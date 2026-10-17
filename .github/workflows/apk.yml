@@ -1,0 +1,47 @@
+# Gera o APK (Android) do jogo Aventura dos Bichos.
+# O arquivo fica para baixar na aba "Actions" do GitHub, dentro da execução, em "Artifacts".
+name: APK Aventura dos Bichos
+
+on:
+  push:
+    paths:
+      - "jogo-animais/**"
+      - ".github/workflows/apk.yml"
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jogo-animais/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Instalar dependências
+        run: npm install --no-audit --no-fund
+
+      - name: Montar o projeto Android
+        run: npm run android
+
+      - name: Gerar o APK
+        working-directory: jogo-animais/app/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Dar um nome bonito ao APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk aventura-dos-bichos.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aventura-dos-bichos-apk
+          path: jogo-animais/app/aventura-dos-bichos.apk
+          retention-days: 30

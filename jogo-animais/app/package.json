@@ -1,0 +1,16 @@
+{
+  "name": "aventura-dos-bichos-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplicativo Android (APK) do jogo Aventura dos Bichos, feito com Capacitor",
+  "scripts": {
+    "www": "node scripts/prepare-www.js",
+    "android": "npm run www && npx cap add android && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "6.2.0",
+    "@capacitor/cli": "6.2.0",
+    "@capacitor/core": "6.2.0",
+    "three": "0.128.0"
+  }
+}
