@@ -1,0 +1,8 @@
+{
+  "appId": "com.aventuradosbichos.app",
+  "appName": "Aventura dos Bichos",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#bfe8ff"
+  }
+}
