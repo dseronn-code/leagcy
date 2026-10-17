@@ -85,6 +85,19 @@
     font-size: clamp(2rem, 9vw, 3.2rem); cursor: pointer; font-family: inherit;
   }
   .result-stars { font-size: 2rem; letter-spacing: 4px; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .avatar { position: relative; display: inline-block; line-height: 1; }
+  .avatar .hat { position: absolute; left: 50%; transform: translateX(-50%); top: -0.45em; font-size: .6em; }
+  .hero .avatar { font-size: 2.2rem; margin-top: 10px; }
+  .card.owned { border-color: var(--good); }
+  .card.equipped { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+  .card .price { margin-top: 6px; font-weight: 700; }
+  .card:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .note { background: var(--card); border: 2px dashed var(--line); border-radius: 12px; padding: 12px; color: var(--muted); font-size: .9rem; margin-top: 14px; }
+  .pix { text-align: center; }
+  .pix img { width: 220px; max-width: 100%; background: #fff; border-radius: 12px; padding: 8px; }
+  .pix textarea { width: 100%; height: 70px; font: .8rem monospace; border-radius: 8px; border: 2px solid var(--line); background: var(--bg); color: var(--ink); padding: 6px; }
+  h3 { margin: 18px 0 10px; }
 </style>
 </head>
 <body>
@@ -100,12 +113,48 @@
   <!-- Menu de mini jogos -->
   <section id="s-hub" class="screen">
     <div class="bar">
-      <div class="hero"><span class="emoji" id="hub-emoji"></span><span id="hub-name"></span></div>
-      <span class="pill">⭐ <span id="hub-stars">0</span> / 12</span>
-      <button class="btn ghost" id="change">Trocar animal</button>
+      <div class="hero"><span id="hub-emoji"></span><span id="hub-name"></span></div>
+      <span class="pill" title="Estrelas para gastar">⭐ <span class="wallet">0</span></span>
+    </div>
+    <div class="bar">
+      <span class="pill" title="Melhores resultados">🏆 <span id="hub-stars">0</span> / 12</span>
+      <div class="actions">
+        <button class="btn" id="open-shop">🛍️ Loja</button>
+        <button class="btn" id="open-buy">💎 Comprar estrelas</button>
+        <button class="btn ghost" id="change">Trocar animal</button>
+      </div>
     </div>
     <h2>Mini jogos</h2>
     <div class="grid" id="games"></div>
+  </section>
+
+  <!-- Loja -->
+  <section id="s-shop" class="screen">
+    <div class="bar">
+      <button class="btn ghost" data-back>← Voltar</button>
+      <h2 style="margin:0">🛍️ Loja</h2>
+      <span class="pill">⭐ <span class="wallet">0</span></span>
+    </div>
+    <p class="hint" style="text-align:left">Ganhe estrelas nos mini jogos e gaste aqui. Toque num item comprado para usar ou tirar.</p>
+    <h3>Chapéus e enfeites</h3>
+    <div class="grid" id="shop-hats"></div>
+    <h3>Cenários</h3>
+    <div class="grid" id="shop-scenes"></div>
+  </section>
+
+  <!-- Comprar estrelas -->
+  <section id="s-buy" class="screen">
+    <div class="bar">
+      <button class="btn ghost" data-back>← Voltar</button>
+      <h2 style="margin:0">💎 Comprar estrelas</h2>
+      <span class="pill">⭐ <span class="wallet">0</span></span>
+    </div>
+    <div id="buy-packs" class="grid"></div>
+    <div id="buy-pix" class="pix"></div>
+    <div class="note">
+      Pagamento por PIX. Peça para um adulto responsável fazer a compra.
+      As estrelas entram na sua carteira assim que o pagamento é confirmado.
+    </div>
   </section>
 
   <!-- Área do mini jogo -->
@@ -143,6 +192,26 @@ const GAMES = [
   { id: "toca",    emoji: "🕳️", name: "Toca Maluca",         desc: "Toque nos bichos que aparecem", stars: [10, 20, 32], play: playWhack },
 ];
 
+const HATS = [
+  { id: "flor",     emoji: "🌸", name: "Flor",      price: 4 },
+  { id: "bone",     emoji: "🧢", name: "Boné",      price: 6 },
+  { id: "laco",     emoji: "🎀", name: "Laço",      price: 6 },
+  { id: "cartola",  emoji: "🎩", name: "Cartola",   price: 10 },
+  { id: "formatura",emoji: "🎓", name: "Formatura", price: 14 },
+  { id: "coroa",    emoji: "👑", name: "Coroa",     price: 25 },
+];
+const SCENES = [
+  { id: "praia", emoji: "🏖️", name: "Praia",  price: 8,  sky: "#8fd8ff", ground: "#f2d48a", deco: "🌴" },
+  { id: "noite", emoji: "🌙", name: "Noite",  price: 12, sky: "#1c2a4a", ground: "#2f5d3a", deco: "✨" },
+  { id: "neve",  emoji: "❄️", name: "Neve",   price: 15, sky: "#dfe9f3", ground: "#ffffff", deco: "❄️" },
+];
+// Os preços em reais ficam no servidor (server.js); aqui é só para mostrar.
+const PACKS = [
+  { id: "p10", stars: 10, label: "R$ 1,99" },
+  { id: "p30", stars: 30, label: "R$ 4,99" },
+  { id: "p80", stars: 80, label: "R$ 9,99" },
+];
+
 // ---------- Armazenamento (opcional) ----------
 function load(key, def) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } }
 function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
@@ -150,9 +219,23 @@ function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); 
 let animal = null;
 let best = {};          // melhores pontos por animal + jogo
 let cleanup = null;     // função para parar o jogo atual
+let wallet = load("bichos-carteira", 0);              // estrelas para gastar
+let owned = load("bichos-itens", []);                 // ids dos itens comprados
+let equipped = load("bichos-equipado", { hat: null, scene: null });
 
 const $ = (id) => document.getElementById(id);
 function show(id) { document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id)); }
+
+function addStars(n) {
+  wallet += n; save("bichos-carteira", wallet);
+  document.querySelectorAll(".wallet").forEach(el => el.textContent = wallet);
+}
+const hat = () => HATS.find(h => h.id === equipped.hat);
+const scene = () => SCENES.find(s => s.id === equipped.scene);
+function avatarHTML() {
+  const h = hat();
+  return `<span class="avatar">${h ? `<span class="hat">${h.emoji}</span>` : ""}${animal.emoji}</span>`;
+}
 
 // ---------- Telas ----------
 function renderPick() {
@@ -170,7 +253,8 @@ function starsFor(game, score) { return game.stars.filter(t => score >= t).lengt
 
 function openHub() {
   best = load("bichos-best-" + animal.id, {});
-  $("hub-emoji").textContent = animal.emoji;
+  $("hub-emoji").innerHTML = avatarHTML();
+  addStars(0);
   $("hub-name").textContent = animal.name + " · " + animal.talent;
   let total = 0;
   $("games").innerHTML = "";
@@ -209,10 +293,12 @@ function finish(g, score) {
   const record = score > old;
   if (record) { best[g.id] = score; save("bichos-best-" + animal.id, best); }
   const st = starsFor(g, score);
+  addStars(st);
   const o = $("g-over");
-  o.innerHTML = `<div class="big">${animal.emoji}</div>
+  o.innerHTML = `<div class="big">${avatarHTML()}</div>
     <div class="result-stars">${"⭐".repeat(st)}${"☆".repeat(3 - st)}</div>
     <div><b>${score}</b> pontos${record ? " · Novo recorde! 🎉" : ""}</div>
+    <div>${st ? `+${st} ⭐ na carteira (total: ${wallet})` : "Faça mais pontos para ganhar estrelas!"}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
       <button class="btn" id="again">Jogar de novo</button>
       <button class="btn ghost" id="tohub">Mini jogos</button>
@@ -224,6 +310,90 @@ function finish(g, score) {
 
 $("back").onclick = () => { stopGame(); openHub(); };
 $("change").onclick = () => show("s-pick");
+$("open-shop").onclick = () => { renderShop(); show("s-shop"); };
+$("open-buy").onclick = () => { renderBuy(); show("s-buy"); };
+document.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { stopPixPoll(); openHub(); });
+
+// ---------- Loja ----------
+function renderShop() {
+  addStars(0);
+  fillShop($("shop-hats"), HATS, "hat", (it) => `<span class="avatar"><span class="hat">${it.emoji}</span>${animal.emoji}</span>`);
+  fillShop($("shop-scenes"), SCENES, "scene", (it) => it.emoji);
+}
+function fillShop(box, items, slot, preview) {
+  box.innerHTML = "";
+  items.forEach(it => {
+    const has = owned.includes(it.id), on = equipped[slot] === it.id;
+    const b = document.createElement("button");
+    b.className = "card" + (on ? " equipped" : has ? " owned" : "");
+    b.innerHTML = `<div class="emoji">${preview(it)}</div><div class="name">${it.name}</div>
+      <div class="price">${on ? "Usando ✔" : has ? "Toque para usar" : `⭐ ${it.price}`}</div>`;
+    b.disabled = !has && wallet < it.price;
+    b.onclick = () => {
+      if (!has) { addStars(-it.price); owned.push(it.id); save("bichos-itens", owned); equipped[slot] = it.id; }
+      else equipped[slot] = on ? null : it.id;
+      save("bichos-equipado", equipped);
+      renderShop();
+    };
+    box.appendChild(b);
+  });
+}
+
+// ---------- Comprar estrelas (PIX via server.js) ----------
+let pixTimer = null;
+function stopPixPoll() { clearInterval(pixTimer); pixTimer = null; }
+function renderBuy() {
+  addStars(0);
+  $("buy-packs").innerHTML = "";
+  PACKS.forEach(p => {
+    const b = document.createElement("button");
+    b.className = "card";
+    b.innerHTML = `<div class="emoji">💎</div><div class="name">${p.stars} estrelas</div><div class="price">${p.label}</div>`;
+    b.onclick = () => startPix(p);
+    $("buy-packs").appendChild(b);
+  });
+  const pending = load("bichos-pix", null);
+  $("buy-pix").innerHTML = "";
+  if (pending) pollPix(pending);
+}
+async function startPix(p) {
+  stopPixPoll();
+  const box = $("buy-pix");
+  box.innerHTML = "<p>Gerando PIX…</p>";
+  try {
+    const r = await fetch("api/estrelas/pix", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pacote: p.id }) });
+    if (!r.ok) throw new Error();
+    const d = await r.json();
+    save("bichos-pix", d);
+    pollPix(d);
+  } catch {
+    box.innerHTML = `<p>Não foi possível gerar o PIX agora. A compra com dinheiro só funciona quando o jogo
+      roda pelo servidor do jogo (<code>npm run jogo</code>).</p>`;
+  }
+}
+function pollPix(d) {
+  const box = $("buy-pix");
+  box.innerHTML = `<h3>Pague ${d.estrelas} ⭐ com PIX</h3>
+    ${d.qr_code_base64 ? `<img alt="QR Code PIX" src="data:image/png;base64,${d.qr_code_base64}">` : ""}
+    <p>Ou copie o código:</p><textarea readonly>${d.qr_code || ""}</textarea>
+    <p id="pix-status">Aguardando pagamento…</p>
+    <button class="btn ghost" id="pix-cancel">Cancelar</button>`;
+  $("pix-cancel").onclick = () => { stopPixPoll(); save("bichos-pix", null); box.innerHTML = ""; };
+  const check = async () => {
+    try {
+      const r = await fetch("api/estrelas/pix/" + encodeURIComponent(d.id));
+      const s = await r.json();
+      if (s.status === "approved") {
+        stopPixPoll(); save("bichos-pix", null);
+        if (s.estrelas) addStars(s.estrelas);
+        box.innerHTML = `<p class="result-stars">🎉</p><p><b>Pagamento confirmado!</b> +${s.estrelas || 0} ⭐ na carteira.</p>`;
+      }
+    } catch {}
+  };
+  stopPixPoll();
+  pixTimer = setInterval(check, 4000);
+  check();
+}
 
 // ---------- Ajudantes de canvas ----------
 function makeCanvas(area, w, h) {
@@ -240,6 +410,18 @@ function drawEmoji(ctx, e, x, y, size) {
   ctx.font = `${size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText(e, x, y);
+}
+function drawAnimal(ctx, x, y, size, flip) {
+  ctx.save(); ctx.translate(x, y); if (flip) ctx.scale(-1, 1);
+  drawEmoji(ctx, animal.emoji, 0, 0, size);
+  const h = hat(); if (h) drawEmoji(ctx, h.emoji, 0, -size * 0.6, size * 0.6);
+  ctx.restore();
+}
+function drawScene(ctx, w, h, groundTop, t) {
+  const s = scene();
+  ctx.fillStyle = s ? s.sky : css("--sky"); ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = s ? s.ground : css("--ground"); ctx.fillRect(0, groundTop, w, h - groundTop);
+  if (s) for (let i = 0; i < 4; i++) drawEmoji(ctx, s.deco, (i * 190 + 60 - t * 0.2) % (w + 60), 30 + (i % 2) * 40, 22);
 }
 
 // ---------- Mini jogo 1: Corrida ----------
@@ -273,12 +455,11 @@ function playRunner(area, done) {
     }
     obs = obs.filter(o => o.x > -40);
 
-    ctx.fillStyle = css("--sky"); ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = css("--ground"); ctx.fillRect(0, groundY + 22, w, h - groundY);
+    drawScene(ctx, w, h, groundY + 22, t);
     drawEmoji(ctx, "☁️", (w - (t * 0.5) % (w + 100)) , 50, 36);
     drawEmoji(ctx, "☁️", (w - (t * 0.3 + 300) % (w + 100)), 90, 28);
     obs.forEach(o => drawEmoji(ctx, o.e, o.x, groundY, 40));
-    ctx.save(); ctx.translate(p.x, p.y); ctx.scale(-1, 1); drawEmoji(ctx, animal.emoji, 0, 0, p.size); ctx.restore();
+    drawAnimal(ctx, p.x, p.y, p.size, true);
     raf = requestAnimationFrame(loop);
   }
   raf = requestAnimationFrame(loop);
@@ -324,10 +505,9 @@ function playCatch(area, done) {
     }
     items = items.filter(it => !it.hit && it.y < h + 20);
 
-    ctx.fillStyle = css("--sky"); ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = css("--ground"); ctx.fillRect(0, h - 18, w, 18);
+    drawScene(ctx, w, h, h - 18, t);
     items.forEach(it => drawEmoji(ctx, it.bad ? "💣" : animal.food, it.x, it.y, 34));
-    drawEmoji(ctx, animal.emoji, p.x, p.y, 48);
+    drawAnimal(ctx, p.x, p.y, 48, false);
     raf = requestAnimationFrame(loop);
   }
   raf = requestAnimationFrame(loop);
