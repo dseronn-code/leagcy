@@ -4,65 +4,102 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Aventura dos Bichos</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #fff8ec;
+    --bg: #fff3f8;
+    --bg2: #eef7ff;
     --card: #ffffff;
-    --ink: #2b2118;
-    --muted: #7a6a5a;
-    --accent: #f08a24;
+    --ink: #5a3d5c;
+    --muted: #9b7f9d;
+    --accent: #ff8fb8;
     --accent-ink: #ffffff;
-    --line: #ecdcc4;
-    --good: #2e9e5b;
-    --sky: #cdeefd;
-    --ground: #9ccc65;
+    --accent2: #8fd3ff;
+    --line: #ffd6e7;
+    --good: #46b97c;
+    --sky: #d5efff;
+    --ground: #a8e6a1;
+    --shadow: 0 6px 0 #ffd0e2;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #1d1913; --card: #2a241c; --ink: #f6ecdf; --muted: #b9a892;
-      --accent: #ff9f43; --accent-ink: #1d1913; --line: #3e3529; --good: #5fd08d;
-      --sky: #22394a; --ground: #3f6b2a;
+      --bg: #2a2036; --bg2: #1f2a3c; --card: #3a2d4a; --ink: #ffeaf5; --muted: #d2b8dc;
+      --accent: #ff8fb8; --accent-ink: #2a2036; --accent2: #7cc4f0; --line: #57436b; --good: #7fe0a8;
+      --sky: #2b4366; --ground: #3f7a4a; --shadow: 0 6px 0 #1c1426;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #1d1913; --card: #2a241c; --ink: #f6ecdf; --muted: #b9a892;
-    --accent: #ff9f43; --accent-ink: #1d1913; --line: #3e3529; --good: #5fd08d;
-    --sky: #22394a; --ground: #3f6b2a;
+    --bg: #2a2036; --bg2: #1f2a3c; --card: #3a2d4a; --ink: #ffeaf5; --muted: #d2b8dc;
+    --accent: #ff8fb8; --accent-ink: #2a2036; --accent2: #7cc4f0; --line: #57436b; --good: #7fe0a8;
+    --sky: #2b4366; --ground: #3f7a4a; --shadow: 0 6px 0 #1c1426;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body {
-    background: var(--bg); color: var(--ink);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    min-height: 100vh;
+    background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%) fixed;
+    background-color: var(--bg); color: var(--ink);
+    font-family: "Fredoka", "Comic Sans MS", system-ui, sans-serif;
+    min-height: 100vh; overflow-x: hidden;
   }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; }
-  h1 { font-size: 1.8rem; margin: 8px 0 4px; text-align: center; }
-  h2 { font-size: 1.3rem; margin: 0 0 12px; }
-  p.sub { text-align: center; color: var(--muted); margin: 0 0 20px; }
+  /* Enfeites flutuando no fundo */
+  .floaties { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+  .floaties span { position: absolute; bottom: -40px; font-size: 1.6rem; opacity: .35; animation: floatUp linear infinite; }
+  @keyframes floatUp { to { transform: translateY(-115vh) rotate(25deg); } }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  @keyframes wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-6deg); } 75% { transform: rotate(6deg); } }
+  @keyframes pop { 0% { transform: scale(.4); opacity: 0; } 70% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes confetti { to { transform: translate(var(--dx), var(--dy)) rotate(360deg); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  .wrap { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 {
+    font-size: 2.2rem; margin: 8px 0 4px; text-align: center; font-weight: 700;
+    color: var(--accent); text-shadow: 3px 3px 0 var(--line);
+  }
+  h2 { font-size: 1.4rem; margin: 0 0 12px; font-weight: 600; }
+  p.sub { text-align: center; color: var(--muted); margin: 0 0 20px; font-size: 1.1rem; }
   .screen { display: none; }
-  .screen.active { display: block; }
-  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .screen.active { display: block; animation: pop .35s ease-out; }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .card {
-    background: var(--card); border: 2px solid var(--line); border-radius: 16px;
-    padding: 14px; text-align: center; cursor: pointer; transition: transform .1s, border-color .1s;
-    color: var(--ink); font: inherit;
+    background: var(--card); border: 3px solid var(--line); border-radius: 24px;
+    padding: 14px; text-align: center; cursor: pointer; transition: transform .15s;
+    color: var(--ink); font: inherit; box-shadow: var(--shadow);
   }
-  .card:hover, .card:focus-visible { transform: translateY(-2px); border-color: var(--accent); outline: none; }
-  .card .emoji { font-size: 3rem; line-height: 1.2; }
+  .card:hover, .card:focus-visible { transform: translateY(-4px) rotate(-1deg); border-color: var(--accent); outline: none; }
+  .card:active { transform: translateY(2px); box-shadow: none; }
+  .card:hover .emoji { animation: wiggle .5s ease-in-out; }
+  .card .emoji { font-size: 3.2rem; line-height: 1.2; }
   .card .name { font-weight: 700; margin-top: 4px; }
   .card .desc { font-size: .85rem; color: var(--muted); margin-top: 4px; }
   .card .best { font-size: .85rem; margin-top: 6px; color: var(--good); font-weight: 600; }
   .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
   .hero { display: flex; align-items: center; gap: 10px; font-weight: 700; }
   .hero .emoji { font-size: 2.2rem; }
-  .pill { background: var(--card); border: 2px solid var(--line); border-radius: 999px; padding: 6px 12px; font-weight: 700; }
+  .pill { background: var(--card); border: 3px solid var(--line); border-radius: 999px; padding: 6px 14px; font-weight: 700; font-size: 1.1rem; }
   button.btn {
-    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 12px;
-    padding: 10px 16px; font: inherit; font-weight: 700; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 999px;
+    padding: 10px 18px; font: inherit; font-weight: 600; font-size: 1.05rem; cursor: pointer;
+    box-shadow: 0 4px 0 color-mix(in srgb, var(--accent) 60%, #000 25%); transition: transform .1s;
   }
-  button.btn.ghost { background: transparent; color: var(--ink); border: 2px solid var(--line); }
-  .stage { position: relative; background: var(--card); border: 2px solid var(--line); border-radius: 16px; overflow: hidden; }
+  button.btn:hover { transform: translateY(-2px); }
+  button.btn:active { transform: translateY(3px); box-shadow: none; }
+  button.btn.blue { background: var(--accent2); box-shadow: 0 4px 0 color-mix(in srgb, var(--accent2) 60%, #000 25%); }
+  button.btn.ghost { background: var(--card); color: var(--ink); border: 3px solid var(--line); box-shadow: none; }
+  .stage { position: relative; background: var(--card); border: 4px solid var(--line); border-radius: 26px; overflow: hidden; box-shadow: var(--shadow); }
+  .stage.done { min-height: 380px; }
+  .bubble {
+    position: relative; background: var(--card); border: 3px solid var(--line); border-radius: 20px;
+    padding: 8px 14px; font-weight: 500; margin-left: 6px;
+  }
+  .bubble::before {
+    content: ""; position: absolute; left: -10px; top: 50%; transform: translateY(-50%);
+    border: 8px solid transparent; border-right-color: var(--line); border-left: 0;
+  }
+  .hero .avatar { animation: bob 2s ease-in-out infinite; }
+  .confetti { position: absolute; left: 50%; top: 40%; font-size: 1.4rem; pointer-events: none; animation: confetti 1.2s ease-out forwards; }
+  .cheer { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
   canvas { display: block; width: 100%; height: auto; touch-action: none; }
   .hud { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 700; gap: 8px; flex-wrap: wrap; }
   .hint { color: var(--muted); font-size: .9rem; margin-top: 8px; text-align: center; }
@@ -74,16 +111,20 @@
   .overlay .big { font-size: 3rem; }
   .mem { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px; }
   .mem button {
-    aspect-ratio: 1; font-size: clamp(1.6rem, 7vw, 2.6rem); border-radius: 12px; border: 2px solid var(--line);
-    background: var(--accent); color: var(--accent-ink); cursor: pointer; font-family: inherit;
+    aspect-ratio: 1; font-size: clamp(1.6rem, 7vw, 2.6rem); border-radius: 18px; border: 3px solid var(--line);
+    background: repeating-linear-gradient(45deg, var(--accent), var(--accent) 10px, color-mix(in srgb, var(--accent) 80%, #fff) 10px, color-mix(in srgb, var(--accent) 80%, #fff) 20px);
+    color: var(--accent-ink); cursor: pointer; font-family: inherit; transition: transform .2s;
   }
+  .mem button.open { animation: pop .25s ease-out; }
   .mem button.open, .mem button.done { background: var(--bg); color: var(--ink); }
   .mem button.done { border-color: var(--good); opacity: .7; }
   .holes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
+  .holes { background: var(--ground); }
   .holes button {
-    aspect-ratio: 1; border-radius: 50%; border: 0; background: color-mix(in srgb, var(--ground) 70%, #000 30%);
+    aspect-ratio: 1; border-radius: 50%; border: 0; background: radial-gradient(circle at 50% 60%, #7a5235 0 55%, #96673f 56% 100%);
     font-size: clamp(2rem, 9vw, 3.2rem); cursor: pointer; font-family: inherit;
   }
+  .holes button:not(:empty) { animation: pop .2s ease-out; }
   .result-stars { font-size: 2rem; letter-spacing: 4px; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .avatar { position: relative; display: inline-block; line-height: 1; }
@@ -101,30 +142,34 @@
 </style>
 </head>
 <body>
+<div class="floaties" id="floaties" aria-hidden="true"></div>
 <div class="wrap">
+  <div style="display:flex;justify-content:flex-end">
+    <button class="btn ghost" id="sound" aria-label="Ligar ou desligar som">🔊</button>
+  </div>
 
   <!-- Escolha do animal -->
   <section id="s-pick" class="screen active">
-    <h1>🐾 Aventura dos Bichos</h1>
-    <p class="sub">Escolha seu animal! Cada um tem um talento especial nos mini jogos.</p>
+    <h1>🐾 Aventura dos Bichos 🌈</h1>
+    <p class="sub">Quem vai ser seu amiguinho hoje? 💖<br>Cada bichinho tem um superpoder!</p>
     <div class="grid" id="animals"></div>
   </section>
 
   <!-- Menu de mini jogos -->
   <section id="s-hub" class="screen">
     <div class="bar">
-      <div class="hero"><span id="hub-emoji"></span><span id="hub-name"></span></div>
+      <div class="hero"><span id="hub-emoji"></span><span class="bubble" id="hub-name"></span></div>
       <span class="pill" title="Estrelas para gastar">⭐ <span class="wallet">0</span></span>
     </div>
     <div class="bar">
       <span class="pill" title="Melhores resultados">🏆 <span id="hub-stars">0</span> / 12</span>
       <div class="actions">
-        <button class="btn" id="open-shop">🛍️ Loja</button>
-        <button class="btn" id="open-buy">💎 Comprar estrelas</button>
-        <button class="btn ghost" id="change">Trocar animal</button>
+        <button class="btn" id="open-shop">🛍️ Lojinha</button>
+        <button class="btn blue" id="open-buy">💎 Mais estrelas</button>
+        <button class="btn ghost" id="change">🔄 Trocar bichinho</button>
       </div>
     </div>
-    <h2>Mini jogos</h2>
+    <h2>🎈 Vamos brincar de quê?</h2>
     <div class="grid" id="games"></div>
   </section>
 
@@ -132,13 +177,13 @@
   <section id="s-shop" class="screen">
     <div class="bar">
       <button class="btn ghost" data-back>← Voltar</button>
-      <h2 style="margin:0">🛍️ Loja</h2>
+      <h2 style="margin:0">🛍️ Lojinha</h2>
       <span class="pill">⭐ <span class="wallet">0</span></span>
     </div>
-    <p class="hint" style="text-align:left">Ganhe estrelas nos mini jogos e gaste aqui. Toque num item comprado para usar ou tirar.</p>
-    <h3>Chapéus e enfeites</h3>
+    <p class="hint" style="text-align:left">Brinque para ganhar estrelinhas e troque por coisas lindas! ✨ Toque no que já é seu para usar ou tirar.</p>
+    <h3>🎀 Chapéus e enfeites</h3>
     <div class="grid" id="shop-hats"></div>
-    <h3>Cenários</h3>
+    <h3>🏞️ Lugares para brincar</h3>
     <div class="grid" id="shop-scenes"></div>
   </section>
 
@@ -146,14 +191,29 @@
   <section id="s-buy" class="screen">
     <div class="bar">
       <button class="btn ghost" data-back>← Voltar</button>
-      <h2 style="margin:0">💎 Comprar estrelas</h2>
+      <h2 style="margin:0">💎 Mais estrelas</h2>
       <span class="pill">⭐ <span class="wallet">0</span></span>
     </div>
     <div id="buy-packs" class="grid"></div>
     <div id="buy-pix" class="pix"></div>
     <div class="note">
-      Pagamento por PIX. Peça para um adulto responsável fazer a compra.
-      As estrelas entram na sua carteira assim que o pagamento é confirmado.
+      👨‍👩‍👧 Área dos adultos. Pagamento por PIX com dinheiro de verdade.
+      As estrelas entram na carteira assim que o pagamento é confirmado.
+    </div>
+  </section>
+
+  <!-- Pergunta para adultos antes da compra -->
+  <section id="s-gate" class="screen">
+    <div class="bar">
+      <button class="btn ghost" data-back>← Voltar</button>
+      <h2 style="margin:0">👨‍👩‍👧 Chame um adulto</h2>
+      <span></span>
+    </div>
+    <div class="stage" style="padding:20px;text-align:center">
+      <p style="font-size:1.1rem">Esta parte usa dinheiro de verdade.<br>Um adulto precisa responder:</p>
+      <p class="cheer" id="gate-q"></p>
+      <div class="actions" id="gate-opts" style="justify-content:center"></div>
+      <p class="hint" id="gate-msg"></p>
     </div>
   </section>
 
@@ -177,19 +237,19 @@
 <script>
 // ---------- Dados ----------
 const ANIMALS = [
-  { id: "coelho",  emoji: "🐰", name: "Coelho",  food: "🥕", talent: "Pula mais alto",          jump: 1.25, speed: 1,    memo: 1,   reflex: 1 },
-  { id: "macaco",  emoji: "🐵", name: "Macaco",  food: "🍌", talent: "Anda mais rápido",        jump: 1,    speed: 1.35, memo: 1,   reflex: 1 },
-  { id: "coruja",  emoji: "🦉", name: "Coruja",  food: "🐛", talent: "Mais tempo na memória",   jump: 1,    speed: 1,    memo: 1.4, reflex: 1 },
-  { id: "gato",    emoji: "🐱", name: "Gato",    food: "🐟", talent: "Reflexos de felino",      jump: 1,    speed: 1,    memo: 1,   reflex: 1.35 },
-  { id: "urso",    emoji: "🐻", name: "Urso",    food: "🍯", talent: "Pega comida em dobro",    jump: 1,    speed: 1,    memo: 1,   reflex: 1, doubleFood: true },
-  { id: "sapo",    emoji: "🐸", name: "Sapo",    food: "🪰", talent: "Pulo e reflexo equilibrados", jump: 1.12, speed: 1.1, memo: 1.1, reflex: 1.12 },
+  { id: "coelho",  emoji: "🐰", name: "Coelho",  food: "🥕", talent: "Pula bem alto! 🦘",        jump: 1.25, speed: 1,    memo: 1,   reflex: 1 },
+  { id: "macaco",  emoji: "🐵", name: "Macaco",  food: "🍌", talent: "Corre rapidinho! 💨",      jump: 1,    speed: 1.35, memo: 1,   reflex: 1 },
+  { id: "coruja",  emoji: "🦉", name: "Coruja",  food: "🐛", talent: "Lembra de tudo! 🧠",       jump: 1,    speed: 1,    memo: 1.4, reflex: 1 },
+  { id: "gato",    emoji: "🐱", name: "Gato",    food: "🐟", talent: "Super ligeirinho! ⚡",     jump: 1,    speed: 1,    memo: 1,   reflex: 1.35 },
+  { id: "urso",    emoji: "🐻", name: "Urso",    food: "🍯", talent: "Come em dobro! 😋",       jump: 1,    speed: 1,    memo: 1,   reflex: 1, doubleFood: true },
+  { id: "sapo",    emoji: "🐸", name: "Sapo",    food: "🪰", talent: "Um pouquinho de tudo! 🌟", jump: 1.12, speed: 1.1, memo: 1.1, reflex: 1.12 },
 ];
 
 const GAMES = [
-  { id: "corrida", emoji: "🏃", name: "Corrida da Floresta", desc: "Pule os obstáculos!",       stars: [10, 25, 45], play: playRunner },
-  { id: "comida",  emoji: "🧺", name: "Chuva de Comida",     desc: "Pegue sua comida favorita", stars: [15, 35, 60], play: playCatch },
-  { id: "memoria", emoji: "🃏", name: "Memória dos Bichos",  desc: "Encontre os pares",         stars: [20, 50, 80], play: playMemory },
-  { id: "toca",    emoji: "🕳️", name: "Toca Maluca",         desc: "Toque nos bichos que aparecem", stars: [10, 20, 32], play: playWhack },
+  { id: "corrida", emoji: "🏃", name: "Corrida da Floresta", desc: "Pule por cima das coisas!", stars: [10, 25, 45], play: playRunner },
+  { id: "comida",  emoji: "🧺", name: "Chuva de Comida",     desc: "Pegue o lanchinho gostoso", stars: [15, 35, 60], play: playCatch },
+  { id: "memoria", emoji: "🃏", name: "Memória dos Bichos",  desc: "Ache os pares iguais",      stars: [20, 50, 80], play: playMemory },
+  { id: "toca",    emoji: "🕳️", name: "Toca Maluca",         desc: "Dê oi pros bichinhos!", stars: [10, 20, 32], play: playWhack },
 ];
 
 const HATS = [
@@ -255,7 +315,7 @@ function openHub() {
   best = load("bichos-best-" + animal.id, {});
   $("hub-emoji").innerHTML = avatarHTML();
   addStars(0);
-  $("hub-name").textContent = animal.name + " · " + animal.talent;
+  $("hub-name").textContent = `Oi! Eu sou o ${animal.name}! ${animal.talent} Vamos brincar? 💕`;
   let total = 0;
   $("games").innerHTML = "";
   GAMES.forEach(g => {
@@ -272,7 +332,7 @@ function openHub() {
   show("s-hub");
 }
 
-function setScore(n) { $("g-score").textContent = "Pontos: " + n; }
+function setScore(n) { $("g-score").textContent = "🍬 Pontos: " + n; }
 function setExtra(t) { $("g-extra").textContent = t; }
 
 function startGame(g) {
@@ -280,6 +340,7 @@ function startGame(g) {
   $("g-title").textContent = g.emoji + " " + g.name;
   $("g-area").innerHTML = "";
   $("g-over").hidden = true;
+  $("g-over").parentElement.classList.remove("done");
   setScore(0); setExtra("");
   show("s-game");
   cleanup = g.play($("g-area"), (score) => finish(g, score));
@@ -295,15 +356,19 @@ function finish(g, score) {
   const st = starsFor(g, score);
   addStars(st);
   const o = $("g-over");
+  const cheer = ["Quase lá! Tenta de novo? 🤗", "Muito bem! 👏", "Que incrível! 🌟", "Você é demais! 🏆"][st];
   o.innerHTML = `<div class="big">${avatarHTML()}</div>
+    <div class="cheer">${cheer}</div>
     <div class="result-stars">${"⭐".repeat(st)}${"☆".repeat(3 - st)}</div>
     <div><b>${score}</b> pontos${record ? " · Novo recorde! 🎉" : ""}</div>
-    <div>${st ? `+${st} ⭐ na carteira (total: ${wallet})` : "Faça mais pontos para ganhar estrelas!"}</div>
+    <div>${st ? `Você ganhou +${st} ⭐! Agora tem ${wallet} estrelinhas.` : "Faça mais pontinhos para ganhar estrelas!"}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
-      <button class="btn" id="again">Jogar de novo</button>
-      <button class="btn ghost" id="tohub">Mini jogos</button>
+      <button class="btn" id="again">🔁 De novo!</button>
+      <button class="btn ghost" id="tohub">🏠 Voltar</button>
     </div>`;
   o.hidden = false;
+  o.parentElement.classList.add("done");
+  if (st) { sfx("win"); confetti(o); } else sfx("ouch");
   $("again").onclick = () => startGame(g);
   $("tohub").onclick = () => openHub();
 }
@@ -311,8 +376,80 @@ function finish(g, score) {
 $("back").onclick = () => { stopGame(); openHub(); };
 $("change").onclick = () => show("s-pick");
 $("open-shop").onclick = () => { renderShop(); show("s-shop"); };
-$("open-buy").onclick = () => { renderBuy(); show("s-buy"); };
+$("open-buy").onclick = () => { openGate(); show("s-gate"); };
 document.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { stopPixPoll(); openHub(); });
+
+// ---------- Sons fofinhos ----------
+let soundOn = load("bichos-som", true);
+let audio = null;
+function tone(freq, start, dur, type = "sine", vol = 0.12) {
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, audio.currentTime + start);
+  g.gain.setValueAtTime(vol, audio.currentTime + start);
+  g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + start + dur);
+  o.connect(g); g.connect(audio.destination);
+  o.start(audio.currentTime + start); o.stop(audio.currentTime + start + dur);
+}
+function sfx(kind) {
+  if (!soundOn) return;
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (kind === "pop") tone(660, 0, 0.08, "triangle", 0.08);
+    if (kind === "point") { tone(880, 0, 0.08); tone(1320, 0.06, 0.1); }
+    if (kind === "jump") { tone(400, 0, 0.12, "triangle"); tone(600, 0.05, 0.12, "triangle"); }
+    if (kind === "ouch") { tone(330, 0, 0.15, "triangle"); tone(247, 0.12, 0.2, "triangle"); }
+    if (kind === "win") [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.1, 0.2));
+  } catch {}
+}
+function paintSound() { $("sound").textContent = soundOn ? "🔊" : "🔇"; }
+$("sound").onclick = () => { soundOn = !soundOn; save("bichos-som", soundOn); paintSound(); };
+paintSound();
+document.addEventListener("click", (e) => { if (e.target.closest(".card, .btn")) sfx("pop"); });
+
+function confetti(box) {
+  const bits = ["⭐", "💖", "🌈", "✨", "🎉", "🌸"];
+  for (let i = 0; i < 18; i++) {
+    const s = document.createElement("span");
+    s.className = "confetti";
+    s.textContent = bits[i % bits.length];
+    s.style.setProperty("--dx", (Math.random() * 300 - 150) + "px");
+    s.style.setProperty("--dy", (Math.random() * -220 + 40) + "px");
+    box.appendChild(s);
+    setTimeout(() => s.remove(), 1300);
+  }
+}
+
+// Enfeites que flutuam no fundo
+(function () {
+  const bits = ["💖", "⭐", "☁️", "🌸", "🫧", "🦋"];
+  for (let i = 0; i < 14; i++) {
+    const s = document.createElement("span");
+    s.textContent = bits[i % bits.length];
+    s.style.left = Math.random() * 100 + "%";
+    s.style.animationDuration = 14 + Math.random() * 14 + "s";
+    s.style.animationDelay = -Math.random() * 28 + "s";
+    $("floaties").appendChild(s);
+  }
+})();
+
+// ---------- Pergunta para adultos ----------
+function openGate() {
+  const a = 6 + Math.floor(Math.random() * 4), b = 6 + Math.floor(Math.random() * 4), ans = a * b;
+  $("gate-q").textContent = `Quanto é ${a} × ${b}?`;
+  $("gate-msg").textContent = "";
+  const opts = new Set([ans]);
+  while (opts.size < 4) opts.add(ans + (Math.floor(Math.random() * 7) - 3) * a || ans + 1);
+  $("gate-opts").innerHTML = "";
+  [...opts].sort(() => Math.random() - 0.5).forEach(n => {
+    const btn = document.createElement("button");
+    btn.className = "btn ghost"; btn.textContent = n;
+    btn.onclick = () => {
+      if (n === ans) { renderBuy(); show("s-buy"); }
+      else { $("gate-msg").textContent = "Ops! Peça ajuda para um adulto 💕"; setTimeout(() => openHub(), 1500); }
+    };
+    $("gate-opts").appendChild(btn);
+  });
+}
 
 // ---------- Loja ----------
 function renderShop() {
@@ -330,7 +467,7 @@ function fillShop(box, items, slot, preview) {
       <div class="price">${on ? "Usando ✔" : has ? "Toque para usar" : `⭐ ${it.price}`}</div>`;
     b.disabled = !has && wallet < it.price;
     b.onclick = () => {
-      if (!has) { addStars(-it.price); owned.push(it.id); save("bichos-itens", owned); equipped[slot] = it.id; }
+      if (!has) { sfx("win"); addStars(-it.price); owned.push(it.id); save("bichos-itens", owned); equipped[slot] = it.id; }
       else equipped[slot] = on ? null : it.id;
       save("bichos-equipado", equipped);
       renderShop();
@@ -426,14 +563,14 @@ function drawScene(ctx, w, h, groundTop, t) {
 
 // ---------- Mini jogo 1: Corrida ----------
 function playRunner(area, done) {
-  $("g-hint").textContent = "Toque na tela ou aperte Espaço / ↑ para pular.";
+  $("g-hint").textContent = "Toque na tela (ou aperte Espaço) para pular! 🦘";
   const { c, ctx, w, h } = makeCanvas(area, 640, 280);
   const groundY = h - 50;
   const p = { x: 80, y: groundY, vy: 0, size: 44 };
   const obstacles = ["🌵", "🪨", "🌳", "🍄"];
   let obs = [], speed = 5, t = 0, score = 0, raf, alive = true, nextSpawn = 60;
 
-  function jump() { if (p.y >= groundY) p.vy = -13 * Math.sqrt(animal.jump); }
+  function jump() { if (p.y >= groundY) { p.vy = -13 * Math.sqrt(animal.jump); sfx("jump"); } }
   const key = (e) => { if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); jump(); } };
   window.addEventListener("keydown", key);
   c.addEventListener("pointerdown", jump);
@@ -450,7 +587,7 @@ function playRunner(area, done) {
     speed = 5 + t / 400;
     for (const o of obs) {
       o.x -= speed;
-      if (!o.passed && o.x < p.x - 20) { o.passed = true; score++; setScore(score); }
+      if (!o.passed && o.x < p.x - 20) { o.passed = true; score++; setScore(score); sfx("point"); }
       if (Math.abs(o.x - p.x) < 30 && groundY - p.y < 30) { alive = false; return done(score); }
     }
     obs = obs.filter(o => o.x > -40);
@@ -468,7 +605,7 @@ function playRunner(area, done) {
 
 // ---------- Mini jogo 2: Chuva de Comida ----------
 function playCatch(area, done) {
-  $("g-hint").textContent = `Mova com ← → ou arraste o dedo. Pegue ${animal.food}, evite 💣!`;
+  $("g-hint").textContent = `Arraste o dedo (ou use ← →). Pegue ${animal.food} e fuja da pimenta 🌶️!`;
   const { c, ctx, w, h } = makeCanvas(area, 640, 360);
   const p = { x: w / 2, y: h - 40 };
   let items = [], score = 0, lives = 3, t = 0, raf, alive = true, keys = {};
@@ -495,8 +632,8 @@ function playCatch(area, done) {
       it.y += it.v;
       if (!it.hit && Math.abs(it.x - p.x) < 34 && Math.abs(it.y - p.y) < 30) {
         it.hit = true;
-        if (it.bad) { lives--; setExtra("❤️".repeat(Math.max(0, lives))); if (lives <= 0) { alive = false; return done(score); } }
-        else { score += animal.doubleFood ? 2 : 1; setScore(score); }
+        if (it.bad) { sfx("ouch"); lives--; setExtra("❤️".repeat(Math.max(0, lives))); if (lives <= 0) { alive = false; return done(score); } }
+        else { score += animal.doubleFood ? 2 : 1; setScore(score); sfx("point"); }
       }
       if (!it.hit && !it.bad && it.y > h + 10) {
         it.hit = true; lives--; setExtra("❤️".repeat(Math.max(0, lives)));
@@ -506,7 +643,7 @@ function playCatch(area, done) {
     items = items.filter(it => !it.hit && it.y < h + 20);
 
     drawScene(ctx, w, h, h - 18, t);
-    items.forEach(it => drawEmoji(ctx, it.bad ? "💣" : animal.food, it.x, it.y, 34));
+    items.forEach(it => drawEmoji(ctx, it.bad ? "🌶️" : animal.food, it.x, it.y, 34));
     drawAnimal(ctx, p.x, p.y, 48, false);
     raf = requestAnimationFrame(loop);
   }
@@ -524,7 +661,7 @@ function playMemory(area, done) {
   const deck = [...pick, ...pick].sort(() => Math.random() - 0.5);
   const totalTime = Math.round(60 * animal.memo);
   let left = totalTime, open = [], found = 0, lock = false, moves = 0, ended = false;
-  $("g-hint").textContent = `Encontre os 8 pares em ${totalTime} segundos. Menos jogadas = mais pontos!`;
+  $("g-hint").textContent = `Ache os 8 pares de bichinhos em ${totalTime} segundos! 🃏`;
 
   const grid = document.createElement("div");
   grid.className = "mem";
@@ -540,7 +677,7 @@ function playMemory(area, done) {
         const [a1, a2] = open;
         if (a1.e === a2.e) {
           a1.b.classList.add("done"); a2.b.classList.add("done");
-          open = []; lock = false; found++;
+          open = []; lock = false; found++; sfx("point");
           setScore(calc());
           if (found === 8) end();
         } else {
@@ -563,7 +700,7 @@ function playMemory(area, done) {
 
 // ---------- Mini jogo 4: Toca Maluca ----------
 function playWhack(area, done) {
-  $("g-hint").textContent = "Toque nos bichinhos 🐹 antes que se escondam. Não toque no 🦨!";
+  $("g-hint").textContent = "Toque nos bichinhos 🐹 pra dar oi! Mas cuidado com o gambá fedidinho 🦨";
   const holes = document.createElement("div");
   holes.className = "holes";
   area.appendChild(holes);
@@ -574,7 +711,7 @@ function playWhack(area, done) {
     b.dataset.state = "";
     b.onclick = () => {
       if (ended || !b.dataset.state) return;
-      if (b.dataset.state === "good") score++; else score = Math.max(0, score - 2);
+      if (b.dataset.state === "good") { score++; sfx("point"); } else { score = Math.max(0, score - 2); sfx("ouch"); }
       setScore(score);
       clearTimeout(b._t); b.dataset.state = ""; b.textContent = "";
     };
