@@ -52,7 +52,10 @@
   @keyframes pop { 0% { transform: scale(.4); opacity: 0; } 70% { transform: scale(1.12); } 100% { transform: scale(1); opacity: 1; } }
   @keyframes confetti { to { transform: translate(var(--dx), var(--dy)) rotate(360deg); opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
-  .wrap { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; }
+  .wrap { position: relative; z-index: 1; max-width: 760px; margin: 0 auto; padding: 66px 16px 40px; }
+  .toggles { position: fixed; top: max(10px, env(safe-area-inset-top)); right: 12px; z-index: 30; display: flex; gap: 6px; }
+  .tg { width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--line); background: var(--card); font-size: 1.3rem; cursor: pointer; padding: 0; }
+  .tg.off { opacity: .45; filter: grayscale(1); text-decoration: line-through; }
   h1 {
     font-size: 2.2rem; margin: 8px 0 4px; text-align: center; font-weight: 700;
     color: var(--accent); text-shadow: 3px 3px 0 var(--line);
@@ -238,14 +241,39 @@
   .meter i { display: block; width: 52px; height: 12px; border-radius: 99px; background: var(--line); overflow: hidden; }
   .meter b { display: block; height: 100%; width: 50%; border-radius: 99px; background: var(--good); transition: width .4s, background .4s; }
   .meter b.low { background: #ff7a7a; } .meter b.mid { background: #ffc93c; }
-  .house-say { position: absolute; top: 74px; left: 0; right: 0; display: flex; justify-content: center; z-index: 2; pointer-events: none; padding: 0 12px; }
+  .meters { display: flex; gap: 6px; flex-wrap: wrap; flex: none; width: calc(100% + 106px); }
+  .house-say { position: absolute; top: 118px; left: 0; right: 0; display: flex; justify-content: center; z-index: 2; pointer-events: none; padding: 0 12px; }
   .house-say .bubble { margin: 0; font-size: 1.1rem; }
   .house-say .bubble::before { display: none; }
   .house-actions { position: absolute; left: 0; right: 0; bottom: max(14px, env(safe-area-inset-bottom)); z-index: 2;
     display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; padding: 0 10px; }
   .house-actions .btn { font-size: 1.2rem; padding: 12px 18px; }
   .house-actions .btn:disabled { opacity: .45; }
-  @media (max-width: 560px) { .meter i { width: 34px; } .house-say { top: 116px; } }
+  .house-actions[hidden] { display: none; }
+  .house-tray {
+    position: absolute; left: 0; right: 0; margin: 0 auto; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 2;
+    width: min(96%, 720px); box-sizing: border-box; background: color-mix(in srgb, var(--card) 94%, transparent); border: 4px solid var(--line);
+    border-radius: 24px; padding: 10px; box-shadow: var(--shadow); animation: pop .3s ease-out;
+  }
+  .house-tray[hidden] { display: none; }
+  .tray-title { font-weight: 700; text-align: center; margin-bottom: 8px; }
+  .tray-items { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; scroll-snap-type: x mandatory; }
+  .tray-items button {
+    flex: 0 0 auto; scroll-snap-align: start; min-width: 74px; border: 3px solid var(--line); border-radius: 18px;
+    background: var(--bg); color: var(--ink); font: 600 .8rem "Fredoka", sans-serif; padding: 6px 8px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .tray-items button span { font-size: 2rem; line-height: 1.1; }
+  .tray-items button.fav { border-color: #ffd54a; background: #fff6d6; color: #5a3d5c; }
+  .tray-items button.done { border-color: var(--good); }
+  .tray-items button.close { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .tray-items button:active { transform: scale(.94); }
+  @media (max-width: 560px) { .meter i { width: 22px; height: 10px; } .meter { padding: 3px 7px; gap: 3px; font-size: .95rem; } .meters { gap: 4px; } .house-say { top: 106px; } }
+  @media (max-height: 500px) {
+    .meters { width: auto; } .house-say { top: 62px; }
+    .tray-title { display: none; } .house-tray { padding: 6px; }
+    .tray-items button { min-width: 60px; padding: 3px 6px; } .tray-items button span { font-size: 1.5rem; }
+  }
   /* Perguntas dos jogos educativos */
   .quiz {
     position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 2;
@@ -264,7 +292,7 @@
   #g-area canvas { border-radius: 0; }
   .gtop {
     position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; gap: 8px; align-items: center;
-    flex-wrap: wrap; padding: max(10px, env(safe-area-inset-top)) 12px 10px; pointer-events: none;
+    flex-wrap: wrap; padding: max(10px, env(safe-area-inset-top)) 118px 10px 12px; pointer-events: none;
   }
   .gtop > * { pointer-events: auto; }
   .gtop .pill { background: color-mix(in srgb, var(--card) 85%, transparent); }
@@ -284,10 +312,12 @@
 </head>
 <body>
 <div class="floaties" id="floaties" aria-hidden="true"></div>
+<div class="toggles">
+  <button class="tg" id="music" aria-label="Ligar ou desligar música">🎵</button>
+  <button class="tg" id="sound" aria-label="Ligar ou desligar sons">🔊</button>
+</div>
 <div class="wrap">
-  <div style="display:flex;justify-content:flex-end">
-    <button class="btn ghost" id="sound" aria-label="Ligar ou desligar som">🔊</button>
-  </div>
+
 
   <!-- Entrada do jogo -->
   <section id="s-splash" class="screen active">
@@ -340,10 +370,12 @@
       <div id="house-area" class="full3d"></div>
       <div class="gtop">
         <button class="btn ghost" id="house-back">← Voltar</button>
-        <span class="pill meter" title="Comidinha">🍎 <i><b id="m-fome"></b></i></span>
-        <span class="pill meter" title="Limpinho">🛁 <i><b id="m-banho"></b></i></span>
-        <span class="pill meter" title="Carinho">💖 <i><b id="m-amor"></b></i></span>
-        <span class="pill meter" title="Soninho">😴 <i><b id="m-sono"></b></i></span>
+        <div class="meters">
+          <span class="pill meter" title="Comidinha">🍎 <i><b id="m-fome"></b></i></span>
+          <span class="pill meter" title="Limpinho">🛁 <i><b id="m-banho"></b></i></span>
+          <span class="pill meter" title="Carinho">💖 <i><b id="m-amor"></b></i></span>
+          <span class="pill meter" title="Soninho">😴 <i><b id="m-sono"></b></i></span>
+        </div>
       </div>
       <div class="house-say"><span class="bubble" id="house-say"></span></div>
       <div class="house-actions">
@@ -351,6 +383,10 @@
         <button class="btn blue" id="act-bath">🛁 Banho</button>
         <button class="btn" id="act-love">🤗 Carinho</button>
         <button class="btn blue" id="act-sleep">💤 Dormir</button>
+      </div>
+      <div class="house-tray" id="house-tray" hidden>
+        <div class="tray-title" id="tray-title"></div>
+        <div class="tray-items" id="tray-items"></div>
       </div>
     </div>
   </section>
@@ -862,6 +898,7 @@ function openHub(greet) {
   $("hub-stars").textContent = total;
   $("hub-max").textContent = GAMES.length * 3;
   show("s-hub");
+  playMusic("menu");
   showcase();
 }
 
@@ -992,6 +1029,7 @@ function startGame(g) {
   goFullscreen();
   show("s-game");
   sfx("start");
+  playMusic(g.edu ? "menu" : "game");
   $("g-hint").classList.remove("fade");
   clearTimeout(hintTimer); hintTimer = setTimeout(() => $("g-hint").classList.add("fade"), 5000);
   cleanup = g.play($("g-area"), (score) => finish(g, score));
@@ -1055,16 +1093,26 @@ function noise(start, dur, freq, vol, type = "bandpass") {
   src.connect(f); f.connect(g); g.connect(audio.destination);
   src.start(audio.currentTime + start);
 }
+function getAudio() {
+  audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+  if (audio.state === "suspended") audio.resume();
+  return audio;
+}
 function sfx(kind) {
   if (!soundOn) return;
   try {
-    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    getAudio();
     if (kind === "pop") tone(660, 0, 0.08, "triangle", 0.08);
     if (kind === "point") { tone(880, 0, 0.08); tone(1320, 0.06, 0.1); }
     if (kind === "jump") { tone(400, 0, 0.12, "triangle"); tone(600, 0.05, 0.12, "triangle"); }
     if (kind === "ouch") { tone(330, 0, 0.15, "triangle"); tone(247, 0.12, 0.2, "triangle"); }
     if (kind === "win") [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.1, 0.2));
     if (kind === "giggle") [880, 1047, 932, 1175, 1047, 1319].forEach((f, i) => tone(f, i * 0.07, 0.08, "triangle", 0.08));
+    if (kind === "glub") [300, 380, 300, 420].forEach((f, i) => tone(f, i * 0.12, 0.1, "sine", 0.12, f * 1.4));
+    if (kind === "squeak") { tone(1400, 0, 0.12, "square", 0.04, 1900); tone(1500, 0.16, 0.14, "square", 0.04, 2100); }
+    if (kind === "scrub") for (let i = 0; i < 5; i++) noise(i * 0.12, 0.08, 3000, 0.25);
+    if (kind === "shower") noise(0, 1.6, 5000, 0.18, "highpass");
+    if (kind === "wind") noise(0, 0.9, 600, 0.35, "bandpass");
     if (kind === "coin") { tone(988, 0, 0.07, "square", 0.05); tone(1319, 0.07, 0.25, "square", 0.05); }
     if (kind === "yum") { tone(520, 0, 0.06, "triangle", 0.1); tone(700, 0.08, 0.08, "triangle", 0.1); }
     if (kind === "buy") { [784, 988, 1175, 1568].forEach((f, i) => tone(f, i * 0.06, 0.15, "triangle", 0.09)); tone(1319, 0.3, 0.3, "square", 0.04); }
@@ -1078,7 +1126,7 @@ function sfx(kind) {
     if (kind === "splash") { noise(0, 0.35, 700, 0.4, "lowpass"); tone(200, 0, 0.2, "sine", 0.1, 90); }
   } catch {}
 }
-function paintSound() { $("sound").textContent = soundOn ? "🔊" : "🔇"; }
+function paintSound() { $("sound").textContent = soundOn ? "🔊" : "🔇"; $("sound").classList.toggle("off", !soundOn); }
 $("sound").onclick = () => { soundOn = !soundOn; save("bichos-som", soundOn); paintSound(); };
 paintSound();
 document.addEventListener("click", (e) => { if (e.target.closest(".card, .btn, .c")) sfx("pop"); });
@@ -1670,6 +1718,74 @@ function playBalloons(area, done) {
   return () => { ended = true; clearInterval(timer); renderer.domElement.onpointerdown = null; };
 }
 
+// ---------- Musiquinha de fundo (gerada pelo próprio jogo) ----------
+// Notas MIDI (60 = Dó central) com duração em tempos; null = pausa. Os acordes trocam a cada compasso de 4 tempos.
+const SONGS = {
+  menu: { bpm: 104, wave: "triangle", vol: .05, bassVol: .05, bounce: false,
+    melody: [[72,1],[76,1],[79,1],[76,1], [77,1],[81,1],[79,2], [76,1],[79,1],[84,1],[79,1], [81,.5],[79,.5],[77,.5],[76,.5],[74,2],
+             [72,1],[76,1],[79,1],[81,1], [79,1],[76,1],[72,1],[74,1], [76,1],[77,1],[74,1],[71,1], [72,2],[null,2]],
+    chords: [48, 53, 48, 55, 48, 57, 55, 48] },
+  game: { bpm: 132, wave: "square", vol: .028, bassVol: .06, bounce: true,
+    melody: [[67,.5],[72,.5],[76,.5],[72,.5],[79,1],[76,1], [77,.5],[76,.5],[74,.5],[72,.5],[74,2],
+             [67,.5],[71,.5],[74,.5],[71,.5],[77,1],[74,1], [76,.5],[74,.5],[72,.5],[71,.5],[72,2],
+             [76,.5],[76,.5],[77,.5],[79,.5],[79,.5],[77,.5],[76,.5],[74,.5], [72,.5],[72,.5],[74,.5],[76,.5],[76,1],[74,1],
+             [76,.5],[76,.5],[77,.5],[79,.5],[79,.5],[77,.5],[76,.5],[74,.5], [72,.5],[72,.5],[74,.5],[76,.5],[74,1],[72,1]],
+    chords: [48, 43, 43, 48, 48, 43, 48, 43] },
+  // "Brilha, brilha, estrelinha" (melodia tradicional) para a hora de dormir
+  lullaby: { bpm: 76, wave: "sine", vol: .06, bassVol: .035, bounce: false,
+    melody: [[72,1],[72,1],[79,1],[79,1], [81,1],[81,1],[79,2], [77,1],[77,1],[76,1],[76,1], [74,1],[74,1],[72,2],
+             [79,1],[79,1],[77,1],[77,1], [76,1],[76,1],[74,2], [79,1],[79,1],[77,1],[77,1], [76,1],[76,1],[74,2]],
+    chords: [48, 53, 53, 55, 48, 48, 48, 55] },
+};
+let musicOn = load("bichos-musica", true), song = null, songName = null, musicGain = null, musicTimer = null;
+let mIdx = 0, mNext = 0, mBeat = 0, bNext = 0, bBeat = 0;
+function note(freq, t, dur, wave, vol) {
+  const o = audio.createOscillator(), g = audio.createGain();
+  o.type = wave; o.frequency.value = freq;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .015);
+  g.gain.exponentialRampToValueAtTime(.0005, t + dur);
+  o.connect(g); g.connect(musicGain); o.start(t); o.stop(t + dur + .05);
+}
+const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
+function musicTick() {
+  if (!song || !audio) return;
+  const now = audio.currentTime, beat = 60 / song.bpm;
+  if (mNext < now - .3) { mNext = bNext = now + .05; }      // voltou de outra aba: recomeça sem amontoar notas
+  while (mNext < now + .25) {
+    const [n, d] = song.melody[mIdx];
+    if (n) { note(midi(n), mNext, d * beat * .95, song.wave, song.vol); note(midi(n + 12), mNext, d * beat * .4, "sine", song.vol * .25); }
+    mNext += d * beat; mBeat += d; mIdx = (mIdx + 1) % song.melody.length;
+  }
+  while (bNext < now + .25) {
+    const bar = Math.floor(bBeat / 4) % song.chords.length, root = song.chords[bar];
+    const step = song.bounce ? .5 : 2;
+    const k = Math.round((bBeat % 4) / step);
+    const n = song.bounce ? (k % 2 ? root + 12 : root) : (k % 2 ? root + 7 : root);
+    note(midi(n), bNext, step * beat * .9, "sine", song.bassVol);
+    bNext += step * beat; bBeat += step;
+  }
+}
+function playMusic(name) {
+  songName = name;
+  if (!musicOn) return;
+  try {
+    getAudio();
+    if (!musicGain) { musicGain = audio.createGain(); musicGain.gain.value = 1; musicGain.connect(audio.destination); }
+    if (song === SONGS[name]) return;
+    song = SONGS[name];
+    mIdx = 0; mBeat = 0; bBeat = 0; mNext = bNext = audio.currentTime + .1;
+    if (!musicTimer) musicTimer = setInterval(musicTick, 60);
+  } catch {}
+}
+function stopMusic() { song = null; clearInterval(musicTimer); musicTimer = null; }
+function duckMusic(on) { if (musicGain && audio) musicGain.gain.setTargetAtTime(on ? .3 : 1, audio.currentTime, .1); }
+function paintMusic() { $("music").classList.toggle("off", !musicOn); }
+$("music").onclick = () => {
+  musicOn = !musicOn; save("bichos-musica", musicOn); paintMusic();
+  if (musicOn) playMusic(songName || "menu"); else stopMusic();
+};
+paintMusic();
+
 // ---------- Voz que lê as perguntas (ajuda quem ainda não lê) ----------
 let voice = null;
 function pickVoice() {
@@ -1687,6 +1803,8 @@ function say(text) {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "pt-BR"; if (voice) u.voice = voice;
     u.rate = .95; u.pitch = 1.25;
+    duckMusic(true);
+    u.onend = u.onerror = () => duckMusic(false);
     speechSynthesis.speak(u);
   } catch {}
 }
@@ -1990,6 +2108,7 @@ function openHouse() {
   stopGame();
   show("s-house");
   const care = loadCare();
+  playMusic("menu");
   const s = new THREE.Scene();
   s.background = new THREE.Color("#ffe9f2");
   const hemi = new THREE.HemisphereLight(0xffffff, 0x9aa8c8, .75); s.add(hemi);
@@ -2029,6 +2148,23 @@ function openHouse() {
   const bowlFood = emojiSprite(animal.food, .45); bowlFood.position.set(-1.6, .4, 1); s.add(bowlFood);
   part("sphere", "#4f9dff", [.25, .25, .25], [1.7, .25, 1.5], s);
   part("torus", "#ffd23a", [.25, .25, .25], [1.7, .25, 1.5], s, [Math.PI / 2, 0, 0]);
+  // Bandeirinhas, estante, abajur e cortinas
+  ["#ff8fb8", "#ffd54a", "#8fd3ff", "#8ee08a", "#b79cff", "#ffb26b", "#ff8fb8", "#ffd54a", "#8fd3ff"].forEach((c, k) => {
+    const x = -4 + k, y = 5 - Math.sin((k / 8) * Math.PI) * .45;
+    part("cone", c, [.22, .4, .03], [x, y, -2.92], s, [Math.PI, 0, 0]);
+  });
+  part("cyl", "#ffffff", [.012, 8.2, .012], [0, 5.05, -2.93], s, [0, 0, Math.PI / 2]);
+  part("box", "#ffd0e2", [.35, 1.9, .1], [-3.62, 3.05, -2.9], s);
+  part("box", "#ffd0e2", [.35, 1.9, .1], [-.98, 3.05, -2.9], s);
+  part("box", "#c98f5f", [1.4, 1.6, .5], [-4.5, .8, .6], s);
+  [[.5, "#ff8fb8"], [1.05, "#8fd3ff"]].forEach(([y, c]) => part("box", "#e6b585", [1.3, .06, .45], [-4.5, y, .64], s));
+  ["#ff6f91", "#4f9dff", "#ffd23a", "#8ee08a", "#b79cff"].forEach((c, k) => part("box", c, [.16, .4, .32], [-5 + k * .22, .74, .64], s));
+  const teddy = emojiSprite("🧸", .45); teddy.position.set(-4.3, 1.35, .7); s.add(teddy);
+  part("cyl", "#fff1c2", [.25, .05, .25], [4.6, .03, .9], s);
+  part("cyl", "#ffffff", [.04, 1.4, .04], [4.6, .72, .9], s);
+  part("cone", "#ffe066", [.4, .45, .4], [4.6, 1.55, .9], s);
+  const clock = emojiSprite("⏰", .5); clock.position.set(.6, 3.9, -2.9); s.add(clock);
+
   // Banheira (aparece só no banho)
   const tub = new THREE.Group();
   part("cyl", "#ffffff", [1.05, .7, 1.05], [0, .35, 0], tub);
@@ -2041,9 +2177,23 @@ function openHouse() {
   a.position.set(0, 0, .5); s.add(a);
   const sh = shadowBlob(.7); sh.position.set(0, .02, .5); s.add(sh);
   const pupilY = a.userData.pupils.map(p => p.scale.y);
+  // Manchinhas de sujeira: aparecem quando o bichinho precisa de banho
+  const dirt = [[.28, .82, .5, a], [-.3, .52, .48, a], [.08, .3, .5, a], [-.12, .95, .5, a], [.26, .18, .4, a.userData.head], [-.3, -.05, .38, a.userData.head]]
+    .map(([x, y, z, parent]) => part("sphere", "#9a7552", [.09, .07, .04], [x, y, z], parent));
+  // Espuma do xampu na cabeça, chuveiro e patinho
+  const foam = new THREE.Group(); a.userData.head.add(foam); foam.visible = false;
+  [[0, .5, 0, .2], [.18, .45, .05, .15], [-.18, .45, .05, .15], [.08, .62, -.05, .13], [-.1, .6, .1, .12]].forEach(([x, y, z, r]) =>
+    part("sphere", WHITE, [r, r, r], [x, y, z], foam));
+  const shower = new THREE.Group();
+  part("cyl", "#cfd8e6", [.05, 2.2, .05], [0, 4, 0], shower);
+  part("cyl", "#cfd8e6", [.35, .08, .35], [0, 2.9, 0], shower);
+  shower.position.set(0, 0, .5); shower.visible = false; s.add(shower);
+  const duck = emojiSprite("🦆", .45); duck.visible = false; s.add(duck);
+  let bathing = false, duckOn = false;
+  const bathUsed = new Set();
 
   const cam = new THREE.PerspectiveCamera(48, 1.6, .1, 100);
-  mount($("house-area"), cam, null, (asp) => fitCamera(cam, new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(0, 1.2, 7.8), 3.4, asp));
+  mount($("house-area"), cam, null, (asp) => fitCamera(cam, new THREE.Vector3(0, asp > 1.7 ? 1.05 : 1.5, 0), new THREE.Vector3(0, 1.2, 7.8), 3.4, asp));
 
   let fx = [], busy = false, sleeping = false, t = 0, chomp = 0, wiggle = 0, nope = 0, lastSave = 0, flash = 0;
   const say1 = $("house-say");
@@ -2057,6 +2207,8 @@ function openHouse() {
     setMsg(`Oi! Vamos brincar na casinha? 🏠`);
   }
   function paint() {
+    const dirty = care.banho < 75 ? Math.ceil((75 - care.banho) / 12.5) : 0;
+    dirt.forEach((d, k) => d.visible = k < dirty);
     CARE.forEach(k => {
       const b = $("m-" + k), v = Math.round(care[k]);
       b.style.width = v + "%"; b.className = v < 30 ? "low" : v < 60 ? "mid" : "";
@@ -2088,41 +2240,127 @@ function openHouse() {
     sky.material.map = emojiSprite(on ? "🌙" : "☀️", .7).material.map;
     a.userData.pupils.forEach((p, k) => p.scale.y = on ? pupilY[k] * .15 : pupilY[k]);
     a.userData.shines.forEach(p => p.visible = !on);
-    if (on) { setMsg("Boa noite! 🌙", 1800); say("Boa noite!"); }
-    else { setMsg("Bom dia! ☀️", 1800); say("Bom dia!"); sfx("start"); }
+    if (on) { setMsg("Boa noite! 🌙", 1800); say("Boa noite!"); playMusic("lullaby"); }
+    else { setMsg("Bom dia! ☀️", 1800); say("Bom dia!"); sfx("start"); playMusic("menu"); }
     paint();
   }
 
-  $("act-food").onclick = () => {
+  // Bandeja de opções (comidas ou coisas do banho)
+  function openTray(title, items, onPick) {
+    $("tray-title").textContent = title;
+    const box = $("tray-items"); box.innerHTML = "";
+    items.forEach(it => {
+      const b = document.createElement("button");
+      b.className = it.cls || "";
+      b.innerHTML = `<span>${it.e}</span>${it.n}`;
+      b.onclick = () => onPick(it, b);
+      box.appendChild(b);
+    });
+    document.querySelector(".house-actions").hidden = true;
+    $("house-tray").hidden = false;
+  }
+  function closeTray() { $("house-tray").hidden = true; document.querySelector(".house-actions").hidden = false; }
+
+  // ----- Comidinhas -----
+  const FOODS = [
+    { e: animal.food, n: "Favorita!", f: 30, fav: true, cls: "fav" },
+    { e: "🍎", n: "Maçã", f: 22 }, { e: "🍌", n: "Banana", f: 22 }, { e: "🥕", n: "Cenoura", f: 22 }, { e: "🍓", n: "Morango", f: 18 },
+    { e: "🍉", n: "Melancia", f: 20 }, { e: "🥦", n: "Brócolis", f: 25, veg: true }, { e: "🧀", n: "Queijo", f: 22 },
+    { e: "🥛", n: "Leite", f: 15, drink: true }, { e: "🧃", n: "Suquinho", f: 14, drink: true },
+    { e: "🍪", n: "Biscoito", f: 12, treat: true }, { e: "🍕", n: "Pizza", f: 25, treat: true },
+    { e: "🍦", n: "Sorvete", f: 10, treat: true }, { e: "🎂", n: "Bolo", f: 12, treat: true },
+  ].filter((f, k, arr) => k === 0 || f.e !== arr[0].e);
+  function feed(food) {
     if (busy || sleeping) return;
     if (care.fome >= 95) { nope = 1; setMsg("Tô cheinho! 😋", 1800); say("Tô cheinho!"); return; }
     busy = true;
-    const f = emojiSprite(animal.food, .45); f.position.set(-1.6, .45, 1); s.add(f);
+    bowlFood.material.map = emojiSprite(food.e, .45).material.map;
+    const f = emojiSprite(food.e, .5); f.position.set(-1.6, .45, 1); s.add(f);
     let k = 0;
     fx.push({ o: f, life: 9999, step: () => {
       k++;
       const p = Math.min(1, k / 35);
       f.position.set(-1.6 + 1.6 * p, .45 + 1.1 * p + Math.sin(p * Math.PI) * .8, 1 - .1 * p);
-      if (p >= 1) { s.remove(f); chomp = 1; sfx("yum"); setTimeout(() => sfx("yum"), 300); addCare("fome", 25); setMsg("Nham nham! Que delícia! 😋", 2000); say("Nham nham! Que delícia!"); busy = false; return true; }
+      f.material.rotation = p * 6;
+      if (p < 1) return;
+      s.remove(f); chomp = 1; busy = false;
+      addCare("fome", food.f);
+      let msg;
+      if (food.fav) { msg = "Minha comida favorita! Eu amei! 😍"; addCare("amor", 15); wiggle = 1;
+        for (let j = 0; j < 6; j++) setTimeout(() => floaty("💖", (Math.random() - .5) * 1.2, 2, .8, .4), j * 100); sfx("match"); }
+      else if (food.treat) { msg = "Que gostoso! Mas é só um pouquinho, tá? 😋"; addCare("amor", 8); }
+      else if (food.veg) msg = "Hmm… verdinho e saudável! Fico forte! 💪";
+      else if (food.drink) msg = "Glub glub! Que refrescante! 😊";
+      else msg = "Nham nham! Que delícia! 😋";
+      if (food.drink) sfx("glub"); else { sfx("yum"); setTimeout(() => sfx("yum"), 300); }
+      setMsg(msg, 2200); say(msg);
+      return true;
     } });
+  }
+  $("act-food").onclick = () => {
+    if (sleeping) return;
+    openTray("O que vamos comer? 🍽️", [...FOODS, { e: "✅", n: "Pronto", cls: "close" }], (it) => it.cls === "close" ? closeTray() : feed(it));
   };
-  $("act-bath").onclick = () => {
-    if (busy || sleeping) return;
-    busy = true; tub.visible = true; sfx("splash");
-    for (let k = 0; k < 36; k++) setTimeout(() => {
+
+  // ----- Hora do banho -----
+  function bubbles(n, y0 = .8) {
+    for (let k = 0; k < n; k++) setTimeout(() => {
       const b = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .75 }));
-      const r = .08 + Math.random() * .14; b.scale.setScalar(r);
+      b.scale.setScalar(.08 + Math.random() * .14);
       const ang = Math.random() * Math.PI * 2;
-      b.position.set(Math.cos(ang) * .8, .8 + Math.random() * .6, .5 + Math.sin(ang) * .5);
+      b.position.set(Math.cos(ang) * .8, y0 + Math.random() * .6, .5 + Math.sin(ang) * .5);
       s.add(b); fx.push({ o: b, life: 70, max: 70, vy: .015 + Math.random() * .015, vx: (Math.random() - .5) * .01, fade: true });
       if (k % 6 === 0) sfx("popb");
-    }, k * 70);
-    setTimeout(() => {
-      tub.visible = false; busy = false; addCare("banho", 40);
+    }, k * 60);
+  }
+  function cleanSpots(n) {
+    let left = n;
+    dirt.forEach(d => { if (left > 0 && d.visible) { d.visible = false; left--; } });
+  }
+  const BATH = [
+    { id: "sabonete", e: "🧼", n: "Sabonete" }, { id: "xampu", e: "🧴", n: "Xampu" }, { id: "chuveiro", e: "🚿", n: "Chuveiro" },
+    { id: "patinho", e: "🦆", n: "Patinho" }, { id: "secar", e: "🌬️", n: "Secar" }, { id: "pronto", e: "✅", n: "Pronto!", cls: "close" },
+  ];
+  function useBath(it, btn) {
+    if (it.id === "pronto") return endBath();
+    if (busy) return;
+    busy = true; bathUsed.add(it.id); btn.classList.add("done");
+    let msg = "", wait = 1600;
+    if (it.id === "sabonete") { sfx("scrub"); bubbles(30); cleanSpots(3); addCare("banho", 20); msg = "Esfrega, esfrega! Que espuminha! 🫧"; }
+    if (it.id === "xampu") { sfx("scrub"); foam.visible = true; bubbles(14, 1.6); addCare("banho", 10); msg = "Xampu na cabecinha! Hihihi! 🧴"; }
+    if (it.id === "chuveiro") {
+      shower.visible = true; sfx("shower"); wait = 2200;
+      for (let k = 0; k < 60; k++) setTimeout(() => {
+        const d = part("sphere", "#7cc8ff", [.03, .08, .03], [(Math.random() - .5) * .6, 2.8, .5 + (Math.random() - .5) * .6], s);
+        fx.push({ o: d, life: 30, max: 30, vy: -.09, vx: 0 });
+      }, k * 30);
+      setTimeout(() => { foam.visible = false; cleanSpots(6); shower.visible = false; }, 1900);
+      addCare("banho", 25); msg = "Uiii, que aguinha gostosa! 🚿";
+    }
+    if (it.id === "patinho") { duckOn = !duckOn; duck.visible = duckOn; sfx("squeak"); setTimeout(() => sfx("giggle"), 250); addCare("amor", 8); msg = duckOn ? "Quack quack! Meu patinho! 🦆" : "Tchau, patinho! 🦆"; wait = 600; }
+    if (it.id === "secar") {
+      sfx("wind"); foam.visible = false; addCare("banho", 10);
+      for (let k = 0; k < 6; k++) setTimeout(() => floaty(k % 2 ? "💨" : "✨", (Math.random() - .5) * 1.6, .9 + Math.random(), .9, .4, 45), k * 120);
+      msg = "Sequinho e fofinho! ✨";
+    }
+    setMsg(msg, 2000); say(msg.replace(/[^\p{L}\p{N}\s!?.,…]/gu, ""));
+    setTimeout(() => { busy = false; }, wait);
+  }
+  function startBath() {
+    if (sleeping) return;
+    bathing = true; tub.visible = true; bathUsed.clear(); sfx("splash");
+    setMsg("Hora do banho! 🛁", 1800); say("Hora do banho!");
+    openTray("Hora do banho! 🛁", BATH, useBath);
+  }
+  function endBath() {
+    bathing = false; tub.visible = false; foam.visible = false; shower.visible = false; duck.visible = duckOn = false;
+    closeTray();
+    if (care.banho >= 80) {
       for (let k = 0; k < 5; k++) floaty("✨", (Math.random() - .5) * 1.6, 1 + Math.random(), .9, .4, 50);
-      setMsg("Tô limpinho e cheiroso! ✨", 2000); say("Tô limpinho e cheiroso!"); sfx("match");
-    }, 2900);
-  };
+      setMsg("Tô limpinho e cheiroso! ✨", 2200); say("Tô limpinho e cheiroso!"); sfx("match");
+    } else { setMsg("Ainda tô meio sujinho… 🙈", 2200); say("Ainda tô meio sujinho!"); }
+  }
+  $("act-bath").onclick = startBath;
   function love() {
     if (sleeping) return;
     wiggle = 1; sfx("match");
@@ -2161,6 +2399,7 @@ function openHouse() {
     const happy = CARE.every(k => care[k] >= 60);
     chomp = Math.max(0, chomp - .02); wiggle = Math.max(0, wiggle - .015); nope = Math.max(0, nope - .03);
     const head = a.userData.head;
+    if (duck.visible) duck.position.set(Math.cos(t / 40) * .75, .78 + Math.sin(t / 10) * .03, .5 + Math.sin(t / 40) * .5);
     if (sleeping) {
       a.position.y = 0; a.rotation.y = 0;
       head.rotation.set(.25 + Math.sin(t / 40) * .03, 0, .15);
@@ -2180,7 +2419,7 @@ function openHouse() {
     renderer.render(s, cam);
   };
   cleanup = () => {
-    clearInterval(timer); hush();
+    clearInterval(timer); hush(); closeTray();
     care.t = Date.now(); save("bichos-casa-" + animal.id, care);
     renderer.domElement.onpointerdown = null;
   };
@@ -2247,6 +2486,7 @@ function splash() {
 }
 $("play").onclick = () => {
   sfx("start");
+  playMusic("menu");
   loopFn = null;
   const saved = ANIMALS.find(a => a.id === load("bichos-animal", null));
   if (saved) { animal = saved; openHub(true); } else { show("s-pick"); say("Quem vai ser seu amiguinho hoje?"); }
