@@ -195,6 +195,22 @@
   .card.equipped { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
   .card .price { margin-top: 6px; font-weight: 700; }
   .card:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .shop-stage { position: relative; border: 5px solid #fff; border-radius: 30px; overflow: hidden; box-shadow: 0 8px 0 var(--line); margin-top: 6px; }
+  .shop-stage .view3d canvas { border-radius: 0; cursor: grab; }
+  .try-tag { position: absolute; left: 10px; top: 10px; background: rgba(255, 255, 255, .9); color: #5a3d5c; font-weight: 600; font-size: .85rem; padding: 4px 12px; border-radius: 99px; pointer-events: none; }
+  .shop-info { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; margin: 14px 0; min-height: 50px; text-align: center; }
+  .shop-info .hint { margin: 0; width: 100%; }
+  .sel-name { font-weight: 700; font-size: 1.25rem; }
+  .buy-btn { animation: buyPulse 1.2s ease-in-out infinite; font-size: 1.15rem !important; }
+  @keyframes buyPulse { 50% { transform: scale(1.07); } }
+  .tabs { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 12px; scrollbar-width: none; }
+  .tab { flex: 0 0 auto; border: 3px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 8px 14px; font: 600 1rem "Fredoka", sans-serif; cursor: pointer; }
+  .tab.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .shop-card { position: relative; }
+  .shop-card.sel { outline: 4px solid var(--accent2); outline-offset: 2px; }
+  .tag-on { position: absolute; top: 8px; left: -6px; background: var(--good); color: #fff; font-weight: 700; font-size: .72rem; padding: 3px 9px; border-radius: 99px; transform: rotate(-8deg); z-index: 1; }
+  .swatch { display: block; width: 96px; height: 96px; margin: 0 auto; border-radius: 22px; border: 3px solid #fff; font-size: 2rem; line-height: 90px; box-shadow: 0 3px 0 var(--line); }
+  .big-emoji { font-size: 3.6rem; display: block; line-height: 104px; }
   .note { background: var(--card); border: 2px dashed var(--line); border-radius: 12px; padding: 12px; color: var(--muted); font-size: .9rem; margin-top: 14px; }
   .pix { text-align: center; }
   .pix img { width: 220px; max-width: 100%; background: #fff; border-radius: 12px; padding: 8px; }
@@ -398,11 +414,10 @@
       <h2 style="margin:0">🛍️ Lojinha</h2>
       <span class="pill">⭐ <span class="wallet">0</span></span>
     </div>
-    <p class="hint" style="text-align:left">Brinque para ganhar estrelinhas e troque por coisas lindas! ✨ Toque no que já é seu para usar ou tirar.</p>
-    <h3>🎀 Chapéus e enfeites</h3>
-    <div class="grid" id="shop-hats"></div>
-    <h3>🏞️ Lugares para brincar</h3>
-    <div class="grid" id="shop-scenes"></div>
+    <div class="shop-stage"><div class="view3d" id="shop-view"></div><div class="try-tag">👀 Provador · arraste para girar</div></div>
+    <div class="shop-info" id="shop-info"></div>
+    <div class="tabs" id="shop-tabs"></div>
+    <div class="grid shop-grid" id="shop-grid"></div>
   </section>
 
   <!-- Comprar estrelas -->
@@ -507,20 +522,72 @@ const GAMES = [
   { id: "quiz",    emoji: "❓", name: "Perguntinhas",        desc: "Você sabe a resposta?",     stars: [5, 8, 10], edu: true, play: (a, d) => playEdu(a, d, quizQ) },
 ];
 
-const HATS = [
-  { id: "flor",     emoji: "🌸", name: "Flor",      price: 4 },
-  { id: "bone",     emoji: "🧢", name: "Boné",      price: 6 },
-  { id: "laco",     emoji: "🎀", name: "Laço",      price: 6 },
-  { id: "cartola",  emoji: "🎩", name: "Cartola",   price: 10 },
-  { id: "formatura",emoji: "🎓", name: "Formatura", price: 14 },
-  { id: "coroa",    emoji: "👑", name: "Coroa",     price: 25 },
+// ---------- Lojinha: tudo que dá para comprar ----------
+// slot: onde o item vai (hat = cabeça, face = rosto, body = corpinho, back = costas, scene = mapa, wall = parede da casinha, decor = móveis)
+const ITEMS = [
+  { slot: "hat", id: "flor",       emoji: "🌸", name: "Flor",             price: 4 },
+  { slot: "hat", id: "bone",       emoji: "🧢", name: "Boné",             price: 6 },
+  { slot: "hat", id: "laco",       emoji: "🎀", name: "Laço",             price: 6 },
+  { slot: "hat", id: "festa",      emoji: "🥳", name: "Chapéu de festa",  price: 8 },
+  { slot: "hat", id: "cartola",    emoji: "🎩", name: "Cartola",          price: 10 },
+  { slot: "hat", id: "floral",     emoji: "💐", name: "Coroa de flores",  price: 12 },
+  { slot: "hat", id: "chef",       emoji: "👨‍🍳", name: "Chapéu de chef",   price: 12 },
+  { slot: "hat", id: "formatura",  emoji: "🎓", name: "Formatura",        price: 14 },
+  { slot: "hat", id: "cowboy",     emoji: "🤠", name: "Chapéu de cowboy", price: 14 },
+  { slot: "hat", id: "bruxinha",   emoji: "🧙", name: "Chapéu de bruxinha", price: 16 },
+  { slot: "hat", id: "tiara",      emoji: "👸", name: "Tiara de princesa", price: 18 },
+  { slot: "hat", id: "coroa",      emoji: "👑", name: "Coroa de rei",     price: 25 },
+  { slot: "hat", id: "astronauta", emoji: "🧑‍🚀", name: "Capacete espacial", price: 30 },
+
+  { slot: "face", id: "nariz",     emoji: "🤡", name: "Nariz de palhaço", price: 5 },
+  { slot: "face", id: "oculos",    emoji: "👓", name: "Óculos",           price: 6 },
+  { slot: "face", id: "bigode",    emoji: "🥸", name: "Bigodinho",        price: 7 },
+  { slot: "face", id: "sol",       emoji: "🕶️", name: "Óculos de sol",    price: 8 },
+  { slot: "face", id: "adesivos",  emoji: "⭐", name: "Estrelinhas",      price: 9 },
+  { slot: "face", id: "coracao",   emoji: "😍", name: "Óculos de coração", price: 12 },
+
+  { slot: "body", id: "gravata",   emoji: "🎀", name: "Gravatinha",       price: 6 },
+  { slot: "body", id: "cachecol",  emoji: "🧣", name: "Cachecol",         price: 9 },
+  { slot: "body", id: "camiseta",  emoji: "👕", name: "Camiseta",         price: 10 },
+  { slot: "body", id: "colar",     emoji: "📿", name: "Colar de pérolas", price: 12 },
+  { slot: "body", id: "jardineira",emoji: "👖", name: "Jardineira",       price: 14 },
+  { slot: "body", id: "abelha",    emoji: "🐝", name: "Roupa de abelhinha", price: 15 },
+  { slot: "body", id: "tutu",      emoji: "🩰", name: "Sainha de bailarina", price: 16 },
+  { slot: "body", id: "capa",      emoji: "🦸", name: "Capa de herói",    price: 20 },
+
+  { slot: "back", id: "balao",     emoji: "🎈", name: "Balãozinho",       price: 10 },
+  { slot: "back", id: "mochila",   emoji: "🎒", name: "Mochila",          price: 12 },
+  { slot: "back", id: "anjo",      emoji: "😇", name: "Asas de anjo",     price: 28 },
+  { slot: "back", id: "fada",      emoji: "🧚", name: "Asas de fada",     price: 30 },
+  { slot: "back", id: "borboleta", emoji: "🦋", name: "Asas de borboleta", price: 35 },
+  { slot: "back", id: "foguete",   emoji: "🚀", name: "Mochila foguete",  price: 45 },
+
+  { slot: "scene", id: "praia",    emoji: "🏖️", name: "Praia",            price: 8,  sky: "#8fd8ff", ground: "#f2d48a", tree: "#3fbf6a", kind: "palm" },
+  { slot: "scene", id: "jardim",   emoji: "🌷", name: "Jardim Encantado", price: 12, sky: "#d4f1ff", ground: "#8fe08a", tree: "#ff8fc6", kind: "flower" },
+  { slot: "scene", id: "noite",    emoji: "🌙", name: "Noite Estrelada",  price: 12, sky: "#1c2a4a", ground: "#2f5d3a", tree: "#2e8a4f", kind: "tree", night: true },
+  { slot: "scene", id: "neve",     emoji: "⛄", name: "Terra da Neve",    price: 15, sky: "#dfe9f3", ground: "#ffffff", tree: "#7cc4a0", kind: "snow" },
+  { slot: "scene", id: "doceria",  emoji: "🍭", name: "Doceria",          price: 20, sky: "#ffd6ec", ground: "#c8f5e0", tree: "#ff8fc6", kind: "candy" },
+  { slot: "scene", id: "mar",      emoji: "🐠", name: "Fundo do Mar",     price: 25, sky: "#4fb8e8", ground: "#f2d9a0", tree: "#4fc37a", kind: "sea" },
+  { slot: "scene", id: "nuvens",   emoji: "☁️", name: "Reino das Nuvens", price: 30, sky: "#ffe9f7", ground: "#ffffff", tree: "#ffffff", kind: "cloud" },
+  { slot: "scene", id: "espaco",   emoji: "🪐", name: "Espaço Sideral",   price: 40, sky: "#1b1240", ground: "#cfc6e8", tree: "#9b7bff", kind: "crystal", night: true },
+
+  { slot: "wall", id: "p_azul",    emoji: "🩵", name: "Parede azul",      price: 6,  back: "#d6ecff", side: "#eef7ff" },
+  { slot: "wall", id: "p_lilas",   emoji: "💜", name: "Parede lilás",     price: 6,  back: "#eadcff", side: "#f5eeff" },
+  { slot: "wall", id: "p_menta",   emoji: "💚", name: "Parede verdinha",  price: 6,  back: "#d5f5e6", side: "#ecfbf3" },
+  { slot: "wall", id: "p_amarela", emoji: "💛", name: "Parede amarela",   price: 6,  back: "#fff1c2", side: "#fff8e0" },
+  { slot: "wall", id: "p_noite",   emoji: "🌌", name: "Parede estrelada", price: 15, back: "#3b3f8a", side: "#4a4f9a", stars: true },
+  { slot: "decor", id: "pufe",     emoji: "🛋️", name: "Pufe fofinho",     price: 8 },
+  { slot: "decor", id: "baloes",   emoji: "🎈", name: "Balões",           price: 8 },
+  { slot: "decor", id: "luzinhas", emoji: "💡", name: "Luzinhas",         price: 10 },
+  { slot: "decor", id: "tapete",   emoji: "🌈", name: "Tapete arco-íris", price: 12 },
+  { slot: "decor", id: "aquario",  emoji: "🐠", name: "Aquário",          price: 15 },
+  { slot: "decor", id: "piano",    emoji: "🎹", name: "Pianinho",         price: 18 },
+  { slot: "decor", id: "cabana",   emoji: "⛺", name: "Cabaninha",        price: 20 },
+  { slot: "decor", id: "escorregador", emoji: "🛝", name: "Escorregador", price: 22 },
 ];
-const DEFAULT_SCENE = { sky: "#bfe8ff", ground: "#9be08f", tree: "#5cc96b", kind: "tree" };
-const SCENES = [
-  { id: "praia", emoji: "🏖️", name: "Praia",  price: 8,  sky: "#8fd8ff", ground: "#f2d48a", tree: "#3fbf6a", kind: "palm" },
-  { id: "noite", emoji: "🌙", name: "Noite",  price: 12, sky: "#1c2a4a", ground: "#2f5d3a", tree: "#2e8a4f", kind: "tree", night: true },
-  { id: "neve",  emoji: "❄️", name: "Neve",   price: 15, sky: "#dfe9f3", ground: "#ffffff", tree: "#e8f4ff", kind: "tree" },
-];
+const HATS = ITEMS.filter(i => i.slot === "hat");
+const DEFAULT_SCENE = { id: null, emoji: "🌲", name: "Floresta", sky: "#bfe8ff", ground: "#9be08f", tree: "#5cc96b", kind: "tree" };
+const SCENES = ITEMS.filter(i => i.slot === "scene");
 // Os preços em reais ficam no servidor (server.js); aqui é só para mostrar.
 const PACKS = [
   { id: "p10", stars: 10, label: "R$ 1,99" },
@@ -538,7 +605,7 @@ let cleanup = null;     // função para parar o jogo atual
 let hintTimer = null;
 let wallet = load("bichos-carteira", 0);              // estrelas para gastar
 let owned = load("bichos-itens", []);                 // ids dos itens comprados
-let equipped = load("bichos-equipado", { hat: null, scene: null });
+let equipped = Object.assign({ hat: null, face: null, body: null, back: null, scene: null, wall: null, decor: [] }, load("bichos-equipado", {}));
 
 const $ = (id) => document.getElementById(id);
 function show(id) {
@@ -578,8 +645,128 @@ function part(geo, color, s, p, parent, r) {
   return m;
 }
 const BLACK = "#2a2230", WHITE = "#ffffff", PINK = "#ff9fb8";
+// Faz um objeto se mexer sozinho a cada quadro (asas batendo, neve caindo…)
+function anim(obj, fn) {
+  let found = null;
+  obj.traverse(o => { if (!found && (o.isMesh || o.isSprite || o.isPoints)) found = o; });
+  if (found) found.onBeforeRender = () => fn(performance.now() / 1000);
+  return obj;
+}
+function glassMat(color, opacity) { return new THREE.MeshPhongMaterial({ color, transparent: true, opacity, shininess: 80, depthWrite: false }); }
 
-function makeAnimal(L, hatId) {
+// Rosto: óculos, nariz, bigode… (posições dependem do formato do bichinho)
+function addFace(head, id, L) {
+  const top = L.eyes === "top", big = L.eyes === "big";
+  const ex = top ? .22 : .18, ey = top ? .4 : .06, ez = (top ? .36 : big ? .44 : L.face ? .5 : L.patches ? .46 : .42) + .07;
+  const nz = L.muzzle ? .78 : L.snout ? .58 : L.beak ? .66 : L.face ? .57 : .5, ny = L.muzzle ? -.18 : L.snout ? -.08 : -.06;
+  const f = new THREE.Group(); head.add(f);
+  if (id === "oculos" || id === "sol") {
+    [-1, 1].forEach(s => {
+      if (id === "sol") part("sphere", "#2a2230", [.12, .1, .03], [s * ex, ey, ez], f);
+      part("torus", id === "sol" ? "#ff6f91" : "#3a3442", [.115, .115, .08], [s * ex, ey, ez + .01], f);
+    });
+    part("cyl", "#3a3442", [.012, ex * .9, .012], [0, ey + .02, ez + .01], f, [0, 0, Math.PI / 2]);
+    if (id === "sol") [-1, 1].forEach(s => part("sphere", WHITE, [.025, .02, .01], [s * ex - .04, ey + .04, ez + .035], f));
+  }
+  if (id === "coracao") {
+    [-1, 1].forEach(s => { const h = emojiSprite("❤️", .28); h.position.set(s * ex, ey, ez + .04); f.add(h); });
+    part("cyl", "#ff4f7a", [.012, ex * .7, .012], [0, ey + .02, ez + .02], f, [0, 0, Math.PI / 2]);
+  }
+  if (id === "nariz") part("sphere", "#ff3b3b", [.085, .085, .085], [0, ny, nz + .03], f);
+  if (id === "bigode") [-1, 1].forEach(s => part("sphere", "#5a3a2a", [.11, .035, .03], [s * .08, ny - .07, nz - .01], f, [0, 0, s * -.35]));
+  if (id === "adesivos") [-1, 1].forEach(s => { const st = emojiSprite("⭐", .14); st.position.set(s * .3, -.13, .44); f.add(st); });
+}
+
+// Roupinhas no corpo
+const RING = new THREE.TorusGeometry(1, .07, 8, 36);
+const SKIRT = new THREE.CylinderGeometry(.6, .76, .22, 28, 1, true);
+function addBody(g, id) {
+  const b = new THREE.Group(); g.add(b);
+  if (id === "gravata") {
+    [-1, 1].forEach(s => part("cone", "#ff4f7a", [.09, .15, .05], [s * .1, 1.0, .44], b, [0, 0, s * Math.PI / 2]));
+    part("sphere", "#e03366", [.05, .05, .04], [0, 1.0, .47], b);
+  }
+  if (id === "cachecol") {
+    const r = new THREE.Mesh(GEO.torus, mat("#ff6f91")); r.scale.set(.36, .36, .45); r.rotation.x = Math.PI / 2; r.position.y = 1.0; b.add(r);
+    part("box", "#ff6f91", [.13, .38, .06], [.2, .82, .43], b, [0, 0, .2]);
+    part("box", "#ffffff", [.135, .05, .065], [.21, .74, .43], b, [0, 0, .2]);
+  }
+  if (id === "camiseta") {
+    part("sphere", "#8fd3ff", [.66, .42, .64], [0, .76, 0], b);
+    [-1, 1].forEach(s => part("sphere", "#8fd3ff", [.18, .14, .18], [s * .52, .86, .1], b));
+    const st = emojiSprite("⭐", .28); st.position.set(0, .78, .68); b.add(st);
+  }
+  if (id === "colar") for (let i = 0; i < 14; i++) {
+    const a = i / 14 * Math.PI * 2;
+    part("sphere", "#fff6fb", [.05, .05, .05], [Math.sin(a) * .34, .98 - Math.cos(a) * .05, Math.cos(a) * .34], b);
+  }
+  if (id === "jardineira") {
+    part("sphere", "#5b8fd9", [.66, .36, .64], [0, .46, 0], b);
+    part("box", "#5b8fd9", [.42, .3, .06], [0, .76, .58], b, [-.25, 0, 0]);
+    [-1, 1].forEach(s => { part("box", "#5b8fd9", [.07, .45, .05], [s * .18, .95, .45], b, [-.6, 0, 0]); part("sphere", "#ffd23a", [.04, .04, .03], [s * .16, .88, .62], b); });
+    part("box", "#4a7bc4", [.16, .1, .02], [0, .74, .62], b, [-.25, 0, 0]);
+  }
+  if (id === "abelha") {
+    [[.4, "#2a2230", .5], [.58, "#ffd23a", .615], [.76, "#2a2230", .6], [.92, "#ffd23a", .5]].forEach(([y, c, r]) => {
+      const m = new THREE.Mesh(RING, mat(c)); m.rotation.x = Math.PI / 2; m.scale.set(r, r * .9, 1.4); m.position.y = y; b.add(m);
+    });
+    [-1, 1].forEach(s => part("sphere", "#e8f6ff", [.2, .3, .03], [s * .3, .95, -.5], b, [0, 0, s * .6]));
+  }
+  if (id === "tutu") {
+    const sk = new THREE.Mesh(SKIRT, new THREE.MeshToonMaterial({ color: "#ffb3d9", side: THREE.DoubleSide })); sk.position.y = .43; b.add(sk);
+    const rf = new THREE.Mesh(RING, mat("#ffd6ec")); rf.rotation.x = Math.PI / 2; rf.scale.set(.76, .76, 1.2); rf.position.y = .32; b.add(rf);
+    part("sphere", "#ff6fa8", [.08, .06, .05], [0, .6, .6], b);
+  }
+  if (id === "capa") {
+    const cape = part("sphere", "#ff5a5a", [.56, .64, .07], [0, .7, -.5], b, [.15, 0, 0]);
+    const col = new THREE.Mesh(GEO.torus, mat("#ffd23a")); col.scale.set(.33, .33, .3); col.rotation.x = Math.PI / 2; col.position.y = 1.0; b.add(col);
+    anim(cape, (t) => { cape.rotation.x = .15 + Math.sin(t * 4) * .08; });
+  }
+}
+
+// Costas: asas, mochila, balão
+function wing(group, color, sx, sy, x, y, z, rz, opacity = .7) {
+  const m = new THREE.Mesh(GEO.sphere, glassMat(color, opacity));
+  m.scale.set(sx, sy, .025); m.position.set(x, y, z); m.rotation.z = rz; group.add(m); return m;
+}
+function addBack(g, id) {
+  const b = new THREE.Group(); g.add(b);
+  if (id === "mochila") {
+    part("box", "#ff9f43", [.5, .56, .26], [0, .78, -.58], b);
+    part("box", "#ffc46b", [.34, .2, .06], [0, .64, -.73], b);
+    part("sphere", "#ff9f43", [.25, .1, .13], [0, 1.06, -.58], b);
+    [-1, 1].forEach(s => part("cyl", "#e8832a", [.035, .5, .035], [s * .26, .9, .4], b, [.4, 0, 0]));
+  }
+  if (id === "balao") {
+    const bl = makeBalloon("#ff6f91"); bl.scale.setScalar(.55); bl.position.set(.55, 2.55, -.4); b.add(bl);
+    part("cyl", "#f4eef6", [.008, 1.1, .008], [.4, 1.55, -.45], b, [0, 0, .25]);
+    anim(bl, (t) => { bl.position.y = 2.55 + Math.sin(t * 1.6) * .08; bl.rotation.z = Math.sin(t * 1.2) * .12; });
+  }
+  if (id === "fada" || id === "anjo" || id === "borboleta") {
+    const L = new THREE.Group(), R = new THREE.Group(); L.position.set(-.15, .9, -.5); R.position.set(.15, .9, -.5); b.add(L, R);
+    [[L, -1], [R, 1]].forEach(([w, s]) => {
+      if (id === "fada") { wing(w, "#bfe8ff", .32, .48, s * .28, .12, 0, s * -.6); wing(w, "#ffc9e8", .22, .3, s * .22, -.3, 0, s * -1.1); }
+      if (id === "anjo") for (let k = 0; k < 4; k++) wing(w, "#ffffff", .12, .42 - k * .06, s * (.15 + k * .12), .05 - k * .05, 0, s * (-.4 - k * .25), .95);
+      if (id === "borboleta") {
+        wing(w, "#ff9f43", .36, .44, s * .3, .14, 0, s * -.5, .9); wing(w, "#ff6fa8", .24, .3, s * .24, -.3, 0, s * -1.1, .9);
+        part("sphere", "#ffffff", [.06, .06, .02], [s * .34, .2, -.02], w); part("sphere", "#2a2230", [.05, .05, .02], [s * .22, -.32, -.02], w);
+      }
+    });
+    anim(L, (t) => { const k = Math.sin(t * 7) * .35; L.rotation.y = k; R.rotation.y = -k; });
+  }
+  if (id === "foguete") {
+    [-1, 1].forEach(s => {
+      part("cyl", "#cfd8e6", [.13, .5, .13], [s * .16, .8, -.58], b);
+      part("cone", "#ff5a5a", [.13, .2, .13], [s * .16, 1.15, -.58], b);
+      const fl = emojiSprite("🔥", .3); fl.position.set(s * .16, .42, -.58); fl.material.rotation = Math.PI; b.add(fl);
+      anim(fl, (t) => { fl.scale.setScalar(.26 + Math.sin(t * 25 + s) * .05); });
+    });
+  }
+}
+
+
+function makeAnimal(L, outfit) {
+  const fit = typeof outfit === "string" ? { hat: outfit } : (outfit || {});
   const g = new THREE.Group();
   const body = L.body;
   part("sphere", body, [.62, .58, .55], [0, .62, 0], g);
@@ -679,7 +866,10 @@ function makeAnimal(L, hatId) {
     part("sphere", L.tailColor, [r, r * 1.6, r], [0, y, z], g, [.35, 0, 0]));
   if (L.tail === "curl") part("torus", L.body, [.09, .09, .09], [0, .6, -.58], g);
 
-  if (hatId) addHat(head, hatId);
+  if (fit.hat) addHat(head, fit.hat);
+  if (fit.face) addFace(head, fit.face, L);
+  if (fit.body) addBody(g, fit.body);
+  if (fit.back) addBack(g, fit.back);
   g.userData = { head, feet, arms, pupils, shines };
   return g;
 }
@@ -718,6 +908,40 @@ function addHat(head, id) {
     part("cyl", "#3a3442", [.3, .14, .3], [0, .05, 0], h);
     part("box", "#3a3442", [.75, .04, .75], [0, .14, 0], h, [0, Math.PI / 4, 0]);
     part("sphere", "#ffd54a", [.06, .06, .06], [.3, .02, .3], h);
+  } else if (id === "festa") {
+    const c = part("cone", "#ff8fb8", [.2, .5, .2], [0, .25, 0], h, [0, 0, .12]);
+    [[.07, .12, .17], [-.08, .26, .12], [.05, .38, .07]].forEach(([x, y, z], k) => part("sphere", ["#ffd54a", "#8fd3ff", "#8ee08a"][k], [.04, .04, .04], [x, y, z], h));
+    part("sphere", "#ffd54a", [.08, .08, .08], [.06, .52, 0], h);
+  } else if (id === "floral") {
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * Math.PI * 2;
+      part("sphere", ["#ff8fc6", "#ffd54a", "#b79cff", "#8fd3ff"][i % 4], [.08, .08, .08], [Math.sin(a) * .34, .0, Math.cos(a) * .34], h);
+      part("sphere", "#5cc96b", [.06, .03, .04], [Math.sin(a + .35) * .36, -.02, Math.cos(a + .35) * .36], h);
+    }
+  } else if (id === "chef") {
+    part("cyl", WHITE, [.26, .2, .26], [0, .08, 0], h);
+    [[0, .36, 0, .22], [.17, .3, .05, .16], [-.17, .3, .05, .16], [0, .3, -.16, .16], [0, .3, .17, .15]].forEach(([x, y, z, r]) => part("sphere", WHITE, [r, r, r], [x, y, z], h));
+  } else if (id === "cowboy") {
+    part("cyl", "#b07a4f", [.55, .03, .45], [0, .04, 0], h);
+    part("cyl", "#b07a4f", [.26, .26, .24], [0, .18, 0], h);
+    part("cyl", "#5a3a2a", [.265, .05, .245], [0, .1, 0], h);
+    part("sphere", "#ffd23a", [.04, .04, .02], [0, .1, .25], h);
+  } else if (id === "bruxinha") {
+    part("cyl", "#7b5cd6", [.5, .03, .5], [0, .04, 0], h);
+    part("cone", "#7b5cd6", [.27, .62, .27], [0, .35, -.03], h, [-.2, 0, .15]);
+    part("cyl", "#ffd23a", [.27, .05, .27], [0, .09, 0], h);
+    const st = emojiSprite("⭐", .18); st.position.set(.1, .35, .22); h.add(st);
+  } else if (id === "tiara") {
+    const r = new THREE.Mesh(RING, mat("#ffd54a")); r.scale.set(.33, .33, 1); r.rotation.x = Math.PI / 2 - .3; r.position.y = .02; h.add(r);
+    part("cone", "#ffd54a", [.07, .2, .04], [0, .12, .3], h);
+    [-1, 1].forEach(s => part("cone", "#ffd54a", [.05, .13, .04], [s * .15, .08, .27], h));
+    part("sphere", "#ff5c8a", [.05, .05, .04], [0, .07, .33], h);
+    [-1, 1].forEach(s => part("sphere", "#8fd3ff", [.035, .035, .03], [s * .15, .04, .3], h));
+  } else if (id === "astronauta") {
+    const glass = new THREE.Mesh(GEO.sphere, glassMat("#cfeaff", .28)); glass.scale.setScalar(.7); glass.position.y = -.4; h.add(glass);
+    const col = new THREE.Mesh(GEO.torus, mat("#e8eef6")); col.scale.set(.5, .5, .5); col.rotation.x = Math.PI / 2; col.position.y = -.88; h.add(col);
+    part("cyl", "#cfd8e6", [.015, .25, .015], [.25, .38, 0], h);
+    part("sphere", "#ff5a5a", [.05, .05, .05], [.25, .52, 0], h);
   }
   head.add(h);
 }
@@ -753,43 +977,179 @@ function shadowBlob(r) {
 
 function makeTree(sc) {
   const t = new THREE.Group();
+  const pastel = ["#ff8fc6", "#8fd3ff", "#ffd54a", "#b79cff", "#8ee08a", "#ffb26b"];
+  const pick = () => pastel[rand(pastel.length)];
   if (sc.kind === "palm") {
     part("cyl", "#b07a4f", [.12, 1.8, .12], [0, .9, 0], t, [0, 0, .12]);
     for (let i = 0; i < 5; i++) {
       const a = i / 5 * Math.PI * 2;
       part("sphere", sc.tree, [.7, .08, .25], [Math.sin(a) * .45 + .1, 1.8, Math.cos(a) * .45], t, [0, -a + Math.PI / 2, -.3]);
     }
+    part("sphere", "#a8714a", [.1, .1, .1], [.15, 1.68, .12], t);
+  } else if (sc.kind === "flower") {
+    part("cyl", "#4fb35f", [.06, 1.4, .06], [0, .7, 0], t);
+    part("sphere", "#5cc96b", [.25, .08, .12], [.2, .5, 0], t, [0, 0, .5]);
+    const c = pick();
+    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; part("sphere", c, [.24, .24, .08], [Math.sin(a) * .3, 1.5 + Math.cos(a) * .3, 0], t); }
+    part("sphere", "#ffe066", [.17, .17, .12], [0, 1.5, .05], t);
+  } else if (sc.kind === "candy") {
+    if (Math.random() < .35) {
+      part("cyl", "#f4a3c4", [.42, .38, .42], [0, .19, 0], t);
+      part("sphere", "#fff6fb", [.48, .32, .48], [0, .48, 0], t);
+      part("sphere", "#ff3b5c", [.11, .11, .11], [0, .82, 0], t);
+    } else {
+      part("cyl", "#ffffff", [.05, 1.4, .05], [0, .7, 0], t);
+      const c = pick();
+      part("cyl", c, [.5, .12, .5], [0, 1.6, 0], t, [Math.PI / 2, 0, 0]);
+      [.38, .25, .12].forEach((r, k) => { const m = new THREE.Mesh(RING, mat(k % 2 ? c : WHITE)); m.scale.set(r, r, .8); m.position.set(0, 1.6, .07); t.add(m); });
+    }
+  } else if (sc.kind === "sea") {
+    if (Math.random() < .5) {
+      const parts = [];
+      for (let k = 0; k < 6; k++) parts.push(part("sphere", k % 2 ? "#4fc37a" : "#3fae69", [.14, .3, .14], [0, .25 + k * .4, 0], t));
+      anim(t, (time) => parts.forEach((p, k) => p.position.x = Math.sin(time * 1.5 + k * .6) * .08 * k));
+    } else {
+      const c = ["#ff7aa8", "#ff9f6b", "#b79cff"][rand(3)];
+      [[0, .5, 0, .14, 1], [.3, .45, .1, .1, .8], [-.28, .4, -.05, .1, .7]].forEach(([x, y, z, r, h]) => {
+        part("cyl", c, [r, h, r], [x, y, z], t, [0, 0, x * 1.2]);
+        part("sphere", c, [r * 1.3, r * 1.3, r * 1.3], [x * 1.6, y + h / 2, z], t);
+      });
+    }
+  } else if (sc.kind === "cloud") {
+    const c = makeCloud(); c.scale.setScalar(.75); c.position.y = .5; t.add(c);
+    const st = emojiSprite("✨", .5); st.position.set(0, 1.4, 0); t.add(st);
+    anim(st, (time) => st.material.opacity = .5 + Math.sin(time * 3) * .5);
+  } else if (sc.kind === "crystal") {
+    [[0, 1.2, "#b79cff"], [.3, .8, "#8fd3ff"], [-.28, .7, "#ff8fc6"]].forEach(([x, h, c]) => {
+      const m = new THREE.Mesh(GEO.cone, new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: .85 }));
+      m.scale.set(.2, h, .2); m.position.set(x, h / 2, 0); m.rotation.z = x * .5; t.add(m);
+    });
   } else {
-    part("cyl", "#9a6a48", [.12, .6, .12], [0, .3, 0], t);
-    part("cone", sc.tree, [.6, 1.1, .6], [0, 1.1, 0], t);
-    part("cone", sc.tree, [.45, .8, .45], [0, 1.6, 0], t);
+    const snow = sc.kind === "snow";
+    if (!snow && Math.random() < .4) {
+      part("cyl", "#9a6a48", [.13, .8, .13], [0, .4, 0], t);
+      part("sphere", sc.tree, [.62, .6, .62], [0, 1.25, 0], t);
+      for (let k = 0; k < 4; k++) { const a = k * 1.7; part("sphere", "#ff5a5a", [.08, .08, .08], [Math.sin(a) * .5, 1.15 + (k % 2) * .25, Math.cos(a) * .5], t); }
+    } else {
+      part("cyl", "#9a6a48", [.12, .6, .12], [0, .3, 0], t);
+      part("cone", sc.tree, [.6, 1.1, .6], [0, 1.1, 0], t);
+      part("cone", sc.tree, [.45, .8, .45], [0, 1.6, 0], t);
+      if (snow) { part("cone", WHITE, [.42, .32, .42], [0, 1.42, 0], t); part("cone", WHITE, [.3, .3, .3], [0, 1.88, 0], t); }
+    }
   }
   return t;
 }
-function makeCloud() {
+function makeCloud(color = WHITE) {
   const c = new THREE.Group();
-  [[0, 0, .6], [.6, -.1, .45], [-.6, -.1, .45], [.25, .3, .4]].forEach(([x, y, r]) => part("sphere", WHITE, [r, r * .8, r], [x, y, 0], c));
+  [[0, 0, .6], [.6, -.1, .45], [-.6, -.1, .45], [.25, .3, .4]].forEach(([x, y, r]) => part("sphere", color, [r, r * .8, r], [x, y, 0], c));
   return c;
 }
 
-// Monta céu, chão, luzes e enfeites do cenário escolhido
-function makeWorld() {
-  const sc = scene();
+// Monta céu, chão, luzes e enfeites do mapa escolhido (os enfeites ficam longe, no fundo)
+function makeWorld(override) {
+  const sc = override || scene();
   const s = new THREE.Scene();
   s.background = new THREE.Color(sc.sky);
   s.fog = new THREE.Fog(sc.sky, 18, 45);
-  s.add(new THREE.HemisphereLight(0xffffff, 0x9aa8c8, sc.night ? .5 : .7));
+  s.add(new THREE.HemisphereLight(0xffffff, 0x9aa8c8, sc.night ? .55 : .7));
   const sun = new THREE.DirectionalLight(0xffffff, sc.night ? .3 : .5);
   sun.position.set(3, 8, 5); s.add(sun);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), mat(sc.ground));
   ground.rotation.x = -Math.PI / 2; s.add(ground);
-  if (sc.night) {
+  const R = (a, b) => a + Math.random() * (b - a);
+  const far = () => [R(-22, 22), R(-26, -12)];
+  const sprite = (e, size, x, y, z) => { const sp = emojiSprite(e, size); sp.position.set(x, y, z); s.add(sp); return sp; };
+  const starsPts = (n, color, size) => {
     const pts = [];
-    for (let i = 0; i < 260; i++) pts.push((Math.random() - .5) * 80, 4 + Math.random() * 20, -15 - Math.random() * 15);
+    for (let i = 0; i < n; i++) pts.push(R(-45, 45), R(4, 26), R(-35, -14));
     const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
-    s.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xfff6c8, size: .25 })));
-    const moon = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xfff1a8 }));
-    moon.position.set(8, 9, -20); moon.scale.setScalar(1.6); s.add(moon);
+    s.add(new THREE.Points(geo, new THREE.PointsMaterial({ color, size })));
+  };
+  const id = sc.id;
+  if (!id) {   // Floresta: florzinhas e cogumelos no fundo
+    for (let i = 0; i < 14; i++) { const [x, z] = far(); sprite(["🌼", "🌷", "🍄"][i % 3], .6, x, .3, z); }
+  }
+  if (id === "praia") {
+    const sea = new THREE.Mesh(new THREE.PlaneGeometry(140, 40), mat("#5cc8ff")); sea.rotation.x = -Math.PI / 2; sea.position.set(0, .03, -32); s.add(sea);
+    const sunB = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xffe066 })); sunB.scale.setScalar(2.4); sunB.position.set(-12, 12, -34); s.add(sunB);
+    [[-8, -22], [6, -26], [14, -20]].forEach(([x, z], k) => { const b = sprite("⛵", 1.6, x, .9, z); anim(b, (t) => b.position.y = .9 + Math.sin(t * 1.5 + k) * .15); });
+    for (let i = 0; i < 4; i++) { const u = new THREE.Group(); part("cyl", WHITE, [.05, 1.6, .05], [0, .8, 0], u); part("cone", i % 2 ? "#ff6f91" : "#ffd23a", [.9, .4, .9], [0, 1.7, 0], u); u.position.set(R(-14, 14), 0, R(-12, -9)); s.add(u); }
+  }
+  if (id === "jardim") {
+    for (let i = 0; i < 8; i++) {
+      const b = sprite("🦋", .6, R(-8, 8), R(2, 4), R(-8, -3)), x0 = b.position.x, y0 = b.position.y, ph = Math.random() * 6;
+      anim(b, (t) => { b.position.x = x0 + Math.sin(t * .7 + ph) * 1.5; b.position.y = y0 + Math.sin(t * 2.3 + ph) * .4; });
+    }
+    for (let i = 0; i < 16; i++) { const [x, z] = far(); sprite(["🌷", "🌻", "🌸", "🌼"][i % 4], .9, x, .45, z); }
+    const rb = makeRainbow(); rb.position.set(6, 0, -24); rb.scale.setScalar(1.3); s.add(rb);
+  }
+  if (id === "noite") {
+    starsPts(260, 0xfff6c8, .25);
+    const moon = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xfff1a8 })); moon.position.set(8, 9, -20); moon.scale.setScalar(1.6); s.add(moon);
+    for (let i = 0; i < 24; i++) {
+      const f = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xeaff8a, transparent: true }));
+      f.scale.setScalar(.06); f.position.set(R(-10, 10), R(.5, 3), R(-10, -2)); s.add(f);
+      const p0 = f.position.clone(), ph = Math.random() * 6;
+      anim(f, (t) => { f.position.set(p0.x + Math.sin(t * .6 + ph) * .6, p0.y + Math.sin(t * .9 + ph) * .3, p0.z); f.material.opacity = .4 + Math.sin(t * 3 + ph) * .6; });
+    }
+  }
+  if (id === "neve") {
+    const N = 500, pts = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) { pts[i * 3] = R(-20, 20); pts[i * 3 + 1] = R(0, 14); pts[i * 3 + 2] = R(-18, 6); }
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+    const flakes = new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xffffff, size: .14 })); s.add(flakes);
+    let last = 0;
+    anim(flakes, (t) => {
+      const dt = Math.min(.05, t - last || .016); last = t;
+      for (let i = 0; i < N; i++) { pts[i * 3 + 1] -= dt * 1.2; pts[i * 3] += Math.sin(t + i) * dt * .2; if (pts[i * 3 + 1] < 0) pts[i * 3 + 1] = 14; }
+      geo.attributes.position.needsUpdate = true;
+    });
+    const sm = new THREE.Group();
+    part("sphere", WHITE, [.8, .75, .8], [0, .7, 0], sm); part("sphere", WHITE, [.55, .52, .55], [0, 1.75, 0], sm);
+    part("cone", "#ff8c42", [.08, .35, .08], [0, 1.75, .6], sm, [Math.PI / 2, 0, 0]);
+    [-1, 1].forEach(k => part("sphere", BLACK, [.06, .06, .04], [k * .18, 1.9, .5], sm));
+    const sc2 = new THREE.Mesh(GEO.torus, mat("#ff5a5a")); sc2.scale.set(.5, .5, .5); sc2.rotation.x = Math.PI / 2; sc2.position.y = 1.35; sm.add(sc2);
+    sm.position.set(-7, 0, -9); sm.rotation.y = .4; s.add(sm);
+  }
+  if (id === "doceria") {
+    for (let i = 0; i < 4; i++) { const c = makeCloud("#ffc2e0"); c.position.set(R(-14, 14), R(6, 10), R(-22, -14)); s.add(c); }
+    for (let i = 0; i < 10; i++) {
+      const c = sprite(["🍬", "🍭", "🧁", "🍩"][i % 4], .8, R(-12, 12), R(3, 8), R(-14, -6)), y0 = c.position.y, ph = Math.random() * 6;
+      anim(c, (t) => { c.position.y = y0 + Math.sin(t + ph) * .4; c.material.rotation = Math.sin(t * .8 + ph) * .4; });
+    }
+  }
+  if (id === "mar") {
+    s.fog = new THREE.Fog(sc.sky, 12, 38);
+    for (let i = 0; i < 9; i++) {
+      const f = sprite(["🐠", "🐟", "🐡", "🐙", "🦀"][i % 5], .9, R(-12, 12), R(1.5, 6), R(-14, -5)), sp = R(.5, 1.2) * (i % 2 ? 1 : -1), ph = Math.random() * 20;
+      if (i % 5 === 4) f.position.y = .4;
+      const y0 = f.position.y;
+      anim(f, (t) => { f.position.x = ((t * sp + ph) % 28 + 28) % 28 - 14; f.position.y = y0 + Math.sin(t * 2 + ph) * .2; });
+    }
+    for (let i = 0; i < 26; i++) {
+      const b = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .5 }));
+      b.scale.setScalar(R(.05, .14)); b.position.set(R(-12, 12), R(0, 9), R(-12, -2)); s.add(b);
+      const v = R(.5, 1.2), x0 = b.position.x, ph = Math.random() * 9;
+      anim(b, (t) => { b.position.y = (t * v + ph) % 9; b.position.x = x0 + Math.sin(t * 2 + ph) * .2; });
+    }
+  }
+  if (id === "nuvens") {
+    for (let i = 0; i < 14; i++) { const c = makeCloud(i % 3 ? WHITE : "#ffe0f2"); c.scale.setScalar(R(1, 2)); c.position.set(R(-25, 25), R(0, 3), R(-28, -10)); s.add(c); }
+    const rb = makeRainbow(); rb.position.set(-5, 0, -22); rb.scale.setScalar(1.4); s.add(rb);
+    for (let i = 0; i < 14; i++) { const st = sprite("✨", .7, R(-14, 14), R(3, 10), R(-16, -8)), ph = Math.random() * 6; anim(st, (t) => st.material.opacity = .5 + Math.sin(t * 2 + ph) * .5); }
+  }
+  if (id === "espaco") {
+    starsPts(400, 0xffffff, .22);
+    const sat = new THREE.Group();
+    part("sphere", "#ffb26b", [2.2, 2.2, 2.2], [0, 0, 0], sat);
+    const ring = new THREE.Mesh(GEO.torus, mat("#ffe0a8")); ring.scale.set(3.4, 3.4, .25); ring.rotation.x = 1.2; sat.add(ring);
+    sat.position.set(11, 10, -28); s.add(sat);
+    const p2 = new THREE.Mesh(GEO.sphere, mat("#7cc8ff")); p2.scale.setScalar(1.1); p2.position.set(-12, 12, -26); s.add(p2);
+    for (let i = 0; i < 12; i++) { const c = new THREE.Mesh(GEO.circle, mat("#b3a8d8")); c.rotation.x = -Math.PI / 2; c.scale.setScalar(R(.4, 1.2)); const [x, z] = far(); c.position.set(x, .02, z); s.add(c); }
+    const rk = sprite("🚀", 1.2, 0, 8, -18);
+    anim(rk, (t) => { rk.position.x = ((t * 3) % 50) - 25; rk.position.y = 8 + Math.sin(t) * 1.5; });
+    const ufo = sprite("🛸", 1.1, -6, 6, -15);
+    anim(ufo, (t) => { ufo.position.x = -6 + Math.sin(t * .5) * 8; ufo.position.y = 6 + Math.sin(t * 2) * .4; });
   }
   return { s, sc };
 }
@@ -830,20 +1190,20 @@ window.addEventListener("resize", resize);
 
 // Foto 3D de um bichinho (usada nos cards, na loja e na memória)
 const THUMBS = {};
-function thumb(look, hatId, key) {
-  const k = key + "|" + (hatId || "");
+function thumb(look, outfit, key, backView) {
+  const k = key + "|" + JSON.stringify(outfit || {}) + (backView ? "|b" : "");
   if (THUMBS[k]) return THUMBS[k];
   const s = new THREE.Scene();
   s.add(new THREE.HemisphereLight(0xffffff, 0x9aa8c8, .7));
   const l = new THREE.DirectionalLight(0xffffff, .5); l.position.set(2, 4, 5); s.add(l);
-  const a = makeAnimal(look, hatId); a.rotation.y = -.35; s.add(a);
+  const a = makeAnimal(look, outfit); a.rotation.y = backView ? 2.5 : -.35; s.add(a);
   const cam = new THREE.PerspectiveCamera(30, 1, .1, 50);
-  cam.position.set(0, 1.3, 4.6); cam.lookAt(0, 1.02, 0);
+  if (backView) { cam.position.set(0, 1.6, 6.2); cam.lookAt(0, 1.3, 0); } else { cam.position.set(0, 1.3, 4.6); cam.lookAt(0, 1.02, 0); }
   thumbRenderer.render(s, cam);
   return THUMBS[k] = thumbRenderer.domElement.toDataURL();
 }
-const animalThumb = (a, hatId) => thumb(a.look, hatId, a.id);
-function avatarHTML() { return `<img class="avatar-img" src="${animalThumb(animal, equipped.hat)}" alt="${animal.name}">`; }
+const animalThumb = (a, outfit) => thumb(a.look, outfit, a.id);
+function avatarHTML() { return `<img class="avatar-img" src="${animalThumb(animal, myOutfit())}" alt="${animal.name}">`; }
 
 // ---------- Telas ----------
 function renderPick() {
@@ -906,7 +1266,7 @@ function openHub(greet) {
 // Bichinho no palco: dança, reage ao toque e tem balões para estourar
 function showcase() {
   const { s, sc } = makeWorld();
-  const a = makeAnimal(animal.look, equipped.hat);
+  const a = makeAnimal(animal.look, myOutfit());
   s.add(a);
   const sh = shadowBlob(.7); s.add(sh);
   [[-2.8, -2], [3, -3], [-4.5, -4], [4.6, -1.5]].forEach(([x, z]) => { const t = makeTree(sc); t.position.set(x, 0, z); s.add(t); });
@@ -1068,7 +1428,7 @@ function finish(g, score) {
 
 $("back").onclick = () => openHub();
 $("change").onclick = () => { stopGame(); show("s-pick"); };
-$("open-shop").onclick = () => { stopGame(); renderShop(); show("s-shop"); };
+$("open-shop").onclick = () => { stopGame(); show("s-shop"); renderShop(); };
 $("open-buy").onclick = () => { stopGame(); openGate(); show("s-gate"); };
 document.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { stopPixPoll(); openHub(); });
 
@@ -1176,29 +1536,128 @@ function openGate() {
   });
 }
 
-// ---------- Loja ----------
+// ---------- Lojinha com provador ----------
+const SHOP_TABS = [
+  { id: "hat", label: "🎩 Chapéus" }, { id: "face", label: "👓 Rostinho" }, { id: "body", label: "👕 Roupinhas" },
+  { id: "back", label: "🦋 Costas" }, { id: "scene", label: "🗺️ Mapas" }, { id: "house", label: "🏠 Casinha" },
+];
+let shopTab = "hat", shopSel = null;
+const myOutfit = (over) => {
+  const o = { hat: equipped.hat, face: equipped.face, body: equipped.body, back: equipped.back };
+  if (over) o[over.slot] = over.id;
+  return o;
+};
+const isOn = (it) => it.slot === "decor" ? (equipped.decor || []).includes(it.id) : equipped[it.slot] === it.id;
+
+// Foto 3D de um mapa
+const SCENE_THUMBS = {};
+function sceneThumb(sc) {
+  const k = sc.id || "floresta";
+  if (SCENE_THUMBS[k]) return SCENE_THUMBS[k];
+  const { s } = makeWorld(sc);
+  [[-1.6, -1.5], [1.7, -2.2], [-.2, -3.5], [2.8, -.6], [-2.8, -.4]].forEach(([x, z]) => { const t = makeTree(sc); t.position.set(x, 0, z); s.add(t); });
+  const cam = new THREE.PerspectiveCamera(45, 1, .1, 80);
+  cam.position.set(0, 2.4, 5.5); cam.lookAt(0, 1.2, -2);
+  thumbRenderer.render(s, cam);
+  return SCENE_THUMBS[k] = thumbRenderer.domElement.toDataURL();
+}
+
+function itemPreview(it) {
+  if (it.slot === "scene") return `<img src="${sceneThumb(it)}" alt="" style="border-radius:18px">`;
+  if (it.slot === "wall") return `<span class="swatch" style="background:linear-gradient(135deg, ${it.back}, ${it.side})">${it.stars ? "⭐" : ""}</span>`;
+  if (it.slot === "decor") return `<span class="big-emoji">${it.emoji}</span>`;
+  if (it.slot === "back") return `<img src="${thumb(animal.look, myOutfit(it), animal.id, true)}" alt="">`;
+  return `<img src="${animalThumb(animal, myOutfit(it))}" alt="">`;
+}
+
 function renderShop() {
   addStars(0);
-  fillShop($("shop-hats"), HATS, "hat", (it) => `<img src="${animalThumb(animal, it.id)}" alt="">`);
-  fillShop($("shop-scenes"), SCENES, "scene", (it) => it.emoji);
-}
-function fillShop(box, items, slot, preview) {
-  box.innerHTML = "";
-  items.forEach(it => {
-    const has = owned.includes(it.id), on = equipped[slot] === it.id;
+  $("shop-tabs").innerHTML = "";
+  SHOP_TABS.forEach(tab => {
     const b = document.createElement("button");
-    b.className = "card" + (on ? " equipped" : has ? " owned" : "");
-    b.innerHTML = `<div class="emoji">${preview(it)}</div><div class="name">${it.name}</div>
-      <div class="price">${on ? "Usando ✔" : has ? "Toque para usar" : `⭐ ${it.price}`}</div>`;
-    b.disabled = !has && wallet < it.price;
-    b.onclick = () => {
-      if (!has) { sfx("buy"); addStars(-it.price); owned.push(it.id); save("bichos-itens", owned); equipped[slot] = it.id; }
-      else { equipped[slot] = on ? null : it.id; sfx("equip"); }
-      save("bichos-equipado", equipped);
-      renderShop();
-    };
-    box.appendChild(b);
+    b.className = "tab" + (tab.id === shopTab ? " on" : "");
+    b.textContent = tab.label;
+    b.onclick = () => { shopTab = tab.id; shopSel = null; renderShop(); };
+    $("shop-tabs").appendChild(b);
   });
+  const items = ITEMS.filter(i => shopTab === "house" ? (i.slot === "wall" || i.slot === "decor") : i.slot === shopTab);
+  if (!shopSel || !items.includes(shopSel)) shopSel = items.find(isOn) || items[0];
+  const grid = $("shop-grid"); grid.innerHTML = "";
+  items.forEach((it, k) => {
+    const has = owned.includes(it.id), on = isOn(it);
+    const b = document.createElement("button");
+    b.className = "card shop-card popin" + (on ? " equipped" : has ? " owned" : "") + (it === shopSel ? " sel" : "");
+    b.style.setProperty("--d", (k % 8) * 40 + "ms");
+    b.innerHTML = `${on ? '<span class="tag-on">Usando</span>' : ""}<div class="emoji">${itemPreview(it)}</div>
+      <div class="name">${it.name}</div><div class="price">${has ? "✔ É seu!" : `⭐ ${it.price}`}</div>`;
+    b.onclick = () => { shopSel = it; sfx("pop"); renderShop(); };
+    grid.appendChild(b);
+  });
+  paintShopInfo();
+  shopStage();
+}
+
+function paintShopInfo() {
+  const it = shopSel, box = $("shop-info");
+  if (!it) { box.innerHTML = ""; return; }
+  const has = owned.includes(it.id), on = isOn(it), falta = it.price - wallet;
+  let btn;
+  if (!has) btn = falta > 0
+    ? `<button class="btn" disabled>Faltam ${falta} ⭐</button><span class="hint">Jogue para ganhar mais estrelinhas!</span>`
+    : `<button class="btn buy-btn" id="shop-act">Comprar por ⭐ ${it.price}</button>`;
+  else if (it.slot === "decor") btn = `<button class="btn blue" id="shop-act">${on ? "Tirar da casinha" : "Colocar na casinha"}</button>`;
+  else btn = `<button class="btn blue" id="shop-act">${on ? "Tirar" : "Usar agora"}</button>`;
+  box.innerHTML = `<div class="sel-name">${it.emoji} ${it.name}</div>${btn}`;
+  const act = $("shop-act");
+  if (act) act.onclick = () => {
+    if (!has) {
+      if (wallet < it.price) return;
+      addStars(-it.price); owned.push(it.id); save("bichos-itens", owned);
+      sfx("buy"); confetti(document.querySelector(".shop-stage"));
+      say(`Oba! Agora o ${it.name} é seu!`);
+      equip(it, true);
+    } else { equip(it, !on); sfx("equip"); }
+    renderShop();
+  };
+}
+function equip(it, on) {
+  if (it.slot === "decor") {
+    const d = new Set(equipped.decor || []);
+    on ? d.add(it.id) : d.delete(it.id);
+    equipped.decor = [...d];
+  } else equipped[it.slot] = on ? it.id : null;
+  save("bichos-equipado", equipped);
+}
+
+// Provador: mostra o bichinho com o item escolhido (antes mesmo de comprar)
+function shopStage() {
+  const it = shopSel;
+  const sc = it && it.slot === "scene" ? it : scene();
+  const { s } = makeWorld(sc);
+  [[-2.6, -2], [2.8, -2.6], [-4, -4], [4.2, -1.2]].forEach(([x, z]) => { const t = makeTree(sc); t.position.set(x, 0, z); s.add(t); });
+  const wear = it && ["hat", "face", "body", "back"].includes(it.slot) ? it : null;
+  const a = makeAnimal(animal.look, myOutfit(wear)); s.add(a);
+  const sh = shadowBlob(.7); s.add(sh);
+  let extra = null;
+  if (it && (it.slot === "decor" || it.slot === "wall")) { extra = emojiSprite(it.emoji, 1.1); extra.position.set(1.6, 1.4, 0); s.add(extra); }
+  const narrow = innerWidth < 600;
+  const cam = new THREE.PerspectiveCamera(35, 2, .1, 100);
+  cam.position.set(0, 1.6, narrow ? 6.6 : 6); cam.lookAt(0, 1.15, 0);
+  mount($("shop-view"), cam, narrow ? 1.5 : 2.2);
+  let t = 0, drag = null, rot = 0;
+  renderer.domElement.onpointerdown = (e) => { drag = e.clientX; };
+  renderer.domElement.onpointermove = (e) => { if (drag !== null) { rot += (e.clientX - drag) * .02; drag = e.clientX; } };
+  renderer.domElement.onpointerup = renderer.domElement.onpointerleave = () => { drag = null; };
+  loopFn = () => {
+    t += .016;
+    if (drag === null) rot += .008;
+    a.rotation.y = rot;
+    a.position.y = Math.abs(Math.sin(t * 2.5)) * .1;
+    a.userData.arms.forEach((m, i) => m.rotation.z = (i ? 1 : -1) * (.4 + Math.sin(t * 4) * .25));
+    if (extra) extra.position.y = 1.4 + Math.sin(t * 2) * .1;
+    renderer.render(s, cam);
+  };
+  cleanup = () => { renderer.domElement.onpointerdown = renderer.domElement.onpointermove = renderer.domElement.onpointerup = renderer.domElement.onpointerleave = null; };
 }
 
 // ---------- Comprar estrelas (PIX via server.js) ----------
@@ -1294,7 +1753,7 @@ function makeObstacle() {
 function playRunner(area, done) {
   $("g-hint").textContent = "Toque na tela (ou aperte Espaço) para pular! 🦘";
   const { s, sc } = makeWorld();
-  const a = makeAnimal(animal.look, equipped.hat);
+  const a = makeAnimal(animal.look, myOutfit());
   a.rotation.y = Math.PI / 2; a.position.x = -2; s.add(a);
   const shadow = shadowBlob(.6); shadow.position.x = -2; s.add(shadow);
   // Trilha de terra
@@ -1345,7 +1804,7 @@ function playRunner(area, done) {
 function playCatch(area, done) {
   $("g-hint").textContent = `Arraste o dedo (ou use ← →). Pegue ${animal.food} e fuja da pimenta 🌶️!`;
   const { s, sc } = makeWorld();
-  const a = makeAnimal(animal.look, equipped.hat); s.add(a);
+  const a = makeAnimal(animal.look, myOutfit()); s.add(a);
   const shadow = shadowBlob(.65); s.add(shadow);
   for (let i = 0; i < 6; i++) { const t = makeTree(sc); t.position.set(-9 + i * 3.6, 0, -6 - (i % 2) * 2); s.add(t); }
   const c1 = makeCloud(); c1.position.set(-4, 6.5, -8); s.add(c1);
@@ -1571,7 +2030,7 @@ function playBoat(area, done) {
   part("sphere", "#ffe3ee", [.74, .2, 1.1], [0, .4, 0], boat);
   part("cyl", "#ffffff", [.03, .9, .03], [0, .9, .7], boat);
   part("cone", "#ffe066", [.3, .45, .04], [.16, 1.15, .7], boat, [0, 0, -Math.PI / 2]);
-  const a = makeAnimal(animal.look, equipped.hat);
+  const a = makeAnimal(animal.look, myOutfit());
   a.scale.setScalar(.55); a.position.y = .35; a.rotation.y = Math.PI;
   boat.add(a); s.add(boat);
   const cam = new THREE.PerspectiveCamera(50, 1.6, .1, 120);
@@ -1637,7 +2096,7 @@ function playBalloons(area, done) {
   const { s, sc } = makeWorld();
   for (let i = 0; i < 7; i++) { const t = makeTree(sc); t.position.set(-9 + i * 3, 0, -5 - (i % 2) * 2); s.add(t); }
   const rb = makeRainbow(); rb.position.set(0, 0, -12); s.add(rb);
-  const a = makeAnimal(animal.look, equipped.hat); a.position.set(0, 0, 1.5); s.add(a);
+  const a = makeAnimal(animal.look, myOutfit()); a.position.set(0, 0, 1.5); s.add(a);
   const sh = shadowBlob(.6); sh.position.z = 1.5; s.add(sh);
   const cam = new THREE.PerspectiveCamera(50, 1.6, .1, 100);
   let halfW = 4;
@@ -1838,7 +2297,7 @@ function playEdu(area, done, gen) {
   // Mesinha
   part("box", "#e8b886", [4.8, .18, 1.9], [0, .86, 0], s);
   [[-2.1, -.7], [2.1, -.7], [-2.1, .7], [2.1, .7]].forEach(([x, z]) => part("cyl", "#c98f5f", [.1, .8, .1], [x, .4, z], s));
-  const a = makeAnimal(animal.look, equipped.hat);
+  const a = makeAnimal(animal.look, myOutfit());
   a.position.set(-2.9, 0, 1.1); a.rotation.y = .5; a.scale.setScalar(.85); s.add(a);
   const sh = shadowBlob(.6); sh.position.set(-2.9, .02, 1.1); s.add(sh);
   const props = new THREE.Group(); s.add(props);
@@ -2121,14 +2580,15 @@ function openHouse() {
   };
   plane(14, 12, "#f3c99b", [0, 0, 1], [-Math.PI / 2, 0, 0]);
   for (let k = -6; k <= 6; k += 1.2) part("box", "#e6b585", [.03, .01, 12], [k, .005, 1], s);
-  plane(14, 8, "#ffe3ee", [0, 4, -3]);
-  plane(12, 8, "#e3f2ff", [-5.5, 4, 1], [0, Math.PI / 2, 0]);
-  plane(12, 8, "#e3f2ff", [5.5, 4, 1], [0, -Math.PI / 2, 0]);
+  const wallItem = ITEMS.find(i => i.slot === "wall" && i.id === equipped.wall);
+  plane(14, 8, wallItem ? wallItem.back : "#ffe3ee", [0, 4, -3]);
+  plane(12, 8, wallItem ? wallItem.side : "#e3f2ff", [-5.5, 4, 1], [0, Math.PI / 2, 0]);
+  plane(12, 8, wallItem ? wallItem.side : "#e3f2ff", [5.5, 4, 1], [0, -Math.PI / 2, 0]);
   const rug = new THREE.Mesh(GEO.circle, mat("#ffc3dc")); rug.rotation.x = -Math.PI / 2; rug.scale.setScalar(1.7); rug.position.set(0, .015, .5); s.add(rug);
   // Janela
   part("box", "#ffffff", [2.3, 1.7, .1], [-2.3, 3.1, -2.95], s);
-  const glassMat = new THREE.MeshBasicMaterial({ color: "#bfe8ff" });
-  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2, 1.4), glassMat); glass.position.set(-2.3, 3.1, -2.88); s.add(glass);
+  const windowMat = new THREE.MeshBasicMaterial({ color: "#bfe8ff" });
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2, 1.4), windowMat); glass.position.set(-2.3, 3.1, -2.88); s.add(glass);
   part("box", "#ffffff", [.06, 1.4, .05], [-2.3, 3.1, -2.86], s);
   part("box", "#ffffff", [2, .06, .05], [-2.3, 3.1, -2.86], s);
   const sky = emojiSprite("☀️", .7); sky.position.set(-2.8, 3.4, -2.8); s.add(sky);
@@ -2165,6 +2625,56 @@ function openHouse() {
   part("cone", "#ffe066", [.4, .45, .4], [4.6, 1.55, .9], s);
   const clock = emojiSprite("⏰", .5); clock.position.set(.6, 3.9, -2.9); s.add(clock);
 
+  // Coisas compradas para a casinha
+  const decor = new Set(equipped.decor || []);
+  if (wallItem && wallItem.stars) for (let k = 0; k < 18; k++) {
+    const st = emojiSprite(k % 3 ? "✨" : "⭐", .3); st.position.set(-5 + Math.random() * 10, 2.2 + Math.random() * 3, -2.9); s.add(st);
+    const ph = Math.random() * 6; anim(st, (t) => st.material.opacity = .5 + Math.sin(t * 2 + ph) * .5);
+  }
+  if (decor.has("luzinhas")) for (let k = 0; k < 17; k++) {
+    const x = -4.8 + k * .6, y = 4.5 - Math.sin((k / 16) * Math.PI) * .5;
+    const l = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: ["#ff6f91", "#ffd23a", "#7cc8ff", "#8ee08a"][k % 4] }));
+    l.scale.setScalar(.11); l.position.set(x, y - .2, -2.85); s.add(l);
+    anim(l, (t) => l.scale.setScalar(Math.sin(t * 3 + k) > -.4 ? .11 : .05));
+  }
+  if (decor.has("tapete")) ["#ff8fa3", "#ffb26b", "#ffe066", "#8ee08a", "#7cc8ff", "#b79cff"].forEach((c, k) => {
+    const m = new THREE.Mesh(GEO.circle, mat(c)); m.rotation.x = -Math.PI / 2; m.scale.setScalar(1.9 - k * .28); m.position.set(0, .017 + k * .001, .5); s.add(m);
+  });
+  if (decor.has("pufe")) { part("sphere", "#ff9ad5", [.5, .32, .5], [2.5, .3, 1.9], s); part("sphere", "#ffffff", [.06, .04, .06], [2.5, .62, 1.9], s); }
+  if (decor.has("baloes")) ["#ff8fb8", "#8fd3ff", "#ffd54a"].forEach((c, k) => {
+    const b = makeBalloon(c); b.scale.setScalar(.6); b.position.set(2.2 + k * .35, 2.4 + k * .3, -1.6 + k * .1); s.add(b);
+    anim(b, (t) => b.rotation.z = Math.sin(t * 1.3 + k) * .1);
+  });
+  if (decor.has("aquario")) {
+    part("box", "#c98f5f", [1.3, .9, .6], [-1.9, .45, -2.5], s);
+    const tank = new THREE.Mesh(GEO.box, glassMat("#7cc8ff", .45)); tank.scale.set(1.2, .7, .5); tank.position.set(-1.9, 1.26, -2.5); s.add(tank);
+    part("box", "#f2d9a0", [1.18, .08, .48], [-1.9, .95, -2.5], s);
+    ["🐠", "🐟"].forEach((e, k) => { const f = emojiSprite(e, .3); f.position.set(-1.9, 1.25 + k * .15, -2.35); s.add(f); anim(f, (t) => f.position.x = -1.9 + Math.sin(t * (1 + k * .4) + k) * .4); });
+  }
+  if (decor.has("piano")) {
+    const p = new THREE.Group();
+    part("box", "#3a3442", [1.6, 1.0, .55], [0, .55, 0], p);
+    part("box", "#ffffff", [1.5, .06, .3], [0, .9, .3], p);
+    for (let k = 0; k < 7; k++) part("box", BLACK, [.08, .05, .16], [-.6 + k * .2, .94, .25], p);
+    const n = emojiSprite("🎵", .35); n.position.set(.4, 1.5, 0); p.add(n); anim(n, (t) => { n.position.y = 1.4 + (t % 2) * .3; n.material.opacity = 1 - (t % 2) / 2; });
+    p.position.set(.6, 0, -2.55); s.add(p);
+  }
+  if (decor.has("cabana")) {
+    const c = new THREE.Group();
+    const tent = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 4, 1, true), new THREE.MeshToonMaterial({ color: "#ffd54a", side: THREE.DoubleSide }));
+    tent.scale.set(.9, 1.6, .9); tent.position.y = .8; tent.rotation.y = Math.PI / 4; c.add(tent);
+    part("cone", "#ff8fb8", [.92, .3, .92], [0, .15, 0], c);
+    const f = emojiSprite("🚩", .35); f.position.set(0, 1.75, 0); c.add(f);
+    c.position.set(-3, 0, -1.4); s.add(c);
+  }
+  if (decor.has("escorregador")) {
+    const e = new THREE.Group();
+    part("box", "#7cc8ff", [.7, .08, .6], [.6, 1.1, 0], e);
+    [[.3, -.25], [.9, -.25], [.3, .25], [.9, .25]].forEach(([x, z]) => part("cyl", "#ff6f91", [.04, 1.1, .04], [x, .55, z], e));
+    part("box", "#ffd54a", [1.6, .06, .55], [-.45, .58, 0], e, [0, 0, .62]);
+    e.position.set(-2.4, 0, 1.6); e.rotation.y = Math.PI + .3; s.add(e);
+  }
+
   // Banheira (aparece só no banho)
   const tub = new THREE.Group();
   part("cyl", "#ffffff", [1.05, .7, 1.05], [0, .35, 0], tub);
@@ -2173,7 +2683,7 @@ function openHouse() {
   water.rotation.x = -Math.PI / 2; water.position.y = .68; water.scale.setScalar(1); tub.add(water);
   tub.position.set(0, 0, .5); tub.visible = false; s.add(tub);
 
-  const a = makeAnimal(animal.look, equipped.hat);
+  const a = makeAnimal(animal.look, myOutfit());
   a.position.set(0, 0, .5); s.add(a);
   const sh = shadowBlob(.7); sh.position.set(0, .02, .5); s.add(sh);
   const pupilY = a.userData.pupils.map(p => p.scale.y);
@@ -2236,7 +2746,7 @@ function openHouse() {
     sleeping = on;
     hemi.intensity = on ? .3 : .75; sun.intensity = on ? .12 : .5;
     s.background.set(on ? "#3a3560" : "#ffe9f2");
-    glassMat.color.set(on ? "#1c2a4a" : "#bfe8ff");
+    windowMat.color.set(on ? "#1c2a4a" : "#bfe8ff");
     sky.material.map = emojiSprite(on ? "🌙" : "☀️", .7).material.map;
     a.userData.pupils.forEach((p, k) => p.scale.y = on ? pupilY[k] * .15 : pupilY[k]);
     a.userData.shines.forEach(p => p.visible = !on);
