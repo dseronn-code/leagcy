@@ -409,11 +409,14 @@ function makeAnimal(L, hatId) {
     });
   } else {
     const big = L.eyes === "big";
+    // Os olhos ficam na frente da máscara do rosto ou da mancha, para nunca sumirem
+    const z = big ? .44 : L.face ? .5 : L.patches ? .46 : .42;
     [-1, 1].forEach(s => {
       if (big) part("sphere", WHITE, [.17, .17, .06], [s * .19, .06, .4], head);
-      const r = big ? .1 : .075;
-      part("sphere", BLACK, [r, r * 1.1, r * .6], [s * .18, .06, big ? .44 : .42], head);
-      part("sphere", WHITE, [.028, .028, .02], [s * .18 + .03, .1, big ? .5 : .47], head);
+      if (L.patches) part("sphere", WHITE, [.075, .085, .04], [s * .18, .06, z], head);
+      const r = big ? .1 : L.patches ? .05 : .075;
+      part("sphere", BLACK, [r, r * 1.1, r * .6], [s * .18, .06, z + (L.patches ? .03 : 0)], head);
+      part("sphere", WHITE, [.028, .028, .02], [s * .18 + .03, .1, z + .05], head);
     });
   }
   [-1, 1].forEach(s => part("sphere", PINK, [.08, .05, .03], [s * .3, -.13, .38], head));
