@@ -110,26 +110,32 @@
   .overlay[hidden] { display: none; }
   .overlay .big { font-size: 3rem; }
   .mem { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px; }
-  .mem button {
-    aspect-ratio: 1; font-size: clamp(1.6rem, 7vw, 2.6rem); border-radius: 18px; border: 3px solid var(--line);
+  .mem .c { aspect-ratio: 1; perspective: 600px; border: 0; padding: 0; background: none; cursor: pointer; }
+  .mem .flip { position: relative; width: 100%; height: 100%; transition: transform .45s; transform-style: preserve-3d; }
+  .mem .c.open .flip, .mem .c.done .flip { transform: rotateY(180deg); }
+  .mem .face {
+    position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+    border-radius: 18px; border: 3px solid var(--line); display: flex; align-items: center; justify-content: center;
+    font: 700 clamp(1.4rem, 6vw, 2.2rem) "Fredoka", sans-serif; color: var(--accent-ink);
+  }
+  .mem .back {
     background: repeating-linear-gradient(45deg, var(--accent), var(--accent) 10px, color-mix(in srgb, var(--accent) 80%, #fff) 10px, color-mix(in srgb, var(--accent) 80%, #fff) 20px);
-    color: var(--accent-ink); cursor: pointer; font-family: inherit; transition: transform .2s;
   }
-  .mem button.open { animation: pop .25s ease-out; }
-  .mem button.open, .mem button.done { background: var(--bg); color: var(--ink); }
-  .mem button.done { border-color: var(--good); opacity: .7; }
-  .holes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
-  .holes { background: var(--ground); }
-  .holes button {
-    aspect-ratio: 1; border-radius: 50%; border: 0; background: radial-gradient(circle at 50% 60%, #7a5235 0 55%, #96673f 56% 100%);
-    font-size: clamp(2rem, 9vw, 3.2rem); cursor: pointer; font-family: inherit;
-  }
-  .holes button:not(:empty) { animation: pop .2s ease-out; }
+  .mem .front { background: var(--bg); transform: rotateY(180deg); }
+  .mem .front img { width: 92%; height: 92%; object-fit: contain; }
+  .mem .c.done .front { border-color: var(--good); }
+  .view3d { width: 100%; }
+  .view3d canvas { border-radius: 22px; }
   .result-stars { font-size: 2rem; letter-spacing: 4px; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-  .avatar { position: relative; display: inline-block; line-height: 1; }
-  .avatar .hat { position: absolute; left: 50%; transform: translateX(-50%); top: -0.45em; font-size: .6em; }
-  .hero .avatar { font-size: 2.2rem; margin-top: 10px; }
+  .avatar-img { border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--accent2) 35%, var(--card)) 0 60%, transparent 61%);
+    width: 110px; height: 110px; object-fit: contain; display: block; margin: 0 auto; }
+  .card .emoji img { width: 104px; height: 104px; object-fit: contain; display: block; margin: 0 auto; border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--accent2) 35%, var(--card)) 0 60%, transparent 61%); }
+  .hub-top { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .hub-top .view3d { max-width: 420px; background: var(--card); border: 4px solid var(--line); border-radius: 26px; box-shadow: var(--shadow); overflow: hidden; }
+  .hub-top .bubble::before { left: 50%; top: -10px; transform: translateX(-50%); border: 8px solid transparent; border-bottom-color: var(--line); border-top: 0; }
+  .loading { text-align: center; padding: 30px; font-size: 1.2rem; color: var(--muted); }
   .card.owned { border-color: var(--good); }
   .card.equipped { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
   .card .price { margin-top: 6px; font-weight: 700; }
@@ -140,6 +146,7 @@
   .pix textarea { width: 100%; height: 70px; font: .8rem monospace; border-radius: 8px; border: 2px solid var(--line); background: var(--bg); color: var(--ink); padding: 6px; }
   h3 { margin: 18px 0 10px; }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 <div class="floaties" id="floaties" aria-hidden="true"></div>
@@ -152,22 +159,23 @@
   <section id="s-pick" class="screen active">
     <h1>🐾 Aventura dos Bichos 🌈</h1>
     <p class="sub">Quem vai ser seu amiguinho hoje? 💖<br>Cada bichinho tem um superpoder!</p>
-    <div class="grid" id="animals"></div>
+    <div class="grid" id="animals"><div class="loading">Preparando os bichinhos… 🐣</div></div>
   </section>
 
   <!-- Menu de mini jogos -->
   <section id="s-hub" class="screen">
-    <div class="bar">
-      <div class="hero"><span id="hub-emoji"></span><span class="bubble" id="hub-name"></span></div>
-      <span class="pill" title="Estrelas para gastar">⭐ <span class="wallet">0</span></span>
+    <div class="hub-top">
+      <div class="view3d" id="hub-view"></div>
+      <span class="bubble" id="hub-name"></span>
     </div>
     <div class="bar">
+      <span class="pill" title="Estrelas para gastar">⭐ <span class="wallet">0</span></span>
       <span class="pill" title="Melhores resultados">🏆 <span id="hub-stars">0</span> / 12</span>
-      <div class="actions">
-        <button class="btn" id="open-shop">🛍️ Lojinha</button>
-        <button class="btn blue" id="open-buy">💎 Mais estrelas</button>
-        <button class="btn ghost" id="change">🔄 Trocar bichinho</button>
-      </div>
+    </div>
+    <div class="actions" style="margin-bottom:16px">
+      <button class="btn" id="open-shop">🛍️ Lojinha</button>
+      <button class="btn blue" id="open-buy">💎 Mais estrelas</button>
+      <button class="btn ghost" id="change">🔄 Trocar bichinho</button>
     </div>
     <h2>🎈 Vamos brincar de quê?</h2>
     <div class="grid" id="games"></div>
@@ -224,7 +232,7 @@
       <h2 id="g-title" style="margin:0"></h2>
       <span></span>
     </div>
-    <div class="hud"><span id="g-score">Pontos: 0</span><span id="g-extra"></span></div>
+    <div class="hud"><span id="g-score">🍬 Pontos: 0</span><span id="g-extra"></span></div>
     <div class="stage">
       <div id="g-area"></div>
       <div class="overlay" id="g-over" hidden></div>
@@ -235,21 +243,46 @@
 </div>
 
 <script>
-// ---------- Dados ----------
+if (!window.THREE) {
+  document.getElementById("animals").innerHTML = '<div class="loading">Ops! Não consegui carregar o 3D. Verifique a internet e recarregue a página. 🔄</div>';
+  throw new Error("Three.js não carregou");
+}
+// ---------- Bichinhos ----------
+// Cada bichinho é montado em 3D com formas simples (veja makeAnimal).
 const ANIMALS = [
-  { id: "coelho",  emoji: "🐰", name: "Coelho",  food: "🥕", talent: "Pula bem alto! 🦘",        jump: 1.25, speed: 1,    memo: 1,   reflex: 1 },
-  { id: "macaco",  emoji: "🐵", name: "Macaco",  food: "🍌", talent: "Corre rapidinho! 💨",      jump: 1,    speed: 1.35, memo: 1,   reflex: 1 },
-  { id: "coruja",  emoji: "🦉", name: "Coruja",  food: "🐛", talent: "Lembra de tudo! 🧠",       jump: 1,    speed: 1,    memo: 1.4, reflex: 1 },
-  { id: "gato",    emoji: "🐱", name: "Gato",    food: "🐟", talent: "Super ligeirinho! ⚡",     jump: 1,    speed: 1,    memo: 1,   reflex: 1.35 },
-  { id: "urso",    emoji: "🐻", name: "Urso",    food: "🍯", talent: "Come em dobro! 😋",       jump: 1,    speed: 1,    memo: 1,   reflex: 1, doubleFood: true },
-  { id: "sapo",    emoji: "🐸", name: "Sapo",    food: "🪰", talent: "Um pouquinho de tudo! 🌟", jump: 1.12, speed: 1.1, memo: 1.1, reflex: 1.12 },
+  { id: "coelho",  emoji: "🐰", name: "Coelho",    food: "🥕", talent: "Pula bem alto! 🦘",        jump: 1.25,
+    look: { body: "#f4eef6", belly: "#ffffff", ears: "long", inner: "#ffb3c7", nose: "#ff8fb0", tail: "puff" } },
+  { id: "macaco",  emoji: "🐵", name: "Macaco",    food: "🍌", talent: "Corre rapidinho! 💨",      speed: 1.35,
+    look: { body: "#a8714a", belly: "#f3d2b0", face: "#f3d2b0", ears: "side", inner: "#f3d2b0", tail: "long" } },
+  { id: "coruja",  emoji: "🦉", name: "Coruja",    food: "🐛", talent: "Lembra de tudo! 🧠",       memo: 1.4,
+    look: { body: "#b98a5e", belly: "#f1dfc0", ears: "tuft", eyes: "big", beak: "#ffa53a", arms: "wing" } },
+  { id: "gato",    emoji: "🐱", name: "Gato",      food: "🐟", talent: "Super ligeirinho! ⚡",     reflex: 1.35,
+    look: { body: "#f7b267", belly: "#fff3e3", ears: "pointy", inner: "#ffc9d6", nose: "#ff8fb0", tail: "long" } },
+  { id: "urso",    emoji: "🐻", name: "Urso",      food: "🍯", talent: "Come em dobro! 😋",        doubleFood: true,
+    look: { body: "#9c6b4e", belly: "#e0bc95", ears: "round", inner: "#e0bc95", snout: "#e0bc95", tail: "puff" } },
+  { id: "sapo",    emoji: "🐸", name: "Sapo",      food: "🪰", talent: "Um pouquinho de tudo! 🌟", jump: 1.12, speed: 1.1, memo: 1.1, reflex: 1.12,
+    look: { body: "#7ed37a", belly: "#d9f5c4", ears: "none", eyes: "top" } },
+  { id: "panda",   emoji: "🐼", name: "Panda",     food: "🎋", talent: "Bem calminho! 🍃",         memo: 1.3, reflex: 1.1,
+    look: { body: "#ffffff", belly: "#ffffff", ears: "round", earColor: "#2f2b33", inner: "#2f2b33", patches: "#2f2b33", armColor: "#2f2b33", feetColor: "#2f2b33", snout: "#ffffff", tail: "puff" } },
+  { id: "pinguim", emoji: "🐧", name: "Pinguim",   food: "🦐", talent: "Escorrega veloz! 🧊",      speed: 1.25, reflex: 1.1,
+    look: { body: "#3b4a6b", belly: "#ffffff", face: "#ffffff", ears: "none", beak: "#ffa53a", arms: "flipper", feetColor: "#ffa53a" } },
+  { id: "unicornio", emoji: "🦄", name: "Unicórnio", food: "🧁", talent: "Pulo mágico! ✨",        jump: 1.2, memo: 1.1,
+    look: { body: "#fdf7ff", belly: "#ffffff", ears: "pointy", inner: "#ffc9e8", horn: "#ffd54a", mane: ["#ff9ad5", "#b79cff", "#8fd3ff"], snout: "#ffe3f1", tail: "bushy", tailColor: "#ff9ad5" } },
+  { id: "porquinho", emoji: "🐷", name: "Porquinho", food: "🍎", talent: "Come em dobro! 🐽",     doubleFood: true,
+    look: { body: "#ffb6c8", belly: "#ffd3de", ears: "small", inner: "#ff9fb8", snout: "#ff9fb8", nose: "#e57a98", tail: "curl" } },
+  { id: "raposa",  emoji: "🦊", name: "Raposa",    food: "🍇", talent: "Esperta e ligeira! 🍂",    speed: 1.15, reflex: 1.2,
+    look: { body: "#ff8c42", belly: "#fff3e3", face: "#fff3e3", ears: "pointy", inner: "#3a2a2a", nose: "#3a2a2a", tail: "bushy", tailTip: "#ffffff", feetColor: "#4a3530" } },
+  { id: "pintinho", emoji: "🐥", name: "Pintinho", food: "🌽", talent: "Pequenino e ágil! 🐣",     jump: 1.15, reflex: 1.15,
+    look: { body: "#ffe066", belly: "#fff1a8", ears: "none", beak: "#ffa53a", crest: "#ffd23a", arms: "wing", feetColor: "#ffa53a" } },
 ];
+ANIMALS.forEach(a => { a.jump ||= 1; a.speed ||= 1; a.memo ||= 1; a.reflex ||= 1; });
+const SKUNK = { body: "#3a3442", belly: "#ffffff", face: "#ffffff", ears: "round", inner: "#ffffff", mane: ["#ffffff"], tail: "bushy", tailTip: "#ffffff" };
 
 const GAMES = [
   { id: "corrida", emoji: "🏃", name: "Corrida da Floresta", desc: "Pule por cima das coisas!", stars: [10, 25, 45], play: playRunner },
   { id: "comida",  emoji: "🧺", name: "Chuva de Comida",     desc: "Pegue o lanchinho gostoso", stars: [15, 35, 60], play: playCatch },
   { id: "memoria", emoji: "🃏", name: "Memória dos Bichos",  desc: "Ache os pares iguais",      stars: [20, 50, 80], play: playMemory },
-  { id: "toca",    emoji: "🕳️", name: "Toca Maluca",         desc: "Dê oi pros bichinhos!", stars: [10, 20, 32], play: playWhack },
+  { id: "toca",    emoji: "🕳️", name: "Toca Maluca",         desc: "Dê oi pros bichinhos!",     stars: [10, 20, 32], play: playWhack },
 ];
 
 const HATS = [
@@ -260,10 +293,11 @@ const HATS = [
   { id: "formatura",emoji: "🎓", name: "Formatura", price: 14 },
   { id: "coroa",    emoji: "👑", name: "Coroa",     price: 25 },
 ];
+const DEFAULT_SCENE = { sky: "#bfe8ff", ground: "#9be08f", tree: "#5cc96b", kind: "tree" };
 const SCENES = [
-  { id: "praia", emoji: "🏖️", name: "Praia",  price: 8,  sky: "#8fd8ff", ground: "#f2d48a", deco: "🌴" },
-  { id: "noite", emoji: "🌙", name: "Noite",  price: 12, sky: "#1c2a4a", ground: "#2f5d3a", deco: "✨" },
-  { id: "neve",  emoji: "❄️", name: "Neve",   price: 15, sky: "#dfe9f3", ground: "#ffffff", deco: "❄️" },
+  { id: "praia", emoji: "🏖️", name: "Praia",  price: 8,  sky: "#8fd8ff", ground: "#f2d48a", tree: "#3fbf6a", kind: "palm" },
+  { id: "noite", emoji: "🌙", name: "Noite",  price: 12, sky: "#1c2a4a", ground: "#2f5d3a", tree: "#2e8a4f", kind: "tree", night: true },
+  { id: "neve",  emoji: "❄️", name: "Neve",   price: 15, sky: "#dfe9f3", ground: "#ffffff", tree: "#e8f4ff", kind: "tree" },
 ];
 // Os preços em reais ficam no servidor (server.js); aqui é só para mostrar.
 const PACKS = [
@@ -290,12 +324,257 @@ function addStars(n) {
   wallet += n; save("bichos-carteira", wallet);
   document.querySelectorAll(".wallet").forEach(el => el.textContent = wallet);
 }
-const hat = () => HATS.find(h => h.id === equipped.hat);
-const scene = () => SCENES.find(s => s.id === equipped.scene);
-function avatarHTML() {
-  const h = hat();
-  return `<span class="avatar">${h ? `<span class="hat">${h.emoji}</span>` : ""}${animal.emoji}</span>`;
+const scene = () => SCENES.find(s => s.id === equipped.scene) || DEFAULT_SCENE;
+
+// ---------- 3D: peças básicas ----------
+const GEO = {
+  sphere: new THREE.SphereGeometry(1, 22, 16),
+  cone: new THREE.ConeGeometry(1, 1, 18),
+  cyl: new THREE.CylinderGeometry(1, 1, 1, 22),
+  box: new THREE.BoxGeometry(1, 1, 1),
+  torus: new THREE.TorusGeometry(1, 0.35, 10, 24),
+  circle: new THREE.CircleGeometry(1, 28),
+};
+const MATS = {};
+function mat(color) { return MATS[color] ||= new THREE.MeshToonMaterial({ color }); }
+function part(geo, color, s, p, parent, r) {
+  const m = new THREE.Mesh(GEO[geo], mat(color));
+  m.scale.set(s[0], s[1], s[2]); m.position.set(p[0], p[1], p[2]);
+  if (r) m.rotation.set(r[0], r[1], r[2]);
+  parent.add(m);
+  return m;
 }
+const BLACK = "#2a2230", WHITE = "#ffffff", PINK = "#ff9fb8";
+
+function makeAnimal(L, hatId) {
+  const g = new THREE.Group();
+  const body = L.body;
+  part("sphere", body, [.62, .58, .55], [0, .62, 0], g);
+  part("sphere", L.belly, [.45, .42, .22], [0, .58, .4], g);
+  const feet = [-1, 1].map(s => part("sphere", L.feetColor || body, [.2, .12, .26], [s * .28, .1, .14], g));
+  const arms = [-1, 1].map(s => L.arms === "flipper" || L.arms === "wing"
+    ? part("sphere", L.armColor || body, [.1, .32, .22], [s * .6, .62, 0], g, [0, 0, s * .35])
+    : part("sphere", L.armColor || body, [.15, .24, .15], [s * .55, .68, .12], g, [0, 0, s * .4]));
+
+  const head = new THREE.Group();
+  head.position.y = 1.36;
+  g.add(head);
+  part("sphere", body, [.52, .48, .48], [0, 0, 0], head);
+  if (L.face) part("sphere", L.face, [.38, .32, .2], [0, -.05, .34], head);
+  if (L.patches) [-1, 1].forEach(s => part("sphere", L.patches, [.14, .17, .08], [s * .18, .03, .39], head, [0, 0, s * -.4]));
+
+  // Olhos com brilho
+  if (L.eyes === "top") {
+    [-1, 1].forEach(s => {
+      part("sphere", body, [.17, .17, .17], [s * .22, .38, .18], head);
+      part("sphere", WHITE, [.12, .12, .08], [s * .22, .4, .3], head);
+      part("sphere", BLACK, [.07, .07, .05], [s * .22, .4, .36], head);
+      part("sphere", WHITE, [.025, .025, .02], [s * .22 + .03, .44, .4], head);
+    });
+  } else {
+    const big = L.eyes === "big";
+    [-1, 1].forEach(s => {
+      if (big) part("sphere", WHITE, [.17, .17, .06], [s * .19, .06, .4], head);
+      const r = big ? .1 : .075;
+      part("sphere", BLACK, [r, r * 1.1, r * .6], [s * .18, .06, big ? .44 : .42], head);
+      part("sphere", WHITE, [.028, .028, .02], [s * .18 + .03, .1, big ? .5 : .47], head);
+    });
+  }
+  [-1, 1].forEach(s => part("sphere", PINK, [.08, .05, .03], [s * .3, -.13, .38], head));
+
+  if (L.snout) {
+    part("sphere", L.snout, [.2, .15, .14], [0, -.13, .42], head);
+    part("sphere", L.nose || BLACK, [.06, .045, .04], [0, -.08, .55], head);
+  } else if (!L.beak) {
+    part("sphere", L.nose || BLACK, [.045, .035, .03], [0, -.06, .47], head);
+  }
+  if (L.beak) part("cone", L.beak, [.1, .2, .1], [0, -.08, .52], head, [Math.PI / 2, 0, 0]);
+
+  // Orelhas
+  const ec = L.earColor || body, inner = L.inner || PINK;
+  [-1, 1].forEach(s => {
+    if (L.ears === "long") {
+      part("sphere", ec, [.12, .42, .07], [s * .17, .66, -.02], head, [0, 0, s * -.15]);
+      part("sphere", inner, [.07, .3, .04], [s * .17, .66, .03], head, [0, 0, s * -.15]);
+    } else if (L.ears === "round") {
+      part("sphere", ec, [.17, .17, .08], [s * .34, .36, 0], head);
+      part("sphere", inner, [.1, .1, .04], [s * .34, .36, .05], head);
+    } else if (L.ears === "side") {
+      part("sphere", ec, [.08, .16, .16], [s * .52, .02, 0], head);
+      part("sphere", inner, [.04, .1, .1], [s * .56, .02, 0], head);
+    } else if (L.ears === "pointy") {
+      part("cone", ec, [.16, .32, .12], [s * .28, .46, 0], head, [0, 0, s * -.35]);
+      part("cone", inner, [.09, .2, .06], [s * .28, .44, .05], head, [0, 0, s * -.35]);
+    } else if (L.ears === "tuft") {
+      part("cone", ec, [.1, .22, .08], [s * .3, .42, 0], head, [0, 0, s * -.5]);
+    } else if (L.ears === "small") {
+      part("cone", ec, [.13, .2, .1], [s * .3, .4, .05], head, [.3, 0, s * -.5]);
+    }
+  });
+  if (L.horn) part("cone", L.horn, [.08, .42, .08], [0, .58, .2], head, [.35, 0, 0]);
+  if (L.mane) L.mane.concat(L.mane).slice(0, 4).forEach((c, i) =>
+    part("sphere", c, [.15, .15, .15], [0, .38 - i * .2, -.25 - i * .07], head));
+  if (L.crest) [-.08, 0, .08].forEach((x, i) => part("sphere", L.crest, [.07, .12, .07], [x, .5, 0], head, [0, 0, x * 4]));
+
+  // Rabinho
+  if (L.tail === "puff") part("sphere", L.tailColor || WHITE, [.17, .17, .17], [0, .45, -.55], g);
+  if (L.tail === "long") {
+    part("cyl", body, [.06, .7, .06], [0, .7, -.7], g, [-.7, 0, 0]);
+    part("sphere", body, [.09, .09, .09], [0, .95, -.95], g);
+  }
+  if (L.tail === "bushy") {
+    part("sphere", L.tailColor || body, [.22, .45, .22], [0, .75, -.62], g, [-.6, 0, 0]);
+    if (L.tailTip) part("sphere", L.tailTip, [.15, .17, .15], [0, 1.08, -.85], g);
+  }
+  if (L.tail === "curl") part("torus", L.body, [.09, .09, .09], [0, .6, -.58], g);
+
+  if (hatId) addHat(head, hatId);
+  g.userData = { head, feet, arms };
+  return g;
+}
+
+function addHat(head, id) {
+  const h = new THREE.Group();
+  h.position.y = .4;
+  if (id === "cartola") {
+    part("cyl", "#3a3442", [.42, .04, .42], [0, .05, 0], h);
+    part("cyl", "#3a3442", [.27, .38, .27], [0, .25, 0], h);
+    part("cyl", "#ff6b8b", [.28, .07, .28], [0, .1, 0], h);
+  } else if (id === "coroa") {
+    part("cyl", "#ffd54a", [.3, .18, .3], [0, .1, 0], h);
+    for (let i = 0; i < 5; i++) {
+      const a = i / 5 * Math.PI * 2;
+      part("cone", "#ffd54a", [.07, .16, .07], [Math.sin(a) * .26, .27, Math.cos(a) * .26], h);
+    }
+    part("sphere", "#ff5c8a", [.06, .06, .06], [0, .12, .3], h);
+  } else if (id === "bone") {
+    part("sphere", "#5aa9ff", [.4, .26, .4], [0, 0, 0], h);
+    part("cyl", "#3d8fe8", [.3, .03, .3], [0, .02, .32], h);
+    part("sphere", "#ffffff", [.05, .05, .05], [0, .26, 0], h);
+  } else if (id === "laco") {
+    [-1, 1].forEach(s => part("cone", "#ff6fa8", [.13, .22, .1], [s * .13, .05, .15], h, [0, 0, s * Math.PI / 2]));
+    part("sphere", "#ff4f93", [.07, .07, .07], [0, .05, .15], h);
+  } else if (id === "flor") {
+    const f = new THREE.Group();
+    f.position.set(.26, .02, .12); f.rotation.z = -.5;
+    for (let i = 0; i < 5; i++) {
+      const a = i / 5 * Math.PI * 2;
+      part("sphere", "#ffb3d1", [.09, .09, .04], [Math.sin(a) * .1, Math.cos(a) * .1, 0], f);
+    }
+    part("sphere", "#ffe066", [.06, .06, .05], [0, 0, .02], f);
+    h.add(f);
+  } else if (id === "formatura") {
+    part("cyl", "#3a3442", [.3, .14, .3], [0, .05, 0], h);
+    part("box", "#3a3442", [.75, .04, .75], [0, .14, 0], h, [0, Math.PI / 4, 0]);
+    part("sphere", "#ffd54a", [.06, .06, .06], [.3, .02, .3], h);
+  }
+  head.add(h);
+}
+
+// Emojis viram figurinhas no mundo 3D (comidas, pimenta…)
+const TEX = {};
+function emojiSprite(e, size) {
+  if (!TEX[e]) {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const x = c.getContext("2d");
+    x.font = '100px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    x.textAlign = "center"; x.textBaseline = "middle";
+    x.fillText(e, 64, 72);
+    TEX[e] = new THREE.CanvasTexture(c);
+  }
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: TEX[e], transparent: true }));
+  s.scale.set(size, size, size);
+  return s;
+}
+
+function shadowBlob(r) {
+  const m = new THREE.Mesh(GEO.circle, new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: .16 }));
+  m.rotation.x = -Math.PI / 2; m.scale.set(r, r, r); m.position.y = .02;
+  return m;
+}
+
+function makeTree(sc) {
+  const t = new THREE.Group();
+  if (sc.kind === "palm") {
+    part("cyl", "#b07a4f", [.12, 1.8, .12], [0, .9, 0], t, [0, 0, .12]);
+    for (let i = 0; i < 5; i++) {
+      const a = i / 5 * Math.PI * 2;
+      part("sphere", sc.tree, [.7, .08, .25], [Math.sin(a) * .45 + .1, 1.8, Math.cos(a) * .45], t, [0, -a + Math.PI / 2, -.3]);
+    }
+  } else {
+    part("cyl", "#9a6a48", [.12, .6, .12], [0, .3, 0], t);
+    part("cone", sc.tree, [.6, 1.1, .6], [0, 1.1, 0], t);
+    part("cone", sc.tree, [.45, .8, .45], [0, 1.6, 0], t);
+  }
+  return t;
+}
+function makeCloud() {
+  const c = new THREE.Group();
+  [[0, 0, .6], [.6, -.1, .45], [-.6, -.1, .45], [.25, .3, .4]].forEach(([x, y, r]) => part("sphere", WHITE, [r, r * .8, r], [x, y, 0], c));
+  return c;
+}
+
+// Monta céu, chão, luzes e enfeites do cenário escolhido
+function makeWorld() {
+  const sc = scene();
+  const s = new THREE.Scene();
+  s.background = new THREE.Color(sc.sky);
+  s.fog = new THREE.Fog(sc.sky, 18, 45);
+  s.add(new THREE.HemisphereLight(0xffffff, 0x9aa8c8, sc.night ? .5 : .7));
+  const sun = new THREE.DirectionalLight(0xffffff, sc.night ? .3 : .5);
+  sun.position.set(3, 8, 5); s.add(sun);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), mat(sc.ground));
+  ground.rotation.x = -Math.PI / 2; s.add(ground);
+  if (sc.night) {
+    const pts = [];
+    for (let i = 0; i < 260; i++) pts.push((Math.random() - .5) * 80, 4 + Math.random() * 20, -15 - Math.random() * 15);
+    const geo = new THREE.BufferGeometry(); geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    s.add(new THREE.Points(geo, new THREE.PointsMaterial({ color: 0xfff6c8, size: .25 })));
+    const moon = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xfff1a8 }));
+    moon.position.set(8, 9, -20); moon.scale.setScalar(1.6); s.add(moon);
+  }
+  return { s, sc };
+}
+
+// ---------- 3D: renderizador ----------
+let renderer = null, thumbRenderer = null, loopFn = null, mounted = null;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  thumbRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  thumbRenderer.setSize(200, 200, false);
+} catch (e) { renderer = null; }
+
+function mount(container, camera, aspect) {
+  mounted = { container, camera, aspect };
+  container.appendChild(renderer.domElement);
+  resize();
+}
+function resize() {
+  if (!mounted) return;
+  const w = mounted.container.clientWidth || 320;
+  renderer.setSize(w, Math.round(w / mounted.aspect));
+  mounted.camera.aspect = mounted.aspect; mounted.camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+(function frame() { requestAnimationFrame(frame); if (loopFn) loopFn(); })();
+
+// Foto 3D de um bichinho (usada nos cards, na loja e na memória)
+const THUMBS = {};
+function thumb(look, hatId, key) {
+  const k = key + "|" + (hatId || "");
+  if (THUMBS[k]) return THUMBS[k];
+  const s = new THREE.Scene();
+  s.add(new THREE.HemisphereLight(0xffffff, 0x9aa8c8, .7));
+  const l = new THREE.DirectionalLight(0xffffff, .5); l.position.set(2, 4, 5); s.add(l);
+  const a = makeAnimal(look, hatId); a.rotation.y = -.35; s.add(a);
+  const cam = new THREE.PerspectiveCamera(30, 1, .1, 50);
+  cam.position.set(0, 1.3, 4.6); cam.lookAt(0, 1.02, 0);
+  thumbRenderer.render(s, cam);
+  return THUMBS[k] = thumbRenderer.domElement.toDataURL();
+}
+const animalThumb = (a, hatId) => thumb(a.look, hatId, a.id);
+function avatarHTML() { return `<img class="avatar-img" src="${animalThumb(animal, equipped.hat)}" alt="${animal.name}">`; }
 
 // ---------- Telas ----------
 function renderPick() {
@@ -303,7 +582,7 @@ function renderPick() {
   ANIMALS.forEach(a => {
     const b = document.createElement("button");
     b.className = "card";
-    b.innerHTML = `<div class="emoji">${a.emoji}</div><div class="name">${a.name}</div><div class="desc">${a.talent}</div>`;
+    b.innerHTML = `<div class="emoji"><img src="${animalThumb(a)}" alt=""></div><div class="name">${a.name}</div><div class="desc">${a.talent}</div>`;
     b.onclick = () => { animal = a; save("bichos-animal", a.id); openHub(); };
     $("animals").appendChild(b);
   });
@@ -312,10 +591,10 @@ function renderPick() {
 function starsFor(game, score) { return game.stars.filter(t => score >= t).length; }
 
 function openHub() {
+  stopGame();
   best = load("bichos-best-" + animal.id, {});
-  $("hub-emoji").innerHTML = avatarHTML();
-  addStars(0);
   $("hub-name").textContent = `Oi! Eu sou o ${animal.name}! ${animal.talent} Vamos brincar? 💕`;
+  addStars(0);
   let total = 0;
   $("games").innerHTML = "";
   GAMES.forEach(g => {
@@ -330,6 +609,28 @@ function openHub() {
   });
   $("hub-stars").textContent = total;
   show("s-hub");
+  showcase();
+}
+
+// Bichinho girando e dançando no menu
+function showcase() {
+  const { s } = makeWorld();
+  const a = makeAnimal(animal.look, equipped.hat);
+  s.add(a); s.add(shadowBlob(.7));
+  const t1 = makeTree(scene()); t1.position.set(-2.6, 0, -2); s.add(t1);
+  const t2 = makeTree(scene()); t2.position.set(2.8, 0, -3); s.add(t2);
+  const cl = makeCloud(); cl.position.set(1.5, 3.4, -6); s.add(cl);
+  const cam = new THREE.PerspectiveCamera(35, 2, .1, 100);
+  cam.position.set(0, 1.6, 6); cam.lookAt(0, 1, 0);
+  mount($("hub-view"), cam, 2);
+  let t = 0;
+  loopFn = () => {
+    t += .016;
+    a.rotation.y = Math.sin(t * .8) * .7;
+    a.position.y = Math.abs(Math.sin(t * 3)) * .15;
+    a.userData.arms.forEach((m, i) => m.rotation.z = (i ? 1 : -1) * (.4 + Math.sin(t * 6) * .3));
+    renderer.render(s, cam);
+  };
 }
 
 function setScore(n) { $("g-score").textContent = "🍬 Pontos: " + n; }
@@ -346,7 +647,7 @@ function startGame(g) {
   cleanup = g.play($("g-area"), (score) => finish(g, score));
 }
 
-function stopGame() { if (cleanup) { cleanup(); cleanup = null; } }
+function stopGame() { loopFn = null; if (cleanup) { cleanup(); cleanup = null; } }
 
 function finish(g, score) {
   stopGame();
@@ -373,10 +674,10 @@ function finish(g, score) {
   $("tohub").onclick = () => openHub();
 }
 
-$("back").onclick = () => { stopGame(); openHub(); };
-$("change").onclick = () => show("s-pick");
-$("open-shop").onclick = () => { renderShop(); show("s-shop"); };
-$("open-buy").onclick = () => { openGate(); show("s-gate"); };
+$("back").onclick = () => openHub();
+$("change").onclick = () => { stopGame(); show("s-pick"); };
+$("open-shop").onclick = () => { stopGame(); renderShop(); show("s-shop"); };
+$("open-buy").onclick = () => { stopGame(); openGate(); show("s-gate"); };
 document.querySelectorAll("[data-back]").forEach(b => b.onclick = () => { stopPixPoll(); openHub(); });
 
 // ---------- Sons fofinhos ----------
@@ -404,7 +705,7 @@ function sfx(kind) {
 function paintSound() { $("sound").textContent = soundOn ? "🔊" : "🔇"; }
 $("sound").onclick = () => { soundOn = !soundOn; save("bichos-som", soundOn); paintSound(); };
 paintSound();
-document.addEventListener("click", (e) => { if (e.target.closest(".card, .btn")) sfx("pop"); });
+document.addEventListener("click", (e) => { if (e.target.closest(".card, .btn, .c")) sfx("pop"); });
 
 function confetti(box) {
   const bits = ["⭐", "💖", "🌈", "✨", "🎉", "🌸"];
@@ -454,7 +755,7 @@ function openGate() {
 // ---------- Loja ----------
 function renderShop() {
   addStars(0);
-  fillShop($("shop-hats"), HATS, "hat", (it) => `<span class="avatar"><span class="hat">${it.emoji}</span>${animal.emoji}</span>`);
+  fillShop($("shop-hats"), HATS, "hat", (it) => `<img src="${animalThumb(animal, it.id)}" alt="">`);
   fillShop($("shop-scenes"), SCENES, "scene", (it) => it.emoji);
 }
 function fillShop(box, items, slot, preview) {
@@ -532,132 +833,156 @@ function pollPix(d) {
   check();
 }
 
-// ---------- Ajudantes de canvas ----------
-function makeCanvas(area, w, h) {
-  const c = document.createElement("canvas");
-  const dpr = window.devicePixelRatio || 1;
-  c.width = w * dpr; c.height = h * dpr;
-  const ctx = c.getContext("2d");
-  ctx.scale(dpr, dpr);
-  area.appendChild(c);
-  return { c, ctx, w, h };
-}
-const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-function drawEmoji(ctx, e, x, y, size) {
-  ctx.font = `${size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(e, x, y);
-}
-function drawAnimal(ctx, x, y, size, flip) {
-  ctx.save(); ctx.translate(x, y); if (flip) ctx.scale(-1, 1);
-  drawEmoji(ctx, animal.emoji, 0, 0, size);
-  const h = hat(); if (h) drawEmoji(ctx, h.emoji, 0, -size * 0.6, size * 0.6);
-  ctx.restore();
-}
-function drawScene(ctx, w, h, groundTop, t) {
-  const s = scene();
-  ctx.fillStyle = s ? s.sky : css("--sky"); ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = s ? s.ground : css("--ground"); ctx.fillRect(0, groundTop, w, h - groundTop);
-  if (s) for (let i = 0; i < 4; i++) drawEmoji(ctx, s.deco, (i * 190 + 60 - t * 0.2) % (w + 60), 30 + (i % 2) * 40, 22);
+// Pisadinhas do bichinho correndo
+function walk(a, t, fast) {
+  const k = Math.sin(t * (fast ? 18 : 10));
+  a.userData.feet[0].position.z = .14 + k * .15;
+  a.userData.feet[1].position.z = .14 - k * .15;
+  a.userData.arms.forEach((m, i) => m.rotation.x = (i ? k : -k) * .5);
+  a.userData.head.rotation.z = k * .05;
 }
 
-// ---------- Mini jogo 1: Corrida ----------
+// ---------- Mini jogo 1: Corrida (3D) ----------
+function makeObstacle() {
+  const o = new THREE.Group();
+  const kind = Math.floor(Math.random() * 4);
+  let h = .8;
+  if (kind === 0) { part("sphere", "#b1abc0", [.5, .4, .45], [0, .3, 0], o); h = .7; }
+  if (kind === 1) {
+    part("cyl", "#56c271", [.22, .9, .22], [0, .45, 0], o);
+    part("cyl", "#56c271", [.12, .35, .12], [.26, .6, 0], o, [0, 0, -.6]);
+    part("sphere", "#56c271", [.22, .22, .22], [0, .9, 0], o);
+    part("sphere", "#ff8fc6", [.09, .09, .09], [0, 1.12, 0], o);
+    h = 1.05;
+  }
+  if (kind === 2) {
+    part("cyl", "#fff4e0", [.14, .4, .14], [0, .2, 0], o);
+    part("sphere", "#ff6b8b", [.42, .26, .42], [0, .45, 0], o);
+    [[.2, .55, .2], [-.2, .58, .1], [0, .66, -.15]].forEach(p => part("sphere", WHITE, [.07, .05, .07], p, o));
+    h = .75;
+  }
+  if (kind === 3) { [[0, .32, 0, .4], [.3, .25, .1, .3], [-.3, .25, -.1, .3]].forEach(([x, y, z, r]) => part("sphere", "#4fb35f", [r, r, r], [x, y, z], o)); h = .7; }
+  o.userData.h = h;
+  return o;
+}
+
 function playRunner(area, done) {
   $("g-hint").textContent = "Toque na tela (ou aperte Espaço) para pular! 🦘";
-  const { c, ctx, w, h } = makeCanvas(area, 640, 280);
-  const groundY = h - 50;
-  const p = { x: 80, y: groundY, vy: 0, size: 44 };
-  const obstacles = ["🌵", "🪨", "🌳", "🍄"];
-  let obs = [], speed = 5, t = 0, score = 0, raf, alive = true, nextSpawn = 60;
+  const { s, sc } = makeWorld();
+  const a = makeAnimal(animal.look, equipped.hat);
+  a.rotation.y = Math.PI / 2; a.position.x = -2; s.add(a);
+  const shadow = shadowBlob(.6); shadow.position.x = -2; s.add(shadow);
+  // Trilha de terra
+  const path = new THREE.Mesh(new THREE.PlaneGeometry(120, 2.2), mat(sc.night ? "#3f6b48" : sc.kind === "palm" ? "#ffe3a8" : "#d9c29a"));
+  path.rotation.x = -Math.PI / 2; path.position.y = .01; s.add(path);
+  const decor = [];
+  for (let i = 0; i < 12; i++) {
+    const t = makeTree(sc);
+    t.position.set(-10 + i * 2.6, 0, -2.5 - (i % 3) * 1.8 - Math.random());
+    s.add(t); decor.push(t);
+  }
+  for (let i = 0; i < 4; i++) { const c = makeCloud(); c.position.set(-10 + i * 7, 4 + Math.random() * 2, -10); s.add(c); decor.push(c); }
+  const cam = new THREE.PerspectiveCamera(45, 1.6, .1, 100);
+  cam.position.set(1, 2.5, 7.5); cam.lookAt(1.2, .9, 0);
+  mount(area, cam, 1.6);
 
-  function jump() { if (p.y >= groundY) { p.vy = -13 * Math.sqrt(animal.jump); sfx("jump"); } }
+  const p = { y: 0, vy: 0 };
+  let obs = [], t = 0, score = 0, nextSpawn = 50, alive = true;
+  function jump() { if (alive && p.y <= 0) { p.vy = .2 * Math.sqrt(animal.jump); sfx("jump"); } }
   const key = (e) => { if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); jump(); } };
   window.addEventListener("keydown", key);
-  c.addEventListener("pointerdown", jump);
+  renderer.domElement.onpointerdown = jump;
 
-  function loop() {
-    if (!alive) return;
+  loopFn = () => {
     t++;
-    p.vy += 0.7; p.y += p.vy;
-    if (p.y > groundY) { p.y = groundY; p.vy = 0; }
+    const speed = .11 + t / 9000;
+    p.vy -= .011; p.y += p.vy;
+    if (p.y < 0) { p.y = 0; p.vy = 0; }
+    a.position.y = p.y;
+    shadow.scale.setScalar(.6 - Math.min(.3, p.y * .2));
+    if (p.y === 0) walk(a, t / 60, true);
     if (--nextSpawn <= 0) {
-      obs.push({ x: w + 20, e: obstacles[Math.floor(Math.random() * obstacles.length)], passed: false });
-      nextSpawn = 50 + Math.random() * 60 - Math.min(30, t / 60);
+      const o = makeObstacle(); o.position.x = 14; s.add(o); obs.push(o);
+      nextSpawn = 55 + Math.random() * 60 - Math.min(30, t / 60);
     }
-    speed = 5 + t / 400;
     for (const o of obs) {
-      o.x -= speed;
-      if (!o.passed && o.x < p.x - 20) { o.passed = true; score++; setScore(score); sfx("point"); }
-      if (Math.abs(o.x - p.x) < 30 && groundY - p.y < 30) { alive = false; return done(score); }
+      o.position.x -= speed;
+      if (!o.userData.passed && o.position.x < -2.6) { o.userData.passed = true; score++; setScore(score); sfx("point"); }
+      if (Math.abs(o.position.x - (-2)) < .65 && p.y < o.userData.h - .15) { alive = false; return done(score); }
     }
-    obs = obs.filter(o => o.x > -40);
-
-    drawScene(ctx, w, h, groundY + 22, t);
-    drawEmoji(ctx, "☁️", (w - (t * 0.5) % (w + 100)) , 50, 36);
-    drawEmoji(ctx, "☁️", (w - (t * 0.3 + 300) % (w + 100)), 90, 28);
-    obs.forEach(o => drawEmoji(ctx, o.e, o.x, groundY, 40));
-    drawAnimal(ctx, p.x, p.y, p.size, true);
-    raf = requestAnimationFrame(loop);
-  }
-  raf = requestAnimationFrame(loop);
-  return () => { alive = false; cancelAnimationFrame(raf); window.removeEventListener("keydown", key); };
+    obs = obs.filter(o => { if (o.position.x < -12) { s.remove(o); return false; } return true; });
+    decor.forEach(d => { d.position.x -= speed * (d.position.y > 2 ? .3 : 1); if (d.position.x < -14) d.position.x += 31; });
+    renderer.render(s, cam);
+  };
+  return () => { window.removeEventListener("keydown", key); renderer.domElement.onpointerdown = null; };
 }
 
-// ---------- Mini jogo 2: Chuva de Comida ----------
+// ---------- Mini jogo 2: Chuva de Comida (3D) ----------
 function playCatch(area, done) {
   $("g-hint").textContent = `Arraste o dedo (ou use ← →). Pegue ${animal.food} e fuja da pimenta 🌶️!`;
-  const { c, ctx, w, h } = makeCanvas(area, 640, 360);
-  const p = { x: w / 2, y: h - 40 };
-  let items = [], score = 0, lives = 3, t = 0, raf, alive = true, keys = {};
-  setExtra("❤️".repeat(lives));
+  const { s, sc } = makeWorld();
+  const a = makeAnimal(animal.look, equipped.hat); s.add(a);
+  const shadow = shadowBlob(.65); s.add(shadow);
+  for (let i = 0; i < 6; i++) { const t = makeTree(sc); t.position.set(-9 + i * 3.6, 0, -6 - (i % 2) * 2); s.add(t); }
+  const c1 = makeCloud(); c1.position.set(-4, 6.5, -8); s.add(c1);
+  const c2 = makeCloud(); c2.position.set(5, 7, -9); s.add(c2);
+  const cam = new THREE.PerspectiveCamera(50, 1.6, .1, 100);
+  cam.position.set(0, 3.4, 9); cam.lookAt(0, 2.4, 0);
+  mount(area, cam, 1.6);
+  const halfW = Math.tan(25 * Math.PI / 180) * 9 * 1.6 - .8;
 
+  let items = [], score = 0, lives = 3, t = 0, keys = {}, x = 0, targetX = null;
+  setExtra("❤️".repeat(lives));
   const kd = (e) => { keys[e.code] = true; if (e.code.startsWith("Arrow")) e.preventDefault(); };
   const ku = (e) => { keys[e.code] = false; };
-  const move = (e) => { const r = c.getBoundingClientRect(); p.x = (e.clientX - r.left) / r.width * w; };
+  const move = (e) => { const r = renderer.domElement.getBoundingClientRect(); targetX = ((e.clientX - r.left) / r.width - .5) * 2 * halfW; };
   window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
-  c.addEventListener("pointermove", move); c.addEventListener("pointerdown", move);
+  renderer.domElement.onpointermove = move; renderer.domElement.onpointerdown = move;
 
-  function loop() {
-    if (!alive) return;
+  function lose() { lives--; setExtra("❤️".repeat(Math.max(0, lives))); sfx("ouch"); return lives <= 0; }
+  loopFn = () => {
     t++;
-    const sp = 7 * animal.speed;
-    if (keys.ArrowLeft) p.x -= sp;
-    if (keys.ArrowRight) p.x += sp;
-    p.x = Math.max(25, Math.min(w - 25, p.x));
+    const sp = .14 * animal.speed;
+    let dx = 0;
+    if (keys.ArrowLeft) { dx = -sp; targetX = null; }
+    if (keys.ArrowRight) { dx = sp; targetX = null; }
+    if (targetX !== null) dx = Math.max(-sp * 1.6, Math.min(sp * 1.6, targetX - x));
+    x = Math.max(-halfW, Math.min(halfW, x + dx));
+    a.position.x = x; shadow.position.x = x;
+    a.rotation.y = dx * -3;
+    if (Math.abs(dx) > .01) walk(a, t / 60, false);
     if (t % Math.max(18, 45 - Math.floor(t / 120)) === 0) {
       const bad = Math.random() < 0.25;
-      items.push({ x: 20 + Math.random() * (w - 40), y: -20, v: 2.5 + Math.random() * 2 + t / 900, bad });
+      const it = emojiSprite(bad ? "🌶️" : animal.food, 1);
+      it.position.set((Math.random() * 2 - 1) * halfW, 9, 0);
+      it.userData = { v: .045 + Math.random() * .03 + t / 60000, bad };
+      s.add(it); items.push(it);
     }
     for (const it of items) {
-      it.y += it.v;
-      if (!it.hit && Math.abs(it.x - p.x) < 34 && Math.abs(it.y - p.y) < 30) {
-        it.hit = true;
-        if (it.bad) { sfx("ouch"); lives--; setExtra("❤️".repeat(Math.max(0, lives))); if (lives <= 0) { alive = false; return done(score); } }
+      it.position.y -= it.userData.v;
+      it.material.rotation += .03;
+      if (!it.userData.hit && Math.abs(it.position.x - x) < .9 && it.position.y < 2 && it.position.y > .4) {
+        it.userData.hit = true;
+        if (it.userData.bad) { if (lose()) return done(score); }
         else { score += animal.doubleFood ? 2 : 1; setScore(score); sfx("point"); }
       }
-      if (!it.hit && !it.bad && it.y > h + 10) {
-        it.hit = true; lives--; setExtra("❤️".repeat(Math.max(0, lives)));
-        if (lives <= 0) { alive = false; return done(score); }
+      if (!it.userData.hit && !it.userData.bad && it.position.y < 0) {
+        it.userData.hit = true;
+        if (lose()) return done(score);
       }
     }
-    items = items.filter(it => !it.hit && it.y < h + 20);
-
-    drawScene(ctx, w, h, h - 18, t);
-    items.forEach(it => drawEmoji(ctx, it.bad ? "🌶️" : animal.food, it.x, it.y, 34));
-    drawAnimal(ctx, p.x, p.y, 48, false);
-    raf = requestAnimationFrame(loop);
-  }
-  raf = requestAnimationFrame(loop);
+    items = items.filter(it => { if (it.userData.hit || it.position.y < -1) { s.remove(it); return false; } return true; });
+    renderer.render(s, cam);
+  };
   return () => {
-    alive = false; cancelAnimationFrame(raf);
     window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku);
+    renderer.domElement.onpointermove = renderer.domElement.onpointerdown = null;
   };
 }
 
-// ---------- Mini jogo 3: Memória ----------
+// ---------- Mini jogo 3: Memória (cartas que viram em 3D) ----------
 function playMemory(area, done) {
-  const pool = ["🐶", "🐱", "🐭", "🐹", "🦊", "🐼", "🐨", "🐯", "🦁", "🐮", "🐷", "🐔"];
-  const pick = pool.sort(() => Math.random() - 0.5).slice(0, 8);
+  const pick = ANIMALS.slice().sort(() => Math.random() - 0.5).slice(0, 8);
   const deck = [...pick, ...pick].sort(() => Math.random() - 0.5);
   const totalTime = Math.round(60 * animal.memo);
   let left = totalTime, open = [], found = 0, lock = false, moves = 0, ended = false;
@@ -666,25 +991,29 @@ function playMemory(area, done) {
   const grid = document.createElement("div");
   grid.className = "mem";
   area.appendChild(grid);
-  deck.forEach((e) => {
+  deck.forEach((d) => {
     const b = document.createElement("button");
-    b.textContent = "?";
+    b.className = "c";
+    b.setAttribute("aria-label", "Carta");
+    b.innerHTML = `<div class="flip"><div class="face back">?</div><div class="face front"><img src="${animalThumb(d)}" alt="${d.name}"></div></div>`;
     b.onclick = () => {
       if (lock || b.classList.contains("open") || b.classList.contains("done")) return;
-      b.classList.add("open"); b.textContent = e; open.push({ b, e });
+      b.classList.add("open"); open.push({ b, id: d.id });
       if (open.length === 2) {
         moves++; lock = true;
         const [a1, a2] = open;
-        if (a1.e === a2.e) {
-          a1.b.classList.add("done"); a2.b.classList.add("done");
-          open = []; lock = false; found++; sfx("point");
-          setScore(calc());
-          if (found === 8) end();
+        if (a1.id === a2.id) {
+          setTimeout(() => {
+            a1.b.classList.add("done"); a2.b.classList.add("done");
+            open = []; lock = false; found++; sfx("point");
+            setScore(calc());
+            if (found === 8) end();
+          }, 400);
         } else {
           setTimeout(() => {
-            [a1, a2].forEach(x => { x.b.classList.remove("open"); x.b.textContent = "?"; });
+            [a1, a2].forEach(x => x.b.classList.remove("open"));
             open = []; lock = false;
-          }, 650);
+          }, 900);
         }
       }
     };
@@ -698,49 +1027,91 @@ function playMemory(area, done) {
   return () => { ended = true; clearInterval(timer); };
 }
 
-// ---------- Mini jogo 4: Toca Maluca ----------
+// ---------- Mini jogo 4: Toca Maluca (3D) ----------
 function playWhack(area, done) {
-  $("g-hint").textContent = "Toque nos bichinhos 🐹 pra dar oi! Mas cuidado com o gambá fedidinho 🦨";
-  const holes = document.createElement("div");
-  holes.className = "holes";
-  area.appendChild(holes);
-  const btns = [];
-  let score = 0, left = 30, ended = false, spawnT;
-  for (let i = 0; i < 9; i++) {
-    const b = document.createElement("button");
-    b.dataset.state = "";
-    b.onclick = () => {
-      if (ended || !b.dataset.state) return;
-      if (b.dataset.state === "good") { score++; sfx("point"); } else { score = Math.max(0, score - 2); sfx("ouch"); }
-      setScore(score);
-      clearTimeout(b._t); b.dataset.state = ""; b.textContent = "";
-    };
-    holes.appendChild(b); btns.push(b);
+  $("g-hint").textContent = "Toque nos bichinhos pra dar oi! Mas cuidado com o gambá fedidinho 🦨";
+  const { s } = makeWorld();
+  const cam = new THREE.PerspectiveCamera(45, 1.15, .1, 100);
+  cam.position.set(0, 7.2, 6.4); cam.lookAt(0, .3, .2);
+  mount(area, cam, 1.15);
+  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const holes = [];
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+    const g = new THREE.Group();
+    g.position.set((c - 1) * 2.3, 0, (r - 1) * 2.1);
+    const hole = new THREE.Mesh(GEO.circle, new THREE.MeshBasicMaterial({ color: 0x4a3122 }));
+    hole.rotation.x = -Math.PI / 2; hole.scale.setScalar(.68); hole.position.y = .02; g.add(hole);
+    const rim = part("torus", "#9a6a48", [.68, .68, .45], [0, .03, 0], g, [Math.PI / 2, 0, 0]);
+    const hit = new THREE.Mesh(GEO.cyl, hitMat); hit.scale.set(.9, 2, .9); hit.position.y = .6; g.add(hit);
+    // O bichinho fica escondido "dentro" da toca (abaixo do chão)
+    const pit = new THREE.Group(); g.add(pit);
+    s.add(g);
+    holes.push({ g, hit, pit, rim, state: "", model: null, y: -1.6, timer: null });
   }
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  let score = 0, left = 30, ended = false, spawnT;
+
+  renderer.domElement.onpointerdown = (e) => {
+    if (ended) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    ptr.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ptr, cam);
+    const hit = ray.intersectObjects(holes.map(h => h.hit))[0];
+    const h = hit && holes.find(x => x.hit === hit.object);
+    if (!h || !h.state || h.y < -.9) return;
+    if (h.state === "good") { score++; sfx("point"); } else { score = Math.max(0, score - 2); sfx("ouch"); }
+    setScore(score);
+    clearTimeout(h.timer); h.state = "";
+  };
+
   function spawn() {
     if (ended) return;
-    const free = btns.filter(b => !b.dataset.state);
+    const free = holes.filter(h => !h.state && h.y < -1.4);
     if (free.length) {
-      const b = free[Math.floor(Math.random() * free.length)];
+      const h = free[Math.floor(Math.random() * free.length)];
       const bad = Math.random() < 0.2;
-      b.dataset.state = bad ? "bad" : "good";
-      b.textContent = bad ? "🦨" : ["🐹", "🐭", "🐿️"][Math.floor(Math.random() * 3)];
-      const stay = (1100 - (30 - left) * 18) * animal.reflex;
-      b._t = setTimeout(() => { b.dataset.state = ""; b.textContent = ""; }, stay);
+      if (h.model) h.pit.remove(h.model);
+      h.model = makeAnimal(bad ? SKUNK : ANIMALS[Math.floor(Math.random() * ANIMALS.length)].look);
+      h.model.scale.setScalar(.75);
+      h.pit.add(h.model);
+      h.state = bad ? "bad" : "good";
+      const stay = (1300 - (30 - left) * 20) * animal.reflex;
+      h.timer = setTimeout(() => { h.state = ""; }, stay);
     }
-    spawnT = setTimeout(spawn, Math.max(350, 750 - (30 - left) * 12));
+    spawnT = setTimeout(spawn, Math.max(380, 800 - (30 - left) * 12));
   }
   spawn();
   setExtra("⏱️ " + left + "s");
   const timer = setInterval(() => { left--; setExtra("⏱️ " + left + "s"); if (left <= 0) end(); }, 1000);
   function end() { if (ended) return; ended = true; clearInterval(timer); clearTimeout(spawnT); done(score); }
-  return () => { ended = true; clearInterval(timer); clearTimeout(spawnT); btns.forEach(b => clearTimeout(b._t)); };
+  let t = 0;
+  loopFn = () => {
+    t += .016;
+    holes.forEach(h => {
+      const target = h.state ? 0 : -1.6;
+      h.y += (target - h.y) * .2;
+      h.pit.position.y = h.y;
+      // Esconde a parte que está "debaixo da terra"
+      if (h.model) { h.model.visible = h.y > -1.3; h.model.rotation.y = Math.sin(t * 4 + h.g.position.x) * .3; }
+    });
+    renderer.render(s, cam);
+  };
+  return () => {
+    ended = true; clearInterval(timer); clearTimeout(spawnT);
+    holes.forEach(h => clearTimeout(h.timer));
+    renderer.domElement.onpointerdown = null;
+  };
 }
 
 // ---------- Início ----------
-renderPick();
-const saved = ANIMALS.find(a => a.id === load("bichos-animal", null));
-if (saved) { animal = saved; openHub(); }
+if (!renderer) {
+  $("animals").innerHTML = `<div class="loading">Ops! Este aparelho não consegue mostrar o jogo em 3D. 😢<br>
+    Tente em outro navegador ou celular.</div>`;
+} else {
+  renderPick();
+  const saved = ANIMALS.find(a => a.id === load("bichos-animal", null));
+  if (saved) { animal = saved; openHub(); }
+}
 </script>
 </body>
 </html>
