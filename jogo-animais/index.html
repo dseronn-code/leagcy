@@ -132,9 +132,61 @@
     width: 110px; height: 110px; object-fit: contain; display: block; margin: 0 auto; }
   .card .emoji img { width: 104px; height: 104px; object-fit: contain; display: block; margin: 0 auto; border-radius: 50%;
     background: radial-gradient(circle, color-mix(in srgb, var(--accent2) 35%, var(--card)) 0 60%, transparent 61%); }
-  .hub-top { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 12px; }
-  .hub-top .view3d { max-width: 420px; background: var(--card); border: 4px solid var(--line); border-radius: 26px; box-shadow: var(--shadow); overflow: hidden; }
-  .hub-top .bubble::before { left: 50%; top: -10px; transform: translateX(-50%); border: 8px solid transparent; border-bottom-color: var(--line); border-top: 0; }
+  /* Menu principal */
+  .hub-stage { position: relative; border: 5px solid #fff; border-radius: 30px; overflow: hidden; box-shadow: 0 8px 0 var(--line), 0 14px 30px rgba(255, 143, 184, .25); }
+  .hub-stage .view3d canvas { border-radius: 0; cursor: pointer; }
+  .hub-hud { position: absolute; top: 10px; left: 10px; right: 10px; display: flex; justify-content: space-between; pointer-events: none; }
+  .hub-hud .pill { background: rgba(255, 255, 255, .9); color: #5a3d5c; }
+  .tap-me {
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); pointer-events: none;
+    background: #fff; color: #ff6f91; font-weight: 700; padding: 6px 14px; border-radius: 999px; box-shadow: 0 4px 0 #ffd0e2;
+    animation: tapme 1.1s ease-in-out infinite;
+  }
+  .tap-me.gone { opacity: 0; transition: opacity .4s; }
+  @keyframes tapme { 50% { transform: translateX(-50%) translateY(-6px); } }
+  .gift {
+    position: absolute; right: 12px; bottom: 12px; font-size: 2.6rem; line-height: 1; background: none; border: 0; cursor: pointer;
+    filter: drop-shadow(0 4px 0 rgba(0, 0, 0, .12)); animation: giftwiggle 1.4s ease-in-out infinite; padding: 0;
+  }
+  .gift-tag { position: absolute; top: -10px; right: -6px; font: 700 .7rem "Fredoka", sans-serif; background: #ff4f93; color: #fff; padding: 2px 6px; border-radius: 99px; }
+  .gift.used { animation: none; filter: grayscale(.8); opacity: .6; }
+  .gift.used .gift-tag { display: none; }
+  .gift.open { animation: giftpop .6s ease-out; }
+  @keyframes giftwiggle { 0%, 60%, 100% { transform: rotate(0) scale(1); } 70% { transform: rotate(-14deg) scale(1.1); } 80% { transform: rotate(12deg) scale(1.1); } 90% { transform: rotate(-8deg); } }
+  @keyframes giftpop { 40% { transform: scale(1.6) rotate(10deg); } 100% { transform: scale(1); } }
+  .reward-pop { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); font-size: 2rem; font-weight: 700; color: #ff4f93;
+    -webkit-text-stroke: 3px #fff; paint-order: stroke fill; pointer-events: none; animation: rewardUp 1.6s ease-out forwards; }
+  @keyframes rewardUp { 0% { transform: translate(-50%, -20%) scale(.4); opacity: 0; } 20% { transform: translate(-50%, -50%) scale(1.2); opacity: 1; } 100% { transform: translate(-50%, -160%) scale(1); opacity: 0; } }
+  .hub-say { display: flex; justify-content: center; margin: 14px 0 12px; }
+  .hub-say .bubble { font-size: 1.1rem; text-align: center; }
+  .hub-say .bubble::before { left: 50%; top: -10px; transform: translateX(-50%); border: 8px solid transparent; border-bottom-color: var(--line); border-top: 0; }
+  .hub-say .bubble.talk { animation: pop .35s ease-out; }
+  .hub-btns { display: flex; justify-content: center; gap: 14px; margin-bottom: 16px; }
+  .round-btn {
+    width: 86px; height: 86px; border-radius: 50%; border: 4px solid #fff; cursor: pointer; font: 600 .85rem "Fredoka", sans-serif;
+    color: #5a3d5c; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    box-shadow: 0 6px 0 var(--line); transition: transform .15s;
+  }
+  .round-btn span { font-size: 1.9rem; line-height: 1; }
+  .round-btn:hover { transform: translateY(-3px) rotate(-4deg); }
+  .round-btn:active { transform: translateY(3px); box-shadow: none; }
+  .round-btn.pink { background: #ffd6e7; } .round-btn.blue { background: #d6f0ff; } .round-btn.yellow { background: #fff1c2; }
+  .ribbon { display: inline-block; color: #fff; padding: 8px 20px; border-radius: 999px; margin: 22px 0 14px; box-shadow: 0 5px 0 rgba(0, 0, 0, .1); }
+  .ribbon.pink { background: linear-gradient(90deg, #ff8fb8, #ffb26b); }
+  .ribbon.blue { background: linear-gradient(90deg, #7cc8ff, #b79cff); }
+  .card.game { position: relative; background: linear-gradient(160deg, var(--g1), var(--g2)); border-color: #fff; color: #5a3d5c; }
+  .card.game .desc { color: #7a5f7c; }
+  .card.game .emoji { animation: bob 2.4s ease-in-out infinite; animation-delay: var(--d); }
+  .card.game .best { color: #2e8a57; }
+  .new-tag { position: absolute; top: 8px; right: -6px; background: #ff4f93; color: #fff; font-weight: 700; font-size: .75rem;
+    padding: 3px 10px; border-radius: 99px; transform: rotate(8deg); box-shadow: 0 3px 0 rgba(0, 0, 0, .15); animation: tapme 1.2s ease-in-out infinite; }
+  .popin { animation: pop .45s ease-out both; animation-delay: var(--d); }
+  .house-card { position: relative; }
+  .house-card .need { position: absolute; top: -12px; right: 10px; background: #ff6f91; color: #fff; font-weight: 700; padding: 5px 12px; border-radius: 99px;
+    white-space: nowrap; box-shadow: 0 3px 0 rgba(0, 0, 0, .15); animation: needbob 1s ease-in-out infinite; }
+  @keyframes needbob { 50% { transform: translateY(-5px); } }
+  .house-card.needs { border-color: #ff8fb8; animation: needpulse 1.6s ease-in-out infinite; }
+  @keyframes needpulse { 50% { box-shadow: 0 6px 0 #ffd0e2, 0 0 0 8px rgba(255, 143, 184, .25); } }
   .loading { text-align: center; padding: 30px; font-size: 1.2rem; color: var(--muted); }
   .card.owned { border-color: var(--good); }
   .card.equipped { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
@@ -179,7 +231,7 @@
   #g-area, .full3d { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   .ghint:empty { display: none; }
   /* Casinha */
-  .house-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; margin-bottom: 18px;
+  .house-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; margin-bottom: 6px;
     background: linear-gradient(120deg, color-mix(in srgb, #ffd6e7 60%, var(--card)), color-mix(in srgb, #d6f0ff 60%, var(--card))); }
   .house-card .emoji { font-size: 3.4rem; }
   .meter { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; }
@@ -256,26 +308,29 @@
 
   <!-- Menu de mini jogos -->
   <section id="s-hub" class="screen">
-    <div class="hub-top">
+    <div class="hub-stage">
       <div class="view3d" id="hub-view"></div>
-      <span class="bubble" id="hub-name"></span>
+      <div class="hub-hud">
+        <span class="pill" title="Estrelas para gastar">⭐ <span class="wallet">0</span></span>
+        <span class="pill" title="Melhores resultados">🏆 <span id="hub-stars">0</span> / <span id="hub-max">12</span></span>
+      </div>
+      <div class="tap-me" id="tap-me">👆 Toque em mim!</div>
+      <button class="gift" id="gift" aria-label="Presente do dia">🎁<span class="gift-tag">Presente!</span></button>
     </div>
-    <div class="bar">
-      <span class="pill" title="Estrelas para gastar">⭐ <span class="wallet">0</span></span>
-      <span class="pill" title="Melhores resultados">🏆 <span id="hub-stars">0</span> / <span id="hub-max">12</span></span>
-    </div>
-    <div class="actions" style="margin-bottom:16px">
-      <button class="btn" id="open-shop">🛍️ Lojinha</button>
-      <button class="btn blue" id="open-buy">💎 Mais estrelas</button>
-      <button class="btn ghost" id="change">🔄 Trocar bichinho</button>
+    <div class="hub-say"><span class="bubble" id="hub-name"></span></div>
+    <div class="hub-btns">
+      <button class="round-btn pink" id="open-shop"><span>🛍️</span>Lojinha</button>
+      <button class="round-btn blue" id="open-buy"><span>💎</span>Estrelas</button>
+      <button class="round-btn yellow" id="change"><span>🔄</span>Trocar</button>
     </div>
     <button class="card house-card" id="open-house">
       <div class="emoji">🏠</div>
-      <div><div class="name" id="house-title">Casinha</div><div class="desc">Dar comida, banho, carinho e soninho 💕</div></div>
+      <div style="flex:1"><div class="name" id="house-title">Casinha</div><div class="desc">Dar comida, banho, carinho e soninho 💕</div></div>
+      <span class="need" id="house-need" hidden></span>
     </button>
-    <h2>🎈 Vamos brincar de quê?</h2>
+    <h2 class="ribbon pink">🎈 Vamos brincar!</h2>
     <div class="grid" id="games"></div>
-    <h2 style="margin-top:22px">📚 Aprender brincando</h2>
+    <h2 class="ribbon blue">📚 Aprender brincando</h2>
     <div class="grid" id="edu-games"></div>
   </section>
 
@@ -757,21 +812,36 @@ function avatarHTML() { return `<img class="avatar-img" src="${animalThumb(anima
 // ---------- Telas ----------
 function renderPick() {
   $("animals").innerHTML = "";
-  ANIMALS.forEach(a => {
+  ANIMALS.forEach((a, i) => {
     const b = document.createElement("button");
-    b.className = "card";
+    b.className = "card popin";
+    b.style.setProperty("--d", i * 60 + "ms");
     b.innerHTML = `<div class="emoji"><img src="${animalThumb(a)}" alt=""></div><div class="name">${a.name}</div><div class="desc">${a.talent}</div>`;
-    b.onclick = () => { animal = a; save("bichos-animal", a.id); openHub(); };
+    b.onclick = () => { animal = a; save("bichos-animal", a.id); openHub(true); };
     $("animals").appendChild(b);
   });
 }
 
 function starsFor(game, score) { return game.stars.filter(t => score >= t).length; }
 
-function openHub() {
+const GAME_COLORS = {
+  corrida: ["#ffe1ec", "#ffc2d9"], comida: ["#fff3c4", "#ffe08a"], memoria: ["#e9e0ff", "#d2c2ff"], toca: ["#dff7d8", "#bdecb0"],
+  barco: ["#dcf1ff", "#b5e2ff"], balao: ["#ffe4d1", "#ffc9a3"], contar: ["#ffe1e1", "#ffc4c4"], contas: ["#e0f4ff", "#bfe4ff"],
+  letras: ["#fff0d6", "#ffdca3"], formas: ["#e6ffe9", "#c3f3cb"], quiz: ["#f3e3ff", "#e1c6ff"],
+};
+function openHub(greet) {
   stopGame();
   best = load("bichos-best-" + animal.id, {});
   $("hub-name").textContent = `Oi! Eu sou o ${animal.name}! ${animal.talent} Vamos brincar? 💕`;
+  if (greet) setTimeout(() => say(`Oi! Eu sou o ${animal.name}! Vamos brincar?`), 300);
+  // A casinha avisa quando o bichinho precisa de alguma coisa
+  const care = loadCare();
+  const low = CARE.reduce((m, k) => care[k] < care[m] ? k : m, "fome");
+  const needs = care[low] < 45;
+  $("open-house").classList.toggle("needs", needs);
+  $("house-need").hidden = !needs;
+  $("house-need").textContent = { fome: "🍎 Tô com fome!", banho: "🛁 Quero banho!", amor: "🤗 Carinho!", sono: "😴 Soninho!" }[low];
+  paintGift();
   addStars(0);
   let total = 0;
   $("games").innerHTML = ""; $("edu-games").innerHTML = "";
@@ -780,8 +850,11 @@ function openHub() {
     const sc = best[g.id] || 0, st = starsFor(g, sc);
     total += st;
     const b = document.createElement("button");
-    b.className = "card";
-    b.innerHTML = `<div class="emoji">${g.emoji}</div><div class="name">${g.name}</div><div class="desc">${g.desc}</div>
+    const [c1, c2] = GAME_COLORS[g.id] || ["#fff", "#fff"];
+    b.className = "card game popin";
+    b.style.cssText = `--g1:${c1};--g2:${c2};--d:${(GAMES.indexOf(g) % 6) * 70}ms`;
+    b.innerHTML = `${best[g.id] === undefined ? '<span class="new-tag">NOVO!</span>' : ""}
+      <div class="emoji">${g.emoji}</div><div class="name">${g.name}</div><div class="desc">${g.desc}</div>
       <div class="best">${"⭐".repeat(st)}${"☆".repeat(3 - st)} · Recorde: ${sc}</div>`;
     b.onclick = () => startGame(g);
     $(g.edu ? "edu-games" : "games").appendChild(b);
@@ -793,25 +866,117 @@ function openHub() {
 }
 
 // Bichinho girando e dançando no menu
+// Bichinho no palco: dança, reage ao toque e tem balões para estourar
 function showcase() {
-  const { s } = makeWorld();
+  const { s, sc } = makeWorld();
   const a = makeAnimal(animal.look, equipped.hat);
-  s.add(a); s.add(shadowBlob(.7));
-  const t1 = makeTree(scene()); t1.position.set(-2.6, 0, -2); s.add(t1);
-  const t2 = makeTree(scene()); t2.position.set(2.8, 0, -3); s.add(t2);
-  const cl = makeCloud(); cl.position.set(1.5, 3.4, -6); s.add(cl);
+  s.add(a);
+  const sh = shadowBlob(.7); s.add(sh);
+  [[-2.8, -2], [3, -3], [-4.5, -4], [4.6, -1.5]].forEach(([x, z]) => { const t = makeTree(sc); t.position.set(x, 0, z); s.add(t); });
+  const rb = makeRainbow(); rb.position.set(0, 0, -10); rb.scale.setScalar(.8); s.add(rb);
+  const cl = makeCloud(); cl.position.set(1.5, 3.6, -6); s.add(cl);
+  // Florzinhas no chão
+  for (let i = 0; i < 10; i++) {
+    const f = emojiSprite(["🌼", "🌷", "🌸"][i % 3], .35);
+    f.position.set((Math.random() - .5) * 7, .18, -1.5 + Math.random() * 2.5); s.add(f);
+  }
+  const COLORS = ["#ff8fb8", "#8fd3ff", "#b79cff", "#8ee08a", "#ffd54a", "#ffb26b"];
+  const balloons = [];
+  function addBalloon(y) {
+    const b = makeBalloon(COLORS[rand(COLORS.length)]);
+    b.scale.setScalar(.55);
+    b.position.set((Math.random() < .5 ? -1 : 1) * (1.4 + Math.random() * 1.6), y, -.5 - Math.random() * 1.5);
+    b.userData.v = .006 + Math.random() * .006; b.userData.ph = Math.random() * 6;
+    s.add(b); balloons.push(b);
+  }
+  for (let i = 0; i < 4; i++) addBalloon(Math.random() * 3);
+  const narrow = innerWidth < 600;
   const cam = new THREE.PerspectiveCamera(35, 2, .1, 100);
-  cam.position.set(0, 1.6, 6); cam.lookAt(0, 1, 0);
-  mount($("hub-view"), cam, 2);
-  let t = 0;
+  cam.position.set(0, 1.7, narrow ? 7 : 6.2); cam.lookAt(0, 1.2, 0);
+  mount($("hub-view"), cam, narrow ? 1.25 : 2);
+  let t = 0, jump = 0, spin = 0, bursts = [];
+  const PHRASES = ["Hihihi! Faz cócegas!", "Oba! Vamos brincar?", "Eu gosto muito de você!", "Uhuu! Que divertido!", "Escolhe um jogo pra gente!", "Você é meu melhor amigo!"];
+  function talk(text) {
+    const el = $("hub-name");
+    el.textContent = text + " 💕"; el.classList.remove("talk"); void el.offsetWidth; el.classList.add("talk");
+    say(text);
+  }
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  renderer.domElement.onpointerdown = (e) => {
+    const r = renderer.domElement.getBoundingClientRect();
+    ptr.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ptr, cam);
+    const hitB = balloons.find(b => ray.intersectObject(b.userData.ball).length);
+    if (hitB) {
+      sfx("popb");
+      for (let i = 0; i < 10; i++) {
+        const p = part("sphere", hitB.userData.ball.material.color.getStyle(), [.06, .06, .06], [hitB.position.x, hitB.position.y, hitB.position.z], s);
+        p.userData.v = new THREE.Vector3((Math.random() - .5) * .14, (Math.random() - .2) * .14, (Math.random() - .5) * .14);
+        p.userData.life = 22; bursts.push(p);
+      }
+      s.remove(hitB); balloons.splice(balloons.indexOf(hitB), 1);
+      setTimeout(() => addBalloon(-1.5), 1500);
+      return;
+    }
+    if (ray.intersectObject(a, true).length) {
+      $("tap-me").classList.add("gone");
+      jump = 1; spin = 1; sfx("giggle");
+      talk(PHRASES[rand(PHRASES.length)]);
+      for (let i = 0; i < 5; i++) {
+        const h = emojiSprite(["💖", "💕", "✨"][i % 3], .35);
+        h.position.set((Math.random() - .5) * 1.2, 1.6 + Math.random() * .5, .6);
+        h.userData.v = new THREE.Vector3((Math.random() - .5) * .02, .025, 0); h.userData.life = 50; h.userData.sprite = true;
+        s.add(h); bursts.push(h);
+      }
+    }
+  };
   loopFn = () => {
     t += .016;
-    a.rotation.y = Math.sin(t * .8) * .7;
-    a.position.y = Math.abs(Math.sin(t * 3)) * .15;
-    a.userData.arms.forEach((m, i) => m.rotation.z = (i ? 1 : -1) * (.4 + Math.sin(t * 6) * .3));
+    jump = Math.max(0, jump - .03); spin = Math.max(0, spin - .02);
+    a.rotation.y = Math.sin(t * .8) * .6 + (spin > 0 ? (1 - spin) * Math.PI * 2 : 0);
+    a.position.y = Math.abs(Math.sin(t * 3)) * .15 + Math.sin(jump * Math.PI) * .9;
+    sh.scale.setScalar(.7 * (1 - Math.sin(jump * Math.PI) * .4));
+    a.userData.arms.forEach((m, i) => m.rotation.z = (i ? 1 : -1) * (.4 + Math.sin(t * 6) * .3 + jump * 1.5));
+    a.userData.head.rotation.z = Math.sin(t * 2) * .08;
+    balloons.forEach(b => {
+      b.position.y += b.userData.v; b.position.x += Math.sin(t + b.userData.ph) * .003;
+      b.rotation.z = Math.sin(t * 1.5 + b.userData.ph) * .12;
+      if (b.position.y > 5) b.position.y = -1.5;
+    });
+    bursts = bursts.filter(p => {
+      p.position.add(p.userData.v);
+      if (p.userData.sprite) p.material.opacity = p.userData.life / 50; else { p.userData.v.y -= .006; p.scale.setScalar(.06 * p.userData.life / 22); }
+      if (--p.userData.life <= 0) { s.remove(p); return false; }
+      return true;
+    });
     renderer.render(s, cam);
   };
+  cleanup = () => { renderer.domElement.onpointerdown = null; };
 }
+
+// ---------- Presente do dia ----------
+const today = () => new Date().toDateString();
+function paintGift() {
+  const used = load("bichos-presente", "") === today();
+  $("gift").classList.toggle("used", used);
+}
+$("gift").onclick = () => {
+  const g = $("gift");
+  if (load("bichos-presente", "") === today()) { say("Volte amanhã para ganhar outro presente!"); $("hub-name").textContent = "Volte amanhã para outro presente! 🎁"; return; }
+  const n = 1 + rand(3);
+  save("bichos-presente", today());
+  g.classList.add("open");
+  sfx("buy");
+  for (let i = 0; i < n; i++) setTimeout(() => sfx("coin"), 400 + i * 220);
+  setTimeout(() => { addStars(n); g.classList.remove("open"); paintGift(); }, 600);
+  const stage = document.querySelector(".hub-stage");
+  confetti(stage);
+  const pop = document.createElement("div");
+  pop.className = "reward-pop"; pop.textContent = `🎉 +${n} ⭐`;
+  stage.appendChild(pop); setTimeout(() => pop.remove(), 1700);
+  $("hub-name").textContent = `Oba! Você ganhou ${n} estrelinha${n > 1 ? "s" : ""}! 🎁`;
+  say(`Oba! Você ganhou ${n} estrela${n > 1 ? "s" : ""} de presente!`);
+};
 
 function setScore(n) { $("g-score").textContent = "🍬 Pontos: " + n; }
 function setExtra(t) { $("g-extra").textContent = t; }
@@ -838,7 +1003,7 @@ function finish(g, score) {
   stopGame();
   const old = best[g.id] || 0;
   const record = score > old;
-  if (record) { best[g.id] = score; save("bichos-best-" + animal.id, best); }
+  if (record || best[g.id] === undefined) { best[g.id] = Math.max(old, score); save("bichos-best-" + animal.id, best); }
   const st = starsFor(g, score);
   addStars(st);
   const o = $("g-over");
@@ -899,6 +1064,7 @@ function sfx(kind) {
     if (kind === "jump") { tone(400, 0, 0.12, "triangle"); tone(600, 0.05, 0.12, "triangle"); }
     if (kind === "ouch") { tone(330, 0, 0.15, "triangle"); tone(247, 0.12, 0.2, "triangle"); }
     if (kind === "win") [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.1, 0.2));
+    if (kind === "giggle") [880, 1047, 932, 1175, 1047, 1319].forEach((f, i) => tone(f, i * 0.07, 0.08, "triangle", 0.08));
     if (kind === "coin") { tone(988, 0, 0.07, "square", 0.05); tone(1319, 0.07, 0.25, "square", 0.05); }
     if (kind === "yum") { tone(520, 0, 0.06, "triangle", 0.1); tone(700, 0.08, 0.08, "triangle", 0.1); }
     if (kind === "buy") { [784, 988, 1175, 1568].forEach((f, i) => tone(f, i * 0.06, 0.15, "triangle", 0.09)); tone(1319, 0.3, 0.3, "square", 0.04); }
@@ -2083,7 +2249,7 @@ $("play").onclick = () => {
   sfx("start");
   loopFn = null;
   const saved = ANIMALS.find(a => a.id === load("bichos-animal", null));
-  if (saved) { animal = saved; openHub(); } else show("s-pick");
+  if (saved) { animal = saved; openHub(true); } else { show("s-pick"); say("Quem vai ser seu amiguinho hoje?"); }
 };
 
 // ---------- Início ----------
