@@ -174,9 +174,41 @@
   #animals .card:nth-child(6n+6) { background: color-mix(in srgb, #ffe0cc 50%, var(--card)); }
   /* Mini jogo em tela cheia */
   body.playing { overflow: hidden; }
-  #s-game.active { position: fixed; inset: 0; z-index: 20; background: var(--bg); animation: none; }
-  #s-game .stage { position: absolute; inset: 0; border: 0; border-radius: 0; box-shadow: none; }
-  #g-area { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #s-game.active, #s-house.active { position: fixed; inset: 0; z-index: 20; background: var(--bg); animation: none; }
+  #s-game .stage, #s-house .stage { position: absolute; inset: 0; border: 0; border-radius: 0; box-shadow: none; }
+  #g-area, .full3d { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .ghint:empty { display: none; }
+  /* Casinha */
+  .house-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; margin-bottom: 18px;
+    background: linear-gradient(120deg, color-mix(in srgb, #ffd6e7 60%, var(--card)), color-mix(in srgb, #d6f0ff 60%, var(--card))); }
+  .house-card .emoji { font-size: 3.4rem; }
+  .meter { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; }
+  .meter i { display: block; width: 52px; height: 12px; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .meter b { display: block; height: 100%; width: 50%; border-radius: 99px; background: var(--good); transition: width .4s, background .4s; }
+  .meter b.low { background: #ff7a7a; } .meter b.mid { background: #ffc93c; }
+  .house-say { position: absolute; top: 74px; left: 0; right: 0; display: flex; justify-content: center; z-index: 2; pointer-events: none; padding: 0 12px; }
+  .house-say .bubble { margin: 0; font-size: 1.1rem; }
+  .house-say .bubble::before { display: none; }
+  .house-actions { position: absolute; left: 0; right: 0; bottom: max(14px, env(safe-area-inset-bottom)); z-index: 2;
+    display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; padding: 0 10px; }
+  .house-actions .btn { font-size: 1.2rem; padding: 12px 18px; }
+  .house-actions .btn:disabled { opacity: .45; }
+  @media (max-width: 560px) { .meter i { width: 34px; } .house-say { top: 116px; } }
+  /* Perguntas dos jogos educativos */
+  .quiz {
+    position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 2;
+    width: min(94%, 680px); background: color-mix(in srgb, var(--card) 94%, transparent); border: 4px solid var(--line);
+    border-radius: 26px; padding: 14px; text-align: center; box-shadow: var(--shadow);
+  }
+  .quiz[hidden] { display: none; }
+  .q-text { font-size: clamp(1.25rem, 4.6vw, 1.9rem); font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .q-word { letter-spacing: 6px; color: var(--accent); font-size: 1.5em; text-shadow: 0 2px 0 var(--line); }
+  .q-opts { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
+  .q-opts .btn { font-size: clamp(1.3rem, 5vw, 2rem); min-width: 86px; padding: 12px 20px; }
+  .q-opts .btn.wrong { opacity: .35; animation: shake .4s; }
+  .q-opts .btn.right { background: var(--good); }
+  .q-say { padding: 6px 12px !important; font-size: 1.1rem !important; }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
   #g-area canvas { border-radius: 0; }
   .gtop {
     position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; gap: 8px; align-items: center;
@@ -210,7 +242,7 @@
     <div id="splash-view"></div>
     <div class="splash-ui">
       <h1 class="logo" id="logo" aria-label="Aventura dos Bichos"></h1>
-      <div class="splash-sub">🐾 13 bichinhos · 6 brincadeiras 🎈</div>
+      <div class="splash-sub">🐾 13 bichinhos · 11 brincadeiras · casinha 🏠</div>
     </div>
     <button class="btn play-btn" id="play">▶ Vamos brincar!</button>
   </section>
@@ -237,8 +269,35 @@
       <button class="btn blue" id="open-buy">💎 Mais estrelas</button>
       <button class="btn ghost" id="change">🔄 Trocar bichinho</button>
     </div>
+    <button class="card house-card" id="open-house">
+      <div class="emoji">🏠</div>
+      <div><div class="name" id="house-title">Casinha</div><div class="desc">Dar comida, banho, carinho e soninho 💕</div></div>
+    </button>
     <h2>🎈 Vamos brincar de quê?</h2>
     <div class="grid" id="games"></div>
+    <h2 style="margin-top:22px">📚 Aprender brincando</h2>
+    <div class="grid" id="edu-games"></div>
+  </section>
+
+  <!-- Casinha -->
+  <section id="s-house" class="screen">
+    <div class="stage">
+      <div id="house-area" class="full3d"></div>
+      <div class="gtop">
+        <button class="btn ghost" id="house-back">← Voltar</button>
+        <span class="pill meter" title="Comidinha">🍎 <i><b id="m-fome"></b></i></span>
+        <span class="pill meter" title="Limpinho">🛁 <i><b id="m-banho"></b></i></span>
+        <span class="pill meter" title="Carinho">💖 <i><b id="m-amor"></b></i></span>
+        <span class="pill meter" title="Soninho">😴 <i><b id="m-sono"></b></i></span>
+      </div>
+      <div class="house-say"><span class="bubble" id="house-say"></span></div>
+      <div class="house-actions">
+        <button class="btn" id="act-food">🍎 Comer</button>
+        <button class="btn blue" id="act-bath">🛁 Banho</button>
+        <button class="btn" id="act-love">🤗 Carinho</button>
+        <button class="btn blue" id="act-sleep">💤 Dormir</button>
+      </div>
+    </div>
   </section>
 
   <!-- Loja -->
@@ -296,6 +355,7 @@
         <span class="pill" id="g-extra"></span>
       </div>
       <p class="ghint" id="g-hint"></p>
+      <div class="quiz" id="g-quiz" hidden></div>
       <div class="overlay" id="g-over" hidden></div>
     </div>
   </section>
@@ -349,6 +409,11 @@ const GAMES = [
   { id: "toca",    emoji: "🕳️", name: "Toca Maluca",         desc: "Dê oi pros bichinhos!",     stars: [10, 20, 32], play: playWhack },
   { id: "barco",   emoji: "🚤", name: "Passeio de Barquinho", desc: "Pegue estrelas no rio",    stars: [10, 25, 45], play: playBoat },
   { id: "balao",   emoji: "🎈", name: "Estoura Balões",      desc: "Pop! Pop! Pop!",            stars: [12, 25, 40], play: playBalloons },
+  { id: "contar",  emoji: "🍎", name: "Conta Frutinhas",     desc: "Quantas tem na mesa?",      stars: [5, 8, 10], edu: true, play: (a, d) => playEdu(a, d, countQ) },
+  { id: "contas",  emoji: "➕", name: "Continhas",           desc: "Mais e menos com frutinhas", stars: [5, 8, 10], edu: true, play: (a, d) => playEdu(a, d, mathQ) },
+  { id: "letras",  emoji: "🔤", name: "Letrinhas",           desc: "Com que letra começa?",     stars: [5, 8, 10], edu: true, play: (a, d) => playEdu(a, d, letterQ) },
+  { id: "formas",  emoji: "🔷", name: "Cores e Formas",      desc: "Toque na forma certa",      stars: [5, 8, 10], edu: true, play: (a, d) => playEdu(a, d, shapeQ) },
+  { id: "quiz",    emoji: "❓", name: "Perguntinhas",        desc: "Você sabe a resposta?",     stars: [5, 8, 10], edu: true, play: (a, d) => playEdu(a, d, quizQ) },
 ];
 
 const HATS = [
@@ -387,7 +452,7 @@ let equipped = load("bichos-equipado", { hat: null, scene: null });
 const $ = (id) => document.getElementById(id);
 function show(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id));
-  document.body.classList.toggle("playing", id === "s-game" || id === "s-splash");
+  document.body.classList.toggle("playing", id === "s-game" || id === "s-splash" || id === "s-house");
   if (id !== "s-game" && document.fullscreenElement) { try { document.exitFullscreen().catch(() => {}); } catch {} }
 }
 // Tenta usar a tela cheia de verdade do aparelho (quando o navegador deixa)
@@ -442,12 +507,13 @@ function makeAnimal(L, hatId) {
   if (L.patches) [-1, 1].forEach(s => part("sphere", L.patches, [.14, .17, .08], [s * .18, .03, .39], head, [0, 0, s * -.4]));
 
   // Olhos com brilho
+  const pupils = [], shines = [];
   if (L.eyes === "top") {
     [-1, 1].forEach(s => {
       part("sphere", body, [.17, .17, .17], [s * .22, .38, .18], head);
       part("sphere", WHITE, [.12, .12, .08], [s * .22, .4, .3], head);
-      part("sphere", BLACK, [.07, .07, .05], [s * .22, .4, .36], head);
-      part("sphere", WHITE, [.025, .025, .02], [s * .22 + .03, .44, .4], head);
+      pupils.push(part("sphere", BLACK, [.07, .07, .05], [s * .22, .4, .36], head));
+      shines.push(part("sphere", WHITE, [.025, .025, .02], [s * .22 + .03, .44, .4], head));
     });
   } else {
     const big = L.eyes === "big";
@@ -457,8 +523,8 @@ function makeAnimal(L, hatId) {
       if (big) part("sphere", WHITE, [.17, .17, .06], [s * .19, .06, .4], head);
       if (L.patches) part("sphere", WHITE, [.075, .085, .04], [s * .18, .06, z], head);
       const r = big ? .1 : L.patches ? .05 : .075;
-      part("sphere", BLACK, [r, r * 1.1, r * .6], [s * .18, .06, z + (L.patches ? .03 : 0)], head);
-      part("sphere", WHITE, [.028, .028, .02], [s * .18 + .03, .1, z + .05], head);
+      pupils.push(part("sphere", BLACK, [r, r * 1.1, r * .6], [s * .18, .06, z + (L.patches ? .03 : 0)], head));
+      shines.push(part("sphere", WHITE, [.028, .028, .02], [s * .18 + .03, .1, z + .05], head));
     });
   }
   [-1, 1].forEach(s => part("sphere", PINK, [.08, .05, .03], [s * .3, -.13, .38], head));
@@ -523,7 +589,7 @@ function makeAnimal(L, hatId) {
   if (L.tail === "curl") part("torus", L.body, [.09, .09, .09], [0, .6, -.58], g);
 
   if (hatId) addHat(head, hatId);
-  g.userData = { head, feet, arms };
+  g.userData = { head, feet, arms, pupils, shines };
   return g;
 }
 
@@ -708,7 +774,8 @@ function openHub() {
   $("hub-name").textContent = `Oi! Eu sou o ${animal.name}! ${animal.talent} Vamos brincar? 💕`;
   addStars(0);
   let total = 0;
-  $("games").innerHTML = "";
+  $("games").innerHTML = ""; $("edu-games").innerHTML = "";
+  $("house-title").textContent = `Casinha do ${animal.name}`;
   GAMES.forEach(g => {
     const sc = best[g.id] || 0, st = starsFor(g, sc);
     total += st;
@@ -717,7 +784,7 @@ function openHub() {
     b.innerHTML = `<div class="emoji">${g.emoji}</div><div class="name">${g.name}</div><div class="desc">${g.desc}</div>
       <div class="best">${"⭐".repeat(st)}${"☆".repeat(3 - st)} · Recorde: ${sc}</div>`;
     b.onclick = () => startGame(g);
-    $("games").appendChild(b);
+    $(g.edu ? "edu-games" : "games").appendChild(b);
   });
   $("hub-stars").textContent = total;
   $("hub-max").textContent = GAMES.length * 3;
@@ -755,6 +822,7 @@ function startGame(g) {
   $("g-area").innerHTML = "";
   $("g-over").hidden = true;
   $("g-over").parentElement.classList.remove("done");
+  $("g-quiz").hidden = true;
   setScore(0); setExtra("");
   goFullscreen();
   show("s-game");
@@ -1435,6 +1503,523 @@ function playBalloons(area, done) {
   function end() { if (ended) return; ended = true; clearInterval(timer); done(score); }
   return () => { ended = true; clearInterval(timer); renderer.domElement.onpointerdown = null; };
 }
+
+// ---------- Voz que lê as perguntas (ajuda quem ainda não lê) ----------
+let voice = null;
+function pickVoice() {
+  try {
+    const v = speechSynthesis.getVoices();
+    voice = v.find(x => /pt[-_]BR/i.test(x.lang)) || v.find(x => /^pt/i.test(x.lang)) || null;
+  } catch {}
+}
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = pickVoice;
+function say(text) {
+  if (!soundOn || !window.speechSynthesis) return;
+  try {
+    speechSynthesis.cancel();
+    if (!voice) pickVoice();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "pt-BR"; if (voice) u.voice = voice;
+    u.rate = .95; u.pitch = 1.25;
+    speechSynthesis.speak(u);
+  } catch {}
+}
+function hush() { try { window.speechSynthesis && speechSynthesis.cancel(); } catch {} }
+
+const rand = (n) => Math.floor(Math.random() * n);
+const shuffle = (arr) => arr.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(x => x[1]);
+// Resposta certa + 2 vizinhas, em ordem crescente (mais fácil para os pequenos)
+function numberOptions(ans, min = 0, max = 20) {
+  const set = new Set([ans]);
+  while (set.size < 3) { const v = ans + (rand(5) - 2); if (v >= min && v <= max) set.add(v); }
+  return [...set].sort((a, b) => a - b).map(v => ({ label: v, value: v }));
+}
+// Coloca n coisas na mesa em até 2 fileiras
+function rowPositions(n, perRow = 5, gap = .78) {
+  const out = [];
+  const rows = Math.ceil(n / perRow);
+  for (let i = 0; i < n; i++) {
+    const r = Math.floor(i / perRow), inRow = Math.min(perRow, n - r * perRow), c = i % perRow;
+    out.push([(c - (inRow - 1) / 2) * gap, rows === 1 ? 0 : (r === 0 ? -.35 : .4)]);
+  }
+  return out;
+}
+const TABLE_Y = .95;
+
+// ---------- Jogo educativo: motor comum ----------
+function playEdu(area, done, gen) {
+  $("g-hint").textContent = "";
+  const { s, sc } = makeWorld();
+  for (let i = 0; i < 6; i++) { const t = makeTree(sc); t.position.set(-8 + i * 3.2, 0, -5 - (i % 2) * 2); s.add(t); }
+  // Mesinha
+  part("box", "#e8b886", [4.8, .18, 1.9], [0, .86, 0], s);
+  [[-2.1, -.7], [2.1, -.7], [-2.1, .7], [2.1, .7]].forEach(([x, z]) => part("cyl", "#c98f5f", [.1, .8, .1], [x, .4, z], s));
+  const a = makeAnimal(animal.look, equipped.hat);
+  a.position.set(-2.9, 0, 1.1); a.rotation.y = .5; a.scale.setScalar(.85); s.add(a);
+  const sh = shadowBlob(.6); sh.position.set(-2.9, .02, 1.1); s.add(sh);
+  const props = new THREE.Group(); s.add(props);
+  const cam = new THREE.PerspectiveCamera(48, 1.6, .1, 100);
+  mount(area, cam, null, (asp) => fitCamera(cam, new THREE.Vector3(-.3, .35, 0), new THREE.Vector3(0, 2.2, 8.5), 3.6, asp));
+
+  const quiz = $("g-quiz");
+  const PRAISE = ["Muito bem!", "Isso mesmo!", "Parabéns!", "Você é demais!", "Uhuu, acertou!"];
+  let i = 0, score = 0, firstTry = true, q = null, busy = false, react = 0, shake = 0, t = 0, ended = false, nextT = null;
+  setExtra("📖 1/10");
+
+  function next() {
+    if (ended) return;
+    if (i >= 10) { ended = true; return done(score); }
+    firstTry = true;
+    setExtra(`📖 ${i + 1}/10`);
+    while (props.children.length) props.remove(props.children[0]);
+    q = gen(i);
+    if (q.props) q.props(props);
+    quiz.hidden = false;
+    quiz.innerHTML = `<div class="q-text"><span>${q.html}</span><button class="btn ghost q-say" aria-label="Ouvir de novo">🔊</button></div>
+      <div class="q-opts"></div>`;
+    quiz.querySelector(".q-say").onclick = () => say(q.say);
+    (q.options || []).forEach(o => {
+      const b = document.createElement("button");
+      b.className = "btn"; b.innerHTML = o.label;
+      b.onclick = () => answer(o.value, b, null);
+      quiz.querySelector(".q-opts").appendChild(b);
+    });
+    say(q.say);
+  }
+  function answer(value, btn, obj) {
+    if (busy || ended) return;
+    if (value === q.answer) {
+      busy = true;
+      if (firstTry) score++;
+      setScore(score);
+      if (btn) btn.classList.add("right");
+      if (obj) obj.userData.bump = 1;
+      sfx("match"); say(PRAISE[rand(PRAISE.length)]); react = 1; confetti(quiz);
+      i++;
+      nextT = setTimeout(() => { busy = false; next(); }, 1600);
+    } else {
+      firstTry = false;
+      if (btn) { btn.classList.add("wrong"); btn.disabled = true; }
+      if (obj) obj.userData.nope = 1;
+      sfx("ouch"); say("Quase! Tente de novo."); shake = 1;
+    }
+  }
+  // Nas cores e formas a criança toca no objeto 3D
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  renderer.domElement.onpointerdown = (e) => {
+    if (!q || !q.pick3D) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    ptr.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ptr, cam);
+    const hit = ray.intersectObjects(props.children, true)[0];
+    let o = hit && hit.object;
+    while (o && o.userData.value === undefined) o = o.parent;
+    if (o) answer(o.userData.value, null, o);
+  };
+
+  loopFn = () => {
+    t++;
+    props.children.forEach(o => {
+      const u = o.userData;
+      if (u.spin) o.rotation.y += .02;
+      if (u.flyAt && t > u.flyAt) { o.position.y += .03; o.material.opacity = Math.max(0, o.material.opacity - .02); }
+      if (u.bump) { u.bump = Math.max(0, u.bump - .04); o.position.y = (u.baseY || o.position.y) + Math.sin(u.bump * Math.PI) * .6; }
+      if (u.nope) { u.nope = Math.max(0, u.nope - .05); o.rotation.z = Math.sin(u.nope * 20) * .3 * u.nope; }
+      if (u.bob !== undefined) o.position.y = u.baseY + Math.sin(t / 20 + u.bob) * .08;
+    });
+    react = Math.max(0, react - .03);
+    shake = Math.max(0, shake - .04);
+    a.position.y = Math.sin(react * Math.PI) * .7;
+    a.userData.arms.forEach((m, k) => m.rotation.z = (k ? 1 : -1) * (.4 + react * 1.6));
+    a.userData.head.rotation.y = Math.sin(shake * 18) * .4 * shake;
+    a.userData.head.rotation.z = Math.sin(t / 30) * .06;
+    renderer.render(s, cam);
+  };
+  next();
+  return () => { ended = true; clearTimeout(nextT); hush(); quiz.hidden = true; renderer.domElement.onpointerdown = null; };
+}
+
+const FRUITS = [["🍎", "maçãs"], ["🍌", "bananas"], ["🍓", "morangos", true], ["🍊", "laranjas"], ["🍇", "uvas"], ["🍐", "peras"], ["🍒", "cerejas"]];
+function fruitAt(group, e, x, z, size = .7) {
+  const f = emojiSprite(e, size);
+  f.position.set(x, TABLE_Y + size / 2, z);
+  f.userData = { baseY: TABLE_Y + size / 2, bob: Math.random() * 6 };
+  group.add(f);
+  return f;
+}
+
+// 1) Conta Frutinhas
+function countQ(i) {
+  const n = i < 3 ? 1 + rand(5) : i < 7 ? 3 + rand(6) : 5 + rand(6);
+  const [e, name, masc] = FRUITS[rand(FRUITS.length)];
+  const qt = masc ? "Quantos" : "Quantas";
+  return {
+    html: `${qt} ${name} tem na mesa? ${e}`, say: `${qt} ${name} tem na mesa?`,
+    options: numberOptions(n, 1, 10), answer: n,
+    props: (g) => rowPositions(n).forEach(([x, z]) => fruitAt(g, e, x, z)),
+  };
+}
+
+// 2) Continhas (mais e menos)
+function mathQ(i) {
+  const sub = i >= 6 && i % 2 === 0;
+  let a, b;
+  if (sub) { a = 3 + rand(6); b = 1 + rand(a - 1); }
+  else if (i < 3) { a = 1 + rand(3); b = 1 + rand(3); }
+  else { a = 1 + rand(5); b = 1 + rand(5); }
+  const ans = sub ? a - b : a + b;
+  const e = FRUITS[rand(FRUITS.length)][0];
+  return {
+    html: `<span class="q-word">${a} ${sub ? "−" : "+"} ${b} = ?</span>`,
+    say: sub ? `Tinha ${a}, foram embora ${b}. Quantos ficaram? ${a} menos ${b}?` : `Quanto é ${a} mais ${b}?`,
+    options: numberOptions(ans, 0, 10), answer: ans,
+    props: (g) => {
+      const gap = .44, size = .5;
+      if (sub) {
+        rowPositions(a, 9, .5).forEach(([x], k) => {
+          const f = fruitAt(g, e, x, 0, size);
+          if (k >= a - b) f.userData = { flyAt: 70 + (k - (a - b)) * 15, baseY: f.position.y };
+        });
+      } else {
+        const total = a + b + 1, x0 = -(total - 1) / 2 * gap;
+        for (let k = 0; k < a; k++) fruitAt(g, e, x0 + k * gap, 0, size);
+        const plus = emojiSprite("➕", .4); plus.position.set(x0 + a * gap, TABLE_Y + .3, 0); g.add(plus);
+        for (let k = 0; k < b; k++) fruitAt(g, e, x0 + (a + 1 + k) * gap, 0, size);
+      }
+    },
+  };
+}
+
+// 3) Letrinhas
+const WORDS = [["GATO", "🐱"], ["BOLA", "⚽"], ["CASA", "🏠"], ["DADO", "🎲"], ["ESTRELA", "⭐"], ["FOCA", "🦭"], ["MAÇÃ", "🍎"],
+  ["PATO", "🦆"], ["SOL", "☀️"], ["UVA", "🍇"], ["VACA", "🐄"], ["ABELHA", "🐝"], ["NAVIO", "🚢"], ["LUA", "🌙"], ["RATO", "🐭"],
+  ["JACARÉ", "🐊"], ["OVO", "🥚"], ["TOMATE", "🍅"], ["BANANA", "🍌"], ["ZEBRA", "🦓"], ["QUEIJO", "🧀"], ["CAVALO", "🐴"],
+  ["LEÃO", "🦁"], ["PEIXE", "🐟"], ["MACACO", "🐵"], ["URSO", "🐻"], ["ELEFANTE", "🐘"], ["TARTARUGA", "🐢"], ["ÍNDIO", null]].filter(w => w[1]);
+let wordDeck = [];
+function letterQ(i) {
+  if (i === 0) wordDeck = shuffle(WORDS);
+  const [word, e] = wordDeck[i % wordDeck.length];
+  const first = word[0];
+  const letters = new Set([first]);
+  const ABC = "ABCDEFGJLMNOPRSTUVZ";
+  while (letters.size < 3) letters.add(ABC[rand(ABC.length)]);
+  return {
+    html: `Com que letra começa? <span class="q-word">_${word.slice(1)}</span>`,
+    say: `Com que letra começa ${word.toLowerCase()}?`,
+    options: shuffle([...letters]).map(l => ({ label: l, value: l })), answer: first,
+    props: (g) => {
+      const big = emojiSprite(e, 1.5);
+      big.position.set(0, TABLE_Y + .9, 0);
+      big.userData = { baseY: TABLE_Y + .9, bob: 0 };
+      g.add(big);
+    },
+  };
+}
+
+// 4) Cores e Formas (toca no objeto 3D)
+const SHAPES = [
+  { id: "bola", art: "na", name: "bola", fem: true },
+  { id: "cubo", art: "no", name: "cubo" },
+  { id: "cone", art: "no", name: "cone" },
+  { id: "rosca", art: "na", name: "rosquinha", fem: true },
+];
+const COLORS3 = [
+  { m: "vermelho", f: "vermelha", c: "#ff5a5a" }, { m: "azul", f: "azul", c: "#4f9dff" }, { m: "amarelo", f: "amarela", c: "#ffd23a" },
+  { m: "verde", f: "verde", c: "#4fc35f" }, { m: "rosa", f: "rosa", c: "#ff8fc6" }, { m: "roxo", f: "roxa", c: "#9b6bff" },
+];
+function shapeMesh(sh, color) {
+  const g = new THREE.Group();
+  if (sh.id === "bola") part("sphere", color, [.4, .4, .4], [0, 0, 0], g);
+  if (sh.id === "cubo") part("box", color, [.62, .62, .62], [0, 0, 0], g, [.3, .5, 0]);
+  if (sh.id === "cone") part("cone", color, [.42, .8, .42], [0, 0, 0], g);
+  if (sh.id === "rosca") part("torus", color, [.32, .32, .32], [0, 0, 0], g, [-.4, 0, 0]);
+  return g;
+}
+function shapeQ(i) {
+  let items, target, html, sayText;
+  if (i < 3) {
+    const cols = shuffle(COLORS3).slice(0, 4);
+    items = cols.map(c => ({ sh: SHAPES[rand(4)], c }));
+    target = rand(4);
+    const c = items[target].c;
+    html = `Toque na cor <b style="color:${c.c}">${c.m.toUpperCase()}</b>`; sayText = `Toque na cor ${c.m}`;
+  } else if (i < 6) {
+    items = shuffle(SHAPES).map(sh => ({ sh, c: COLORS3[rand(6)] }));
+    target = rand(4);
+    const sh = items[target].sh;
+    html = `Toque ${sh.art} <b>${sh.name.toUpperCase()}</b>`; sayText = `Toque ${sh.art} ${sh.name}`;
+  } else {
+    const sh = SHAPES[rand(4)], c = COLORS3[rand(6)];
+    const otherC = shuffle(COLORS3.filter(x => x !== c)), otherS = shuffle(SHAPES.filter(x => x !== sh));
+    items = shuffle([{ sh, c }, { sh, c: otherC[0] }, { sh: otherS[0], c }, { sh: otherS[1], c: otherC[1] }]);
+    target = items.findIndex(x => x.sh === sh && x.c === c);
+    const adj = sh.fem ? c.f : c.m;
+    html = `Toque ${sh.art} <b>${sh.name.toUpperCase()} <span style="color:${c.c}">${adj.toUpperCase()}</span></b>`;
+    sayText = `Toque ${sh.art} ${sh.name} ${adj}`;
+  }
+  return {
+    html, say: sayText, pick3D: true, answer: target,
+    props: (g) => items.forEach((it, k) => {
+      const m = shapeMesh(it.sh, it.c.c);
+      m.position.set(-1.7 + k * 1.13, TABLE_Y + .55, .1);
+      m.userData = { value: k, spin: true, baseY: TABLE_Y + .55 };
+      g.add(m);
+    }),
+  };
+}
+
+// 5) Perguntinhas
+const QUIZ = [
+  ["Qual bichinho faz miau?", "🐱 Gato", "🐶 Cachorro", "🐮 Vaca"],
+  ["Qual bichinho faz au au?", "🐶 Cachorro", "🐱 Gato", "🐷 Porco"],
+  ["Qual bichinho faz muu?", "🐮 Vaca", "🐔 Galinha", "🐸 Sapo"],
+  ["Qual bichinho voa?", "🐦 Passarinho", "🐟 Peixe", "🐢 Tartaruga"],
+  ["Quem mora na água?", "🐟 Peixe", "🦒 Girafa", "🐔 Galinha"],
+  ["Qual fruta é amarela?", "🍌 Banana", "🍓 Morango", "🍇 Uva"],
+  ["De que cor é o céu num dia de sol?", "🔵 Azul", "🔴 Vermelho", "🟢 Verde"],
+  ["Quantas patas tem um cachorro?", "4", "2", "6"],
+  ["Quantas pernas tem uma galinha?", "2", "4", "3"],
+  ["O que a gente usa quando chove?", "☂️ Guarda-chuva", "🕶️ Óculos", "🩴 Chinelo"],
+  ["Qual é o maior bichinho?", "🐘 Elefante", "🐭 Rato", "🐜 Formiga"],
+  ["Quem faz o mel?", "🐝 Abelha", "🐌 Caracol", "🦋 Borboleta"],
+  ["Quem bota ovo?", "🐔 Galinha", "🐶 Cachorro", "🐱 Gato"],
+  ["Qual é a comida favorita do coelho?", "🥕 Cenoura", "🍕 Pizza", "🍦 Sorvete"],
+  ["Quando a gente vê a lua?", "🌙 De noite", "☀️ De dia", "🌈 No arco-íris"],
+  ["Quantos dedos tem uma mão?", "5", "4", "3"],
+  ["O que é bem quentinho?", "🔥 Fogo", "🧊 Gelo", "⛄ Boneco de neve"],
+  ["O que usamos para escovar os dentes?", "🪥 Escova", "🥄 Colher", "✏️ Lápis"],
+  ["Qual destes é um meio de transporte?", "🚌 Ônibus", "🍎 Maçã", "🧸 Ursinho"],
+  ["Onde o peixe mora?", "🌊 No mar", "🌳 Na árvore", "☁️ Na nuvem"],
+  ["Qual destes a gente usa nos pés?", "👟 Tênis", "🧢 Boné", "🧤 Luva"],
+  ["Qual é a cor do morango?", "🔴 Vermelho", "🔵 Azul", "🟣 Roxo"],
+];
+let quizDeck = [];
+function quizQ(i) {
+  if (i === 0) quizDeck = shuffle(QUIZ);
+  const [question, right, ...wrong] = quizDeck[i % quizDeck.length];
+  const e = right.split(" ")[0];
+  return {
+    html: question, say: question,
+    options: shuffle([right, ...wrong]).map(o => ({ label: o, value: o })), answer: right,
+    props: (g) => {
+      const m = emojiSprite("❓", 1.3);
+      m.position.set(0, TABLE_Y + .8, 0); m.userData = { baseY: TABLE_Y + .8, bob: 0 };
+      g.add(m);
+    },
+  };
+}
+
+// ---------- Casinha ----------
+const CARE = ["fome", "banho", "amor", "sono"];
+const DECAY = { fome: 1.2, banho: .8, amor: 1, sono: .6 };   // pontos por minuto
+function loadCare() {
+  const c = load("bichos-casa-" + animal.id, null) || { fome: 60, banho: 60, amor: 60, sono: 70, t: Date.now(), reward: 0 };
+  const mins = Math.min((Date.now() - c.t) / 60000, 600);
+  CARE.forEach(k => c[k] = Math.max(5, c[k] - DECAY[k] * mins));
+  c.t = Date.now();
+  return c;
+}
+
+function openHouse() {
+  stopGame();
+  show("s-house");
+  const care = loadCare();
+  const s = new THREE.Scene();
+  s.background = new THREE.Color("#ffe9f2");
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x9aa8c8, .75); s.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffffff, .5); sun.position.set(2, 5, 4); s.add(sun);
+
+  // Quartinho
+  const plane = (w, h, color, pos, rot) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat(color));
+    m.position.set(...pos); if (rot) m.rotation.set(...rot); s.add(m); return m;
+  };
+  plane(14, 12, "#f3c99b", [0, 0, 1], [-Math.PI / 2, 0, 0]);
+  for (let k = -6; k <= 6; k += 1.2) part("box", "#e6b585", [.03, .01, 12], [k, .005, 1], s);
+  plane(14, 8, "#ffe3ee", [0, 4, -3]);
+  plane(12, 8, "#e3f2ff", [-5.5, 4, 1], [0, Math.PI / 2, 0]);
+  plane(12, 8, "#e3f2ff", [5.5, 4, 1], [0, -Math.PI / 2, 0]);
+  const rug = new THREE.Mesh(GEO.circle, mat("#ffc3dc")); rug.rotation.x = -Math.PI / 2; rug.scale.setScalar(1.7); rug.position.set(0, .015, .5); s.add(rug);
+  // Janela
+  part("box", "#ffffff", [2.3, 1.7, .1], [-2.3, 3.1, -2.95], s);
+  const glassMat = new THREE.MeshBasicMaterial({ color: "#bfe8ff" });
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(2, 1.4), glassMat); glass.position.set(-2.3, 3.1, -2.88); s.add(glass);
+  part("box", "#ffffff", [.06, 1.4, .05], [-2.3, 3.1, -2.86], s);
+  part("box", "#ffffff", [2, .06, .05], [-2.3, 3.1, -2.86], s);
+  const sky = emojiSprite("☀️", .7); sky.position.set(-2.8, 3.4, -2.8); s.add(sky);
+  // Quadrinho e plantinha
+  part("box", "#ffd54a", [1.1, .9, .06], [2.4, 3.4, -2.95], s);
+  const pic = emojiSprite("💖", .55); pic.position.set(2.4, 3.4, -2.85); s.add(pic);
+  part("cyl", "#ff9f6b", [.35, .5, .35], [-4.4, .25, -2], s);
+  [[0, .9, 0, .45], [.25, 1.2, .1, .3], [-.25, 1.15, -.1, .3]].forEach(([x, y, z, r]) => part("sphere", "#5cc96b", [r, r, r], [-4.4 + x, y, -2 + z], s));
+  // Caminha
+  part("box", "#b79cff", [2.4, .5, 1.5], [3.3, .25, -1.2], s);
+  part("box", "#ffffff", [2.3, .25, 1.4], [3.3, .62, -1.2], s);
+  part("box", "#ff9ad5", [1.5, .12, 1.42], [3.7, .78, -1.2], s);
+  part("sphere", "#ffffff", [.42, .16, .32], [2.55, .84, -1.2], s);
+  part("box", "#9b7bff", [.15, 1.3, 1.5], [2.05, .8, -1.2], s);
+  // Potinho de comida e brinquedo
+  part("cyl", "#ff7aa8", [.42, .2, .42], [-1.6, .1, 1], s);
+  const bowlFood = emojiSprite(animal.food, .45); bowlFood.position.set(-1.6, .4, 1); s.add(bowlFood);
+  part("sphere", "#4f9dff", [.25, .25, .25], [1.7, .25, 1.5], s);
+  part("torus", "#ffd23a", [.25, .25, .25], [1.7, .25, 1.5], s, [Math.PI / 2, 0, 0]);
+  // Banheira (aparece só no banho)
+  const tub = new THREE.Group();
+  part("cyl", "#ffffff", [1.05, .7, 1.05], [0, .35, 0], tub);
+  part("torus", "#e9f2ff", [1.05, 1.05, .6], [0, .7, 0], tub, [Math.PI / 2, 0, 0]);
+  const water = new THREE.Mesh(GEO.circle, new THREE.MeshBasicMaterial({ color: "#8fd3ff" }));
+  water.rotation.x = -Math.PI / 2; water.position.y = .68; water.scale.setScalar(1); tub.add(water);
+  tub.position.set(0, 0, .5); tub.visible = false; s.add(tub);
+
+  const a = makeAnimal(animal.look, equipped.hat);
+  a.position.set(0, 0, .5); s.add(a);
+  const sh = shadowBlob(.7); sh.position.set(0, .02, .5); s.add(sh);
+  const pupilY = a.userData.pupils.map(p => p.scale.y);
+
+  const cam = new THREE.PerspectiveCamera(48, 1.6, .1, 100);
+  mount($("house-area"), cam, null, (asp) => fitCamera(cam, new THREE.Vector3(0, 1.5, 0), new THREE.Vector3(0, 1.2, 7.8), 3.4, asp));
+
+  let fx = [], busy = false, sleeping = false, t = 0, chomp = 0, wiggle = 0, nope = 0, lastSave = 0, flash = 0;
+  const say1 = $("house-say");
+  function setMsg(text, ms) { say1.textContent = text; flash = ms ? Date.now() + ms : 0; }
+  function moodMsg() {
+    if (flash > Date.now()) return;
+    if (sleeping) return setMsg("Zzz… 😴");
+    const low = CARE.reduce((m, k) => care[k] < care[m] ? k : m, "fome");
+    if (care[low] >= 80) return setMsg(`Tô muito feliz! Obrigado! 💕`);
+    if (care[low] < 45) return setMsg({ fome: "Tô com fominha! 🍎", banho: "Preciso de um banho! 🛁", amor: "Me dá um abraço? 🤗", sono: "Tô com soninho… 😴" }[low]);
+    setMsg(`Oi! Vamos brincar na casinha? 🏠`);
+  }
+  function paint() {
+    CARE.forEach(k => {
+      const b = $("m-" + k), v = Math.round(care[k]);
+      b.style.width = v + "%"; b.className = v < 30 ? "low" : v < 60 ? "mid" : "";
+    });
+    ["act-food", "act-bath", "act-love"].forEach(id => $(id).disabled = sleeping);
+    $("act-sleep").textContent = sleeping ? "☀️ Acordar" : "💤 Dormir";
+  }
+  function addCare(k, n) {
+    care[k] = Math.min(100, care[k] + n);
+    // Recompensa: tudo bem cuidado (no máximo 1 ⭐ a cada 10 minutos)
+    if (CARE.every(x => care[x] >= 90) && Date.now() - (care.reward || 0) > 10 * 60000) {
+      care.reward = Date.now();
+      addStars(1);
+      setTimeout(() => { sfx("win"); setTimeout(() => sfx("coin"), 450); }, 600);
+      setMsg("Você cuidou muito bem de mim! +1 ⭐", 4000);
+      say("Você cuidou muito bem de mim! Ganhou uma estrela!");
+    }
+    paint();
+  }
+  function floaty(e, x, y, z, size, life = 80) {
+    const sp = emojiSprite(e, size); sp.position.set(x, y, z); s.add(sp);
+    fx.push({ o: sp, life, max: life, vy: .02, vx: (Math.random() - .5) * .01 });
+  }
+  function setSleep(on) {
+    sleeping = on;
+    hemi.intensity = on ? .3 : .75; sun.intensity = on ? .12 : .5;
+    s.background.set(on ? "#3a3560" : "#ffe9f2");
+    glassMat.color.set(on ? "#1c2a4a" : "#bfe8ff");
+    sky.material.map = emojiSprite(on ? "🌙" : "☀️", .7).material.map;
+    a.userData.pupils.forEach((p, k) => p.scale.y = on ? pupilY[k] * .15 : pupilY[k]);
+    a.userData.shines.forEach(p => p.visible = !on);
+    if (on) { setMsg("Boa noite! 🌙", 1800); say("Boa noite!"); }
+    else { setMsg("Bom dia! ☀️", 1800); say("Bom dia!"); sfx("start"); }
+    paint();
+  }
+
+  $("act-food").onclick = () => {
+    if (busy || sleeping) return;
+    if (care.fome >= 95) { nope = 1; setMsg("Tô cheinho! 😋", 1800); say("Tô cheinho!"); return; }
+    busy = true;
+    const f = emojiSprite(animal.food, .45); f.position.set(-1.6, .45, 1); s.add(f);
+    let k = 0;
+    fx.push({ o: f, life: 9999, step: () => {
+      k++;
+      const p = Math.min(1, k / 35);
+      f.position.set(-1.6 + 1.6 * p, .45 + 1.1 * p + Math.sin(p * Math.PI) * .8, 1 - .1 * p);
+      if (p >= 1) { s.remove(f); chomp = 1; sfx("yum"); setTimeout(() => sfx("yum"), 300); addCare("fome", 25); setMsg("Nham nham! Que delícia! 😋", 2000); say("Nham nham! Que delícia!"); busy = false; return true; }
+    } });
+  };
+  $("act-bath").onclick = () => {
+    if (busy || sleeping) return;
+    busy = true; tub.visible = true; sfx("splash");
+    for (let k = 0; k < 36; k++) setTimeout(() => {
+      const b = new THREE.Mesh(GEO.sphere, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .75 }));
+      const r = .08 + Math.random() * .14; b.scale.setScalar(r);
+      const ang = Math.random() * Math.PI * 2;
+      b.position.set(Math.cos(ang) * .8, .8 + Math.random() * .6, .5 + Math.sin(ang) * .5);
+      s.add(b); fx.push({ o: b, life: 70, max: 70, vy: .015 + Math.random() * .015, vx: (Math.random() - .5) * .01, fade: true });
+      if (k % 6 === 0) sfx("popb");
+    }, k * 70);
+    setTimeout(() => {
+      tub.visible = false; busy = false; addCare("banho", 40);
+      for (let k = 0; k < 5; k++) floaty("✨", (Math.random() - .5) * 1.6, 1 + Math.random(), .9, .4, 50);
+      setMsg("Tô limpinho e cheiroso! ✨", 2000); say("Tô limpinho e cheiroso!"); sfx("match");
+    }, 2900);
+  };
+  function love() {
+    if (sleeping) return;
+    wiggle = 1; sfx("match");
+    for (let k = 0; k < 6; k++) setTimeout(() => floaty("💖", (Math.random() - .5) * 1.2, 2 + Math.random() * .3, .8, .4), k * 120);
+    addCare("amor", 22);
+    setMsg(["Hihihi! Eu te amo! 💕", "Que abraço gostoso! 🤗", "Mais carinho! 🥰"][rand(3)], 2000);
+  }
+  $("act-love").onclick = love;
+  $("act-sleep").onclick = () => setSleep(!sleeping);
+  $("house-back").onclick = () => openHub();
+  // Tocar no bichinho também faz carinho
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  renderer.domElement.onpointerdown = (e) => {
+    const r = renderer.domElement.getBoundingClientRect();
+    ptr.set((e.clientX - r.left) / r.width * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ptr, cam);
+    if (ray.intersectObject(a, true).length) love();
+  };
+
+  const timer = setInterval(() => {
+    CARE.forEach(k => { if (!(sleeping && k === "sono")) care[k] = Math.max(0, care[k] - DECAY[k] / 60); });
+    if (sleeping) {
+      care.sono = Math.min(100, care.sono + 5);
+      floaty("💤", .5, 2.2, .6, .45, 90);
+      if (care.sono >= 100) setSleep(false);
+    }
+    care.t = Date.now();
+    if (Date.now() - lastSave > 4000) { save("bichos-casa-" + animal.id, care); lastSave = Date.now(); }
+    paint(); moodMsg();
+  }, 1000);
+  paint(); moodMsg();
+  say(say1.textContent.replace(/[^\p{L}\p{N}\s!?.,…]/gu, ""));
+
+  loopFn = () => {
+    t++;
+    const happy = CARE.every(k => care[k] >= 60);
+    chomp = Math.max(0, chomp - .02); wiggle = Math.max(0, wiggle - .015); nope = Math.max(0, nope - .03);
+    const head = a.userData.head;
+    if (sleeping) {
+      a.position.y = 0; a.rotation.y = 0;
+      head.rotation.set(.25 + Math.sin(t / 40) * .03, 0, .15);
+    } else {
+      a.position.y = tub.visible ? 0 : happy ? Math.abs(Math.sin(t / 14)) * .15 : 0;
+      a.rotation.y = Math.sin(wiggle * 25) * .5 * wiggle + Math.sin(t / 90) * .25;
+      head.rotation.set(Math.sin(chomp * 30) * .15 * chomp + (CARE.some(k => care[k] < 25) ? .2 : 0), Math.sin(nope * 20) * .4 * nope, Math.sin(t / 50) * .06);
+      a.userData.arms.forEach((m, k) => m.rotation.z = (k ? 1 : -1) * (.4 + wiggle * 1.2 + (tub.visible ? Math.sin(t / 4) * .4 : 0)));
+    }
+    fx = fx.filter(f => {
+      if (f.step) return !f.step();
+      f.o.position.y += f.vy; f.o.position.x += f.vx;
+      if (f.fade || f.o.isSprite) f.o.material.opacity = Math.max(0, f.life / f.max);
+      if (--f.life <= 0) { s.remove(f.o); return false; }
+      return true;
+    });
+    renderer.render(s, cam);
+  };
+  cleanup = () => {
+    clearInterval(timer); hush();
+    care.t = Date.now(); save("bichos-casa-" + animal.id, care);
+    renderer.domElement.onpointerdown = null;
+  };
+}
+$("open-house").onclick = () => openHouse();
 
 // ---------- Tela de entrada ----------
 function buildLogo() {
