@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aventura dos Bichos</title>
+<style>
+  :root {
+    --bg: #fff8ec;
+    --card: #ffffff;
+    --ink: #2b2118;
+    --muted: #7a6a5a;
+    --accent: #f08a24;
+    --accent-ink: #ffffff;
+    --line: #ecdcc4;
+    --good: #2e9e5b;
+    --sky: #cdeefd;
+    --ground: #9ccc65;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1d1913; --card: #2a241c; --ink: #f6ecdf; --muted: #b9a892;
+      --accent: #ff9f43; --accent-ink: #1d1913; --line: #3e3529; --good: #5fd08d;
+      --sky: #22394a; --ground: #3f6b2a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1d1913; --card: #2a241c; --ink: #f6ecdf; --muted: #b9a892;
+    --accent: #ff9f43; --accent-ink: #1d1913; --line: #3e3529; --good: #5fd08d;
+    --sky: #22394a; --ground: #3f6b2a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 1.8rem; margin: 8px 0 4px; text-align: center; }
+  h2 { font-size: 1.3rem; margin: 0 0 12px; }
+  p.sub { text-align: center; color: var(--muted); margin: 0 0 20px; }
+  .screen { display: none; }
+  .screen.active { display: block; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .card {
+    background: var(--card); border: 2px solid var(--line); border-radius: 16px;
+    padding: 14px; text-align: center; cursor: pointer; transition: transform .1s, border-color .1s;
+    color: var(--ink); font: inherit;
+  }
+  .card:hover, .card:focus-visible { transform: translateY(-2px); border-color: var(--accent); outline: none; }
+  .card .emoji { font-size: 3rem; line-height: 1.2; }
+  .card .name { font-weight: 700; margin-top: 4px; }
+  .card .desc { font-size: .85rem; color: var(--muted); margin-top: 4px; }
+  .card .best { font-size: .85rem; margin-top: 6px; color: var(--good); font-weight: 600; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .hero { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+  .hero .emoji { font-size: 2.2rem; }
+  .pill { background: var(--card); border: 2px solid var(--line); border-radius: 999px; padding: 6px 12px; font-weight: 700; }
+  button.btn {
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 12px;
+    padding: 10px 16px; font: inherit; font-weight: 700; cursor: pointer;
+  }
+  button.btn.ghost { background: transparent; color: var(--ink); border: 2px solid var(--line); }
+  .stage { position: relative; background: var(--card); border: 2px solid var(--line); border-radius: 16px; overflow: hidden; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; }
+  .hud { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 700; gap: 8px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: .9rem; margin-top: 8px; text-align: center; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--card) 88%, transparent); text-align: center; padding: 16px; gap: 10px;
+  }
+  .overlay[hidden] { display: none; }
+  .overlay .big { font-size: 3rem; }
+  .mem { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 10px; }
+  .mem button {
+    aspect-ratio: 1; font-size: clamp(1.6rem, 7vw, 2.6rem); border-radius: 12px; border: 2px solid var(--line);
+    background: var(--accent); color: var(--accent-ink); cursor: pointer; font-family: inherit;
+  }
+  .mem button.open, .mem button.done { background: var(--bg); color: var(--ink); }
+  .mem button.done { border-color: var(--good); opacity: .7; }
+  .holes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 14px; }
+  .holes button {
+    aspect-ratio: 1; border-radius: 50%; border: 0; background: color-mix(in srgb, var(--ground) 70%, #000 30%);
+    font-size: clamp(2rem, 9vw, 3.2rem); cursor: pointer; font-family: inherit;
+  }
+  .result-stars { font-size: 2rem; letter-spacing: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Escolha do animal -->
+  <section id="s-pick" class="screen active">
+    <h1>🐾 Aventura dos Bichos</h1>
+    <p class="sub">Escolha seu animal! Cada um tem um talento especial nos mini jogos.</p>
+    <div class="grid" id="animals"></div>
+  </section>
+
+  <!-- Menu de mini jogos -->
+  <section id="s-hub" class="screen">
+    <div class="bar">
+      <div class="hero"><span class="emoji" id="hub-emoji"></span><span id="hub-name"></span></div>
+      <span class="pill">⭐ <span id="hub-stars">0</span> / 12</span>
+      <button class="btn ghost" id="change">Trocar animal</button>
+    </div>
+    <h2>Mini jogos</h2>
+    <div class="grid" id="games"></div>
+  </section>
+
+  <!-- Área do mini jogo -->
+  <section id="s-game" class="screen">
+    <div class="bar">
+      <button class="btn ghost" id="back">← Voltar</button>
+      <h2 id="g-title" style="margin:0"></h2>
+      <span></span>
+    </div>
+    <div class="hud"><span id="g-score">Pontos: 0</span><span id="g-extra"></span></div>
+    <div class="stage">
+      <div id="g-area"></div>
+      <div class="overlay" id="g-over" hidden></div>
+    </div>
+    <p class="hint" id="g-hint"></p>
+  </section>
+
+</div>
+
+<script>
+// ---------- Dados ----------
+const ANIMALS = [
+  { id: "coelho",  emoji: "🐰", name: "Coelho",  food: "🥕", talent: "Pula mais alto",          jump: 1.25, speed: 1,    memo: 1,   reflex: 1 },
+  { id: "macaco",  emoji: "🐵", name: "Macaco",  food: "🍌", talent: "Anda mais rápido",        jump: 1,    speed: 1.35, memo: 1,   reflex: 1 },
+  { id: "coruja",  emoji: "🦉", name: "Coruja",  food: "🐛", talent: "Mais tempo na memória",   jump: 1,    speed: 1,    memo: 1.4, reflex: 1 },
+  { id: "gato",    emoji: "🐱", name: "Gato",    food: "🐟", talent: "Reflexos de felino",      jump: 1,    speed: 1,    memo: 1,   reflex: 1.35 },
+  { id: "urso",    emoji: "🐻", name: "Urso",    food: "🍯", talent: "Pega comida em dobro",    jump: 1,    speed: 1,    memo: 1,   reflex: 1, doubleFood: true },
+  { id: "sapo",    emoji: "🐸", name: "Sapo",    food: "🪰", talent: "Pulo e reflexo equilibrados", jump: 1.12, speed: 1.1, memo: 1.1, reflex: 1.12 },
+];
+
+const GAMES = [
+  { id: "corrida", emoji: "🏃", name: "Corrida da Floresta", desc: "Pule os obstáculos!",       stars: [10, 25, 45], play: playRunner },
+  { id: "comida",  emoji: "🧺", name: "Chuva de Comida",     desc: "Pegue sua comida favorita", stars: [15, 35, 60], play: playCatch },
+  { id: "memoria", emoji: "🃏", name: "Memória dos Bichos",  desc: "Encontre os pares",         stars: [20, 50, 80], play: playMemory },
+  { id: "toca",    emoji: "🕳️", name: "Toca Maluca",         desc: "Toque nos bichos que aparecem", stars: [10, 20, 32], play: playWhack },
+];
+
+// ---------- Armazenamento (opcional) ----------
+function load(key, def) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } }
+function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
+
+let animal = null;
+let best = {};          // melhores pontos por animal + jogo
+let cleanup = null;     // função para parar o jogo atual
+
+const $ = (id) => document.getElementById(id);
+function show(id) { document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id)); }
+
+// ---------- Telas ----------
+function renderPick() {
+  $("animals").innerHTML = "";
+  ANIMALS.forEach(a => {
+    const b = document.createElement("button");
+    b.className = "card";
+    b.innerHTML = `<div class="emoji">${a.emoji}</div><div class="name">${a.name}</div><div class="desc">${a.talent}</div>`;
+    b.onclick = () => { animal = a; save("bichos-animal", a.id); openHub(); };
+    $("animals").appendChild(b);
+  });
+}
+
+function starsFor(game, score) { return game.stars.filter(t => score >= t).length; }
+
+function openHub() {
+  best = load("bichos-best-" + animal.id, {});
+  $("hub-emoji").textContent = animal.emoji;
+  $("hub-name").textContent = animal.name + " · " + animal.talent;
+  let total = 0;
+  $("games").innerHTML = "";
+  GAMES.forEach(g => {
+    const sc = best[g.id] || 0, st = starsFor(g, sc);
+    total += st;
+    const b = document.createElement("button");
+    b.className = "card";
+    b.innerHTML = `<div class="emoji">${g.emoji}</div><div class="name">${g.name}</div><div class="desc">${g.desc}</div>
+      <div class="best">${"⭐".repeat(st)}${"☆".repeat(3 - st)} · Recorde: ${sc}</div>`;
+    b.onclick = () => startGame(g);
+    $("games").appendChild(b);
+  });
+  $("hub-stars").textContent = total;
+  show("s-hub");
+}
+
+function setScore(n) { $("g-score").textContent = "Pontos: " + n; }
+function setExtra(t) { $("g-extra").textContent = t; }
+
+function startGame(g) {
+  stopGame();
+  $("g-title").textContent = g.emoji + " " + g.name;
+  $("g-area").innerHTML = "";
+  $("g-over").hidden = true;
+  setScore(0); setExtra("");
+  show("s-game");
+  cleanup = g.play($("g-area"), (score) => finish(g, score));
+}
+
+function stopGame() { if (cleanup) { cleanup(); cleanup = null; } }
+
+function finish(g, score) {
+  stopGame();
+  const old = best[g.id] || 0;
+  const record = score > old;
+  if (record) { best[g.id] = score; save("bichos-best-" + animal.id, best); }
+  const st = starsFor(g, score);
+  const o = $("g-over");
+  o.innerHTML = `<div class="big">${animal.emoji}</div>
+    <div class="result-stars">${"⭐".repeat(st)}${"☆".repeat(3 - st)}</div>
+    <div><b>${score}</b> pontos${record ? " · Novo recorde! 🎉" : ""}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <button class="btn" id="again">Jogar de novo</button>
+      <button class="btn ghost" id="tohub">Mini jogos</button>
+    </div>`;
+  o.hidden = false;
+  $("again").onclick = () => startGame(g);
+  $("tohub").onclick = () => openHub();
+}
+
+$("back").onclick = () => { stopGame(); openHub(); };
+$("change").onclick = () => show("s-pick");
+
+// ---------- Ajudantes de canvas ----------
+function makeCanvas(area, w, h) {
+  const c = document.createElement("canvas");
+  const dpr = window.devicePixelRatio || 1;
+  c.width = w * dpr; c.height = h * dpr;
+  const ctx = c.getContext("2d");
+  ctx.scale(dpr, dpr);
+  area.appendChild(c);
+  return { c, ctx, w, h };
+}
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function drawEmoji(ctx, e, x, y, size) {
+  ctx.font = `${size}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(e, x, y);
+}
+
+// ---------- Mini jogo 1: Corrida ----------
+function playRunner(area, done) {
+  $("g-hint").textContent = "Toque na tela ou aperte Espaço / ↑ para pular.";
+  const { c, ctx, w, h } = makeCanvas(area, 640, 280);
+  const groundY = h - 50;
+  const p = { x: 80, y: groundY, vy: 0, size: 44 };
+  const obstacles = ["🌵", "🪨", "🌳", "🍄"];
+  let obs = [], speed = 5, t = 0, score = 0, raf, alive = true, nextSpawn = 60;
+
+  function jump() { if (p.y >= groundY) p.vy = -13 * Math.sqrt(animal.jump); }
+  const key = (e) => { if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); jump(); } };
+  window.addEventListener("keydown", key);
+  c.addEventListener("pointerdown", jump);
+
+  function loop() {
+    if (!alive) return;
+    t++;
+    p.vy += 0.7; p.y += p.vy;
+    if (p.y > groundY) { p.y = groundY; p.vy = 0; }
+    if (--nextSpawn <= 0) {
+      obs.push({ x: w + 20, e: obstacles[Math.floor(Math.random() * obstacles.length)], passed: false });
+      nextSpawn = 50 + Math.random() * 60 - Math.min(30, t / 60);
+    }
+    speed = 5 + t / 400;
+    for (const o of obs) {
+      o.x -= speed;
+      if (!o.passed && o.x < p.x - 20) { o.passed = true; score++; setScore(score); }
+      if (Math.abs(o.x - p.x) < 30 && groundY - p.y < 30) { alive = false; return done(score); }
+    }
+    obs = obs.filter(o => o.x > -40);
+
+    ctx.fillStyle = css("--sky"); ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = css("--ground"); ctx.fillRect(0, groundY + 22, w, h - groundY);
+    drawEmoji(ctx, "☁️", (w - (t * 0.5) % (w + 100)) , 50, 36);
+    drawEmoji(ctx, "☁️", (w - (t * 0.3 + 300) % (w + 100)), 90, 28);
+    obs.forEach(o => drawEmoji(ctx, o.e, o.x, groundY, 40));
+    ctx.save(); ctx.translate(p.x, p.y); ctx.scale(-1, 1); drawEmoji(ctx, animal.emoji, 0, 0, p.size); ctx.restore();
+    raf = requestAnimationFrame(loop);
+  }
+  raf = requestAnimationFrame(loop);
+  return () => { alive = false; cancelAnimationFrame(raf); window.removeEventListener("keydown", key); };
+}
+
+// ---------- Mini jogo 2: Chuva de Comida ----------
+function playCatch(area, done) {
+  $("g-hint").textContent = `Mova com ← → ou arraste o dedo. Pegue ${animal.food}, evite 💣!`;
+  const { c, ctx, w, h } = makeCanvas(area, 640, 360);
+  const p = { x: w / 2, y: h - 40 };
+  let items = [], score = 0, lives = 3, t = 0, raf, alive = true, keys = {};
+  setExtra("❤️".repeat(lives));
+
+  const kd = (e) => { keys[e.code] = true; if (e.code.startsWith("Arrow")) e.preventDefault(); };
+  const ku = (e) => { keys[e.code] = false; };
+  const move = (e) => { const r = c.getBoundingClientRect(); p.x = (e.clientX - r.left) / r.width * w; };
+  window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
+  c.addEventListener("pointermove", move); c.addEventListener("pointerdown", move);
+
+  function loop() {
+    if (!alive) return;
+    t++;
+    const sp = 7 * animal.speed;
+    if (keys.ArrowLeft) p.x -= sp;
+    if (keys.ArrowRight) p.x += sp;
+    p.x = Math.max(25, Math.min(w - 25, p.x));
+    if (t % Math.max(18, 45 - Math.floor(t / 120)) === 0) {
+      const bad = Math.random() < 0.25;
+      items.push({ x: 20 + Math.random() * (w - 40), y: -20, v: 2.5 + Math.random() * 2 + t / 900, bad });
+    }
+    for (const it of items) {
+      it.y += it.v;
+      if (!it.hit && Math.abs(it.x - p.x) < 34 && Math.abs(it.y - p.y) < 30) {
+        it.hit = true;
+        if (it.bad) { lives--; setExtra("❤️".repeat(Math.max(0, lives))); if (lives <= 0) { alive = false; return done(score); } }
+        else { score += animal.doubleFood ? 2 : 1; setScore(score); }
+      }
+      if (!it.hit && !it.bad && it.y > h + 10) {
+        it.hit = true; lives--; setExtra("❤️".repeat(Math.max(0, lives)));
+        if (lives <= 0) { alive = false; return done(score); }
+      }
+    }
+    items = items.filter(it => !it.hit && it.y < h + 20);
+
+    ctx.fillStyle = css("--sky"); ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = css("--ground"); ctx.fillRect(0, h - 18, w, 18);
+    items.forEach(it => drawEmoji(ctx, it.bad ? "💣" : animal.food, it.x, it.y, 34));
+    drawEmoji(ctx, animal.emoji, p.x, p.y, 48);
+    raf = requestAnimationFrame(loop);
+  }
+  raf = requestAnimationFrame(loop);
+  return () => {
+    alive = false; cancelAnimationFrame(raf);
+    window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku);
+  };
+}
+
+// ---------- Mini jogo 3: Memória ----------
+function playMemory(area, done) {
+  const pool = ["🐶", "🐱", "🐭", "🐹", "🦊", "🐼", "🐨", "🐯", "🦁", "🐮", "🐷", "🐔"];
+  const pick = pool.sort(() => Math.random() - 0.5).slice(0, 8);
+  const deck = [...pick, ...pick].sort(() => Math.random() - 0.5);
+  const totalTime = Math.round(60 * animal.memo);
+  let left = totalTime, open = [], found = 0, lock = false, moves = 0, ended = false;
+  $("g-hint").textContent = `Encontre os 8 pares em ${totalTime} segundos. Menos jogadas = mais pontos!`;
+
+  const grid = document.createElement("div");
+  grid.className = "mem";
+  area.appendChild(grid);
+  deck.forEach((e) => {
+    const b = document.createElement("button");
+    b.textContent = "?";
+    b.onclick = () => {
+      if (lock || b.classList.contains("open") || b.classList.contains("done")) return;
+      b.classList.add("open"); b.textContent = e; open.push({ b, e });
+      if (open.length === 2) {
+        moves++; lock = true;
+        const [a1, a2] = open;
+        if (a1.e === a2.e) {
+          a1.b.classList.add("done"); a2.b.classList.add("done");
+          open = []; lock = false; found++;
+          setScore(calc());
+          if (found === 8) end();
+        } else {
+          setTimeout(() => {
+            [a1, a2].forEach(x => { x.b.classList.remove("open"); x.b.textContent = "?"; });
+            open = []; lock = false;
+          }, 650);
+        }
+      }
+    };
+    grid.appendChild(b);
+  });
+
+  function calc() { return found * 6 + (found === 8 ? Math.max(0, 40 - moves) + left : 0); }
+  function end() { if (ended) return; ended = true; clearInterval(timer); done(calc()); }
+  setExtra("⏱️ " + left + "s");
+  const timer = setInterval(() => { left--; setExtra("⏱️ " + left + "s"); if (left <= 0) end(); }, 1000);
+  return () => { ended = true; clearInterval(timer); };
+}
+
+// ---------- Mini jogo 4: Toca Maluca ----------
+function playWhack(area, done) {
+  $("g-hint").textContent = "Toque nos bichinhos 🐹 antes que se escondam. Não toque no 🦨!";
+  const holes = document.createElement("div");
+  holes.className = "holes";
+  area.appendChild(holes);
+  const btns = [];
+  let score = 0, left = 30, ended = false, spawnT;
+  for (let i = 0; i < 9; i++) {
+    const b = document.createElement("button");
+    b.dataset.state = "";
+    b.onclick = () => {
+      if (ended || !b.dataset.state) return;
+      if (b.dataset.state === "good") score++; else score = Math.max(0, score - 2);
+      setScore(score);
+      clearTimeout(b._t); b.dataset.state = ""; b.textContent = "";
+    };
+    holes.appendChild(b); btns.push(b);
+  }
+  function spawn() {
+    if (ended) return;
+    const free = btns.filter(b => !b.dataset.state);
+    if (free.length) {
+      const b = free[Math.floor(Math.random() * free.length)];
+      const bad = Math.random() < 0.2;
+      b.dataset.state = bad ? "bad" : "good";
+      b.textContent = bad ? "🦨" : ["🐹", "🐭", "🐿️"][Math.floor(Math.random() * 3)];
+      const stay = (1100 - (30 - left) * 18) * animal.reflex;
+      b._t = setTimeout(() => { b.dataset.state = ""; b.textContent = ""; }, stay);
+    }
+    spawnT = setTimeout(spawn, Math.max(350, 750 - (30 - left) * 12));
+  }
+  spawn();
+  setExtra("⏱️ " + left + "s");
+  const timer = setInterval(() => { left--; setExtra("⏱️ " + left + "s"); if (left <= 0) end(); }, 1000);
+  function end() { if (ended) return; ended = true; clearInterval(timer); clearTimeout(spawnT); done(score); }
+  return () => { ended = true; clearInterval(timer); clearTimeout(spawnT); btns.forEach(b => clearTimeout(b._t)); };
+}
+
+// ---------- Início ----------
+renderPick();
+const saved = ANIMALS.find(a => a.id === load("bichos-animal", null));
+if (saved) { animal = saved; openHub(); }
+</script>
+</body>
+</html>
