@@ -145,6 +145,29 @@
   .pix img { width: 220px; max-width: 100%; background: #fff; border-radius: 12px; padding: 8px; }
   .pix textarea { width: 100%; height: 70px; font: .8rem monospace; border-radius: 8px; border: 2px solid var(--line); background: var(--bg); color: var(--ink); padding: 6px; }
   h3 { margin: 18px 0 10px; }
+  /* Mini jogo em tela cheia */
+  body.playing { overflow: hidden; }
+  #s-game.active { position: fixed; inset: 0; z-index: 20; background: var(--bg); animation: none; }
+  #s-game .stage { position: absolute; inset: 0; border: 0; border-radius: 0; box-shadow: none; }
+  #g-area { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  #g-area canvas { border-radius: 0; }
+  .gtop {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2; display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap; padding: max(10px, env(safe-area-inset-top)) 12px 10px; pointer-events: none;
+  }
+  .gtop > * { pointer-events: auto; }
+  .gtop .pill { background: color-mix(in srgb, var(--card) 85%, transparent); }
+  .gtop .pill:empty { display: none; }
+  @media (max-width: 560px) { .gtop .gtitle { display: none; } }
+  .ghint {
+    position: absolute; bottom: max(12px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); z-index: 2;
+    margin: 0; padding: 8px 16px; border-radius: 999px; width: max-content; max-width: 92%; text-align: center;
+    background: color-mix(in srgb, var(--card) 88%, transparent); font-weight: 500; transition: opacity .8s; pointer-events: none;
+  }
+  .ghint.fade { opacity: 0; }
+  #s-game .overlay { z-index: 3; }
+  #s-game .mem { width: min(94vw, calc(100vh - 150px)); margin-top: 40px; }
+  #s-game .stage.done { min-height: 0; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
@@ -227,17 +250,17 @@
 
   <!-- Área do mini jogo -->
   <section id="s-game" class="screen">
-    <div class="bar">
-      <button class="btn ghost" id="back">← Voltar</button>
-      <h2 id="g-title" style="margin:0"></h2>
-      <span></span>
-    </div>
-    <div class="hud"><span id="g-score">🍬 Pontos: 0</span><span id="g-extra"></span></div>
     <div class="stage">
       <div id="g-area"></div>
+      <div class="gtop">
+        <button class="btn ghost" id="back">← Voltar</button>
+        <span class="pill gtitle" id="g-title"></span>
+        <span class="pill" id="g-score">🍬 Pontos: 0</span>
+        <span class="pill" id="g-extra"></span>
+      </div>
+      <p class="ghint" id="g-hint"></p>
       <div class="overlay" id="g-over" hidden></div>
     </div>
-    <p class="hint" id="g-hint"></p>
   </section>
 
 </div>
@@ -272,6 +295,8 @@ const ANIMALS = [
     look: { body: "#ffb6c8", belly: "#ffd3de", ears: "small", inner: "#ff9fb8", snout: "#ff9fb8", nose: "#e57a98", tail: "curl" } },
   { id: "raposa",  emoji: "🦊", name: "Raposa",    food: "🍇", talent: "Esperta e ligeira! 🍂",    speed: 1.15, reflex: 1.2,
     look: { body: "#ff8c42", belly: "#fff3e3", face: "#fff3e3", ears: "pointy", inner: "#3a2a2a", nose: "#3a2a2a", tail: "bushy", tailTip: "#ffffff", feetColor: "#4a3530" } },
+  { id: "cavalo",  emoji: "🐴", name: "Cavalo",    food: "🌾", talent: "Galopa ligeirinho! 🐎",   speed: 1.2, jump: 1.15,
+    look: { body: "#c98b5a", belly: "#e8c39e", ears: "pointy", inner: "#a86d44", muzzle: "#f0d2b0", blaze: "#ffffff", headScale: [.44, .52, .48], earSize: 1.25, horseMane: "#5a3a2a", forelock: "#5a3a2a", tail: "flow", tailColor: "#5a3a2a", feetColor: "#5a3a2a" } },
   { id: "pintinho", emoji: "🐥", name: "Pintinho", food: "🌽", talent: "Pequenino e ágil! 🐣",     jump: 1.15, reflex: 1.15,
     look: { body: "#ffe066", belly: "#fff1a8", ears: "none", beak: "#ffa53a", crest: "#ffd23a", arms: "wing", feetColor: "#ffa53a" } },
 ];
@@ -313,12 +338,22 @@ function save(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); 
 let animal = null;
 let best = {};          // melhores pontos por animal + jogo
 let cleanup = null;     // função para parar o jogo atual
+let hintTimer = null;
 let wallet = load("bichos-carteira", 0);              // estrelas para gastar
 let owned = load("bichos-itens", []);                 // ids dos itens comprados
 let equipped = load("bichos-equipado", { hat: null, scene: null });
 
 const $ = (id) => document.getElementById(id);
-function show(id) { document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id)); }
+function show(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.toggle("active", s.id === id));
+  document.body.classList.toggle("playing", id === "s-game");
+  if (id !== "s-game" && document.fullscreenElement) { try { document.exitFullscreen().catch(() => {}); } catch {} }
+}
+// Tenta usar a tela cheia de verdade do aparelho (quando o navegador deixa)
+function goFullscreen() {
+  if (document.fullscreenElement) return;
+  try { const r = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); r && r.catch && r.catch(() => {}); } catch {}
+}
 
 function addStars(n) {
   wallet += n; save("bichos-carteira", wallet);
@@ -359,7 +394,8 @@ function makeAnimal(L, hatId) {
   const head = new THREE.Group();
   head.position.y = 1.36;
   g.add(head);
-  part("sphere", body, [.52, .48, .48], [0, 0, 0], head);
+  part("sphere", body, L.headScale || [.52, .48, .48], [0, 0, 0], head);
+  if (L.blaze) part("sphere", L.blaze, [.07, .24, .04], [0, .14, .43], head, [-.25, 0, 0]);
   if (L.face) part("sphere", L.face, [.38, .32, .2], [0, -.05, .34], head);
   if (L.patches) [-1, 1].forEach(s => part("sphere", L.patches, [.14, .17, .08], [s * .18, .03, .39], head, [0, 0, s * -.4]));
 
@@ -382,10 +418,14 @@ function makeAnimal(L, hatId) {
   }
   [-1, 1].forEach(s => part("sphere", PINK, [.08, .05, .03], [s * .3, -.13, .38], head));
 
-  if (L.snout) {
+  if (L.muzzle) {
+    part("sphere", L.muzzle, [.28, .24, .36], [0, -.24, .4], head);
+    [-1, 1].forEach(s => part("sphere", "#6b4a3a", [.045, .03, .02], [s * .1, -.2, .75], head));
+    part("sphere", "#c97a6a", [.1, .025, .02], [0, -.36, .7], head);
+  } else if (L.snout) {
     part("sphere", L.snout, [.2, .15, .14], [0, -.13, .42], head);
     part("sphere", L.nose || BLACK, [.06, .045, .04], [0, -.08, .55], head);
-  } else if (!L.beak) {
+  } else if (!L.beak && !L.muzzle) {
     part("sphere", L.nose || BLACK, [.045, .035, .03], [0, -.06, .47], head);
   }
   if (L.beak) part("cone", L.beak, [.1, .2, .1], [0, -.08, .52], head, [Math.PI / 2, 0, 0]);
@@ -403,8 +443,9 @@ function makeAnimal(L, hatId) {
       part("sphere", ec, [.08, .16, .16], [s * .52, .02, 0], head);
       part("sphere", inner, [.04, .1, .1], [s * .56, .02, 0], head);
     } else if (L.ears === "pointy") {
-      part("cone", ec, [.16, .32, .12], [s * .28, .46, 0], head, [0, 0, s * -.35]);
-      part("cone", inner, [.09, .2, .06], [s * .28, .44, .05], head, [0, 0, s * -.35]);
+      const k = L.earSize || 1;
+      part("cone", ec, [.16, .32 * k, .12], [s * .26, .46 + (k - 1) * .2, 0], head, [0, 0, s * -.3]);
+      part("cone", inner, [.09, .2 * k, .06], [s * .26, .44 + (k - 1) * .2, .05], head, [0, 0, s * -.3]);
     } else if (L.ears === "tuft") {
       part("cone", ec, [.1, .22, .08], [s * .3, .42, 0], head, [0, 0, s * -.5]);
     } else if (L.ears === "small") {
@@ -414,6 +455,9 @@ function makeAnimal(L, hatId) {
   if (L.horn) part("cone", L.horn, [.08, .42, .08], [0, .58, .2], head, [.35, 0, 0]);
   if (L.mane) L.mane.concat(L.mane).slice(0, 4).forEach((c, i) =>
     part("sphere", c, [.15, .15, .15], [0, .38 - i * .2, -.25 - i * .07], head));
+  if (L.horseMane) for (let i = 0; i < 6; i++)
+    part("sphere", L.horseMane, [.12, .16, .14], [0, .5 - i * .17, -.08 - i * .1], head, [-.5, 0, 0]);
+  if (L.forelock) part("sphere", L.forelock, [.14, .14, .1], [0, .5, .22], head, [.5, 0, 0]);
   if (L.crest) [-.08, 0, .08].forEach((x, i) => part("sphere", L.crest, [.07, .12, .07], [x, .5, 0], head, [0, 0, x * 4]));
 
   // Rabinho
@@ -426,6 +470,8 @@ function makeAnimal(L, hatId) {
     part("sphere", L.tailColor || body, [.22, .45, .22], [0, .75, -.62], g, [-.6, 0, 0]);
     if (L.tailTip) part("sphere", L.tailTip, [.15, .17, .15], [0, 1.08, -.85], g);
   }
+  if (L.tail === "flow") [[.82, -.5, .1], [.62, -.66, .13], [.4, -.74, .14], [.2, -.76, .12]].forEach(([y, z, r]) =>
+    part("sphere", L.tailColor, [r, r * 1.6, r], [0, y, z], g, [.35, 0, 0]));
   if (L.tail === "curl") part("torus", L.body, [.09, .09, .09], [0, .6, -.58], g);
 
   if (hatId) addHat(head, hatId);
@@ -545,16 +591,27 @@ try {
   thumbRenderer.setSize(200, 200, false);
 } catch (e) { renderer = null; }
 
-function mount(container, camera, aspect) {
-  mounted = { container, camera, aspect };
+// aspect fixo (menu) ou null para ocupar todo o container (mini jogos); onFit ajusta a câmera ao formato da tela
+function mount(container, camera, aspect, onFit) {
+  mounted = { container, camera, aspect, onFit };
   container.appendChild(renderer.domElement);
   resize();
 }
 function resize() {
   if (!mounted) return;
   const w = mounted.container.clientWidth || 320;
-  renderer.setSize(w, Math.round(w / mounted.aspect));
-  mounted.camera.aspect = mounted.aspect; mounted.camera.updateProjectionMatrix();
+  const h = mounted.aspect ? Math.round(w / mounted.aspect) : (mounted.container.clientHeight || 240);
+  renderer.setSize(w, h);
+  mounted.camera.aspect = w / h; mounted.camera.updateProjectionMatrix();
+  if (mounted.onFit) mounted.onFit(w / h);
+}
+// Afasta a câmera o suficiente para caber "halfW" de largura, mesmo com o celular em pé
+function fitCamera(cam, target, offset, halfW, asp) {
+  const base = offset.length();
+  const need = halfW / (Math.tan(cam.fov * Math.PI / 360) * asp);
+  const d = Math.max(base, need);
+  cam.position.copy(target).addScaledVector(offset.clone().normalize(), d);
+  cam.lookAt(target);
 }
 window.addEventListener("resize", resize);
 (function frame() { requestAnimationFrame(frame); if (loopFn) loopFn(); })();
@@ -643,7 +700,10 @@ function startGame(g) {
   $("g-over").hidden = true;
   $("g-over").parentElement.classList.remove("done");
   setScore(0); setExtra("");
+  goFullscreen();
   show("s-game");
+  $("g-hint").classList.remove("fade");
+  clearTimeout(hintTimer); hintTimer = setTimeout(() => $("g-hint").classList.add("fade"), 5000);
   cleanup = g.play($("g-area"), (score) => finish(g, score));
 }
 
@@ -883,8 +943,7 @@ function playRunner(area, done) {
   }
   for (let i = 0; i < 4; i++) { const c = makeCloud(); c.position.set(-10 + i * 7, 4 + Math.random() * 2, -10); s.add(c); decor.push(c); }
   const cam = new THREE.PerspectiveCamera(45, 1.6, .1, 100);
-  cam.position.set(1, 2.5, 7.5); cam.lookAt(1.2, .9, 0);
-  mount(area, cam, 1.6);
+  mount(area, cam, null, (asp) => fitCamera(cam, new THREE.Vector3(1.2, .9, 0), new THREE.Vector3(-.2, 1.6, 7.5), 4, asp));
 
   const p = { y: 0, vy: 0 };
   let obs = [], t = 0, score = 0, nextSpawn = 50, alive = true;
@@ -927,9 +986,11 @@ function playCatch(area, done) {
   const c1 = makeCloud(); c1.position.set(-4, 6.5, -8); s.add(c1);
   const c2 = makeCloud(); c2.position.set(5, 7, -9); s.add(c2);
   const cam = new THREE.PerspectiveCamera(50, 1.6, .1, 100);
-  cam.position.set(0, 3.4, 9); cam.lookAt(0, 2.4, 0);
-  mount(area, cam, 1.6);
-  const halfW = Math.tan(25 * Math.PI / 180) * 9 * 1.6 - .8;
+  let halfW = 4;
+  mount(area, cam, null, (asp) => {
+    fitCamera(cam, new THREE.Vector3(0, 2.4, 0), new THREE.Vector3(0, 1, 9), 3.8, asp);
+    halfW = Math.min(7, Math.tan(25 * Math.PI / 180) * cam.position.z * asp - .8);
+  });
 
   let items = [], score = 0, lives = 3, t = 0, keys = {}, x = 0, targetX = null;
   setExtra("❤️".repeat(lives));
@@ -1032,8 +1093,7 @@ function playWhack(area, done) {
   $("g-hint").textContent = "Toque nos bichinhos pra dar oi! Mas cuidado com o gambá fedidinho 🦨";
   const { s } = makeWorld();
   const cam = new THREE.PerspectiveCamera(45, 1.15, .1, 100);
-  cam.position.set(0, 7.2, 6.4); cam.lookAt(0, .3, .2);
-  mount(area, cam, 1.15);
+  mount(area, cam, null, (asp) => fitCamera(cam, new THREE.Vector3(0, .3, .2), new THREE.Vector3(0, 6.9, 6.2), 3.5, asp));
   const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
   const holes = [];
   for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
