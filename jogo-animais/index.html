@@ -369,6 +369,7 @@ const GEO = {
   box: new THREE.BoxGeometry(1, 1, 1),
   torus: new THREE.TorusGeometry(1, 0.35, 10, 24),
   circle: new THREE.CircleGeometry(1, 28),
+  smile: new THREE.TorusGeometry(1, .22, 8, 18, Math.PI),
 };
 const MATS = {};
 function mat(color) { return MATS[color] ||= new THREE.MeshToonMaterial({ color }); }
@@ -424,12 +425,15 @@ function makeAnimal(L, hatId) {
   if (L.muzzle) {
     part("sphere", L.muzzle, [.28, .24, .36], [0, -.24, .4], head);
     [-1, 1].forEach(s => part("sphere", "#6b4a3a", [.045, .03, .02], [s * .1, -.2, .75], head));
-    part("sphere", "#c97a6a", [.1, .025, .02], [0, -.36, .7], head);
+    smile(head, -.34, .745, .08);
   } else if (L.snout) {
     part("sphere", L.snout, [.2, .15, .14], [0, -.13, .42], head);
     part("sphere", L.nose || BLACK, [.06, .045, .04], [0, -.08, .55], head);
-  } else if (!L.beak && !L.muzzle) {
-    part("sphere", L.nose || BLACK, [.045, .035, .03], [0, -.06, .47], head);
+    smile(head, -.22, .56, .05);
+  } else if (!L.beak) {
+    if (L.eyes !== "top") part("sphere", L.nose || BLACK, [.045, .035, .03], [0, -.06, L.face ? .54 : .47], head);
+    if (L.eyes === "top") smile(head, -.1, .47, .1);
+    else smile(head, -.15, L.face ? .53 : .455, .055);
   }
   if (L.beak) part("cone", L.beak, [.1, .2, .1], [0, -.08, .52], head, [Math.PI / 2, 0, 0]);
 
@@ -518,6 +522,13 @@ function addHat(head, id) {
     part("sphere", "#ffd54a", [.06, .06, .06], [.3, .02, .3], h);
   }
   head.add(h);
+}
+
+// Boquinha sorrindo (meio anel virado para baixo)
+function smile(head, y, z, w) {
+  const m = new THREE.Mesh(GEO.smile, mat("#6a3045"));
+  m.scale.set(w, w, w * .6); m.position.set(0, y, z); m.rotation.z = Math.PI;
+  head.add(m);
 }
 
 // Emojis viram figurinhas no mundo 3D (comidas, pimenta…)
