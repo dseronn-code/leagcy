@@ -1,0 +1,553 @@
+<title>Luna Assistente</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Layout: uma tela só — cabeçalho, a "lua" no centro, conversa embaixo e a caixa de texto fixa no rodapé */
+  :root {
+    --bg: #eef0f7;
+    --surface: #ffffff;
+    --ink: #1d2140;
+    --muted: #646a8c;
+    --line: #d9dcec;
+    --accent: #5b5bd6;
+    --accent-ink: #ffffff;
+    --glow-a: #9aa7ff;
+    --glow-b: #f3c2ff;
+    --ok: #1f8a5b;
+    --warn: #b4531c;
+    --display: "Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+    --body: "Figtree", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1124; --surface: #1a1d36; --ink: #eceefe; --muted: #a2a7cc; --line: #2c3054;
+      --accent: #8e8cff; --accent-ink: #12142a; --glow-a: #6f7cff; --glow-b: #c58cff; --ok: #5fd39c; --warn: #ffb07a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1124; --surface: #1a1d36; --ink: #eceefe; --muted: #a2a7cc; --line: #2c3054;
+    --accent: #8e8cff; --accent-ink: #12142a; --glow-a: #6f7cff; --glow-b: #c58cff; --ok: #5fd39c; --warn: #ffb07a;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.5 var(--body);
+  }
+  .app {
+    height: 100%; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 14px;
+  }
+  header { display: flex; align-items: center; gap: 10px; }
+  h1 { font: 700 1.5rem/1.1 var(--display); margin: 0; letter-spacing: -.01em; }
+  .chip {
+    font: 600 .78rem/1 var(--body); letter-spacing: .04em; text-transform: uppercase; padding: 6px 10px;
+    border-radius: 99px; background: var(--surface); border: 1px solid var(--line); color: var(--muted);
+  }
+  .chip[data-s="ouvindo"], .chip[data-s="escutando"] { color: var(--ok); border-color: currentColor; }
+  .chip[data-s="pensando"], .chip[data-s="falando"] { color: var(--accent); border-color: currentColor; }
+  .spacer { flex: 1; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  .icon-btn {
+    border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 8px 12px; font-weight: 600;
+  }
+  .icon-btn:focus-visible, .send:focus-visible, .orb:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  /* A lua */
+  .stage { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 6px; }
+  .orb {
+    width: min(46vw, 190px); aspect-ratio: 1; max-width: 100%; border-radius: 50%; border: 0; padding: 0;
+    background: radial-gradient(circle at 35% 30%, #fff 0 6%, var(--glow-b) 30%, var(--glow-a) 62%, var(--accent) 100%);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--glow-a) 18%, transparent), 0 18px 50px color-mix(in srgb, var(--accent) 40%, transparent);
+    transition: transform .3s;
+  }
+  .orb[data-s="dormindo"] { filter: saturate(.55) brightness(.92); }
+  .orb[data-s="ouvindo"] { animation: breathe 3.2s ease-in-out infinite; }
+  .orb[data-s="escutando"] { animation: listen 1s ease-in-out infinite; }
+  .orb[data-s="pensando"] { animation: think 1.4s linear infinite; }
+  .orb[data-s="falando"] { animation: speak .5s ease-in-out infinite alternate; }
+  @keyframes breathe { 50% { transform: scale(1.04); } }
+  @keyframes listen { 50% { transform: scale(1.1); box-shadow: 0 0 0 22px color-mix(in srgb, var(--glow-a) 22%, transparent), 0 18px 50px color-mix(in srgb, var(--accent) 40%, transparent); } }
+  @keyframes think { to { filter: hue-rotate(360deg); } }
+  @keyframes speak { to { transform: scale(1.07); } }
+  @media (prefers-reduced-motion: reduce) { .orb { animation: none !important; } }
+  .hint { color: var(--muted); text-align: center; margin: 0; font-size: .95rem; text-wrap: balance; }
+  .hint b { color: var(--ink); }
+  .heard { min-height: 1.5em; font-style: italic; color: var(--muted); text-align: center; margin: 0; }
+
+  /* Conversa */
+  .log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+  .msg { max-width: 85%; padding: 10px 14px; border-radius: 16px; min-width: 0; overflow-wrap: anywhere; }
+  .msg.eu { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-bottom-right-radius: 4px; }
+  .msg.ela { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.aviso { align-self: center; background: transparent; border: 1px dashed var(--line); color: var(--muted); font-size: .92rem; text-align: center; }
+  .msg a { color: inherit; font-weight: 600; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .card h2 { font: 700 1.1rem var(--display); margin: 0; }
+  .card p { margin: 0; color: var(--muted); }
+
+  /* Rodapé */
+  form.bar { display: flex; gap: 8px; }
+  .bar input {
+    flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+    border-radius: 14px; padding: 12px 14px; font: inherit;
+  }
+  .send { border: 0; border-radius: 14px; padding: 0 16px; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .send:disabled { opacity: .5; cursor: default; }
+
+  /* Ajustes */
+  dialog {
+    border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--ink);
+    width: min(520px, calc(100vw - 32px)); max-height: calc(100% - 32px); padding: 20px;
+  }
+  dialog::backdrop { background: rgba(10, 12, 30, .45); }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .field label { font-weight: 600; }
+  .field small { color: var(--muted); }
+  .field input, .field select {
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; width: 100%;
+  }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .toggle { display: flex; align-items: center; gap: 10px; font-weight: 600; margin-bottom: 14px; }
+  .list { margin: 0; padding-left: 18px; color: var(--muted); }
+  .dlg-head { display: flex; align-items: center; margin-bottom: 14px; }
+  .dlg-head h2 { font: 700 1.3rem var(--display); margin: 0; flex: 1; }
+</style>
+
+<div class="app">
+  <header>
+    <h1 id="title">Luna</h1>
+    <span class="chip" id="chip" data-s="dormindo">Dormindo</span>
+    <span class="spacer"></span>
+    <button class="icon-btn" id="open-settings" type="button">Ajustes</button>
+  </header>
+
+  <section class="stage">
+    <button class="orb" id="orb" type="button" data-s="dormindo" aria-label="Toque para falar com a assistente"></button>
+    <p class="hint" id="hint">Toque na lua para falar.</p>
+    <p class="heard" id="heard" aria-live="polite"></p>
+  </section>
+
+  <div class="log" id="log" aria-live="polite"></div>
+
+  <form class="bar" id="bar">
+    <input id="text" autocomplete="off" placeholder="Ou escreva aqui o que você quer…" aria-label="Seu pedido">
+    <button class="send" id="send" type="submit">Enviar</button>
+  </form>
+</div>
+
+<dialog id="settings">
+  <div class="dlg-head"><h2>Ajustes</h2><button class="icon-btn" id="close-settings" type="button">Fechar</button></div>
+  <div class="field">
+    <label for="name">Nome da assistente</label>
+    <input id="name" maxlength="20">
+    <small>É o nome que você fala para chamar. Nomes curtos e diferentes funcionam melhor, como Luna, Íris ou Bia.</small>
+  </div>
+  <div class="field">
+    <label for="owner">Seu nome</label>
+    <input id="owner" maxlength="30" placeholder="Como ela deve te chamar">
+  </div>
+  <label class="toggle"><input type="checkbox" id="always"> Ficar sempre ouvindo meu chamado</label>
+  <div class="field">
+    <label for="voice">Voz</label>
+    <select id="voice"></select>
+  </div>
+  <div class="field">
+    <label for="rate">Velocidade da fala</label>
+    <input id="rate" type="range" min="0.7" max="1.4" step="0.05">
+  </div>
+  <div class="field" id="key-field">
+    <label for="key">Chave da API do Claude</label>
+    <input id="key" type="password" autocomplete="off" placeholder="sk-ant-…">
+    <small>Fica guardada só neste navegador. Crie a sua em console.anthropic.com, em “API Keys”. O uso é cobrado na sua conta da Anthropic.</small>
+  </div>
+  <div class="field">
+    <label>Avisos marcados</label>
+    <ul class="list" id="timers-list"></ul>
+  </div>
+  <div class="field">
+    <label>Notas guardadas</label>
+    <ul class="list" id="notes-list"></ul>
+  </div>
+  <div class="row">
+    <button class="icon-btn" id="reset" type="button">Começar conversa nova</button>
+    <button class="icon-btn" id="clear-notes" type="button">Apagar notas</button>
+  </div>
+</dialog>
+
+<script type="module">
+// ---------- Guardar ajustes neste navegador ----------
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("luna-" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("luna-" + k, JSON.stringify(v)); } catch {} },
+};
+const $ = (id) => document.getElementById(id);
+const cfg = {
+  name: store.get("name", "Luna"),
+  owner: store.get("owner", ""),
+  always: store.get("always", true),
+  voice: store.get("voice", ""),
+  rate: store.get("rate", 1),
+  key: store.get("key", ""),
+};
+let notes = store.get("notes", []);
+let timers = store.get("timers", []);   // [{id, at, msg}]
+
+// ---------- Onde a página está rodando ----------
+// Dentro do Claude (link do artefato): usa o Claude da sua conta, sem chave.
+// Fora (arquivo aberto no Chrome): usa a API do Claude com a sua chave.
+const inViewer = !!window.claude;
+let sample = null;
+if (inViewer) claude.use("sample").then((s) => { sample = s; refreshHint(); });
+$("key-field").hidden = inViewer;
+
+// ---------- Interface ----------
+const STATE_LABEL = { dormindo: "Dormindo", ouvindo: "Ouvindo", escutando: "Te escutando", pensando: "Pensando", falando: "Falando" };
+let state = "dormindo";
+function setState(s) {
+  state = s;
+  $("chip").dataset.s = s; $("chip").textContent = STATE_LABEL[s];
+  $("orb").dataset.s = s;
+}
+function addMsg(kind, text, link) {
+  const el = document.createElement("div");
+  el.className = "msg " + kind;
+  el.textContent = text;
+  if (link) {
+    const a = document.createElement("a");
+    a.href = link.url; a.target = "_blank"; a.rel = "noopener";
+    a.textContent = " " + (link.label || "Abrir site") + " ↗";
+    el.append(document.createElement("br"), a);
+  }
+  $("log").append(el);
+  $("log").scrollTop = $("log").scrollHeight;
+  return el;
+}
+function refreshHint() {
+  const n = cfg.name;
+  $("title").textContent = n;
+  document.title = n + " Assistente";
+  let h;
+  if (!SR) h = `Toque na lua ou escreva. Para chamar pela voz, abra no Google Chrome.`;
+  else if (micBlocked) h = `O microfone está bloqueado aqui. Escreva seu pedido, ou abra o arquivo no Chrome para chamar a ${n} pela voz.`;
+  else if (cfg.always && listening) h = `Diga <b>“${n}”</b> e depois o seu pedido. Ex.: “${n}, que horas são?”`;
+  else h = `Toque na lua e fale, ou ligue “sempre ouvindo” nos ajustes.`;
+  if (!inViewer && !cfg.key) h = `Para eu funcionar fora do Claude, coloque sua chave da API em <b>Ajustes</b>.`;
+  $("hint").innerHTML = h;
+}
+
+// ---------- Voz que fala ----------
+let voices = [];
+function loadVoices() {
+  voices = (speechSynthesis.getVoices() || []).filter(v => /^pt/i.test(v.lang));
+  const sel = $("voice"); sel.innerHTML = "";
+  if (!voices.length) { const o = document.createElement("option"); o.textContent = "Voz padrão do aparelho"; o.value = ""; sel.append(o); return; }
+  voices.sort((a, b) => (b.lang === "pt-BR") - (a.lang === "pt-BR"));
+  voices.forEach(v => { const o = document.createElement("option"); o.value = v.name; o.textContent = `${v.name} (${v.lang})`; sel.append(o); });
+  sel.value = voices.some(v => v.name === cfg.voice) ? cfg.voice : voices[0].name;
+}
+if ("speechSynthesis" in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+function speak(text) {
+  return new Promise((resolve) => {
+    if (!("speechSynthesis" in window)) return resolve();
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "pt-BR"; u.rate = Number(cfg.rate) || 1; u.pitch = 1.05;
+      const v = voices.find(v => v.name === $("voice").value); if (v) u.voice = v;
+      // Alguns aparelhos não avisam quando a fala termina: não fica esperando para sempre
+      const guard = setTimeout(resolve, 2500 + text.length * 90);
+      u.onend = u.onerror = () => { clearTimeout(guard); resolve(); };
+      setState("falando");
+      speechSynthesis.speak(u);
+    } catch { resolve(); }
+  });
+}
+// Plim curtinho para avisar que ela acordou
+let actx = null;
+function chime(up = true) {
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    [up ? 660 : 880, up ? 880 : 660].forEach((f, i) => {
+      const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime + i * .11;
+      o.frequency.value = f; g.gain.setValueAtTime(.12, t); g.gain.exponentialRampToValueAtTime(.001, t + .25);
+      o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + .26);
+    });
+  } catch {}
+}
+
+// ---------- Ouvido: chamar pelo nome ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false, micBlocked = false, wantListen = false, commandTimer = null;
+const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+function nearly(a, b) {   // aceita 1 letra de diferença ("lua" ≠ "luna", mas "lunna" = "luna")
+  if (a === b) return true;
+  if (b.length < 4 || Math.abs(a.length - b.length) > 1) return false;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length] <= 1;
+}
+// Procura o nome na frase; devolve o que veio depois dele (ou null se não chamou)
+function findWake(text) {
+  const words = text.trim().split(/\s+/), name = norm(cfg.name);
+  const idx = words.findIndex(w => nearly(norm(w), name));
+  return idx < 0 ? null : words.slice(idx + 1).join(" ").replace(/^[\s,.;:!?]+/, "");
+}
+function startListening() {
+  if (!SR || micBlocked || busy) return;
+  wantListen = true;
+  if (listening) return;
+  try {
+    rec = new SR();
+    rec.lang = "pt-BR"; rec.continuous = true; rec.interimResults = true;
+    rec.onstart = () => { listening = true; if (state === "dormindo") setState("ouvindo"); refreshHint(); };
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        micBlocked = true; wantListen = false;
+        addMsg("aviso", "Não consegui usar o microfone. Se o navegador perguntar, toque em “Permitir”.");
+      }
+    };
+    rec.onend = () => {
+      listening = false;
+      // O Chrome desliga sozinho de tempos em tempos: religa se ainda devo ouvir
+      if (wantListen && !busy && !micBlocked) setTimeout(startListening, 300);
+      else if (!busy) setState("dormindo");
+      refreshHint();
+    };
+    rec.onresult = onHeard;
+    rec.start();
+  } catch { listening = false; }
+}
+function stopListening() { wantListen = false; try { rec && rec.abort(); } catch {} listening = false; }
+function onHeard(ev) {
+  let text = "", final = false;
+  for (let i = ev.resultIndex; i < ev.results.length; i++) { text += ev.results[i][0].transcript; if (ev.results[i].isFinal) final = true; }
+  if (busy) return;
+  if (state === "escutando") {
+    $("heard").textContent = text;
+    if (final && norm(text)) { clearTimeout(commandTimer); handle(text.trim()); }
+    return;
+  }
+  const after = findWake(text);
+  if (after === null) return;
+  $("heard").textContent = text;
+  if (!final) return;
+  if (after.length > 2) handle(after);     // "Luna, que horas são?" de uma vez
+  else wake();                               // só "Luna": espera o pedido
+}
+function wake() {
+  chime(true);
+  setState("escutando");
+  $("heard").textContent = "Pode falar…";
+  clearTimeout(commandTimer);
+  commandTimer = setTimeout(() => { if (state === "escutando") { setState(listening ? "ouvindo" : "dormindo"); $("heard").textContent = ""; chime(false); } }, 9000);
+  if (!listening) startListening();
+}
+$("orb").onclick = () => {
+  if (busy) { speechSynthesis.cancel(); return; }
+  if (!SR || micBlocked) { $("text").focus(); return; }
+  wake();
+};
+
+// ---------- Coisas que ela sabe fazer no aparelho ----------
+let lastLink = null;
+const TOOLS = [
+  { name: "agendar_aviso", description: "Marca um timer, alarme ou lembrete que toca nesta página depois de N segundos. Use para 'me avisa em 10 minutos', 'timer de 5 min', 'me lembra às 15h' (calcule os segundos a partir da data e hora atual informada). Retorna o horário marcado.",
+    inputSchema: { type: "object", properties: { segundos: { type: "integer", description: "Daqui a quantos segundos tocar (mínimo 1)" }, mensagem: { type: "string", description: "O que falar quando tocar" } }, required: ["segundos", "mensagem"], additionalProperties: false },
+    run: ({ segundos, mensagem }) => {
+      const s = Math.max(1, Math.round(Number(segundos) || 0));
+      const t = { id: Date.now() + Math.random(), at: Date.now() + s * 1000, msg: String(mensagem || "Seu aviso chegou") };
+      timers.push(t); store.set("timers", timers); paintLists();
+      return { ok: true, toca_as: new Date(t.at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) };
+    } },
+  { name: "listar_avisos", description: "Lista os timers e lembretes marcados que ainda não tocaram.",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    run: () => timers.map(t => ({ mensagem: t.msg, toca_as: new Date(t.at).toLocaleString("pt-BR") })) },
+  { name: "cancelar_avisos", description: "Cancela todos os timers e lembretes marcados.",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    run: () => { const n = timers.length; timers = []; store.set("timers", timers); paintLists(); return { cancelados: n }; } },
+  { name: "salvar_nota", description: "Guarda uma anotação ou item de lista para o usuário (ex.: lista de compras, ideias, recados).",
+    inputSchema: { type: "object", properties: { texto: { type: "string" } }, required: ["texto"], additionalProperties: false },
+    run: ({ texto }) => { notes.push({ t: String(texto), d: Date.now() }); store.set("notes", notes); paintLists(); return { ok: true, total: notes.length }; } },
+  { name: "ler_notas", description: "Devolve todas as anotações guardadas, da mais antiga para a mais nova.",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    run: () => notes.map(n => n.t) },
+  { name: "apagar_notas", description: "Apaga todas as anotações guardadas. Use só se o usuário pedir claramente para apagar.",
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
+    run: () => { const n = notes.length; notes = []; store.set("notes", notes); paintLists(); return { apagadas: n }; } },
+  { name: "abrir_site", description: "Abre um site ou busca para o usuário (YouTube, mapas, WhatsApp Web, pesquisa no Google etc.). Passe a URL completa com https.",
+    inputSchema: { type: "object", properties: { url: { type: "string" }, nome: { type: "string", description: "Nome curto do site" } }, required: ["url"], additionalProperties: false },
+    run: ({ url, nome }) => {
+      const u = String(url || "");
+      if (!/^https:\/\//i.test(u)) throw new Error("A URL precisa começar com https://");
+      lastLink = { url: u, label: "Abrir " + (nome || "site") };
+      if (!inViewer) { const w = window.open(u, "_blank", "noopener"); return { aberto: !!w || true }; }
+      return { mostrado_como_link: true };
+    } },
+];
+
+// Os avisos tocam mesmo depois de recarregar a página (se ela estiver aberta na hora)
+setInterval(() => {
+  const now = Date.now(), due = timers.filter(t => t.at <= now);
+  if (!due.length) return;
+  timers = timers.filter(t => t.at > now); store.set("timers", timers); paintLists();
+  due.forEach(async (t) => {
+    for (let i = 0; i < 3; i++) setTimeout(() => chime(true), i * 400);
+    addMsg("aviso", "⏰ " + t.msg);
+    if (!busy) { busy = true; stopListening(); await speak(t.msg); busy = false; resume(); }
+  });
+}, 1000);
+
+function paintLists() {
+  const tl = $("timers-list"), nl = $("notes-list");
+  tl.innerHTML = ""; nl.innerHTML = "";
+  if (!timers.length) tl.innerHTML = "<li>Nenhum aviso marcado.</li>";
+  timers.forEach(t => { const li = document.createElement("li"); li.textContent = `${new Date(t.at).toLocaleString("pt-BR", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })} — ${t.msg}`; tl.append(li); });
+  if (!notes.length) nl.innerHTML = "<li>Nenhuma nota ainda.</li>";
+  notes.forEach(n => { const li = document.createElement("li"); li.textContent = n.t; nl.append(li); });
+}
+
+// ---------- O cérebro: o Claude ----------
+const MODEL = "claude-opus-5-5";
+function rules() {
+  return `Você é ${cfg.name}, uma assistente pessoal de voz${cfg.owner ? ` de ${cfg.owner}` : ""}. ` +
+    `Responda sempre em português do Brasil, de forma curta (1 a 3 frases) e natural para ser falada em voz alta: ` +
+    `sem markdown, sem listas com marcadores, sem emojis e sem escrever links (diga só o nome do site). ` +
+    `Use as ferramentas para marcar avisos e timers, guardar e ler notas e abrir sites. ` +
+    `Cada pedido chega com a data e a hora atuais entre colchetes; use isso para horários e lembretes. ` +
+    (inViewer ? `Neste modo você não acessa a internet: para notícias, clima ou resultados atuais, diga isso e ofereça abrir um site. `
+              : `Para informações atuais (clima, notícias, resultados, preços), use a busca na web. `) +
+    `Você roda dentro de um navegador: não consegue fazer ligações, mandar mensagens nem mexer em outros aplicativos do aparelho. ` +
+    `Quando pedirem isso, diga com sinceridade e ofereça a melhor alternativa, como abrir o site certo.`;
+}
+const stamp = () => new Date().toLocaleString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+// Conversa guardada só na memória desta aba. "Começar conversa nova" limpa tudo.
+let apiHistory = [];     // modo chave: blocos completos da API, sempre acrescentando no fim
+let turns = [];          // modo Claude: só textos
+
+let Anthropic = null, client = null;
+async function apiAsk(text) {
+  if (!Anthropic) Anthropic = (await import("https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.131.0/+esm")).default;
+  if (!client || client._key !== cfg.key) { client = new Anthropic({ apiKey: cfg.key, dangerouslyAllowBrowser: true }); client._key = cfg.key; }
+  apiHistory.push({ role: "user", content: `[${stamp()}] ${text}` });
+  const tools = [
+    ...TOOLS.map(t => ({ name: t.name, description: t.description, input_schema: t.inputSchema, strict: true })),
+    { type: "web_search_20260209", name: "web_search", max_uses: 3 },
+  ];
+  for (let round = 0; round < 8; round++) {
+    const resp = await client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      output_config: { effort: "low" },
+      system: rules(),
+      tools,
+      messages: apiHistory,
+    });
+    apiHistory.push({ role: "assistant", content: resp.content });
+    if (resp.stop_reason === "refusal") return "Desculpe, com isso eu não posso ajudar.";
+    if (resp.stop_reason === "pause_turn") continue;           // a busca na web ainda está trabalhando
+    if (resp.stop_reason === "tool_use") {
+      const results = [];
+      for (const b of resp.content) {
+        if (b.type !== "tool_use") continue;
+        const tool = TOOLS.find(t => t.name === b.name);
+        try { results.push({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(await tool.run(b.input || {})) }); }
+        catch (e) { results.push({ type: "tool_result", tool_use_id: b.id, content: String(e.message || e), is_error: true }); }
+      }
+      apiHistory.push({ role: "user", content: results });
+      continue;
+    }
+    return resp.content.filter(b => b.type === "text").map(b => b.text).join(" ").trim() || "Pronto.";
+  }
+  return "Demorei demais pensando nisso. Pode repetir de um jeito mais simples?";
+}
+async function viewerAsk(text) {
+  turns.push({ role: "user", content: `[${stamp()}] ${text}` });
+  const recent = turns.slice(-20);
+  if (recent[0].role !== "user") recent.shift();
+  const { text: answer } = await sample([{ role: "user", content: rules() }, ...recent], {
+    modelTier: "quick",
+    tools: TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, execute: t.run })),
+  });
+  turns.push({ role: "assistant", content: answer });
+  return answer.trim();
+}
+function explainError(e) {
+  if (Anthropic && e instanceof Anthropic.AuthenticationError) return "Sua chave da API não foi aceita. Confira em Ajustes.";
+  if (Anthropic && e instanceof Anthropic.PermissionDeniedError) return "Sua chave não tem permissão para usar esse modelo.";
+  if (Anthropic && e instanceof Anthropic.RateLimitError) return "Muitos pedidos seguidos ou o limite da conta acabou. Tente daqui a pouco.";
+  if (Anthropic && e instanceof Anthropic.APIConnectionError) return "Estou sem conexão com a internet agora.";
+  if (Anthropic && e instanceof Anthropic.APIError) return "O serviço do Claude deu um erro. Tente de novo.";
+  if (e && e.code === "not_granted") return "Preciso da sua permissão para usar o Claude. Tente de novo e toque em Permitir.";
+  if (e && e.code === "rate_limited") return "Chegamos no limite de uso por agora. Tente daqui a pouco.";
+  if (e && e.code === "refused") return "Desculpe, com isso eu não posso ajudar.";
+  if (e && e.code === "tools_unavailable") return "Aqui eu não consigo usar minhas ferramentas.";
+  if (e && /import|fetch|module/i.test(String(e.message || e))) return "Não consegui carregar a parte do Claude. Confira a internet.";
+  return "Algo deu errado. Pode tentar de novo?";
+}
+
+// ---------- Fluxo de um pedido ----------
+let busy = false;
+async function handle(text) {
+  if (busy || !text) return;
+  if (!inViewer && !cfg.key) { addMsg("aviso", "Coloque sua chave da API em Ajustes para eu responder."); $("settings").showModal(); return; }
+  if (inViewer && !sample) { addMsg("aviso", "Ainda estou conectando ao Claude. Tente de novo em alguns segundos."); return; }
+  busy = true; clearTimeout(commandTimer); stopListening();
+  $("heard").textContent = ""; $("send").disabled = true;
+  addMsg("eu", text);
+  setState("pensando");
+  lastLink = null;
+  let answer;
+  try { answer = inViewer ? await viewerAsk(text) : await apiAsk(text); }
+  catch (e) { answer = explainError(e); }
+  addMsg("ela", answer, lastLink);
+  await speak(answer);
+  busy = false; $("send").disabled = false;
+  resume();
+}
+function resume() {
+  setState("dormindo");
+  if (cfg.always && SR && !micBlocked) startListening();
+  refreshHint();
+}
+
+$("bar").onsubmit = (e) => { e.preventDefault(); const t = $("text").value.trim(); if (!t) return; $("text").value = ""; handle(t); };
+
+// ---------- Ajustes ----------
+function fillSettings() {
+  $("name").value = cfg.name; $("owner").value = cfg.owner; $("always").checked = cfg.always;
+  $("rate").value = cfg.rate; $("key").value = cfg.key; paintLists();
+}
+$("open-settings").onclick = () => { fillSettings(); $("settings").showModal(); };
+$("close-settings").onclick = () => $("settings").close();
+$("settings").addEventListener("close", () => {
+  const newName = $("name").value.trim() || "Luna";
+  const changedName = newName !== cfg.name || $("owner").value.trim() !== cfg.owner;
+  cfg.name = newName; cfg.owner = $("owner").value.trim(); cfg.always = $("always").checked;
+  cfg.rate = Number($("rate").value); cfg.voice = $("voice").value; cfg.key = $("key").value.trim();
+  Object.entries(cfg).forEach(([k, v]) => store.set(k, v));
+  if (changedName) { apiHistory = []; turns = []; }     // nome novo = conversa nova
+  if (cfg.always) startListening(); else { stopListening(); setState("dormindo"); }
+  refreshHint();
+});
+$("reset").onclick = () => { apiHistory = []; turns = []; $("log").innerHTML = ""; addMsg("aviso", "Conversa nova. Pode pedir!"); };
+$("clear-notes").onclick = () => { notes = []; store.set("notes", notes); paintLists(); };
+
+// ---------- Começo ----------
+setState("dormindo");
+refreshHint();
+addMsg("ela", `Oi${cfg.owner ? ", " + cfg.owner : ""}! Eu sou a ${cfg.name}. Posso responder perguntas, marcar timers e lembretes, guardar notas e abrir sites para você.`);
+// O navegador só deixa ouvir depois de um toque na tela
+if (cfg.always && SR) document.addEventListener("pointerdown", () => { if (!listening && !busy) startListening(); }, { once: true });
+</script>
