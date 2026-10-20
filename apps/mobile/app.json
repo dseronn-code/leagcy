@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Sonora",
+    "slug": "sonora",
+    "scheme": "sonora",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0A0A0C",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.sonora",
+      "infoPlist": {
+        "UIBackgroundModes": ["audio", "fetch"]
+      }
+    },
+    "android": {
+      "package": "app.sonora",
+      "adaptiveIcon": {
+        "backgroundColor": "#0A0A0C",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      "expo-secure-store",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": true
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "apiUrl": "http://localhost:8080"
+    }
+  }
+}
