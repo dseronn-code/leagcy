@@ -63,6 +63,17 @@ export interface StoredOp extends ChangeOp {
   authorId: string;
 }
 
+export interface SpotifyImport {
+  spotifyId: string;
+  localId: string;
+  name: string;
+  artworkUrl?: string;
+  total: number;
+  playable: number;
+  lastSyncedAt: number;
+  lastError: string | null;
+}
+
 export const api = {
   register: (email: string, password: string, displayName?: string) => post<{ token: string; user: { id: string; displayName: string } }>('/auth/register', { email, password, displayName }),
   login: (email: string, password: string) => post<{ token: string; user: { id: string; displayName: string } }>('/auth/login', { email, password }),
@@ -93,4 +104,13 @@ export const api = {
   home: () => req<{ sections: { id: string; title: string; tracks?: Track[]; mixes?: Mix[] }[] }>('/recs/home'),
   radio: (seed: string, exclude: string[] = []) => req<{ tracks: Track[] }>(`/recs/radio?${qs({ seed, exclude: exclude.slice(-100).join(',') || undefined })}`),
   playlistRecs: (trackIds: string[]) => post<{ tracks: Track[] }>('/recs/playlist', { trackIds }),
+
+  spotifyStatus: () => req<{ enabled: boolean; clientId: string | null; connected: boolean; account: { id: string; displayName: string } | null }>('/spotify/status'),
+  spotifyConnect: (code: string, codeVerifier: string, redirectUri: string) => post<{ account: { displayName: string } }>('/spotify/connect', { code, codeVerifier, redirectUri }),
+  spotifyDisconnect: () => req<{ ok: boolean }>('/spotify/connect', { method: 'DELETE' }),
+  spotifyPlaylists: () => req<{ playlists: SpotifyImport[] }>('/spotify/playlists'),
+  spotifyImport: (url: string) => post<{ playlist: SpotifyImport }>('/spotify/playlists', { url }),
+  spotifySync: () => post<{ playlists: SpotifyImport[] }>('/spotify/sync', {}),
+  spotifySyncOne: (spotifyId: string) => post<{ playlist: SpotifyImport }>(`/spotify/playlists/${spotifyId}/sync`, {}),
+  spotifyStop: (spotifyId: string) => req<{ ok: boolean }>(`/spotify/playlists/${spotifyId}`, { method: 'DELETE' }),
 };

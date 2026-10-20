@@ -1,6 +1,6 @@
 import pg from 'pg';
-import { localDay, isQualifiedPlay, type Plan, type PlayEvent } from '@sonora/core';
-import type { Repos, StoredOp, User } from './types';
+import { localDay, isQualifiedPlay, type Plan, type PlayEvent, type SpotifyItem } from '@sonora/core';
+import type { ImportedPlaylist, Repos, StoredOp, User } from './types';
 
 type Row = Record<string, unknown>;
 
@@ -17,6 +17,20 @@ function toPlay(r: Row): PlayEvent {
     source: r.source as PlayEvent['source'],
     deviceId: r.device_id as string,
     tzOffsetMin: r.tz_offset_min as number,
+  };
+}
+
+function toImport(r: Row): ImportedPlaylist {
+  return {
+    userId: r.user_id as string,
+    spotifyId: r.spotify_id as string,
+    localId: r.local_id as string,
+    name: r.name as string,
+    artworkUrl: (r.artwork_url as string | null) ?? undefined,
+    snapshotId: r.snapshot_id as string,
+    items: r.items as ImportedPlaylist['items'],
+    lastSyncedAt: (r.last_synced_at as Date).getTime(),
+    lastError: (r.last_error as string | null) ?? null,
   };
 }
 
@@ -175,6 +189,56 @@ export function postgresRepos(connectionString: string): Repos & { close(): Prom
       async of(trackId, limit) {
         const rows = await q('SELECT neighbor_id, score FROM track_neighbors WHERE track_id = $1 ORDER BY score DESC LIMIT $2', [trackId, limit]);
         return rows.map((r) => ({ id: r.neighbor_id as string, score: r.score as number }));
+      },
+    },
+    spotify: {
+      async getLink(userId) {
+        const [r] = await q('SELECT * FROM spotify_links WHERE user_id = $1', [userId]);
+        return r
+          ? { userId, spotifyUserId: r.spotify_user_id as string, displayName: r.display_name as string, refreshToken: r.refresh_token as string, accessToken: r.access_token as string, expiresAt: (r.expires_at as Date).getTime() }
+          : null;
+      },
+      async setLink(l) {
+        await q(
+          `INSERT INTO spotify_links VALUES ($1,$2,$3,$4,$5,to_timestamp($6/1000.0))
+           ON CONFLICT (user_id) DO UPDATE SET spotify_user_id=$2, display_name=$3, refresh_token=$4, access_token=$5, expires_at=to_timestamp($6/1000.0)`,
+          [l.userId, l.spotifyUserId, l.displayName, l.refreshToken, l.accessToken, l.expiresAt],
+        );
+      },
+      async deleteLink(userId) {
+        await q('DELETE FROM spotify_links WHERE user_id = $1', [userId]);
+      },
+      async listImports(userId) {
+        return (await q('SELECT * FROM spotify_imports WHERE user_id = $1 ORDER BY name', [userId])).map(toImport);
+      },
+      async allImports() {
+        return (await q('SELECT * FROM spotify_imports ORDER BY last_synced_at')).map(toImport);
+      },
+      async getImport(userId, spotifyId) {
+        const [r] = await q('SELECT * FROM spotify_imports WHERE user_id = $1 AND spotify_id = $2', [userId, spotifyId]);
+        return r ? toImport(r) : null;
+      },
+      async saveImport(p) {
+        await q(
+          `INSERT INTO spotify_imports VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,to_timestamp($8/1000.0),$9)
+           ON CONFLICT (user_id, spotify_id) DO UPDATE SET local_id=$3, name=$4, artwork_url=$5, snapshot_id=$6, items=$7::jsonb, last_synced_at=to_timestamp($8/1000.0), last_error=$9`,
+          [p.userId, p.spotifyId, p.localId, p.name, p.artworkUrl ?? null, p.snapshotId, JSON.stringify(p.items), p.lastSyncedAt, p.lastError],
+        );
+      },
+      async deleteImport(userId, spotifyId) {
+        await q('DELETE FROM spotify_imports WHERE user_id = $1 AND spotify_id = $2', [userId, spotifyId]);
+      },
+      async putTracks(items) {
+        if (!items.length) return;
+        await q(
+          `INSERT INTO spotify_tracks SELECT i->>'spotifyId', i FROM jsonb_array_elements($1::jsonb) AS i
+           ON CONFLICT (spotify_id) DO UPDATE SET item = EXCLUDED.item`,
+          [JSON.stringify(items)],
+        );
+      },
+      async getTrack(id) {
+        const [r] = await q('SELECT item FROM spotify_tracks WHERE spotify_id = $1', [id]);
+        return r ? (r.item as SpotifyItem) : null;
       },
     },
   };

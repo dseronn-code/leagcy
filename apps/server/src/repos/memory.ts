@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ChangeOp } from '@sonora/core';
-import type { PlaylistRole, Repos, StampedPlay, StoredOp, User } from './types';
+import type { ChangeOp, SpotifyItem } from '@sonora/core';
+import type { ImportedPlaylist, PlaylistRole, Repos, SpotifyLink, StampedPlay, StoredOp, User } from './types';
 
 /** Implementação em memória — usada em testes e quando não há DATABASE_URL. */
 export function memoryRepos(): Repos {
@@ -11,6 +11,10 @@ export function memoryRepos(): Repos {
   const invites = new Map<string, { playlistId: string; expiresAt: Date }>();
   const plays = new Map<string, StampedPlay>();
   const neighbors = new Map<string, Array<{ id: string; score: number }>>();
+  const spotifyLinks = new Map<string, SpotifyLink>();
+  const imports = new Map<string, ImportedPlaylist>();
+  const spotifyTracks = new Map<string, SpotifyItem>();
+  const clone = <T>(x: T): T => structuredClone(x);
   let seq = 0;
 
   return {
@@ -95,6 +99,41 @@ export function memoryRepos(): Repos {
       },
       async of(trackId, limit) {
         return (neighbors.get(trackId) ?? []).slice(0, limit);
+      },
+    },
+    spotify: {
+      async getLink(userId) {
+        const l = spotifyLinks.get(userId);
+        return l ? clone(l) : null;
+      },
+      async setLink(l) {
+        spotifyLinks.set(l.userId, clone(l));
+      },
+      async deleteLink(userId) {
+        spotifyLinks.delete(userId);
+      },
+      async listImports(userId) {
+        return [...imports.values()].filter((p) => p.userId === userId).map(clone);
+      },
+      async allImports() {
+        return [...imports.values()].map(clone);
+      },
+      async getImport(userId, spotifyId) {
+        const p = imports.get(`${userId}|${spotifyId}`);
+        return p ? clone(p) : null;
+      },
+      async saveImport(p) {
+        imports.set(`${p.userId}|${p.spotifyId}`, clone(p));
+      },
+      async deleteImport(userId, spotifyId) {
+        imports.delete(`${userId}|${spotifyId}`);
+      },
+      async putTracks(items) {
+        for (const it of items) spotifyTracks.set(it.spotifyId, clone(it));
+      },
+      async getTrack(id) {
+        const t = spotifyTracks.get(id);
+        return t ? clone(t) : null;
       },
     },
   };

@@ -93,6 +93,34 @@ CREATE TABLE IF NOT EXISTS track_embeddings (
 );
 CREATE INDEX IF NOT EXISTS track_embeddings_hnsw ON track_embeddings USING hnsw (embedding vector_cosine_ops);
 
+-- Integração com o Spotify (somente metadados de playlists).
+CREATE TABLE IF NOT EXISTS spotify_links (
+  user_id         uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  spotify_user_id text NOT NULL,
+  display_name    text NOT NULL,
+  refresh_token   text NOT NULL,          -- criptografar em repouso (KMS) em produção
+  access_token    text NOT NULL,
+  expires_at      timestamptz NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spotify_imports (
+  user_id        uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  spotify_id     text NOT NULL,
+  local_id       text NOT NULL,
+  name           text NOT NULL,
+  artwork_url    text,
+  snapshot_id    text NOT NULL,
+  items          jsonb NOT NULL,          -- ImportedItem[] na ordem do Spotify
+  last_synced_at timestamptz NOT NULL,
+  last_error     text,
+  PRIMARY KEY (user_id, spotify_id)
+);
+
+CREATE TABLE IF NOT EXISTS spotify_tracks (
+  spotify_id text PRIMARY KEY,
+  item       jsonb NOT NULL
+);
+
 -- Cache de letras (inclui índice full-text para "buscar por letra").
 CREATE TABLE IF NOT EXISTS lyrics_cache (
   track_id   text PRIMARY KEY,

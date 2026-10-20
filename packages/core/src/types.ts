@@ -100,7 +100,8 @@ export interface ArtistPage {
   related: Artist[];
 }
 
-export type PlaylistKind = 'user' | 'collaborative' | 'smart' | 'algorithmic';
+/** `spotify`: espelho somente-leitura de uma playlist do Spotify, sincronizado pelo servidor. */
+export type PlaylistKind = 'user' | 'collaborative' | 'smart' | 'algorithmic' | 'spotify';
 
 export interface PlaylistEntry {
   /** ID da entrada (não da faixa): permite a mesma faixa duas vezes. */
