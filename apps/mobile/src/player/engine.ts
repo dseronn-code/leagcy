@@ -164,6 +164,8 @@ async function nativeSourceFor(id: string): Promise<{ uri: string; name: string 
   if (offline) return { uri: offline.url, name: t.title };
   if (!t.sources.some((s) => s.requiresAuthorization)) {
     const src = resolveSource(t);
+    // Sem nenhuma fonte (ex.: faixa do Spotify que não está no seu acervo): pula em silêncio.
+    if (!src && t.sources.length === 0) refused.set(id, 'no-source');
     return src ? { uri: src.url, name: t.title } : null;
   }
   let cached = signedCache.get(id);

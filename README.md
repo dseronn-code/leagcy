@@ -9,6 +9,7 @@ Streaming de música para **Android e iOS**, **sem anúncios**, com áudio **los
 - [Arquitetura](docs/ARCHITECTURE.md): catálogo e licenciamento, backend, recomendações, estatísticas, sincronização, desempenho e segurança.
 - [Motor de áudio](docs/AUDIO_ENGINE.md): qualidade, gapless, normalização, EQ, bit-perfect, Bluetooth/AirPlay/Chromecast/carros.
 - [Telas e fluxos](docs/SCREENS_AND_FLOWS.md): mapa de navegação, telas, fluxos do usuário e acessibilidade.
+- [Importar playlists do Spotify](docs/SPOTIFY_IMPORT.md): colar o link, sincronização automática e de onde vem o áudio.
 - [Plano de licenciamento](docs/LICENSING.md): direitos envolvidos, caminhos (parceiro B2B, contratos diretos, nicho), o que o código já cumpre e o que falta.
 
 ## Estrutura
@@ -45,6 +46,9 @@ cd apps/mobile
 npx expo run:android   # ou run:ios, ou: npx eas-cli@latest build --profile development
 ```
 
+### Playlists do Spotify
+Cole o link de uma playlist sua do Spotify e ela fica sincronizada (adições e remoções chegam sozinhas). O Spotify fornece só a lista; o áudio vem do seu acervo Navidrome/Subsonic ou do Jamendo. Configuração em [docs/SPOTIFY_IMPORT.md](docs/SPOTIFY_IMPORT.md).
+
 ### Fontes de música (legais)
 - **Jamendo**: catálogo Creative Commons com FLAC. Crie um `client_id` grátis em devportal.jamendo.com.
 - **Subsonic/Navidrome**: aponte `SUBSONIC_URL` para o seu servidor e o app toca o acervo **no arquivo original** (hi-res, sem transcodificação).
@@ -65,6 +69,7 @@ npx expo run:android   # ou run:ios, ou: npx eas-cli@latest build --profile deve
 | Estatísticas: minutos/horas por dia/semana/mês/ano, tops, gêneros, streaks, mapa de calor, Wrapped contínuo, histórico completo | ✅ |
 | Offline: downloads seletivos no codec original, estatísticas offline | ✅ |
 | Sincronização entre dispositivos (biblioteca, playlists, configurações, histórico) | ✅ |
+| Importar playlist do Spotify pelo link, com sincronização automática (adições, remoções, ordem) e casamento com o acervo | ✅ (o áudio vem das fontes legais; faixas não encontradas abrem no Spotify) |
 | Requisitos de licenciamento: assinatura, território, URLs assinadas, licença offline 30 dias, relatório de royalties (CSV por ISRC/território/plano) | ✅ |
 | DRM (Widevine/FairPlay), cobrança via App Store/Google Play, formato DDEX DSR | 🛠️ depende do contrato (ver [licenciamento §5](docs/LICENSING.md#5-o-que-ainda-falta-depende-do-contrato)) |
 | Equalizador 10 bandas: UI, presets, persistência e ponte JS | ✅; processamento no módulo nativo `SonoraDsp`, que ainda falta (esboço em docs) |
@@ -75,6 +80,6 @@ npx expo run:android   # ou run:ios, ou: npx eas-cli@latest build --profile deve
 
 ## Verificação
 
-- `packages/core`: 26 testes (fila, estatísticas, LRC, índices fracionários, convergência do sync, busca, qualidade, smart playlists, recomendação, autorização e rateio de royalties).
-- `apps/server`: 9 testes de API ponta a ponta com providers falsos (auth, busca filtrada, ingestão idempotente e estatísticas, sync e permissões de playlist colaborativa, recomendações, autorização de stream por assinatura/território, renovação de licença offline, relatório de uso em CSV).
+- `packages/core`: 29 testes (fila, estatísticas, LRC, índices fracionários, convergência do sync, busca, qualidade, smart playlists, recomendação, autorização e rateio de royalties, links e diff de playlist do Spotify, casamento de faixas).
+- `apps/server`: 15 testes de API ponta a ponta com providers falsos (auth, busca filtrada, ingestão idempotente e estatísticas, sync e permissões de playlist colaborativa, recomendações, autorização de stream por assinatura/território, renovação de licença offline, relatório de uso em CSV, importação e sincronização de playlist do Spotify com uma API falsa).
 - `apps/mobile`: `tsc --noEmit` e `eslint` (eslint-config-expo) sem erros; bundles Android e iOS gerados com `expo export`. A interface ainda não foi testada num aparelho ou emulador.

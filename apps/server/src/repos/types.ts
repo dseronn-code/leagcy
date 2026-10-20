@@ -1,4 +1,4 @@
-import type { ChangeOp, Entitlement, Plan, PlayEvent } from '@sonora/core';
+import type { ChangeOp, Entitlement, Plan, PlayEvent, SpotifyItem } from '@sonora/core';
 
 export interface User {
   id: string;
@@ -23,6 +23,39 @@ export interface StoredOp extends ChangeOp {
 }
 
 export type PlaylistRole = 'owner' | 'editor' | 'follower';
+
+/** Conta Spotify vinculada (OAuth com PKCE; o refresh token fica só no servidor). */
+export interface SpotifyLink {
+  userId: string;
+  spotifyUserId: string;
+  displayName: string;
+  refreshToken: string;
+  accessToken: string;
+  expiresAt: number;
+}
+
+export interface ImportedItem extends SpotifyItem {
+  /** Chave da ocorrência (`spotifyId#n`): base do entryId estável na biblioteca. */
+  key: string;
+  /** Faixa tocável encontrada numa fonte legal, ou null. */
+  matchedTrackId: string | null;
+  matchCheckedAt: number;
+  /** Posição fracionária já gravada na biblioteca. */
+  position: string;
+}
+
+/** Playlist do Spotify espelhada numa playlist da biblioteca do usuário. */
+export interface ImportedPlaylist {
+  userId: string;
+  spotifyId: string;
+  localId: string;
+  name: string;
+  artworkUrl?: string;
+  snapshotId: string;
+  items: ImportedItem[];
+  lastSyncedAt: number;
+  lastError: string | null;
+}
 
 /**
  * Persistência. Implementada em Postgres (produção) e em memória (dev/testes).
@@ -57,5 +90,18 @@ export interface Repos {
   neighbors: {
     replace(trackId: string, neighbors: Array<{ id: string; score: number }>): Promise<void>;
     of(trackId: string, limit: number): Promise<Array<{ id: string; score: number }>>;
+  };
+  spotify: {
+    getLink(userId: string): Promise<SpotifyLink | null>;
+    setLink(link: SpotifyLink): Promise<void>;
+    deleteLink(userId: string): Promise<void>;
+    listImports(userId: string): Promise<ImportedPlaylist[]>;
+    allImports(): Promise<ImportedPlaylist[]>;
+    getImport(userId: string, spotifyId: string): Promise<ImportedPlaylist | null>;
+    saveImport(p: ImportedPlaylist): Promise<void>;
+    deleteImport(userId: string, spotifyId: string): Promise<void>;
+    /** Metadados das faixas do Spotify (para exibir as que não têm fonte de áudio). */
+    putTracks(items: SpotifyItem[]): Promise<void>;
+    getTrack(spotifyId: string): Promise<SpotifyItem | null>;
   };
 }

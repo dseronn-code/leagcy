@@ -9,6 +9,7 @@ import { authorize, listenedMsByPeriod, localDay, OFFLINE_LICENSE_MS, parseSearc
 import type { CatalogService } from './providers/catalog';
 import type { LyricsService } from './lyrics';
 import type { RecommendationService } from './recs/service';
+import { SpotifyImportError, summarizeImport, type SpotifySyncService } from './spotify/sync';
 import type { Repos } from './repos/types';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
@@ -37,6 +38,8 @@ export interface Deps {
   catalog: CatalogService;
   lyrics: LyricsService;
   recs: RecommendationService;
+  /** Ausente quando SPOTIFY_CLIENT_ID não está configurado. */
+  spotify?: SpotifySyncService;
   jwtSecret: string;
   adminToken?: string;
   trialDays?: number;
@@ -355,6 +358,65 @@ export async function buildApp(deps: Deps) {
   app.post('/recs/playlist', { preHandler: auth }, async (req) => {
     const { trackIds } = z.object({ trackIds: z.array(z.string()).max(500) }).parse(req.body);
     return { tracks: await recs.forPlaylist(uid(req), trackIds) };
+  });
+
+  // ---------- Importação de playlists do Spotify ----------
+  const spotify = deps.spotify;
+  const spotifyError = (reply: FastifyReply, e: unknown) => {
+    if (!(e instanceof SpotifyImportError)) throw e;
+    const status = { 'invalid-link': 400, 'not-connected': 409, 'not-allowed': 403, 'not-found': 404, 'spotify-error': 502 }[e.code];
+    return reply.code(status).send({ error: e.code, message: e.message });
+  };
+
+  app.get('/spotify/status', { preHandler: auth }, async (req) => {
+    const link = spotify ? await repos.spotify.getLink(uid(req)) : null;
+    return { enabled: !!spotify, clientId: spotify?.client.clientId ?? null, connected: !!link, account: link ? { id: link.spotifyUserId, displayName: link.displayName } : null };
+  });
+
+  app.post('/spotify/connect', { preHandler: auth }, async (req, reply) => {
+    if (!spotify) return reply.code(404).send({ error: 'spotify-disabled' });
+    const { code, codeVerifier, redirectUri } = z.object({ code: z.string().min(1), codeVerifier: z.string().min(43).max(128), redirectUri: z.string().url() }).parse(req.body);
+    try {
+      return { account: await spotify.connect(uid(req), code, codeVerifier, redirectUri) };
+    } catch (e) {
+      return reply.code(400).send({ error: 'spotify-auth', message: (e as Error).message });
+    }
+  });
+
+  app.delete('/spotify/connect', { preHandler: auth }, async (req) => {
+    await repos.spotify.deleteLink(uid(req));
+    return { ok: true };
+  });
+
+  app.get('/spotify/playlists', { preHandler: auth }, async (req) => ({ playlists: (await repos.spotify.listImports(uid(req))).map(summarizeImport) }));
+
+  app.post('/spotify/playlists', { preHandler: auth }, async (req, reply) => {
+    if (!spotify) return reply.code(404).send({ error: 'spotify-disabled' });
+    const { url } = z.object({ url: z.string().min(1).max(500) }).parse(req.body);
+    try {
+      return { playlist: await spotify.importPlaylist(uid(req), url) };
+    } catch (e) {
+      return spotifyError(reply, e);
+    }
+  });
+
+  /** O app chama ao abrir e ao puxar para atualizar; o servidor também varre sozinho a cada poucos minutos. */
+  app.post('/spotify/sync', { preHandler: auth }, async (req, reply) => {
+    if (!spotify) return reply.code(404).send({ error: 'spotify-disabled' });
+    return { playlists: await spotify.syncUser(uid(req)) };
+  });
+
+  app.post('/spotify/playlists/:spotifyId/sync', { preHandler: auth }, async (req, reply) => {
+    if (!spotify) return reply.code(404).send({ error: 'spotify-disabled' });
+    const p = await repos.spotify.getImport(uid(req), (req.params as { spotifyId: string }).spotifyId);
+    if (!p) return reply.code(404).send({ error: 'not-found' });
+    return { playlist: summarizeImport(await spotify.syncOne(p, true)) };
+  });
+
+  app.delete('/spotify/playlists/:spotifyId', { preHandler: auth }, async (req, reply) => {
+    if (!spotify) return reply.code(404).send({ error: 'spotify-disabled' });
+    await spotify.stopSyncing(uid(req), (req.params as { spotifyId: string }).spotifyId);
+    return { ok: true };
   });
 
   // ---------- Administração e relatórios para licenciantes ----------

@@ -76,12 +76,13 @@ export default function Library() {
         <>
           <Row title="Músicas curtidas" subtitle={`${likes.size} músicas`} icon="heart" onPress={() => router.push('/playlist/liked')} />
           <Row title="Baixadas" subtitle={`${downloads} músicas offline`} icon="arrow-down-circle" onPress={() => router.push('/downloads')} />
+          <Row title="Importar do Spotify" subtitle="Cole o link de uma playlist e ela fica sincronizada" icon="sync-circle" onPress={() => router.push('/spotify')} />
           {sorted.playlists.map((p) => (
             <Row
               key={p.id}
               title={p.name}
-              subtitle={`${{ user: 'Playlist', collaborative: 'Colaborativa', smart: 'Inteligente', algorithmic: 'Mix' }[p.kind]} · ${p.kind === 'smart' ? 'automática' : `${p.entries.length} músicas`}`}
-              icon={p.artworkUrl ? undefined : p.kind === 'collaborative' ? 'people' : p.kind === 'smart' ? 'sparkles' : 'musical-notes'}
+              subtitle={`${{ user: 'Playlist', collaborative: 'Colaborativa', smart: 'Inteligente', algorithmic: 'Mix', spotify: 'Do Spotify' }[p.kind]} · ${p.kind === 'smart' ? 'automática' : `${p.entries.length} músicas`}`}
+              icon={p.artworkUrl ? undefined : p.kind === 'collaborative' ? 'people' : p.kind === 'smart' ? 'sparkles' : p.kind === 'spotify' ? 'sync-circle' : 'musical-notes'}
               uri={p.artworkUrl}
               onPress={() => router.push(`/playlist/${p.id}`)}
             />

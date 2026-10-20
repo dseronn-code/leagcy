@@ -84,8 +84,14 @@ export async function syncNow(): Promise<void> {
   }
 }
 
+/** Pede ao servidor para conferir as playlists do Spotify agora (ele também confere sozinho a cada poucos minutos). */
+async function syncSpotify() {
+  await api.spotifySync().catch(() => undefined); // 404 = servidor sem integração; offline = tenta depois
+  await syncNow();
+}
+
 export function startSync() {
-  void syncNow();
+  void syncSpotify();
   useLibrary.subscribe((s, prev) => {
     if (s.dirty !== prev.dirty) {
       if (debounce) clearTimeout(debounce);
@@ -101,7 +107,7 @@ export function startSync() {
   startInterval();
   AppState.addEventListener('change', (st) => {
     if (st === 'active') {
-      void syncNow();
+      void syncSpotify();
       startInterval();
     } else if (interval) {
       clearInterval(interval);

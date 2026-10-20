@@ -1,4 +1,4 @@
-import { Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Linking, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { create } from 'zustand';
@@ -30,7 +30,7 @@ function Action({ icon, label, onPress }: { icon: IconName; label: string; onPre
 export function TrackSheet() {
   const { track, mode } = useSheet();
   const liked = useLibrary((s) => (track ? s.likes.has(track.id) : false));
-  const playlists = useLibrary((s) => s.playlists.filter((p) => p.kind !== 'smart' && p.kind !== 'algorithmic'));
+  const playlists = useLibrary((s) => s.playlists.filter((p) => p.kind !== 'smart' && p.kind !== 'algorithmic' && p.kind !== 'spotify'));
   const downloaded = useDownloads((s) => (track ? s.files.has(track.id) : false));
   if (!track) return null;
 
@@ -57,6 +57,9 @@ export function TrackSheet() {
         <ScrollView style={{ maxHeight: 460 }}>
           {mode === 'actions' ? (
             <>
+              {track.provider === 'spotify' && (
+                <Action icon="open-outline" label="Abrir no Spotify (não está no seu acervo)" onPress={run(() => Linking.openURL(`https://open.spotify.com/track/${track.id.slice('spotify:'.length)}`))} />
+              )}
               <Action icon={liked ? 'heart' : 'heart-outline'} label={liked ? 'Remover das curtidas' : 'Curtir'} onPress={run(() => toggleLike(track))} />
               <Action icon="play-skip-forward-outline" label="Tocar a seguir" onPress={run(() => playNext([track]))} />
               <Action icon="list-outline" label="Adicionar à fila" onPress={run(() => addToQueue([track]))} />

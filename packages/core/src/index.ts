@@ -9,3 +9,4 @@ export * from './quality';
 export * from './recommend';
 export * from './smartPlaylist';
 export * from './licensing';
+export * from './spotify';

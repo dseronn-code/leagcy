@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Alert, ScrollView, Share, Text, TextInput, View } from 'react-native';
+import { Alert, Linking, ScrollView, Share, Text, TextInput, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { evaluateSmartPlaylist, isQualifiedPlay, type Track } from '@sonora/core';
 import { api } from '@/api/client';
@@ -57,7 +57,10 @@ export default function PlaylistScreen() {
     return evaluateSmartPlaylist(resolved, (tid) => ({ playCount: stats.get(tid)?.playCount ?? 0, lastPlayedAt: stats.get(tid)?.lastPlayedAt, liked: likes.has(tid) }), smartRules);
   }, [rows, isSmart, resolved, smartRules, history, likes]);
 
-  const canEdit = !!playlist && playlist.kind !== 'smart' && playlist.kind !== 'algorithmic';
+  // Faixas do Spotify sem fonte legal ficam visíveis, mas fora da fila.
+  const playable = useMemo(() => tracks.filter((t) => t.provider !== 'spotify'), [tracks]);
+  const canEdit = !!playlist && playlist.kind !== 'smart' && playlist.kind !== 'algorithmic' && playlist.kind !== 'spotify';
+  const fromSpotify = playlist?.kind === 'spotify';
   const { data: recs } = useAsync(async () => (canEdit && tracks.length ? (await api.playlistRecs(tracks.map((t) => t.id))).tracks : []), [canEdit, tracks.length]);
 
   if (!isLiked && !playlist) return <Empty icon="musical-notes-outline" title="Playlist não encontrada" />;
@@ -104,14 +107,15 @@ export default function PlaylistScreen() {
         artwork={playlist?.artworkUrl ?? tracks[0]?.artworkUrl}
         title={title}
         subtitle={playlist?.description}
-        meta={`${playlist?.kind === 'collaborative' ? 'Colaborativa · ' : isSmart ? 'Inteligente · ' : ''}${tracks.length} músicas · ${formatMinutes(total)}`}
+        meta={`${playlist?.kind === 'collaborative' ? 'Colaborativa · ' : isSmart ? 'Inteligente · ' : fromSpotify ? 'Sincronizada do Spotify · ' : ''}${fromSpotify ? `${playable.length} de ${tracks.length} tocáveis` : `${tracks.length} músicas`} · ${formatMinutes(total)}`}
         actions={
           <>
             {canEdit && <IconButton name={editing ? 'checkmark' : 'create-outline'} color={editing ? colors.accent : colors.text} label={editing ? 'Concluir edição' : 'Editar'} onPress={() => setEditing(!editing)} />}
             <IconButton name="arrow-down-circle-outline" label="Baixar todas" onPress={() => download(tracks)} />
-            {!isLiked && <IconButton name={playlist?.kind === 'collaborative' ? 'person-add-outline' : 'share-outline'} label="Compartilhar" onPress={() => void share()} />}
-            {!isLiked && <IconButton name="ellipsis-horizontal" label="Mais" onPress={more} />}
-            <PlayButtons onPlay={() => void playTracks(tracks, 0, ctx, title, { shuffle: false })} onShuffle={() => void playTracks(tracks, 0, ctx, title, { shuffle: true })} />
+            {!isLiked && !fromSpotify && <IconButton name={playlist?.kind === 'collaborative' ? 'person-add-outline' : 'share-outline'} label="Compartilhar" onPress={() => void share()} />}
+            {!isLiked && !fromSpotify && <IconButton name="ellipsis-horizontal" label="Mais" onPress={more} />}
+            {fromSpotify && <IconButton name="sync-circle-outline" label="Gerenciar sincronização com o Spotify" onPress={() => router.push('/spotify')} />}
+            <PlayButtons onPlay={() => void playTracks(playable, 0, ctx, title, { shuffle: false })} onShuffle={() => void playTracks(playable, 0, ctx, title, { shuffle: true })} />
           </>
         }
       />
@@ -123,6 +127,9 @@ export default function PlaylistScreen() {
             style={{ backgroundColor: colors.surface, color: colors.text, borderRadius: radius.md, padding: space.md, fontSize: 18, marginBottom: space.md }}
             accessibilityLabel="Nome da playlist"
           />
+        )}
+        {fromSpotify && (
+          <Text style={[type.caption, { marginBottom: space.sm }]}>Para adicionar ou tirar músicas, edite a playlist no Spotify — as mudanças chegam aqui sozinhas.</Text>
         )}
         {tracks.length === 0 && <Empty icon="add-circle-outline" title="Playlist vazia" body="Toque longo em qualquer música e escolha “Adicionar à playlist”." />}
         {editing && playlist && rows ? (
@@ -147,7 +154,19 @@ export default function PlaylistScreen() {
             )}
           />
         ) : (
-          tracks.map((t, i) => <TrackRow key={rows?.[i]?.e.entryId ?? t.id} track={t} onPress={() => void playTracks(tracks, i, ctx, title)} />)
+          tracks.map((t, i) =>
+            t.provider === 'spotify' ? (
+              <View key={rows?.[i]?.e.entryId ?? t.id} style={{ opacity: 0.45 }}>
+                <TrackRow
+                  track={t}
+                  onPress={() => void Linking.openURL(`https://open.spotify.com/track/${t.id.slice('spotify:'.length)}`)}
+                  trailing={<IconButton name="open-outline" size={18} color={colors.textDim} label={`${t.title}: não está no seu acervo. Abrir no Spotify`} onPress={() => void Linking.openURL(`https://open.spotify.com/track/${t.id.slice('spotify:'.length)}`)} />}
+                />
+              </View>
+            ) : (
+              <TrackRow key={rows?.[i]?.e.entryId ?? t.id} track={t} onPress={() => void playTracks(playable, Math.max(0, playable.indexOf(t)), ctx, title)} />
+            ),
+          )
         )}
 
         {!editing && recs && recs.length > 0 && playlist && (
