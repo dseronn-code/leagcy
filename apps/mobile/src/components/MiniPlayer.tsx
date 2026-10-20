@@ -11,9 +11,19 @@ export function MiniPlayer() {
   const source = usePlayer((s) => s.source);
   const progress = usePlayer((s) => (s.durationSec ? s.positionSec / s.durationSec : 0));
   const liked = useLibrary((s) => (current ? s.likes.has(current.id) : false));
-  if (!current) return null;
+  const unavailable = usePlayer((s) => s.unavailable);
+  const notice = unavailable && (
+    <Pressable onPress={() => usePlayer.setState({ unavailable: null })} style={styles.notice} accessibilityRole="alert">
+      <Text style={type.caption} numberOfLines={2}>
+        “{unavailable.title}” indisponível: {REASONS[unavailable.reason] ?? 'tente novamente mais tarde'}.
+      </Text>
+    </Pressable>
+  );
+  if (!current) return notice || null;
 
   return (
+    <>
+    {notice}
     <Pressable style={styles.wrap} onPress={() => router.push('/player')} accessibilityRole="button" accessibilityLabel={`Tocando ${current.title}. Abrir player.`}>
       <View style={styles.row}>
         <Artwork uri={current.artworkUrl} size={40} />
@@ -36,12 +46,22 @@ export function MiniPlayer() {
         <View style={[styles.fill, { width: `${Math.min(100, progress * 100)}%` }]} />
       </View>
     </Pressable>
+    </>
   );
 }
+
+const REASONS: Record<string, string> = {
+  'no-subscription': 'exige assinatura',
+  expired: 'sua assinatura venceu',
+  territory: 'não licenciada na sua região',
+  'not-licensed': 'retirada do catálogo pelo detentor dos direitos',
+  offline: 'sem conexão',
+};
 
 const styles = StyleSheet.create({
   wrap: { marginHorizontal: space.sm, marginBottom: space.xs, backgroundColor: colors.surfaceHigh, borderRadius: radius.md, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', padding: space.sm },
   track: { height: 2, backgroundColor: colors.border },
   fill: { height: 2, backgroundColor: colors.text },
+  notice: { marginHorizontal: space.sm, marginBottom: space.xs, padding: space.sm, borderRadius: radius.sm, backgroundColor: colors.surface, borderLeftWidth: 3, borderLeftColor: colors.danger },
 });

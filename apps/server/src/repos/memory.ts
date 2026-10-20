@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ChangeOp, PlayEvent } from '@sonora/core';
-import type { PlaylistRole, Repos, StoredOp, User } from './types';
+import type { ChangeOp } from '@sonora/core';
+import type { PlaylistRole, Repos, StampedPlay, StoredOp, User } from './types';
 
 /** Implementação em memória — usada em testes e quando não há DATABASE_URL. */
 export function memoryRepos(): Repos {
@@ -9,7 +9,7 @@ export function memoryRepos(): Repos {
   const opKeys = new Set<string>();
   const members = new Map<string, PlaylistRole>();
   const invites = new Map<string, { playlistId: string; expiresAt: Date }>();
-  const plays = new Map<string, PlayEvent & { userId: string }>();
+  const plays = new Map<string, StampedPlay>();
   const neighbors = new Map<string, Array<{ id: string; score: number }>>();
   let seq = 0;
 
@@ -25,6 +25,10 @@ export function memoryRepos(): Repos {
       },
       async byId(id) {
         return users.get(id) ?? null;
+      },
+      async setEntitlement(id, e) {
+        const u = users.get(id);
+        if (u) users.set(id, { ...u, entitlement: e });
       },
     },
     sync: {
@@ -66,11 +70,11 @@ export function memoryRepos(): Repos {
       },
     },
     plays: {
-      async insert(userId, events) {
+      async insert(userId, events, stamp) {
         let n = 0;
         for (const e of events) {
           if (plays.has(e.id)) continue;
-          plays.set(e.id, { ...e, userId });
+          plays.set(e.id, { ...e, ...stamp, userId });
           n++;
         }
         return n;
@@ -79,10 +83,10 @@ export function memoryRepos(): Repos {
         return [...plays.values()]
           .filter((e) => e.userId === userId && e.startedAt >= from && e.startedAt < to)
           .sort((a, b) => a.startedAt - b.startedAt)
-          .map(({ userId: _u, ...e }) => e);
+          .map(({ userId: _u, country: _c, plan: _p, ...e }) => e);
       },
-      async allSince(since) {
-        return [...plays.values()].filter((e) => e.startedAt >= since);
+      async allSince(since, until = Number.MAX_SAFE_INTEGER) {
+        return [...plays.values()].filter((e) => e.startedAt >= since && e.startedAt < until);
       },
     },
     neighbors: {

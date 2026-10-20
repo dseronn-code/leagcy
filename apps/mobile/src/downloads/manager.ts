@@ -1,7 +1,8 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { create } from 'zustand';
 import { pickSource, type AudioSource, type Track } from '@sonora/core';
-import { addDownload, cacheTracks, listDownloads, removeDownload, type DownloadRow } from '@/db/local';
+import { api } from '@/api/client';
+import { addDownload, cacheTracks, listDownloads, removeDownload, setLicenseExpiry, type DownloadRow } from '@/db/local';
 import { useLibrary } from '@/library/store';
 import { deviceCaps } from '@/player/caps';
 
@@ -9,6 +10,10 @@ import { deviceCaps } from '@/player/caps';
  * Downloads seletivos para modo offline. Arquivos ficam no diretório de
  * documentos do app (não são apagados pelo sistema como o cache) no codec
  * original escolhido — FLAC hi-res é baixado sem transcodificação.
+ *
+ * Catálogo licenciado: o download só é feito com URL autorizada pelo servidor
+ * e a licença offline vale 30 dias; o app revalida ao sincronizar e apaga o que
+ * o licenciante retirou ou que o usuário não pode mais ouvir.
  */
 
 interface DownloadState {
@@ -40,6 +45,7 @@ export async function initDownloads() {
 export function localFileFor(trackId: string): AudioSource | null {
   const r = useDownloads.getState().files.get(trackId);
   if (!r) return null;
+  if (r.license_expires_at !== null && r.license_expires_at < Date.now()) return null; // licença vencida: precisa revalidar online
   return { url: r.uri, codec: r.codec as AudioSource['codec'], bitrate: 0, sampleRateHz: 0, channels: 2 };
 }
 
@@ -67,7 +73,18 @@ function pump() {
 
 async function downloadOne(t: Track) {
   const prefs = useLibrary.getState().audio;
-  const src = pickSource(t.sources, prefs.downloadQuality, deviceCaps, prefs.preferSpatial);
+  let sources = t.sources;
+  let licenseExpiresAt: number | null = null;
+  if (t.sources.some((s) => s.requiresAuthorization)) {
+    try {
+      const r = await api.stream(t.id, useLibrary.getState().deviceId, 'download');
+      sources = r.sources;
+      licenseExpiresAt = r.licenseExpiresAt ?? null;
+    } catch {
+      return; // sem assinatura/território: não baixa
+    }
+  }
+  const src = pickSource(sources, prefs.downloadQuality, deviceCaps, prefs.preferSpatial);
   if (!src) return;
   setActive(t.id, 0);
   try {
@@ -75,7 +92,7 @@ async function downloadOne(t: Track) {
     const dest = new File(dir(), `${t.id.replace(/[^a-zA-Z0-9_-]/g, '_')}.${ext}`);
     if (dest.exists) dest.delete();
     const file = await File.downloadFileAsync(src.url, dest);
-    const row: DownloadRow = { track_id: t.id, uri: file.uri, codec: src.codec, bytes: file.size ?? 0, created_at: Date.now() };
+    const row: DownloadRow = { track_id: t.id, uri: file.uri, codec: src.codec, bytes: file.size ?? 0, created_at: Date.now(), license_expires_at: licenseExpiresAt };
     await addDownload(row);
     useDownloads.setState((s) => {
       const files = new Map(s.files).set(t.id, row);
@@ -106,6 +123,25 @@ export async function deleteDownload(trackId: string) {
     files.delete(trackId);
     return { files, totalBytes: s.totalBytes - r.bytes };
   });
+}
+
+/** Revalida licenças offline com o servidor; apaga o que foi revogado. */
+export async function renewLicenses() {
+  const rows = [...useDownloads.getState().files.values()].filter((r) => r.license_expires_at !== null);
+  // Renova no máximo a cada ~5 dias (prazo de 30), para não pesar em cada sync.
+  if (!rows.some((r) => r.license_expires_at! < Date.now() + 25 * 86_400_000)) return;
+  const licensed = rows.map((r) => r.track_id);
+  const { renewed, revoked, expiresAt } = await api.renewDownloads(licensed);
+  await setLicenseExpiry(renewed, expiresAt);
+  useDownloads.setState((s) => {
+    const files = new Map(s.files);
+    for (const id of renewed) {
+      const r = files.get(id);
+      if (r) files.set(id, { ...r, license_expires_at: expiresAt });
+    }
+    return { files };
+  });
+  for (const id of revoked) await deleteDownload(id);
 }
 
 export async function deleteAllDownloads() {

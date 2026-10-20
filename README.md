@@ -9,6 +9,7 @@ Streaming de música para **Android e iOS**, **sem anúncios**, com áudio **los
 - [Arquitetura](docs/ARCHITECTURE.md): catálogo e licenciamento, backend, recomendações, estatísticas, sincronização, desempenho e segurança.
 - [Motor de áudio](docs/AUDIO_ENGINE.md): qualidade, gapless, normalização, EQ, bit-perfect, Bluetooth/AirPlay/Chromecast/carros.
 - [Telas e fluxos](docs/SCREENS_AND_FLOWS.md): mapa de navegação, telas, fluxos do usuário e acessibilidade.
+- [Plano de licenciamento](docs/LICENSING.md): direitos envolvidos, caminhos (parceiro B2B, contratos diretos, nicho), o que o código já cumpre e o que falta.
 
 ## Estrutura
 
@@ -47,7 +48,7 @@ npx expo run:android   # ou run:ios, ou: npx eas-cli@latest build --profile deve
 ### Fontes de música (legais)
 - **Jamendo**: catálogo Creative Commons com FLAC. Crie um `client_id` grátis em devportal.jamendo.com.
 - **Subsonic/Navidrome**: aponte `SUBSONIC_URL` para o seu servidor e o app toca o acervo **no arquivo original** (hi-res, sem transcodificação).
-- **Catálogo comercial** (majors e distribuidoras): exige contratos de licenciamento. A interface `CatalogProvider` já está pronta para essas integrações (ver [Arquitetura §2](docs/ARCHITECTURE.md#2-catálogo-e-licenciamento)).
+- **Catálogo comercial** (majors e distribuidoras): exige contratos de licenciamento — ver o [plano de licenciamento](docs/LICENSING.md). O servidor já faz autorização por assinatura e território, URLs assinadas, licença offline de 30 dias e relatório mensal de royalties por ISRC.
 
 ## Status
 
@@ -64,6 +65,8 @@ npx expo run:android   # ou run:ios, ou: npx eas-cli@latest build --profile deve
 | Estatísticas: minutos/horas por dia/semana/mês/ano, tops, gêneros, streaks, mapa de calor, Wrapped contínuo, histórico completo | ✅ |
 | Offline: downloads seletivos no codec original, estatísticas offline | ✅ |
 | Sincronização entre dispositivos (biblioteca, playlists, configurações, histórico) | ✅ |
+| Requisitos de licenciamento: assinatura, território, URLs assinadas, licença offline 30 dias, relatório de royalties (CSV por ISRC/território/plano) | ✅ |
+| DRM (Widevine/FairPlay), cobrança via App Store/Google Play, formato DDEX DSR | 🛠️ depende do contrato (ver [licenciamento §5](docs/LICENSING.md#5-o-que-ainda-falta-depende-do-contrato)) |
 | Equalizador 10 bandas: UI, presets, persistência e ponte JS | ✅; processamento no módulo nativo `SonoraDsp`, que ainda falta (esboço em docs) |
 | Bit-perfect USB (Android 14+) | 🛠️ toggle e ponte prontos; depende do `SonoraDsp` |
 | AirPlay | ✅ pelo seletor do sistema; 🛠️ botão dedicado |
@@ -72,6 +75,6 @@ npx expo run:android   # ou run:ios, ou: npx eas-cli@latest build --profile deve
 
 ## Verificação
 
-- `packages/core`: 24 testes (fila, estatísticas, LRC, índices fracionários, convergência do sync, busca, qualidade, smart playlists, recomendação).
-- `apps/server`: 6 testes de API ponta a ponta com provider falso (auth, busca filtrada, ingestão idempotente e estatísticas, sync e permissões de playlist colaborativa, recomendações a partir da co-escuta).
+- `packages/core`: 26 testes (fila, estatísticas, LRC, índices fracionários, convergência do sync, busca, qualidade, smart playlists, recomendação, autorização e rateio de royalties).
+- `apps/server`: 9 testes de API ponta a ponta com providers falsos (auth, busca filtrada, ingestão idempotente e estatísticas, sync e permissões de playlist colaborativa, recomendações, autorização de stream por assinatura/território, renovação de licença offline, relatório de uso em CSV).
 - `apps/mobile`: `tsc --noEmit` e `eslint` (eslint-config-expo) sem erros; bundles Android e iOS gerados com `expo export`. A interface ainda não foi testada num aparelho ou emulador.

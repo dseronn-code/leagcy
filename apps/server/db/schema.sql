@@ -7,8 +7,15 @@ CREATE TABLE IF NOT EXISTS users (
   email         text UNIQUE NOT NULL,
   display_name  text NOT NULL,
   password_hash text NOT NULL,
+  -- Assinatura (atualizada pelas notificações de servidor da App Store / Google Play).
+  plan             text NOT NULL DEFAULT 'none' CHECK (plan IN ('none', 'trial', 'premium', 'family', 'student')),
+  plan_valid_until timestamptz NOT NULL DEFAULT to_timestamp(0),
+  country          char(2) NOT NULL DEFAULT 'BR',
   created_at    timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan text NOT NULL DEFAULT 'none';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_valid_until timestamptz NOT NULL DEFAULT to_timestamp(0);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS country char(2) NOT NULL DEFAULT 'BR';
 
 -- Log de sincronização (event sourcing). Escopo = 'user:<id>' ou 'playlist:<id>'
 -- (playlists colaborativas têm escopo próprio, compartilhado entre colaboradores).
@@ -53,8 +60,13 @@ CREATE TABLE IF NOT EXISTS play_events (
   skipped           boolean NOT NULL,
   source            jsonb NOT NULL,
   device_id         text NOT NULL,
-  tz_offset_min     smallint NOT NULL
+  tz_offset_min     smallint NOT NULL,
+  -- Carimbados pelo servidor na ingestão; base dos relatórios de royalties.
+  country           char(2) NOT NULL DEFAULT 'BR',
+  plan              text NOT NULL DEFAULT 'none'
 );
+ALTER TABLE play_events ADD COLUMN IF NOT EXISTS country char(2) NOT NULL DEFAULT 'BR';
+ALTER TABLE play_events ADD COLUMN IF NOT EXISTS plan text NOT NULL DEFAULT 'none';
 CREATE INDEX IF NOT EXISTS play_events_user_time ON play_events (user_id, started_at DESC);
 
 -- Rollup diário para estatísticas instantâneas (mantido pelo servidor a cada ingestão).

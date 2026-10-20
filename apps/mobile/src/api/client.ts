@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
-import type { Album, ArtistPage, ChangeOp, ListeningSummary, PlayEvent, RankedItem, SearchQuery, Track } from '@sonora/core';
+import type { Album, ArtistPage, AudioSource, ChangeOp, Entitlement, ListeningSummary, PlayEvent, RankedItem, SearchQuery, Track } from '@sonora/core';
 
 const BASE: string = (Constants.expoConfig?.extra?.apiUrl as string | undefined) ?? 'http://localhost:8080';
 const TOKEN_KEY = 'sonora.token';
@@ -66,7 +66,10 @@ export interface StoredOp extends ChangeOp {
 export const api = {
   register: (email: string, password: string, displayName?: string) => post<{ token: string; user: { id: string; displayName: string } }>('/auth/register', { email, password, displayName }),
   login: (email: string, password: string) => post<{ token: string; user: { id: string; displayName: string } }>('/auth/login', { email, password }),
-  me: () => req<{ id: string; email: string; displayName: string }>('/me'),
+  me: () => req<{ id: string; email: string; displayName: string; entitlement: Entitlement }>('/me'),
+  stream: (id: string, deviceId: string, purpose: 'stream' | 'download' = 'stream') =>
+    req<{ sources: AudioSource[]; licenseExpiresAt?: number }>(`/tracks/${encodeURIComponent(id)}/stream?${qs({ deviceId, purpose })}`),
+  renewDownloads: (ids: string[]) => post<{ renewed: string[]; revoked: string[]; expiresAt: number }>('/downloads/renew', { ids }),
 
   search: (q: string, limit = 30) => req<{ query: SearchQuery; tracks: Track[]; albums: Album[]; artists: ArtistPage['artist'][]; errors: string[] }>(`/search?${qs({ q, limit })}`),
   track: (id: string) => req<Track>(`/tracks/${encodeURIComponent(id)}`),

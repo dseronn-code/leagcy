@@ -53,6 +53,8 @@ Monorepo (npm workspaces):
 | **Subsonic/OpenSubsonic** (Navidrome, Gonic…) | Implementado | Arquivo original (`format=raw`), até 32-bit/384 kHz, ReplayGain | Acervo próprio do usuário/organização. É o caminho para hi-res real hoje. |
 | **Provedores licenciados** | Interface pronta | FLAC/ALAC hi-res, Dolby Atmos (E-AC-3 JOC) | Integração via contrato com distribuidoras (feeds DDEX ERN para metadados, CDN própria com DRM). |
 
+Contratos, requisitos de licenciantes e o que já está implementado para eles: ver [LICENSING.md](LICENSING.md).
+
 O `CatalogService`:
 - roteia por prefixo do ID (`jamendo:123`, `subsonic:abc`);
 - busca em paralelo em todos os providers, tolerando falha de um deles (`errors[]` na resposta);
@@ -81,7 +83,9 @@ popularity:>70 quality:hires type:track lyrics:"travessia"
 | `GET /tracks/:id/lyrics` | Letras sincronizadas (LRC). |
 | `GET /sync/scopes`, `POST /sync/push`, `GET /sync/pull` | Sincronização multi-dispositivo. |
 | `POST /playlists/:id/claim`, `/invites`, `POST /invites/:token/accept`, `/follow` | Playlists colaborativas e seguir playlists. |
-| `POST /plays`, `GET /history`, `/stats/summary`, `/stats/series`, `/stats/top` | Histórico e estatísticas. |
+| `POST /plays`, `GET /history`, `/stats/summary`, `/stats/series`, `/stats/top` | Histórico e estatísticas (o servidor carimba país e plano em cada reprodução). |
+| `GET /tracks/:id/stream`, `POST /downloads/renew` | Autorização por assinatura/território, URL assinada, licença offline de 30 dias. |
+| `POST /admin/users/:id/entitlement`, `GET /admin/reports/usage` | Administração (exige `ADMIN_TOKEN`): plano do usuário e relatório mensal de royalties em CSV. |
 | `GET /recs/home`, `/recs/discover-weekly`, `/recs/daily-mixes`, `/recs/radio`, `POST /recs/playlist` | Recomendações. |
 
 ### Modelo de dados (`apps/server/db/schema.sql`)

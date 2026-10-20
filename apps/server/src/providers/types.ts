@@ -1,4 +1,4 @@
-import type { Album, Artist, ArtistPage, SearchQuery, Track } from '@sonora/core';
+import type { Album, Artist, ArtistPage, AudioSource, SearchQuery, Track } from '@sonora/core';
 
 export interface SearchResults {
   tracks: Track[];
@@ -22,6 +22,18 @@ export interface CatalogProvider {
   artist(rawId: string): Promise<ArtistPage | null>;
   /** Faixas por gênero ordenadas por popularidade (candidatos de recomendação). */
   tracksByGenre(genre: string, limit: number): Promise<Track[]>;
+  /**
+   * Catálogo licenciado: URLs assinadas de curta duração, emitidas só depois que
+   * o servidor validou assinatura e território. Providers sem isso usam `track.sources`.
+   */
+  streamSources?(rawId: string, ctx: StreamContext): Promise<AudioSource[]>;
+}
+
+export interface StreamContext {
+  userId: string;
+  deviceId: string;
+  country: string;
+  purpose: 'stream' | 'download';
 }
 
 export class ProviderError extends Error {

@@ -1,6 +1,6 @@
 import pg from 'pg';
-import { localDay, isQualifiedPlay, type PlayEvent } from '@sonora/core';
-import type { Repos, StoredOp } from './types';
+import { localDay, isQualifiedPlay, type Plan, type PlayEvent } from '@sonora/core';
+import type { Repos, StoredOp, User } from './types';
 
 type Row = Record<string, unknown>;
 
@@ -20,6 +20,16 @@ function toPlay(r: Row): PlayEvent {
   };
 }
 
+function toUser(r: Row): User {
+  return {
+    id: r.id as string,
+    email: r.email as string,
+    displayName: r.display_name as string,
+    passwordHash: r.password_hash as string,
+    entitlement: { plan: r.plan as Plan, validUntil: (r.plan_valid_until as Date).getTime(), country: (r.country as string).trim() },
+  };
+}
+
 export function postgresRepos(connectionString: string): Repos & { close(): Promise<void> } {
   const pool = new pg.Pool({ connectionString, max: 20 });
   const q = async (sql: string, params: unknown[] = []) => (await pool.query(sql, params)).rows as Row[];
@@ -28,16 +38,23 @@ export function postgresRepos(connectionString: string): Repos & { close(): Prom
     close: () => pool.end(),
     users: {
       async create(u) {
-        const [r] = await q('INSERT INTO users (email, display_name, password_hash) VALUES ($1,$2,$3) RETURNING id', [u.email, u.displayName, u.passwordHash]);
+        const e = u.entitlement;
+        const [r] = await q(
+          'INSERT INTO users (email, display_name, password_hash, plan, plan_valid_until, country) VALUES ($1,$2,$3,$4,to_timestamp($5/1000.0),$6) RETURNING id',
+          [u.email, u.displayName, u.passwordHash, e.plan, e.validUntil, e.country],
+        );
         return { ...u, id: r!.id as string };
       },
       async byEmail(email) {
         const [r] = await q('SELECT * FROM users WHERE email = $1', [email]);
-        return r ? { id: r.id as string, email: r.email as string, displayName: r.display_name as string, passwordHash: r.password_hash as string } : null;
+        return r ? toUser(r) : null;
       },
       async byId(id) {
         const [r] = await q('SELECT * FROM users WHERE id = $1', [id]);
-        return r ? { id: r.id as string, email: r.email as string, displayName: r.display_name as string, passwordHash: r.password_hash as string } : null;
+        return r ? toUser(r) : null;
+      },
+      async setEntitlement(id, e) {
+        await q('UPDATE users SET plan = $2, plan_valid_until = to_timestamp($3/1000.0), country = $4 WHERE id = $1', [id, e.plan, e.validUntil, e.country]);
       },
     },
     sync: {
@@ -95,7 +112,7 @@ export function postgresRepos(connectionString: string): Repos & { close(): Prom
       },
     },
     plays: {
-      async insert(userId, events) {
+      async insert(userId, events, stamp) {
         if (events.length === 0) return 0;
         const client = await pool.connect();
         try {
@@ -104,11 +121,11 @@ export function postgresRepos(connectionString: string): Repos & { close(): Prom
             `INSERT INTO play_events
              SELECT e->>'id', $1, ARRAY(SELECT jsonb_array_elements_text(e->'artistIds')), ARRAY(SELECT jsonb_array_elements_text(e->'genres')),
                     to_timestamp((e->>'startedAt')::bigint / 1000.0), (e->>'listenedMs')::int, (e->>'trackDurationMs')::int,
-                    (e->>'skipped')::boolean, e->'source', e->>'deviceId', (e->>'tzOffsetMin')::smallint
+                    (e->>'skipped')::boolean, e->'source', e->>'deviceId', (e->>'tzOffsetMin')::smallint, $3, $4
              FROM jsonb_array_elements($2::jsonb) AS e
              ON CONFLICT (id) DO NOTHING
              RETURNING id`,
-            [userId, JSON.stringify(events)],
+            [userId, JSON.stringify(events), stamp.country, stamp.plan],
           );
           // Atualiza o rollup diário apenas com os eventos realmente novos.
           const fresh = new Set(inserted.rows.map((r: Row) => r.id as string));
@@ -141,9 +158,9 @@ export function postgresRepos(connectionString: string): Repos & { close(): Prom
         const rows = await q('SELECT * FROM play_events WHERE user_id = $1 AND started_at >= to_timestamp($2/1000.0) AND started_at < to_timestamp($3/1000.0) ORDER BY started_at', [userId, from, to]);
         return rows.map(toPlay);
       },
-      async allSince(since) {
-        const rows = await q('SELECT * FROM play_events WHERE started_at >= to_timestamp($1/1000.0) ORDER BY user_id, started_at', [since]);
-        return rows.map((r) => ({ ...toPlay(r), userId: r.user_id as string }));
+      async allSince(since, until = 8.64e15) {
+        const rows = await q('SELECT * FROM play_events WHERE started_at >= to_timestamp($1/1000.0) AND started_at < to_timestamp($2/1000.0) ORDER BY user_id, started_at', [since, until]);
+        return rows.map((r) => ({ ...toPlay(r), userId: r.user_id as string, country: (r.country as string).trim(), plan: r.plan as Plan }));
       },
     },
     neighbors: {

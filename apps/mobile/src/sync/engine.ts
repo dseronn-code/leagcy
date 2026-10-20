@@ -2,6 +2,7 @@ import { AppState } from 'react-native';
 import * as Network from 'expo-network';
 import { api } from '@/api/client';
 import { ackOutbox, getCursor, markPlaysUploaded, outbox, pendingPlays, setCursor } from '@/db/local';
+import { renewLicenses } from '@/downloads/manager';
 import { applyRemote, useLibrary } from '@/library/store';
 
 /**
@@ -69,6 +70,9 @@ export async function syncNow(): Promise<void> {
       await markPlaysUploaded(plays.map((p) => p.id));
       if (plays.length < 500) break;
     }
+
+    // 4. licenças offline do catálogo licenciado
+    await renewLicenses();
   } catch (e) {
     console.warn('sync falhou; tentará novamente', e);
   } finally {
