@@ -38,10 +38,14 @@ export async function openDb(): Promise<SQLite.SQLiteDatabase> {
       uri TEXT NOT NULL,
       codec TEXT NOT NULL,
       bytes INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      license_expires_at INTEGER      -- NULL = conteúdo livre (sem licença offline)
     );
     CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
   `);
+  // Migração de bancos criados antes da coluna de licença.
+  const cols = await db.getAllAsync<{ name: string }>('PRAGMA table_info(downloads)');
+  if (!cols.some((c) => c.name === 'license_expires_at')) await db.execAsync('ALTER TABLE downloads ADD COLUMN license_expires_at INTEGER');
   return db;
 }
 
@@ -132,10 +136,24 @@ export interface DownloadRow {
   codec: string;
   bytes: number;
   created_at: number;
+  license_expires_at: number | null;
 }
 
 export async function addDownload(r: DownloadRow) {
-  await (await d()).runAsync('INSERT OR REPLACE INTO downloads VALUES (?, ?, ?, ?, ?)', r.track_id, r.uri, r.codec, r.bytes, r.created_at);
+  await (await d()).runAsync(
+    'INSERT OR REPLACE INTO downloads (track_id, uri, codec, bytes, created_at, license_expires_at) VALUES (?, ?, ?, ?, ?, ?)',
+    r.track_id,
+    r.uri,
+    r.codec,
+    r.bytes,
+    r.created_at,
+    r.license_expires_at,
+  );
+}
+
+export async function setLicenseExpiry(trackIds: string[], expiresAt: number) {
+  if (!trackIds.length) return;
+  await (await d()).runAsync(`UPDATE downloads SET license_expires_at = ? WHERE track_id IN (${trackIds.map(() => '?').join(',')})`, expiresAt, ...trackIds);
 }
 
 export async function removeDownload(trackId: string) {

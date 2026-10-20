@@ -18,6 +18,11 @@ export interface AudioSource {
   channels: number;
   /** true para Dolby Atmos / áudio espacial (E-AC-3 JOC). */
   spatial?: boolean;
+  /**
+   * Catálogo licenciado: `url` não vem nos metadados; o app pede uma URL
+   * assinada e de curta duração em /tracks/:id/stream no momento de tocar.
+   */
+  requiresAuthorization?: boolean;
   /** Ganho ReplayGain da faixa em dB (normalização). */
   trackGainDb?: number;
   albumGainDb?: number;
@@ -47,6 +52,12 @@ export interface Track {
   /** 0..100 */
   popularity?: number;
   isrc?: string;
+  /** Código UPC/EAN do lançamento (exigido nos relatórios de uso). */
+  upc?: string;
+  /** Gravadora/distribuidora detentora do fonograma. */
+  licensor?: string;
+  /** Territórios ISO 3166-1 alfa-2 liberados; ausente = sem restrição (CC/acervo próprio). */
+  territories?: string[];
   sources: AudioSource[];
   hasSyncedLyrics?: boolean;
 }

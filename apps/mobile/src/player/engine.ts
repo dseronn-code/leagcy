@@ -25,7 +25,7 @@ import {
   type QueueState,
   type Track,
 } from '@sonora/core';
-import { api } from '@/api/client';
+import { api, ApiError } from '@/api/client';
 import { cacheTracks, insertPlay, kvGet, kvSet } from '@/db/local';
 import { localFileFor } from '@/downloads/manager';
 import { useLibrary } from '@/library/store';
@@ -60,6 +60,8 @@ export interface PlayerState {
   /** Ao acabar a fila, continua com rádio baseado no que tocou. */
   autoplay: boolean;
   sleepAt: number | null;
+  /** Última faixa pulada por indisponibilidade (sem assinatura, fora do território...). */
+  unavailable: { title: string; reason: string } | null;
 }
 
 export const usePlayer = create<PlayerState>(() => ({
@@ -76,6 +78,7 @@ export const usePlayer = create<PlayerState>(() => ({
   contextTitle: null,
   autoplay: true,
   sleepAt: null,
+  unavailable: null,
 }));
 
 let native: AudioPlaylist | null = null;
@@ -87,6 +90,13 @@ let currentStartedAt = 0;
 let sleepTimer: ReturnType<typeof setTimeout> | null = null;
 let onCellular = false;
 let fetchingRadio = false;
+/** Invalida janelas em construção quando o usuário troca de faixa de novo no meio do await. */
+let windowGen = 0;
+/** URLs assinadas de catálogo licenciado expiram rápido; reaproveitamos por poucos minutos. */
+const signedCache = new Map<string, { sources: AudioSource[]; at: number }>();
+const SIGNED_TTL_MS = 4 * 60_000;
+/** Faixas que o servidor recusou nesta sessão (não tenta de novo a cada reconciliação). */
+const refused = new Map<string, string>();
 
 const get = () => usePlayer.getState();
 const set = (p: Partial<PlayerState>) => usePlayer.setState(p);
@@ -126,8 +136,11 @@ async function onNativeTrackChanged(prev: number, cur: number) {
   logPlay(cur < prev ? 'manual' : 'auto');
   let q = get().queue;
   if (!q) return;
-  if (cur > prev) for (let i = prev; i < cur; i++) q = qNext(q, false) ?? q;
-  else q = qPrev(q);
+  if (cur > prev) {
+    // Avança a fila lógica até a faixa que o nativo está tocando (faixas indisponíveis ficaram fora da janela).
+    const target = nativeIds[cur];
+    for (let i = 0; i < 50 && q && currentTrack(q) !== target; i++) q = qNext(q, false) ?? q;
+  } else q = qPrev(q);
   nativeIndex = cur;
   commitQueue(q);
   await reconcileLookahead();
@@ -140,9 +153,34 @@ function resolveSource(t: Track): AudioSource | null {
   return pickSource(t.sources, onCellular ? prefs.cellularQuality : prefs.wifiQuality, deviceCaps, prefs.preferSpatial);
 }
 
-function nativeSourceFor(id: string) {
+/**
+ * Fonte tocável para o player nativo. Arquivo baixado tem prioridade; faixas de
+ * catálogo licenciado pedem URL assinada ao servidor (que valida assinatura e território).
+ */
+async function nativeSourceFor(id: string): Promise<{ uri: string; name: string } | null> {
   const t = get().tracks[id];
-  const src = t && resolveSource(t);
+  if (!t || refused.has(id)) return null;
+  const offline = localFileFor(t.id);
+  if (offline) return { uri: offline.url, name: t.title };
+  if (!t.sources.some((s) => s.requiresAuthorization)) {
+    const src = resolveSource(t);
+    return src ? { uri: src.url, name: t.title } : null;
+  }
+  let cached = signedCache.get(id);
+  if (!cached || Date.now() - cached.at > SIGNED_TTL_MS) {
+    try {
+      const { sources } = await api.stream(id, useLibrary.getState().deviceId);
+      cached = { sources, at: Date.now() };
+      signedCache.set(id, cached);
+    } catch (e) {
+      const reason = e instanceof ApiError && e.status === 403 ? e.message : 'offline';
+      if (reason !== 'offline') refused.set(id, reason);
+      set({ unavailable: { title: t.title, reason } });
+      return null;
+    }
+  }
+  const prefs = useLibrary.getState().audio;
+  const src = pickSource(cached.sources, onCellular ? prefs.cellularQuality : prefs.wifiQuality, deviceCaps, prefs.preferSpatial);
   return src ? { uri: src.url, name: t.title } : null;
 }
 
@@ -183,14 +221,31 @@ function pruneTracks(q: QueueState): Record<string, Track> {
 /** Recria a janela nativa a partir da faixa atual (usado em saltos manuais). */
 async function loadWindow(autoplay: boolean) {
   if (!native) return;
-  const q = get().queue;
-  const cur = q && currentTrack(q);
+  const gen = ++windowGen;
+  // Pula faixas indisponíveis no início (sem assinatura, fora do território), como os apps de referência.
+  let first: { uri: string; name: string } | null = null;
+  for (let attempts = 0; attempts < 20; attempts++) {
+    const q = get().queue;
+    const cur = q && currentTrack(q);
+    if (!cur) break;
+    first = await nativeSourceFor(cur);
+    if (gen !== windowGen) return;
+    if (first) break;
+    const n = qNext(q, false);
+    if (!n) break;
+    commitQueue(n);
+  }
   native.clear();
   nativeIds = [];
   nativeIndex = 0;
-  if (!cur) return;
-  for (const id of [cur, ...upNext(q, LOOKAHEAD)]) {
-    const src = nativeSourceFor(id);
+  const q = get().queue;
+  const cur = q && currentTrack(q);
+  if (!cur || !first) return;
+  native.add(first);
+  nativeIds.push(cur);
+  for (const id of upNext(q, LOOKAHEAD)) {
+    const src = await nativeSourceFor(id);
+    if (gen !== windowGen) return;
     if (!src) continue;
     native.add(src);
     nativeIds.push(id);
@@ -209,13 +264,15 @@ async function loadWindow(autoplay: boolean) {
 /** Garante que as próximas faixas na janela nativa batem com a fila lógica. */
 async function reconcileLookahead() {
   if (!native) return;
-  const want = upNext(get().queue!, LOOKAHEAD);
+  const gen = windowGen;
+  const want = upNext(get().queue!, LOOKAHEAD + refused.size).filter((id) => !refused.has(id)).slice(0, LOOKAHEAD);
   const have = nativeIds.slice(nativeIndex + 1);
   if (want.length === have.length && want.every((id, i) => id === have[i])) return;
   for (let i = nativeIds.length - 1; i > nativeIndex; i--) native.remove(i);
   nativeIds = nativeIds.slice(0, nativeIndex + 1);
   for (const id of want) {
-    const src = nativeSourceFor(id);
+    const src = await nativeSourceFor(id);
+    if (gen !== windowGen) return;
     if (!src) continue;
     native.add(src);
     nativeIds.push(id);

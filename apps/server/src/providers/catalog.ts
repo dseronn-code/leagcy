@@ -1,5 +1,5 @@
 import { normalize, type Artist, type ArtistPage, type SearchQuery, type Track } from '@sonora/core';
-import type { CatalogProvider, SearchResults } from './types';
+import type { CatalogProvider, SearchResults, StreamContext } from './types';
 
 /**
  * Federa vários providers: roteia por prefixo de ID, faz busca em paralelo,
@@ -41,6 +41,12 @@ export class CatalogService {
   async tracks(ids: string[]): Promise<Track[]> {
     const out = await Promise.all(ids.map((id) => this.track(id).catch(() => null)));
     return out.filter((t): t is Track => t !== null);
+  }
+
+  /** Fontes tocáveis para o usuário (assinadas, se o provider exigir). */
+  async streamSources(t: Track, ctx: StreamContext) {
+    const [p, raw] = this.route(t.id);
+    return p.streamSources ? p.streamSources(raw, ctx) : t.sources;
   }
 
   album(id: string) {

@@ -5,7 +5,7 @@ import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
-import { listenedMsByPeriod, localDay, parseSearch, summarize, topArtists, topGenres, topTracks, type Track } from '@sonora/core';
+import { authorize, listenedMsByPeriod, localDay, OFFLINE_LICENSE_MS, parseSearch, summarize, topArtists, topGenres, topTracks, usageCsv, usageReport, type Plan, type Track } from '@sonora/core';
 import type { CatalogService } from './providers/catalog';
 import type { LyricsService } from './lyrics';
 import type { RecommendationService } from './recs/service';
@@ -38,6 +38,8 @@ export interface Deps {
   lyrics: LyricsService;
   recs: RecommendationService;
   jwtSecret: string;
+  adminToken?: string;
+  trialDays?: number;
   logger?: boolean;
 }
 
@@ -94,15 +96,38 @@ export async function buildApp(deps: Deps) {
   };
   const uid = (req: FastifyRequest) => req.user.sub;
 
+  const admin = async (req: FastifyRequest, reply: FastifyReply) => {
+    const token = req.headers['x-admin-token'];
+    if (!deps.adminToken || typeof token !== 'string' || token.length !== deps.adminToken.length || !timingSafeEqual(Buffer.from(token), Buffer.from(deps.adminToken))) {
+      return reply.code(404).send({ error: 'not found' });
+    }
+  };
+
+  const entitlementOf = async (userId: string) => (await repos.users.byId(userId))?.entitlement ?? null;
+
   app.get('/health', async () => ({ ok: true, providers: catalog.providers.map((p) => p.id) }));
 
   // ---------- Auth ----------
-  const credentials = z.object({ email: z.string().email(), password: z.string().min(8), displayName: z.string().min(1).max(60).optional() });
+  const credentials = z.object({
+    email: z.string().email(),
+    password: z.string().min(8),
+    displayName: z.string().min(1).max(60).optional(),
+    country: z.string().length(2).optional(),
+  });
 
   app.post('/auth/register', async (req, reply) => {
     const body = credentials.parse(req.body);
     if (await repos.users.byEmail(body.email.toLowerCase())) return reply.code(409).send({ error: 'email já cadastrado' });
-    const user = await repos.users.create({ email: body.email.toLowerCase(), displayName: body.displayName ?? body.email.split('@')[0]!, passwordHash: await hashPassword(body.password) });
+    // País da conta: informado no cadastro ou detectado pela CDN (ex.: CF-IPCountry); define o território licenciado.
+    const detected = req.headers['cf-ipcountry'] ?? req.headers['x-country'];
+    const country = (body.country ?? (typeof detected === 'string' ? detected : 'BR')).toUpperCase();
+    const trialDays = deps.trialDays ?? 0;
+    const user = await repos.users.create({
+      email: body.email.toLowerCase(),
+      displayName: body.displayName ?? body.email.split('@')[0]!,
+      passwordHash: await hashPassword(body.password),
+      entitlement: trialDays > 0 ? { plan: 'trial', validUntil: Date.now() + trialDays * 86_400_000, country } : { plan: 'none', validUntil: 0, country },
+    });
     return { token: app.jwt.sign({ sub: user.id }), user: { id: user.id, displayName: user.displayName } };
   });
 
@@ -115,7 +140,7 @@ export async function buildApp(deps: Deps) {
 
   app.get('/me', { preHandler: auth }, async (req) => {
     const u = await repos.users.byId(uid(req));
-    return u && { id: u.id, email: u.email, displayName: u.displayName };
+    return u && { id: u.id, email: u.email, displayName: u.displayName, entitlement: u.entitlement };
   });
 
   // ---------- Catálogo e busca ----------
@@ -149,6 +174,39 @@ export async function buildApp(deps: Deps) {
   app.get('/artists/:id', { preHandler: auth }, async (req, reply) => {
     const a = await catalog.artist((req.params as { id: string }).id);
     return a ?? reply.code(404).send({ error: 'not found' });
+  });
+
+  // ---------- Autorização de reprodução (exigência dos licenciantes) ----------
+  app.get('/tracks/:id/stream', { preHandler: auth }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const { deviceId, purpose } = z.object({ deviceId: z.string().max(64), purpose: z.enum(['stream', 'download']).default('stream') }).parse(req.query);
+    const t = await catalog.track(id);
+    if (!t) return reply.code(404).send({ error: 'not found' });
+    const e = await entitlementOf(uid(req));
+    const decision = authorize(t, e);
+    if (!decision.ok) return reply.code(403).send({ error: decision.reason });
+    const sources = await catalog.streamSources(t, { userId: uid(req), deviceId, country: e?.country ?? 'BR', purpose });
+    return { sources, ...(purpose === 'download' ? { licenseExpiresAt: Date.now() + OFFLINE_LICENSE_MS } : {}) };
+  });
+
+  /** Revalida licenças offline (o app chama ao sincronizar; prazo de 30 dias sem rede). */
+  app.post('/downloads/renew', { preHandler: auth }, async (req) => {
+    const { ids } = z.object({ ids: z.array(z.string()).max(5000) }).parse(req.body);
+    const e = await entitlementOf(uid(req));
+    const expiresAt = Date.now() + OFFLINE_LICENSE_MS;
+    const renewed: string[] = [];
+    const revoked: string[] = [];
+    for (let i = 0; i < ids.length; i += 200) {
+      const chunk = ids.slice(i, i + 200);
+      const found = new Map((await catalog.tracks(chunk)).map((t) => [t.id, t]));
+      for (const id of chunk) {
+        const t = found.get(id);
+        // Faixa sumida do catálogo = licença retirada pelo detentor.
+        if (t && authorize(t, e).ok) renewed.push(id);
+        else revoked.push(id);
+      }
+    }
+    return { renewed, revoked, expiresAt };
   });
 
   app.get('/tracks/:id/lyrics', { preHandler: auth }, async (req, reply) => {
@@ -226,7 +284,10 @@ export async function buildApp(deps: Deps) {
   // ---------- Histórico e estatísticas ----------
   app.post('/plays', { preHandler: auth }, async (req) => {
     const { events } = z.object({ events: z.array(playEventSchema).max(2000) }).parse(req.body);
-    return { accepted: await repos.plays.insert(uid(req), events as never) };
+    const e = await entitlementOf(uid(req));
+    // O plano vigente na ingestão é o que vai para o relatório; reprodução de catálogo licenciado sem plano já é barrada em /stream.
+    const plan: Plan = e && e.validUntil >= Date.now() ? e.plan : 'none';
+    return { accepted: await repos.plays.insert(uid(req), events as never, { country: e?.country ?? 'BR', plan }) };
   });
 
   app.get('/history', { preHandler: auth }, async (req) => {
@@ -294,6 +355,37 @@ export async function buildApp(deps: Deps) {
   app.post('/recs/playlist', { preHandler: auth }, async (req) => {
     const { trackIds } = z.object({ trackIds: z.array(z.string()).max(500) }).parse(req.body);
     return { tracks: await recs.forPlaylist(uid(req), trackIds) };
+  });
+
+  // ---------- Administração e relatórios para licenciantes ----------
+  app.post('/admin/users/:id/entitlement', { preHandler: admin }, async (req, reply) => {
+    const body = z.object({ plan: z.enum(['none', 'trial', 'premium', 'family', 'student']), validUntil: z.number().int(), country: z.string().length(2) }).parse(req.body);
+    const id = (req.params as { id: string }).id;
+    if (!(await repos.users.byId(id))) return reply.code(404).send({ error: 'not found' });
+    await repos.users.setEntitlement(id, { ...body, country: body.country.toUpperCase() });
+    return { ok: true };
+  });
+
+  /**
+   * Relatório mensal de uso por ISRC × território × plano, com rateio do pool de royalties.
+   * `pool` = receita destinada a royalties por país, em centavos: `BR:1500000,PT:200000`.
+   */
+  app.get('/admin/reports/usage', { preHandler: admin }, async (req, reply) => {
+    const { period, pool } = z.object({ period: z.string().regex(/^\d{4}-\d{2}$/), pool: z.string().default('') }).parse(req.query);
+    const [y, m] = period.split('-').map(Number) as [number, number];
+    const events = await repos.plays.allSince(Date.UTC(y, m - 1, 1), Date.UTC(y, m, 1));
+    const tracks = new Map((await catalog.tracks([...new Set(events.map((e) => e.trackId))])).map((t) => [t.id, t]));
+    const royaltyPoolCents = new Map(
+      pool
+        .split(',')
+        .filter(Boolean)
+        .map((p) => {
+          const [c, v] = p.split(':');
+          return [c!.toUpperCase(), Number(v)] as const;
+        }),
+    );
+    const rows = usageReport({ events, tracks, royaltyPoolCents });
+    return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="usage-${period}.csv"`).send(usageCsv(rows, period));
   });
 
   return app;

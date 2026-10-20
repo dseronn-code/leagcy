@@ -19,7 +19,7 @@ const repos = config.databaseUrl ? postgresRepos(config.databaseUrl) : memoryRep
 if (!config.databaseUrl) console.warn('DATABASE_URL ausente: usando armazenamento em memória (dados somem ao reiniciar).');
 
 const catalog = new CatalogService(providers);
-const app = await buildApp({ repos, catalog, lyrics: new LyricsService(), recs: new RecommendationService(repos, catalog), jwtSecret: config.jwtSecret, logger: true });
+const app = await buildApp({ repos, catalog, lyrics: new LyricsService(), recs: new RecommendationService(repos, catalog), jwtSecret: config.jwtSecret, adminToken: config.adminToken, trialDays: config.trialDays, logger: true });
 
 // Em produção o job roda separado (npm run job:cooccurrence); aqui roda a cada hora por conveniência.
 setInterval(() => void rebuildNeighbors(repos).catch((e) => app.log.error(e)), 3_600_000).unref();
