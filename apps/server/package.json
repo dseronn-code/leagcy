@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/index.ts",
+    "start": "node --env-file-if-exists=.env --import tsx src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:migrate": "psql \"$DATABASE_URL\" -f db/schema.sql",
-    "job:cooccurrence": "tsx src/recs/cooccurrenceJob.ts"
+    "job:cooccurrence": "node --env-file-if-exists=.env --import tsx src/recs/cooccurrenceJob.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.1",
