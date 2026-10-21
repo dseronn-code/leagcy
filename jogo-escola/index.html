@@ -1,0 +1,660 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Antes do Sinal</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+  /* Layout: uma folha de caderno (claro) ou um quadro-negro (escuro); cabeçalho com placar, a planta da escola no meio, controles embaixo. */
+  :root {
+    --paper: #fbfaf3;
+    --grid: #dbe5f1;
+    --ink: #1d2f6f;
+    --ink-soft: #55648f;
+    --margin: #d24b43;
+    --wall: #24346b;
+    --surface: #fffefa;
+    --line: #c9d3e6;
+    --tree: #3f8f4f;
+    --c-mat: #2f5fd0; --c-por: #c8402f; --c-cie: #2a8a52;
+    --c-his: #a8701a; --c-geo: #16899a; --c-art: #9443b5;
+    --c-can: #d97a12; --c-por-ta: #6b7280;
+    --good: #2a8a52; --bad: #c8402f;
+    --f-display: "Kalam", "Comic Sans MS", "Segoe Print", cursive;
+    --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #1d2a25; --grid: #263730; --ink: #eef1e4; --ink-soft: #a9b8ad;
+      --margin: #f2c94c; --wall: #4a6357; --surface: #24342e; --line: #3b5047; --tree: #5fae6f;
+      --c-mat: #86a6ff; --c-por: #ff8d7d; --c-cie: #74d49e; --c-his: #e8b55e;
+      --c-geo: #62d0dc; --c-art: #d39cf0; --c-can: #ffb35c; --c-por-ta: #9aa5a0;
+      --good: #74d49e; --bad: #ff8d7d;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #1d2a25; --grid: #263730; --ink: #eef1e4; --ink-soft: #a9b8ad;
+    --margin: #f2c94c; --wall: #4a6357; --surface: #24342e; --line: #3b5047; --tree: #5fae6f;
+    --c-mat: #86a6ff; --c-por: #ff8d7d; --c-cie: #74d49e; --c-his: #e8b55e;
+    --c-geo: #62d0dc; --c-art: #d39cf0; --c-can: #ffb35c; --c-por-ta: #9aa5a0;
+    --good: #74d49e; --bad: #ff8d7d;
+    color-scheme: dark;
+  }
+
+  html, body { min-height: 100%; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 15px;
+    line-height: 1.5;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 20px 32px;
+  }
+  main { max-width: 980px; margin: 0 auto; display: grid; gap: 14px; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 10px 24px;
+    padding-bottom: 10px;
+    border-bottom: 3px double var(--margin);
+  }
+  h1 {
+    font-family: var(--f-display); font-weight: 700;
+    font-size: clamp(30px, 6vw, 44px); line-height: 1; margin: 0;
+    text-wrap: balance;
+  }
+  .sub { margin: 4px 0 0; color: var(--ink-soft); }
+
+  .hud { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .clock {
+    font-family: var(--f-display); font-weight: 700; font-size: 34px; line-height: 1;
+    font-variant-numeric: tabular-nums; min-width: 3.4ch; text-align: right;
+  }
+  .clock.low { color: var(--bad); }
+  .hud-label { display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+  .best { font-variant-numeric: tabular-nums; font-weight: 700; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
+    border: 1.5px solid var(--c); color: var(--c); background: transparent;
+  }
+  .chip.done { background: var(--c); color: var(--paper); }
+  .chip.done::before { content: "✓ "; }
+
+  .stage { position: relative; }
+  canvas { display: block; width: 100%; height: auto; touch-action: none; border-radius: 4px; }
+
+  .overlay {
+    position: absolute; inset: 0; display: grid; place-items: center; padding: 12px;
+    background: color-mix(in srgb, var(--paper) 72%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  .card {
+    background: var(--surface); color: var(--ink);
+    border: 2px solid var(--ink); border-radius: 6px;
+    box-shadow: 5px 5px 0 var(--line);
+    padding: 18px 20px; width: min(520px, 100%); max-height: 100%; overflow: auto;
+    display: grid; gap: 12px;
+  }
+  .card h2 { font-family: var(--f-display); font-size: 28px; line-height: 1.1; margin: 0; text-wrap: balance; }
+  .card p { margin: 0; }
+  .card ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+  .eyebrow { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; color: var(--c, var(--ink-soft)); }
+  .q { font-size: 18px; font-weight: 700; }
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  @media (max-width: 460px) { .opts { grid-template-columns: 1fr; } }
+
+  button {
+    font: inherit; color: var(--ink); background: var(--surface);
+    border: 2px solid var(--ink); border-radius: 6px; padding: 9px 12px; cursor: pointer;
+    text-align: left;
+  }
+  button:hover { background: var(--grid); }
+  button:focus-visible { outline: 3px solid var(--margin); outline-offset: 2px; }
+  button.primary { background: var(--ink); color: var(--paper); font-weight: 700; text-align: center; }
+  button.primary:hover { opacity: .9; }
+  button.ghost { border-color: var(--line); color: var(--ink-soft); text-align: center; }
+  .opts button .k { font-variant-numeric: tabular-nums; color: var(--ink-soft); margin-right: 6px; }
+  .opts button.right { border-color: var(--good); background: color-mix(in srgb, var(--good) 18%, var(--surface)); }
+  .opts button.wrong { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 18%, var(--surface)); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row > * { flex: 1 1 140px; }
+  .result { font-family: var(--f-display); font-size: 40px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+
+  .toast {
+    position: absolute; left: 50%; top: 10px; transform: translateX(-50%);
+    background: var(--ink); color: var(--paper); font-weight: 700;
+    padding: 6px 14px; border-radius: 999px; font-size: 14px; white-space: nowrap;
+    max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis;
+    transition: opacity .25s;
+  }
+
+  .below { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; color: var(--ink-soft); }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; background: var(--dot); vertical-align: -1px; }
+  kbd { font-family: var(--f-body); font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+
+  .pad { display: none; grid-template-columns: repeat(3, 56px); grid-template-rows: repeat(2, 52px); gap: 6px; justify-content: center; margin: 0 auto; }
+  .pad button { text-align: center; font-size: 22px; padding: 0; user-select: none; -webkit-user-select: none; touch-action: none; }
+  .pad .up { grid-column: 2; grid-row: 1; }
+  .pad .left { grid-column: 1; grid-row: 2; }
+  .pad .down { grid-column: 2; grid-row: 2; }
+  .pad .right { grid-column: 3; grid-row: 2; }
+  @media (hover: none), (pointer: coarse) { .pad { display: grid; } .keys-hint { display: none; } }
+
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+</style>
+
+<main>
+  <header>
+    <div>
+      <h1>Antes do Sinal</h1>
+      <p class="sub">Escola Estadual do Corredor Comprido · 1º horário</p>
+    </div>
+    <div class="hud">
+      <div><span class="hud-label">Sinal toca em</span><span class="clock" id="clock">02:30</span></div>
+      <div><span class="hud-label">Recorde</span><span class="best" id="best">—</span></div>
+    </div>
+  </header>
+
+  <div class="chips" id="chips" aria-label="Matérias concluídas"></div>
+
+  <div class="stage" id="stage">
+    <canvas id="cv" aria-label="Planta da escola"></canvas>
+    <div class="toast" id="toast" style="opacity:0" aria-live="polite"></div>
+
+    <div class="overlay" id="menu">
+      <div class="card">
+        <span class="eyebrow">Você chegou atrasado</span>
+        <h2>Passe nas 6 salas antes do sinal tocar</h2>
+        <ul>
+          <li>Pare na porta de cada sala e responda a pergunta do professor.</li>
+          <li>Errou? Perde 8 segundos. Saia e volte na porta para tentar outra pergunta.</li>
+          <li>Cuidado com a <b>inspetora</b>: se ela te pegar correndo, são 10 segundos a menos e você volta pra portaria.</li>
+          <li>A cantina vale um pão de queijo: +15 segundos, uma vez só.</li>
+        </ul>
+        <p class="keys-hint">Ande com <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> ou <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>. Responda com <kbd>1</kbd>–<kbd>4</kbd>.</p>
+        <button class="primary" id="start">Entrar na escola</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="quiz" hidden>
+      <div class="card" id="quizCard">
+        <span class="eyebrow" id="qSub"></span>
+        <p class="q" id="qText"></p>
+        <div class="opts" id="qOpts"></div>
+        <button class="ghost" id="qLeave">Voltar ao corredor (Esc)</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="over" hidden>
+      <div class="card">
+        <span class="eyebrow" id="oEyebrow"></span>
+        <h2 id="oTitle"></h2>
+        <p id="oText"></p>
+        <div><span class="hud-label">Pontos</span><span class="result" id="oScore">0</span></div>
+        <button class="primary" id="again">Jogar de novo</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pad" id="pad" aria-label="Controles">
+    <button class="up" data-dir="up" aria-label="Cima">▲</button>
+    <button class="left" data-dir="left" aria-label="Esquerda">◀</button>
+    <button class="down" data-dir="down" aria-label="Baixo">▼</button>
+    <button class="right" data-dir="right" aria-label="Direita">▶</button>
+  </div>
+
+  <div class="below">
+    <div class="legend">
+      <span style="--dot: var(--ink)">Você</span>
+      <span style="--dot: var(--margin)">Inspetora</span>
+      <span style="--dot: var(--tree)">Canteiros do pátio</span>
+    </div>
+    <span class="keys-hint">Pontos: 100 por matéria + 10 por segundo que sobrar.</span>
+  </div>
+</main>
+
+<script>
+(() => {
+  const MAP = [
+    "##########################",
+    "#MMMMMM#PPPPPP#CCCCCC#KKK#",
+    "#MMMMMM#PPPPPP#CCCCCC#KKK#",
+    "#MMMMMM#PPPPPP#CCCCCC#KKK#",
+    "###1######2######3#####k##",
+    "#........................#",
+    "#..TT.....TT....TT....T..#",
+    "#........................#",
+    "#....T.....TTTT.....T....#",
+    "#........................#",
+    "#..TT.....TT....TT.......#",
+    "#........................#",
+    "###4######5######6#####e##",
+    "#HHHHHH#GGGGGG#AAAAAA#EEE#",
+    "#HHHHHH#GGGGGG#AAAAAA#EEE#",
+    "#HHHHHH#GGGGGG#AAAAAA#EEE#",
+    "##########################",
+  ];
+  const W = MAP[0].length, H = MAP.length;
+  const START = { x: 23, y: 11 };
+  const INSP_START = { x: 2, y: 7 };
+  const TOTAL_TIME = 150;
+
+  const SUBJECTS = {
+    "1": { room: "M", nome: "Matemática", cor: "--c-mat", prof: "Prof.ª Cida" },
+    "2": { room: "P", nome: "Português", cor: "--c-por", prof: "Prof. Márcio" },
+    "3": { room: "C", nome: "Ciências", cor: "--c-cie", prof: "Prof.ª Helena" },
+    "4": { room: "H", nome: "História", cor: "--c-his", prof: "Prof. Jorge" },
+    "5": { room: "G", nome: "Geografia", cor: "--c-geo", prof: "Prof.ª Rosa" },
+    "6": { room: "A", nome: "Artes", cor: "--c-art", prof: "Prof. Beto" },
+  };
+  const OTHER_ROOMS = { K: { nome: "Cantina", cor: "--c-can" }, E: { nome: "Portaria", cor: "--c-por-ta" } };
+
+  // A primeira alternativa de cada pergunta é a certa; elas são embaralhadas na hora.
+  const QUESTIONS = {
+    "1": [
+      ["Quanto é 7 × 8?", "56", "54", "48", "64"],
+      ["Quanto é 15% de 200?", "30", "15", "20", "35"],
+      ["Quanto dá a soma dos ângulos internos de um triângulo?", "180°", "360°", "90°", "270°"],
+      ["Qual é o próximo número primo depois do 7?", "11", "9", "10", "13"],
+      ["Quanto é 2³?", "8", "6", "9", "5"],
+    ],
+    "2": [
+      ["Qual destas palavras é um substantivo?", "mesa", "correr", "bonito", "rapidamente"],
+      ["Qual é o plural de “pão”?", "pães", "pãos", "pões", "pãoes"],
+      ["Qual palavra está escrita certo?", "exceção", "excessão", "esceção", "exseção"],
+      ["Qual é o antônimo de “alegre”?", "triste", "contente", "feliz", "animado"],
+      ["Quantas sílabas tem a palavra “escola”?", "3", "2", "4", "5"],
+    ],
+    "3": [
+      ["Qual planeta é chamado de Planeta Vermelho?", "Marte", "Júpiter", "Vênus", "Saturno"],
+      ["Que gás as plantas absorvem na fotossíntese?", "Gás carbônico", "Oxigênio", "Nitrogênio", "Hélio"],
+      ["Qual é o maior órgão do corpo humano?", "Pele", "Fígado", "Coração", "Pulmão"],
+      ["Ao nível do mar, a água ferve a quantos graus?", "100 °C", "90 °C", "80 °C", "120 °C"],
+    ],
+    "4": [
+      ["Em que ano foi proclamada a Independência do Brasil?", "1822", "1500", "1889", "1888"],
+      ["Quem assinou a Lei Áurea?", "Princesa Isabel", "Dom Pedro I", "Tiradentes", "Getúlio Vargas"],
+      ["Em que ano a frota de Cabral chegou ao Brasil?", "1500", "1492", "1822", "1600"],
+      ["Em que ano foi proclamada a República no Brasil?", "1889", "1822", "1930", "1964"],
+    ],
+    "5": [
+      ["Qual é a capital do Brasil?", "Brasília", "Rio de Janeiro", "São Paulo", "Salvador"],
+      ["Qual é o maior rio do Brasil em volume de água?", "Amazonas", "São Francisco", "Paraná", "Tietê"],
+      ["Em quantas regiões o IBGE divide o Brasil?", "5", "4", "6", "7"],
+      ["Qual é o maior país da América do Sul?", "Brasil", "Argentina", "Peru", "Colômbia"],
+    ],
+    "6": [
+      ["Quem pintou o “Abaporu”?", "Tarsila do Amaral", "Anita Malfatti", "Candido Portinari", "Di Cavalcanti"],
+      ["Misturando tinta azul com amarela, dá:", "Verde", "Roxo", "Laranja", "Marrom"],
+      ["Quais são as cores primárias na pintura escolar?", "Vermelho, amarelo e azul", "Verde, roxo e laranja", "Preto, branco e cinza", "Rosa, verde e azul"],
+      ["Quem pintou a “Mona Lisa”?", "Leonardo da Vinci", "Michelangelo", "Van Gogh", "Picasso"],
+    ],
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const cv = $("cv"), ctx = cv.getContext("2d");
+  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Retângulo de cada sala, achado na planta.
+  const rooms = {};
+  MAP.forEach((row, y) => [...row].forEach((c, x) => {
+    if (/[A-Z]/.test(c)) {
+      const r = rooms[c] || (rooms[c] = { x0: x, y0: y, x1: x, y1: y });
+      r.x0 = Math.min(r.x0, x); r.y0 = Math.min(r.y0, y);
+      r.x1 = Math.max(r.x1, x); r.y1 = Math.max(r.y1, y);
+    }
+  }));
+
+  const tileAt = (x, y) => (MAP[y] && MAP[y][x]) || "#";
+  const playerCan = (c) => ".123456ke".includes(c);
+  const inspCan = (c) => c === ".";
+
+  let best = 0;
+  try { best = Number(localStorage.getItem("antes-do-sinal-recorde")) || 0; } catch (e) {}
+
+  let S;
+  function fresh() {
+    return {
+      mode: "menu",
+      time: TOTAL_TIME,
+      done: {},
+      lanche: false,
+      used: {},
+      p: { x: START.x, y: START.y, rx: START.x, ry: START.y },
+      i: { x: INSP_START.x, y: INSP_START.y, rx: INSP_START.x, ry: INSP_START.y, dir: [1, 0], chasing: false },
+      moveCd: 0, inspCd: 0.6, invuln: 0,
+      held: null,
+    };
+  }
+  S = fresh();
+
+  // ---------- som ----------
+  let audio = null;
+  function beep(freq, dur = 0.12, type = "square", vol = 0.05) {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = type; o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, audio.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + dur);
+      o.connect(g).connect(audio.destination);
+      o.start(); o.stop(audio.currentTime + dur);
+    } catch (e) {}
+  }
+  const bell = () => { [0, 160, 320].forEach((d) => setTimeout(() => beep(880, 0.14, "triangle", 0.06), d)); };
+
+  // ---------- HUD ----------
+  function renderChips() {
+    $("chips").innerHTML = Object.entries(SUBJECTS).map(([k, s]) =>
+      `<span class="chip${S.done[k] ? " done" : ""}" style="--c: var(${s.cor})">${s.nome}</span>`).join("");
+  }
+  function renderClock() {
+    const t = Math.max(0, Math.ceil(S.time));
+    $("clock").textContent = `${String(Math.floor(t / 60)).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
+    $("clock").classList.toggle("low", t <= 20);
+  }
+  function renderBest() { $("best").textContent = best ? `${best} pts` : "—"; }
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $("toast");
+    t.textContent = msg; t.style.opacity = 1;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.style.opacity = 0), 1900);
+  }
+
+  // ---------- jogo ----------
+  function start() {
+    S = fresh();
+    S.mode = "play";
+    $("menu").hidden = true; $("over").hidden = true; $("quiz").hidden = true;
+    renderChips(); renderClock();
+    bell();
+    toast("Corre! O sinal toca em 2:30");
+    cv.focus?.();
+  }
+
+  const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
+  function tryMove(dir) {
+    const [dx, dy] = DIRS[dir];
+    const nx = S.p.x + dx, ny = S.p.y + dy;
+    const c = tileAt(nx, ny);
+    if (!playerCan(c)) return;
+    S.p.x = nx; S.p.y = ny;
+    if (SUBJECTS[c] && !S.done[c]) openQuiz(c);
+    else if (SUBJECTS[c]) toast(`${SUBJECTS[c].nome} já está feita ✓`);
+    else if (c === "k") {
+      if (!S.lanche) { S.lanche = true; S.time += 15; beep(660, 0.1); setTimeout(() => beep(990, 0.12), 110); toast("Pão de queijo! +15 s"); }
+      else toast("A cantina já te deu lanche hoje");
+    } else if (c === "e") toast("Sair agora? Só depois da última aula!");
+  }
+
+  function stepInspector() {
+    const i = S.i, p = S.p;
+    const opts = Object.values(DIRS).filter(([dx, dy]) => inspCan(tileAt(i.x + dx, i.y + dy)));
+    if (!opts.length) return;
+    const dist = Math.abs(i.x - p.x) + Math.abs(i.y - p.y);
+    const onDoor = !inspCan(tileAt(p.x, p.y));
+    i.chasing = dist <= 7 && S.invuln <= 0 && !onDoor;
+    let choice;
+    if (i.chasing) {
+      let bestD = Infinity, cands = [];
+      for (const d of opts) {
+        const nd = Math.abs(i.x + d[0] - p.x) + Math.abs(i.y + d[1] - p.y);
+        if (nd < bestD) { bestD = nd; cands = [d]; } else if (nd === bestD) cands.push(d);
+      }
+      choice = cands[Math.floor(Math.random() * cands.length)];
+    } else {
+      const same = opts.find((d) => d[0] === i.dir[0] && d[1] === i.dir[1]);
+      const noBack = opts.filter((d) => !(d[0] === -i.dir[0] && d[1] === -i.dir[1]));
+      if (same && Math.random() < 0.75) choice = same;
+      else { const pool = noBack.length ? noBack : opts; choice = pool[Math.floor(Math.random() * pool.length)]; }
+    }
+    i.dir = choice; i.x += choice[0]; i.y += choice[1];
+  }
+
+  function checkCaught() {
+    if (S.invuln > 0) return;
+    if (S.i.x === S.p.x && S.i.y === S.p.y) {
+      S.time -= 10; S.invuln = 2.2;
+      S.p.x = S.p.rx = START.x; S.p.y = S.p.ry = START.y;
+      beep(220, 0.25, "sawtooth", 0.05);
+      toast("Inspetora: “Sem correr no corredor!” −10 s");
+    }
+  }
+
+  function shuffle(a) { for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; } return a; }
+
+  let quizLock = false, current = null;
+  function openQuiz(k) {
+    const pool = QUESTIONS[k];
+    S.used[k] = S.used[k] || [];
+    let free = pool.map((_, n) => n).filter((n) => !S.used[k].includes(n));
+    if (!free.length) { S.used[k] = []; free = pool.map((_, n) => n); }
+    const n = free[Math.floor(Math.random() * free.length)];
+    S.used[k].push(n);
+    const [q, right, ...wrong] = pool[n];
+    const answers = shuffle([right, ...wrong]);
+    current = { k, right, answers };
+    S.mode = "quiz"; S.held = null; quizLock = false;
+    const s = SUBJECTS[k];
+    $("quizCard").style.setProperty("--c", `var(${s.cor})`);
+    $("qSub").textContent = `${s.nome} · ${s.prof}`;
+    $("qText").textContent = q;
+    $("qOpts").innerHTML = answers.map((a, idx) => `<button data-idx="${idx}"><span class="k">${idx + 1}</span>${a}</button>`).join("");
+    $("quiz").hidden = false;
+    $("qOpts").querySelector("button").focus({ preventScroll: true });
+  }
+
+  function answer(idx) {
+    if (quizLock || !current || S.mode !== "quiz") return;
+    quizLock = true;
+    const btns = [...$("qOpts").children];
+    const ok = current.answers[idx] === current.right;
+    btns.forEach((b, n) => { if (current.answers[n] === current.right) b.classList.add("right"); });
+    if (ok) {
+      S.done[current.k] = true;
+      beep(784, 0.1, "triangle"); setTimeout(() => beep(1046, 0.16, "triangle"), 100);
+      toast(`Boa! ${SUBJECTS[current.k].nome} concluída`);
+      renderChips();
+    } else {
+      btns[idx].classList.add("wrong");
+      S.time -= 8;
+      beep(196, 0.22, "sawtooth", 0.04);
+      toast("Errou… −8 s. Volte depois para outra pergunta.");
+    }
+    setTimeout(() => {
+      closeQuiz();
+      if (Object.keys(S.done).length === 6) finish(true);
+    }, ok ? 650 : 1300);
+  }
+
+  function closeQuiz() {
+    $("quiz").hidden = true; current = null;
+    if (S.mode === "quiz") S.mode = "play";
+  }
+
+  function finish(won) {
+    S.mode = "over";
+    $("quiz").hidden = true;
+    const stars = Object.keys(S.done).length;
+    const left = Math.max(0, Math.ceil(S.time));
+    const score = stars * 100 + (won ? left * 10 : 0);
+    const record = score > best;
+    if (record) { best = score; try { localStorage.setItem("antes-do-sinal-recorde", String(best)); } catch (e) {} renderBest(); }
+    $("oEyebrow").textContent = won ? "Presença confirmada" : "Trrrriiiim!";
+    $("oTitle").textContent = won ? "Você passou em todas as salas!" : "O sinal tocou";
+    $("oText").textContent = won
+      ? `Sobraram ${left} segundos.${S.lanche ? " E ainda deu tempo do pão de queijo." : ""}${record ? " Novo recorde!" : ""}`
+      : `Você fez ${stars} de 6 matérias. Faltou ${6 - stars} — a coordenação vai ligar pra casa.${record ? " Mesmo assim, é seu novo recorde!" : ""}`;
+    $("oScore").textContent = score;
+    $("over").hidden = false;
+    won ? bell() : beep(330, 0.6, "triangle", 0.06);
+    $("again").focus({ preventScroll: true });
+  }
+
+  // ---------- desenho ----------
+  let tile = 24, dpr = 1, colors = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const names = ["--paper", "--grid", "--ink", "--ink-soft", "--margin", "--wall", "--tree", "--surface",
+      "--c-mat", "--c-por", "--c-cie", "--c-his", "--c-geo", "--c-art", "--c-can", "--c-por-ta"];
+    names.forEach((n) => (colors[n] = cs.getPropertyValue(n).trim()));
+  }
+  function resize() {
+    const w = $("stage").clientWidth;
+    tile = Math.max(10, Math.floor(w / W));
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = tile * W * dpr; cv.height = tile * H * dpr;
+    cv.style.width = tile * W + "px"; cv.style.height = tile * H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function roomLabel(r, name, color, sub) {
+    const x = r.x0 * tile, y = r.y0 * tile, w = (r.x1 - r.x0 + 1) * tile, h = (r.y1 - r.y0 + 1) * tile;
+    ctx.fillStyle = color; ctx.globalAlpha = 0.14; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1;
+    ctx.fillStyle = color; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    let fs = Math.min(tile * 0.85, (w * 0.9) / (name.length * 0.56));
+    ctx.font = `700 ${fs}px Kalam, "Comic Sans MS", cursive`;
+    ctx.fillText(name, x + w / 2, y + h / 2 - (sub ? fs * 0.35 : 0));
+    if (sub) {
+      ctx.font = `700 ${Math.max(8, fs * 0.6)}px "Atkinson Hyperlegible", system-ui, sans-serif`;
+      ctx.fillStyle = colors["--ink-soft"];
+      ctx.fillText(sub, x + w / 2, y + h / 2 + fs * 0.6);
+    }
+  }
+
+  function draw(now) {
+    const T = tile;
+    ctx.fillStyle = colors["--paper"]; ctx.fillRect(0, 0, W * T, H * T);
+    ctx.strokeStyle = colors["--grid"]; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x <= W; x++) { ctx.moveTo(x * T + 0.5, 0); ctx.lineTo(x * T + 0.5, H * T); }
+    for (let y = 0; y <= H; y++) { ctx.moveTo(0, y * T + 0.5); ctx.lineTo(W * T, y * T + 0.5); }
+    ctx.stroke();
+
+    for (const [k, s] of Object.entries(SUBJECTS)) {
+      roomLabel(rooms[s.room], s.nome, colors[s.cor], S.done[k] ? "✓ feita" : "");
+    }
+    roomLabel(rooms.K, "Cantina", colors["--c-can"], S.lanche ? "" : "+15 s");
+    roomLabel(rooms.E, "Portaria", colors["--c-por-ta"], "");
+
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const c = MAP[y][x], px = x * T, py = y * T;
+      if (c === "#") { ctx.fillStyle = colors["--wall"]; ctx.fillRect(px, py, T, T); }
+      else if (c === "T") {
+        ctx.fillStyle = colors["--tree"];
+        ctx.beginPath(); ctx.arc(px + T / 2, py + T / 2, T * 0.42, 0, Math.PI * 2); ctx.fill();
+      } else if (SUBJECTS[c] || c === "k" || c === "e") {
+        const col = SUBJECTS[c] ? colors[SUBJECTS[c].cor] : c === "k" ? colors["--c-can"] : colors["--c-por-ta"];
+        const doneDoor = (SUBJECTS[c] && S.done[c]) || (c === "k" && S.lanche);
+        ctx.fillStyle = col; ctx.globalAlpha = doneDoor ? 0.35 : 1;
+        ctx.fillRect(px + 1, py + 1, T - 2, T - 2);
+        ctx.globalAlpha = 1;
+        if (SUBJECTS[c] && !S.done[c] && S.mode !== "menu") {
+          const pulse = reduceMotion ? 0 : (Math.sin(now / 250) + 1) * 0.5;
+          ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.globalAlpha = 0.4 + pulse * 0.6;
+          ctx.strokeRect(px - 2, py - 2, T + 4, T + 4); ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    // inspetora
+    const i = S.i;
+    ctx.fillStyle = colors["--margin"];
+    ctx.beginPath(); ctx.arc((i.rx + 0.5) * T, (i.ry + 0.5) * T, T * 0.4, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = colors["--paper"]; ctx.lineWidth = Math.max(1.5, T * 0.09);
+    ctx.beginPath(); ctx.moveTo((i.rx + 0.5) * T, (i.ry + 0.5) * T); ctx.lineTo((i.rx + 0.82) * T, (i.ry + 0.72) * T); ctx.stroke();
+    if (i.chasing && S.mode === "play") {
+      ctx.fillStyle = colors["--margin"]; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+      ctx.font = `700 ${T * 0.9}px Kalam, cursive`;
+      ctx.fillText("!", (i.rx + 0.5) * T, (i.ry - 0.05) * T);
+    }
+
+    // você
+    const p = S.p;
+    const blink = S.invuln > 0 && !reduceMotion && Math.floor(now / 120) % 2 === 0;
+    if (!blink) {
+      ctx.fillStyle = colors["--c-can"];
+      ctx.fillRect((p.rx + 0.14) * T, (p.ry + 0.3) * T, T * 0.22, T * 0.42);
+      ctx.fillStyle = colors["--ink"];
+      ctx.beginPath(); ctx.arc((p.rx + 0.55) * T, (p.ry + 0.5) * T, T * 0.36, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // ---------- laço ----------
+  let last = performance.now(), lastClock = -1;
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (S.mode === "play" || S.mode === "quiz") {
+      S.time -= dt;
+      if (S.time <= 0) { S.time = 0; finish(false); }
+    }
+    if (S.mode === "play") {
+      S.invuln = Math.max(0, S.invuln - dt);
+      S.moveCd -= dt;
+      if (S.held && S.moveCd <= 0) { tryMove(S.held); S.moveCd = 0.12; checkCaught(); }
+      S.inspCd -= dt;
+      if (S.inspCd <= 0 && S.mode === "play") {
+        stepInspector(); checkCaught();
+        S.inspCd = 0.34 - Object.keys(S.done).length * 0.025;
+      }
+    }
+    const k = reduceMotion ? 1 : Math.min(1, dt * 18);
+    for (const o of [S.p, S.i]) { o.rx += (o.x - o.rx) * k; o.ry += (o.y - o.ry) * k; }
+    const c = Math.ceil(S.time);
+    if (c !== lastClock) { lastClock = c; renderClock(); }
+    draw(now);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- entrada ----------
+  const KEYMAP = { ArrowUp: "up", KeyW: "up", ArrowDown: "down", KeyS: "down", ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right" };
+  addEventListener("keydown", (e) => {
+    if (S.mode === "quiz") {
+      if (/^Digit[1-4]$/.test(e.code) || /^Numpad[1-4]$/.test(e.code)) { e.preventDefault(); answer(Number(e.code.slice(-1)) - 1); }
+      else if (e.key === "Escape") closeQuiz();
+      return;
+    }
+    const dir = KEYMAP[e.code];
+    if (S.mode === "play" && dir) {
+      e.preventDefault();
+      if (S.held !== dir) { S.held = dir; S.moveCd = 0; }
+    } else if ((S.mode === "menu" || S.mode === "over") && (e.key === "Enter" || e.key === " ") && document.activeElement?.tagName !== "BUTTON") {
+      e.preventDefault(); start();
+    }
+  });
+  addEventListener("keyup", (e) => { if (KEYMAP[e.code] === S.held) S.held = null; });
+  addEventListener("blur", () => (S.held = null));
+
+  $("pad").querySelectorAll("button").forEach((b) => {
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); b.setPointerCapture?.(e.pointerId);
+      if (S.mode === "play") { S.held = b.dataset.dir; S.moveCd = 0; }
+    });
+    const stop = () => { if (S.held === b.dataset.dir) S.held = null; };
+    b.addEventListener("pointerup", stop); b.addEventListener("pointercancel", stop); b.addEventListener("lostpointercapture", stop);
+    b.addEventListener("contextmenu", (e) => e.preventDefault());
+  });
+
+  $("qOpts").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) answer(Number(b.dataset.idx)); });
+  $("qLeave").addEventListener("click", closeQuiz);
+  $("start").addEventListener("click", start);
+  $("again").addEventListener("click", start);
+
+  const mq = matchMedia("(prefers-color-scheme: dark)");
+  mq.addEventListener?.("change", readColors);
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  addEventListener("resize", resize);
+
+  readColors(); resize(); renderChips(); renderClock(); renderBest();
+  requestAnimationFrame(frame);
+})();
+</script>
