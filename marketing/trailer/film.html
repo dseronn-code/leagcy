@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Sonora — A Interrupção</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; width: 100vw; height: auto; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/*
+ * "A Interrupção" — filme de lançamento do Sonora.
+ * O filme inteiro é a função render(t): cada quadro depende só do tempo, então
+ * a renderização é determinística e cai sempre no compasso da trilha (120 BPM).
+ * Abrir este arquivo no navegador toca uma prévia em tempo real (sem som).
+ */
+const W = 1920, H = 1080, CX = W / 2, CY = H / 2;
+const BEAT = 0.5;
+const cv = document.getElementById('c');
+/** Contexto de desenho atual (trocado ao pré-renderizar o quadro congelado). */
+let ctx = cv.getContext('2d');
+
+const C = {
+  bg: '#050507', text: '#F5F5F7', dim: '#8A8A96', accent: '#7C5CFF', accent2: '#B19CFF',
+  hires: '#F5C542', pill: '#2A2A2E', pillText: '#B8B8BE',
+};
+const DISPLAY = '"Inter Display", Inter, sans-serif';
+const TEXT = 'Inter, sans-serif';
+
+// ---------- utilidades ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, x) => a + (b - a) * x;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+/** Opacidade de um elemento visível entre a e b, com entrada e saída suaves. */
+const life = (t, a, b, fin = 0.35, fout = 0.3) => Math.min(prog(t, a, a + fin), 1 - prog(t, b - fout, b));
+/** Pulso que acompanha o bumbo (decai a cada tempo). */
+const pulse = (t, from = 12) => (t < from ? 0 : Math.exp(-((t - from) % BEAT) * 9));
+
+function rand(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), a | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function text(str, x, y, { size = 72, weight = 700, color = C.text, alpha = 1, font = DISPLAY, align = 'center', spacing = 0, scale = 1, blur = 0, glow = 0 } = {}) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  ctx.font = `${weight} ${size}px ${font}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.letterSpacing = `${spacing}px`;
+  if (blur) ctx.filter = `blur(${blur}px)`;
+  if (glow) { ctx.shadowColor = color; ctx.shadowBlur = glow; }
+  ctx.fillStyle = color;
+  ctx.fillText(str, 0, 0);
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+}
+
+function vignette(strength = 0.6) {
+  const g = ctx.createRadialGradient(CX, CY, H * 0.2, CX, CY, H * 0.95);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, `rgba(0,0,0,${strength})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function glowBlob(x, y, r, color, alpha) {
+  if (alpha <= 0) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha = 1;
+}
+
+/** Grão de filme leve: textura "cinema" e esconde banding nos degradês. */
+const grainCanvas = document.createElement('canvas');
+grainCanvas.width = 512; grainCanvas.height = 512;
+{
+  const g = grainCanvas.getContext('2d');
+  const img = g.createImageData(512, 512);
+  const r = rand(99);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = r() * 255;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 18;
+  }
+  g.putImageData(img, 0, 0);
+}
+function grain(t) {
+  const o = Math.floor(t * 24) % 8;
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.translate(-(o * 61) % 512, -(o * 97) % 512);
+  ctx.fillStyle = ctx.createPattern(grainCanvas, 'repeat');
+  ctx.fillRect(0, 0, W + 512, H + 512);
+  ctx.restore();
+}
+
+/** Marca do Sonora: anel com três ondas, que "respira" com a música. */
+function mark(x, y, r, { alpha = 1, energy = 0, color = C.text } = {}) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = r * 0.12;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.stroke();
+  const hs = [0.45, 0.8, 0.55];
+  hs.forEach((h, i) => {
+    const xx = (i - 1) * r * 0.36;
+    const hh = r * (h + energy * 0.15 * (i === 1 ? 1 : 0.6));
+    ctx.beginPath();
+    ctx.moveTo(xx, -hh / 1.6);
+    ctx.lineTo(xx, hh / 1.6);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ---------- partículas compartilhadas ----------
+const P = (() => {
+  const r = rand(42);
+  return Array.from({ length: 220 }, () => ({ a: r() * Math.PI * 2, d: 0.15 + r() * 0.85, s: 0.5 + r() * 2.2, ph: r() * 6.28, sp: 0.2 + r() * 0.8 }));
+})();
+
+function particles(t, { converge = 0, alpha = 1, color = '255,255,255', speed = 1 } = {}) {
+  for (const p of P) {
+    const ang = p.a + t * 0.05 * p.sp * speed;
+    const dist = p.d * (1 - converge * 0.85) * H * 0.75;
+    const x = CX + Math.cos(ang) * dist * 1.6;
+    const y = CY + Math.sin(ang) * dist;
+    const tw = 0.4 + 0.6 * Math.sin(t * 2 + p.ph) ** 2;
+    ctx.fillStyle = `rgba(${color},${alpha * tw * (0.25 + converge * 0.6)})`;
+    ctx.beginPath();
+    ctx.arc(x, y, p.s * (1 + converge), 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---------- cenas ----------
+function sceneIntro(t) {
+  // 0–6 s: a música crescendo
+  const build = easeInOut(prog(t, 0, 6));
+  const beatGlow = Math.exp(-(t % BEAT) * 5) * (0.15 + build * 0.5);
+  glowBlob(CX, CY, H * (0.5 + build * 0.5), 'rgba(124,92,255,0.9)', 0.12 + build * 0.35 + beatGlow * 0.2);
+  glowBlob(CX + 300, CY + 120, H * 0.5, 'rgba(255,92,180,0.8)', build * 0.18);
+  particles(t, { converge: build * 0.7, alpha: 0.4 + build * 0.6, speed: 1 + build * 6 });
+  text('Você conhece esse momento.', CX, CY, { size: 76, weight: 600, alpha: life(t, 0.4, 2.1), spacing: -1 });
+  text('A música crescendo.', CX, CY, { size: 84, weight: 700, alpha: life(t, 2.1, 3.9), spacing: -1, scale: lerp(1, 1.04, prog(t, 2.1, 3.9)) });
+  const chorus = prog(t, 3.9, 6);
+  text('O refrão chegando…', CX, CY, { size: 104, weight: 800, alpha: prog(t, 3.9, 4.3), spacing: -2, scale: lerp(1, 1.18, easeInOut(chorus)), glow: 30 * chorus, color: C.text });
+}
+
+function scenePause(t) {
+  // 6–9 s: a interrupção. Tudo para; só o relógio anda.
+  ctx.save();
+  ctx.filter = 'grayscale(1) brightness(0.32) blur(2px)';
+  ctx.drawImage(frozenIntro, 0, 0);
+  ctx.restore();
+  const appear = easeOutBack(prog(t, 6.05, 6.4));
+  const w = 760, h = 132, x = CX - w / 2, y = H - 290;
+  ctx.save();
+  ctx.translate(CX, y + h / 2);
+  ctx.scale(lerp(0.9, 1, appear), lerp(0.9, 1, appear));
+  ctx.translate(-CX, -(y + h / 2));
+  ctx.globalAlpha = clamp(appear);
+  roundRect(x, y, w, h, h / 2);
+  ctx.fillStyle = C.pill;
+  ctx.fill();
+  const secs = 30 - Math.max(0, Math.floor(t - 6.25 + 1));
+  text('ANÚNCIO', x + 74, y + 46, { size: 22, weight: 700, color: '#77777E', font: TEXT, align: 'left', spacing: 3 });
+  text(`Sua música volta em 0:${String(secs).padStart(2, '0')}`, x + 74, y + 86, { size: 40, weight: 600, color: C.pillText, font: TEXT, align: 'left' });
+  // barra de progresso do "anúncio", quase parada
+  roundRect(x + 74, y + h - 16, w - 148, 4, 2);
+  ctx.fillStyle = '#3A3A40';
+  ctx.fill();
+  roundRect(x + 74, y + h - 16, (w - 148) * (0.02 + 0.03 * prog(t, 6.2, 9)), 4, 2);
+  ctx.fillStyle = '#8A8A90';
+  ctx.fill();
+  ctx.restore();
+}
+
+function sceneTakeBack(t) {
+  // 9–12 s: a pílula se desfaz; "a gente também conhece".
+  const build = easeInOut(prog(t, 9, 12));
+  glowBlob(CX, CY, H * (0.3 + build * 0.7), 'rgba(124,92,255,0.9)', build * 0.5);
+  particles(t, { converge: 1 - build * 0.6, alpha: 0.3 + build * 0.7, speed: 1 + build * 10 });
+  // estilhaços da pílula
+  const w = 760, h = 132, x0 = CX - w / 2, y0 = H - 290;
+  const r = rand(7);
+  const k = easeOut(prog(t, 9, 10.6));
+  if (k < 1) {
+    for (let i = 0; i < 48; i++) {
+      const sx = x0 + r() * w, sy = y0 + r() * h, sw = 20 + r() * 60, sh = 10 + r() * 30;
+      const vx = (r() - 0.5) * 500, vy = -200 - r() * 400, rot = (r() - 0.5) * 4;
+      ctx.save();
+      ctx.globalAlpha = (1 - k) * 0.9;
+      ctx.translate(sx + vx * k, sy + vy * k + 300 * k * k);
+      ctx.rotate(rot * k);
+      ctx.fillStyle = C.pill;
+      ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+      ctx.restore();
+    }
+  }
+  text('A gente também conhece.', CX, CY - 10, { size: 80, weight: 600, alpha: life(t, 9.25, 10.85), spacing: -1 });
+  text('Por isso tiramos.', CX, CY - 10, { size: 112, weight: 800, alpha: prog(t, 10.85, 11.1) * (1 - prog(t, 11.85, 12)), spacing: -3, scale: lerp(1, 1.08, prog(t, 10.85, 12)) });
+  // flash de luz no último instante antes do drop
+  ctx.fillStyle = `rgba(255,255,255,${prog(t, 11.82, 12) ** 3})`;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function eqBars(t, { y = H, alpha = 0.5, count = 64, energy = 1 } = {}) {
+  const bw = W / count;
+  for (let i = 0; i < count; i++) {
+    const f = i / count;
+    const amp = (0.35 + 0.65 * Math.abs(Math.sin(i * 1.7 + t * 3.1) * Math.cos(i * 0.31 + t * 1.3))) * (0.5 + pulse(t) * 0.5 * (1 - f)) * energy;
+    const h = amp * 260;
+    const g = ctx.createLinearGradient(0, y - h, 0, y);
+    g.addColorStop(0, `rgba(177,156,255,${alpha})`);
+    g.addColorStop(1, 'rgba(124,92,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(i * bw + 2, y - h, bw - 4, h);
+  }
+}
+
+function sceneDrop(t) {
+  // 12–14 s: SONORA nasce do drop
+  const k = prog(t, 12, 14);
+  // anel de onda expandindo
+  for (let ring = 0; ring < 4; ring++) {
+    const rk = prog(t, 12 + ring * 0.12, 13.6 + ring * 0.12);
+    if (rk <= 0 || rk >= 1) continue;
+    ctx.save();
+    ctx.globalAlpha = (1 - rk) * 0.8;
+    ctx.strokeStyle = ring % 2 ? C.accent2 : C.text;
+    ctx.lineWidth = 6 * (1 - rk) + 1;
+    ctx.beginPath();
+    const R = easeOut(rk) * W * 0.7;
+    for (let a = 0; a <= 200; a++) {
+      const ang = (a / 200) * Math.PI * 2;
+      const wob = 1 + 0.04 * Math.sin(ang * 12 + t * 20) * (1 - rk);
+      const px = CX + Math.cos(ang) * R * wob, py = CY + Math.sin(ang) * R * wob * 0.92;
+      a ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  glowBlob(CX, CY, H * 0.9, 'rgba(124,92,255,0.9)', 0.35 + pulse(t) * 0.2);
+  eqBars(t, { alpha: 0.35 });
+  const appear = easeOutBack(prog(t, 12.0, 12.7));
+  mark(CX, CY - 190, 70 * appear, { alpha: clamp(appear), energy: pulse(t) });
+  text('SONORA', CX, CY + 40, { size: 170, weight: 900, spacing: lerp(60, 14, easeOut(prog(t, 12, 13.2))), alpha: prog(t, 12.05, 12.4), scale: 1 + pulse(t) * 0.015 });
+  // flash residual do drop
+  ctx.fillStyle = `rgba(255,255,255,${(1 - prog(t, 12, 12.35)) ** 2})`;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function sceneZero(t) {
+  // 14–20 s: "Zero anúncios. / Zero interrupções. / Zero."
+  glowBlob(CX, CY, H, 'rgba(124,92,255,0.9)', 0.18 + pulse(t) * 0.12);
+  eqBars(t, { alpha: 0.28 });
+  const s = 1 + pulse(t) * 0.025;
+  const word = (str, a, b, size) => {
+    const k = prog(t, a, a + 0.18);
+    text(str, CX, CY, { size, weight: 900, spacing: -size * 0.04, alpha: k * (1 - prog(t, b - 0.05, b)), scale: s * lerp(1.08, 1, easeOut(k)) });
+  };
+  word('Zero anúncios.', 14, 16, 150);
+  word('Zero interrupções.', 16, 18, 138);
+  // "Zero." gigante, com o ponto em destaque
+  if (t >= 18) {
+    const k = easeOut(prog(t, 18, 18.25));
+    text('Zero', CX - 40, CY, { size: 380, weight: 900, spacing: -18, alpha: k * (1 - prog(t, 19.9, 20)), scale: s * lerp(1.12, 1, k) });
+    ctx.save();
+    ctx.globalAlpha = k * (1 - prog(t, 19.9, 20));
+    ctx.fillStyle = C.accent;
+    ctx.beginPath();
+    ctx.arc(CX + 470, CY + 105, 34 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function sceneQuality(t) {
+  // 20–26 s: da escadinha à curva perfeita
+  const smooth = easeInOut(prog(t, 20.6, 23.2));
+  glowBlob(CX, CY + 80, H * 0.9, 'rgba(245,197,66,0.8)', 0.08 + smooth * 0.12);
+  const steps = Math.round(lerp(10, 400, smooth ** 2));
+  const y0 = CY + 190;
+  ctx.save();
+  ctx.lineWidth = 6;
+  ctx.lineJoin = 'round';
+  const g = ctx.createLinearGradient(0, 0, W, 0);
+  g.addColorStop(0, C.accent);
+  g.addColorStop(0.5, C.hires);
+  g.addColorStop(1, C.accent2);
+  ctx.strokeStyle = g;
+  ctx.shadowColor = C.hires;
+  ctx.shadowBlur = 20 * smooth;
+  ctx.beginPath();
+  const wave = (x) => Math.sin(x * 0.006 + t * 2.2) * 110 + Math.sin(x * 0.017 - t * 3.1) * 45 + Math.sin(x * 0.041 + t * 1.3) * 18;
+  const q = (v) => Math.round(v / (300 / steps)) * (300 / steps);
+  const stepW = W / steps;
+  for (let x = 0; x <= W; x += 4) {
+    const xs = Math.floor(x / stepW) * stepW; // retenção de amostra (low-res)
+    const v = lerp(q(wave(xs)), wave(x), smooth);
+    x ? ctx.lineTo(x, y0 + v) : ctx.moveTo(x, y0 + v);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  const k = prog(t, 20.3, 23.4);
+  const bits = Math.round(lerp(16, 24, easeInOut(k)));
+  const khz = lerp(44.1, 192, easeInOut(k));
+  const khzStr = khz >= 191.5 ? '192' : khz < 44.2 ? '44,1' : String(Math.round(khz));
+  const a = life(t, 20.2, 23.7, 0.3, 0.3);
+  text(`${bits}-bit`, CX - 300, CY - 230, { size: 120, weight: 900, color: bits === 24 ? C.hires : C.text, alpha: a, spacing: -3 });
+  text(`${khzStr} kHz`, CX + 300, CY - 230, { size: 120, weight: 900, color: khzStr === '192' ? C.hires : C.text, alpha: a, spacing: -3 });
+  text('LOSSLESS · HI-RES', CX, CY - 120, { size: 28, weight: 700, color: C.hires, alpha: a * prog(t, 22.6, 23), font: TEXT, spacing: 8 });
+  text('Ouça o que o estúdio ouviu.', CX, CY - 200, { size: 104, weight: 800, alpha: life(t, 23.7, 26, 0.25, 0.08), spacing: -2, scale: lerp(1.04, 1, easeOut(prog(t, 23.7, 24.3))) });
+}
+
+const MESES = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+function sceneDecember(t) {
+  // 26–32 s: o resumo que só chega em dezembro… e o nosso, agora.
+  glowBlob(CX, CY, H * 0.8, 'rgba(124,92,255,0.8)', 0.1);
+  text('Tem gente que espera o ano inteiro', CX, 230, { size: 64, weight: 600, alpha: life(t, 26.1, 28.95, 0.3, 0.2), spacing: -1 });
+  text('pra saber o que ouviu.', CX, 310, { size: 64, weight: 600, alpha: life(t, 26.6, 28.95, 0.3, 0.2), spacing: -1, color: C.dim });
+
+  // calendário folheando até dezembro
+  if (t < 29.4) {
+    const flip = prog(t, 26.2, 27.9);
+    const idx = Math.min(11, Math.floor(easeInOut(flip) * 12));
+    const tear = easeOut(prog(t, 28.9, 29.4));
+    ctx.save();
+    ctx.translate(CX, CY + 110 + tear * 700);
+    ctx.rotate(tear * 0.6);
+    ctx.globalAlpha = 1 - tear;
+    roundRect(-210, -230, 420, 460, 28);
+    ctx.fillStyle = '#F5F5F7';
+    ctx.fill();
+    roundRect(-210, -230, 420, 110, [28, 28, 0, 0]);
+    ctx.fillStyle = idx === 11 ? '#FF5C7A' : '#3A3A44';
+    ctx.fill();
+    ctx.restore();
+    text(MESES[idx], CX + Math.sin(tear) * 120, CY - 65 + tear * 700, { size: 64, weight: 800, color: '#FFFFFF', alpha: 1 - tear, spacing: 6 });
+    text(String(idx === 11 ? 31 : 1 + ((idx * 7) % 28)), CX + Math.sin(tear) * 200, CY + 170 + tear * 700, { size: 220, weight: 900, color: '#111116', alpha: 1 - tear, spacing: -8 });
+  }
+
+  // "Aqui é agora." + painel ao vivo
+  if (t >= 29.2) {
+    const k = easeOut(prog(t, 29.2, 29.6));
+    text('Aqui é agora.', CX, 230, { size: 112, weight: 900, alpha: k * (1 - prog(t, 31.9, 32)), spacing: -3 });
+    const cardA = easeOutBack(prog(t, 29.7, 30.3));
+    const mins = Math.round(12480 * easeOut(prog(t, 29.8, 31.3)));
+    ctx.save();
+    ctx.globalAlpha = clamp(cardA) * (1 - prog(t, 31.9, 32));
+    roundRect(CX - 760, CY - 90, 700, 380, 36);
+    const g = ctx.createLinearGradient(CX - 760, CY - 90, CX - 60, CY + 290);
+    g.addColorStop(0, '#4C2FD9');
+    g.addColorStop(1, '#1B1240');
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.restore();
+    const ca = clamp(cardA) * (1 - prog(t, 31.9, 32));
+    text('TEMPO OUVIDO', CX - 700, CY - 30, { size: 24, weight: 700, color: '#CFC6FF', alpha: ca, font: TEXT, align: 'left', spacing: 4 });
+    text(`${mins.toLocaleString('pt-BR')} min`, CX - 700, CY + 60, { size: 108, weight: 900, alpha: ca, align: 'left', spacing: -3 });
+    text('42 dias seguidos', CX - 700, CY + 170, { size: 40, weight: 600, color: '#CFC6FF', alpha: ca * prog(t, 30.6, 30.9), font: TEXT, align: 'left' });
+    text('atualizado agora', CX - 700, CY + 230, { size: 26, weight: 500, color: '#9C8FE0', alpha: ca * prog(t, 30.8, 31.1), font: TEXT, align: 'left' });
+    // barras da semana
+    const vals = [0.45, 0.7, 0.38, 0.92, 0.6, 1, 0.78];
+    const days = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+    vals.forEach((v, i) => {
+      const bk = easeOutBack(prog(t, 30.0 + i * 0.08, 30.5 + i * 0.08));
+      const bh = 300 * v * clamp(bk, 0, 1.1);
+      const bx = CX + 100 + i * 90;
+      ctx.save();
+      ctx.globalAlpha = (1 - prog(t, 31.9, 32));
+      roundRect(bx, CY + 250 - bh, 56, bh, 12);
+      ctx.fillStyle = v === 1 ? C.accent : '#2E2E38';
+      ctx.fill();
+      ctx.restore();
+      text(days[i], bx + 28, CY + 285, { size: 26, weight: 600, color: C.dim, alpha: prog(t, 30.0, 30.4) * (1 - prog(t, 31.9, 32)), font: TEXT });
+    });
+  }
+}
+
+const FAIXAS = [
+  ['Luz de Março', 'Clara Ventura', '#E8505B'], ['Maré Alta', 'Os Litorâneos', '#14B8A6'], ['Noite em Neon', 'Kairo', '#7C5CFF'],
+  ['Vento Sul', 'Helena Duarte', '#F59E0B'], ['Céu de Vidro', 'Trio Aurora', '#3B82F6'], ['Ruas de Ouro', 'Bento & Lia', '#EC4899'],
+  ['Depois da Chuva', 'Marina Sol', '#22C55E'],
+];
+function scenePlaylist(t) {
+  // 32–38 s: cola o link, a playlist vem — e continua vindo
+  glowBlob(CX, CY, H * 0.9, 'rgba(124,92,255,0.8)', 0.12 + pulse(t) * 0.08);
+  text('Cola o link da sua playlist.', CX, 170, { size: 76, weight: 800, alpha: life(t, 32.05, 34.9, 0.25, 0.2), spacing: -2 });
+  text('Ela vem. E continua vindo.', CX, 170, { size: 76, weight: 800, alpha: life(t, 34.9, 38, 0.2, 0.1), spacing: -2 });
+
+  // campo de link
+  const fy = 300, fw = 1000, fx = CX - fw / 2;
+  const appear = easeOutBack(prog(t, 32.2, 32.6));
+  const pasted = t >= 32.9;
+  ctx.save();
+  ctx.globalAlpha = clamp(appear) * (1 - prog(t, 37.9, 38));
+  roundRect(fx, fy, fw, 96, 22);
+  ctx.fillStyle = '#16161C';
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = pasted ? C.accent : '#2E2E38';
+  ctx.stroke();
+  ctx.restore();
+  const fa = clamp(appear) * (1 - prog(t, 37.9, 38));
+  text(pasted ? 'https://…/playlist/as-da-semana' : 'Cole o link aqui', fx + 40, fy + 48, { size: 34, weight: 500, color: pasted ? C.text : '#55555F', alpha: fa, font: TEXT, align: 'left' });
+  if (pasted) {
+    // flash do "colar"
+    ctx.fillStyle = `rgba(124,92,255,${0.4 * (1 - prog(t, 32.9, 33.3))})`;
+    roundRect(fx, fy, fw, 96, 22);
+    ctx.fill();
+  }
+
+  // faixas descendo em cascata
+  const rowH = 86, top = 440;
+  const list = t >= 36.6 ? [['Hoje Mesmo', 'Clara Ventura', '#FF5C7A', true], ...FAIXAS] : FAIXAS;
+  const insertK = easeOut(prog(t, 36.6, 37.1));
+  list.slice(0, 6).forEach((f, i) => {
+    const isNew = f[3] === true;
+    const k = isNew ? insertK : easeOutBack(prog(t, 33.3 + i * 0.12, 33.8 + i * 0.12));
+    const shift = t >= 36.6 && !isNew ? (1 - insertK) * -rowH : 0;
+    const y = top + i * rowH + shift + (1 - clamp(k)) * 60;
+    const a = clamp(k) * (1 - prog(t, 37.9, 38));
+    if (a <= 0) return;
+    ctx.save();
+    ctx.globalAlpha = a;
+    roundRect(fx, y, 64, 64, 10);
+    ctx.fillStyle = f[2];
+    ctx.fill();
+    ctx.restore();
+    text(f[0], fx + 92, y + 20, { size: 32, weight: 700, alpha: a, font: TEXT, align: 'left' });
+    text(f[1], fx + 92, y + 50, { size: 24, weight: 500, color: C.dim, alpha: a, font: TEXT, align: 'left' });
+    text('24-bit · 96 kHz', fx + fw - 10, y + 32, { size: 22, weight: 700, color: C.hires, alpha: a * 0.9, font: TEXT, align: 'right', spacing: 1 });
+    if (isNew) {
+      ctx.save();
+      ctx.globalAlpha = a;
+      roundRect(fx + 400, y + 14, 120, 36, 18);
+      ctx.fillStyle = C.accent;
+      ctx.fill();
+      ctx.restore();
+      text('NOVA', fx + 460, y + 33, { size: 20, weight: 800, alpha: a, font: TEXT, spacing: 2 });
+    }
+  });
+}
+
+function sceneGapless(t) {
+  // 38–42 s: duas faixas se emendam sem nenhum vão
+  const k = easeInOut(prog(t, 38.3, 39.6));
+  const gap = lerp(240, 0, k);
+  const y0 = CY + 60;
+  const blockW = 760;
+  const drawWave = (x0, seed, color) => {
+    const r = rand(seed);
+    for (let i = 0; i < 76; i++) {
+      const env = Math.sin((i / 76) * Math.PI) ** 0.4;
+      const h = (40 + r() * 200) * env * (0.7 + pulse(t) * 0.3);
+      ctx.fillStyle = color;
+      roundRect(x0 + i * 10, y0 - h / 2, 6, h, 3);
+      ctx.fill();
+    }
+  };
+  ctx.save();
+  ctx.globalAlpha = 1 - prog(t, 41.9, 42);
+  drawWave(CX - gap / 2 - blockW, 3, C.accent2);
+  drawWave(CX + gap / 2, 5, C.accent);
+  ctx.restore();
+  // luz passando pela emenda
+  if (k >= 1) {
+    const sweep = prog(t, 39.6, 40.6);
+    glowBlob(CX + lerp(-200, 200, sweep), y0, 260, 'rgba(255,255,255,0.9)', (1 - Math.abs(sweep - 0.5) * 2) * 0.35);
+  }
+  text('Sem silêncio entre as faixas.', CX, 230, { size: 88, weight: 800, alpha: life(t, 38.15, 42, 0.3, 0.1), spacing: -2 });
+  text('GAPLESS', CX, CY + 290, { size: 26, weight: 700, color: C.accent2, alpha: prog(t, 39.6, 40) * (1 - prog(t, 41.9, 42)), font: TEXT, spacing: 10 });
+}
+
+function sceneEnd(t) {
+  // 42–48 s: assinatura
+  const k = easeOut(prog(t, 42, 43));
+  glowBlob(CX, CY - 40, H * 0.7, 'rgba(124,92,255,0.9)', 0.25 * k * (1 - prog(t, 46.8, 48)));
+  const fadeOutAll = 1 - prog(t, 46.9, 47.9);
+  mark(CX, CY - 150, 74, { alpha: k * fadeOutAll, energy: Math.exp(-(t - 42) * 2) });
+  text('Sonora', CX, CY + 0, { size: 150, weight: 800, alpha: prog(t, 42.15, 42.7) * fadeOutAll, spacing: lerp(18, -4, easeOut(prog(t, 42.1, 44))) });
+  text('Ouça do jeito que foi gravado.', CX, CY + 125, { size: 52, weight: 500, color: C.text, alpha: prog(t, 43.0, 43.6) * fadeOutAll, font: TEXT });
+  text('Sem anúncios. Nunca.', CX, CY + 215, { size: 30, weight: 600, color: C.dim, alpha: prog(t, 44.2, 44.8) * fadeOutAll, font: TEXT, spacing: 2 });
+}
+
+// ---------- montagem ----------
+/** O quadro que "congela" no corte de 6 s: o refrão, pré-renderizado num canvas à parte. */
+let frozenIntro = null;
+function prepare() {
+  frozenIntro = document.createElement('canvas');
+  frozenIntro.width = W;
+  frozenIntro.height = H;
+  const main = ctx;
+  ctx = frozenIntro.getContext('2d');
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+  sceneIntro(5.95);
+  ctx = main;
+}
+
+const SCENES = [
+  [0, 6, sceneIntro], [6, 9, scenePause], [9, 12, sceneTakeBack], [12, 14, sceneDrop], [14, 20, sceneZero],
+  [20, 26, sceneQuality], [26, 32, sceneDecember], [32, 38, scenePlaylist], [38, 42, sceneGapless], [42, 48.1, sceneEnd],
+];
+
+window.DURATION = 48;
+window.render = function render(t) {
+  if (!frozenIntro) prepare();
+  ctx.globalAlpha = 1;
+  ctx.filter = 'none';
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+  for (const [a, b, fn] of SCENES) if (t >= a && t < b) fn(t);
+  vignette(t >= 6 && t < 9 ? 0.75 : 0.55);
+  grain(t);
+};
+
+// Prévia em tempo real ao abrir o arquivo no navegador (o render.mjs desliga com ?render).
+if (!location.search.includes('render')) {
+  document.fonts.ready.then(() => {
+    const t0 = performance.now();
+    const loop = () => {
+      render(((performance.now() - t0) / 1000) % DURATION);
+      requestAnimationFrame(loop);
+    };
+    loop();
+  });
+}
+</script>
+</body>
+</html>

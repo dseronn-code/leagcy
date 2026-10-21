@@ -6,3 +6,5 @@ dist/
 apps/mobile/android/
 apps/mobile/ios/
 coverage/
+marketing/trailer/out/
+__pycache__/
