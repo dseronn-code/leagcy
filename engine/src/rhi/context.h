@@ -42,6 +42,7 @@ class Context {
   VkPhysicalDeviceProperties properties{};
   bool rayTracing = false;  // VK_KHR_ray_query + acceleration_structure ativos
   RayTracingFns rt;
+  PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR = nullptr;
 
  private:
   bool wantRayTracing_ = true;

@@ -1,6 +1,6 @@
 # O que tem no motor do GTA 6 e o que falta no Legacy Engine
 
-Pesquisa de 22/10/2026. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Series).
+Pesquisa de 22/10/2026, status atualizado no Dia 2. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Series).
 
 **Sobre as fontes:** a Rockstar quase não publica detalhes técnicos do RAGE. O nome "RAGE 9" aparece só em blogs de fãs. O que existe de mais confiável é a análise da Digital Foundry sobre o Trailer 2 (capturado em um PS5 comum). O resto da lista vem do que já se sabe do GTA V e do RDR2, de patentes da Take-Two e do que todo mundo aberto AAA precisa.
 
@@ -22,11 +22,11 @@ Pesquisa de 22/10/2026. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Serie
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| GI por ray tracing | 🟡 | 1 rebote, sem cache de radiância e sem denoiser |
-| Reflexos por ray tracing | 🟡 | Funcionam, mas sem SSR híbrido e sem denoiser |
+| GI por ray tracing | 🟡 | 1 rebote com denoiser SVGF (Dia 2); falta cache de radiância multi-rebote |
+| Reflexos por ray tracing | ✅ | VNDF + denoiser (Dia 2); SSR híbrido não necessário por enquanto |
 | Sombra do sol | ✅ | Ray tracing, com penumbra física |
 | Shadow maps em cascata (fallback e performance) | ❌ | |
-| Milhares de luzes (neon, faróis, postes) | ❌ | Essencial para Vice City à noite: ReSTIR DI ou clustered lighting |
+| Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR DI com sombras (Dia 2) |
 | Céu e atmosfera física | ✅ | |
 | Nuvens volumétricas, raios de luz (god rays) | ❌ | Hoje só temos névoa por altura |
 | Ciclo dia/noite | 🟡 | O sol se move; faltam lua, estrelas e luzes da cidade |
@@ -35,17 +35,17 @@ Pesquisa de 22/10/2026. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Serie
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| Denoiser | ❌ | Sem ele o ray tracing só fica limpo com a câmera parada |
-| TAA | ❌ | |
-| Upscaling (FSR, DLSS, XeSS) | ❌ | O próprio GTA 6 renderiza abaixo de 4K |
-| Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | ❌ | Só temos tonemap ACES |
+| Denoiser | ✅ | SVGF (Dia 2); evolução: ReLAX/ReBLUR (NVIDIA NRD) |
+| TAA | ✅ | TAAU com clipping YCoCg (Dia 2) |
+| Upscaling (FSR, DLSS, XeSS) | 🟡 | TAAU próprio (Dia 2); faltam DLSS/FSR 3/XeSS |
+| Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | 🟡 | Tudo menos lens flare (Dia 2) |
 
 ### Materiais e superfícies
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| PBR | ✅ | Ainda sem texturas |
-| Texturas, normal maps, mipmaps, compressão BC7 | ❌ | |
+| PBR | ✅ | Com texturas glTF (Dia 2) |
+| Texturas, normal maps, mipmaps, compressão BC7 | 🟡 | Tudo menos BC7 (Dia 2) |
 | Pintura de carro (clearcoat, flocos metálicos) | ❌ | |
 | Vidro e transparência | ❌ | |
 | Decals (sujeira, marcas, pichação) | ❌ | |

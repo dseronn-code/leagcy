@@ -62,7 +62,7 @@ AccelStructure buildAccel(Context& ctx, VkAccelerationStructureTypeKHR type,
 AccelStructure buildBlas(Context& ctx, const BlasInput& in) {
   VkAccelerationStructureGeometryKHR geom{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
   geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-  geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+  geom.flags = 0;  // opacidade decidida por instância (FORCE_OPAQUE / FORCE_NO_OPAQUE)
   auto& tri = geom.geometry.triangles;
   tri.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
   tri.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -85,7 +85,8 @@ AccelStructure buildTlas(Context& ctx, const std::vector<TlasInstance>& instance
     r.instanceCustomIndex = instances[i].customIndex;
     r.mask = 0xFF;
     r.instanceShaderBindingTableRecordOffset = 0;
-    r.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    r.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
+              (instances[i].opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR);
     r.accelerationStructureReference = instances[i].blas->address;
   }
   Buffer instBuf = createBufferWithData(ctx, raw.data(), raw.size() * sizeof(raw[0]), kAsInputUsage);

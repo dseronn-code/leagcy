@@ -24,6 +24,18 @@ FetchContent_Declare(glm
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(glm)
 
+# cgltf (leitor glTF 2.0) e stb (decodificação de imagens) — só headers.
+FetchContent_Declare(cgltf
+  GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
+  GIT_TAG v1.14
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_Declare(stb
+  GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_TAG a7d4c2175630e1ea5b6f8dd00ab96fed0b97b96d
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(cgltf stb)
+
 # GLFW — usa a instalação do sistema se existir, senão baixa.
 find_package(glfw3 3.3 QUIET)
 if(NOT glfw3_FOUND)
@@ -63,11 +75,13 @@ file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
 add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
+target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw)
 target_compile_definitions(legacy PRIVATE
   GLM_FORCE_DEPTH_ZERO_TO_ONE
   GLM_FORCE_RADIANS
-  SHADER_DIR="${SHADER_OUT_DIR}")
+  SHADER_DIR="${SHADER_OUT_DIR}"
+  ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 if(MSVC)
   target_compile_options(legacy PRIVATE /W4 /permissive-)
 else()

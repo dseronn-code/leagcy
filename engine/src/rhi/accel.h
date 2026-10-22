@@ -25,9 +25,10 @@ struct TlasInstance {
   const AccelStructure* blas = nullptr;
   glm::mat4 transform{1.0f};
   uint32_t customIndex = 0;  // gl_InstanceCustomIndexEXT no shader
+  bool opaque = true;        // false => o shader testa o alfa da textura (folhagem, grades)
 };
 
-// Bottom-level: triângulos de uma malha (opacos, otimizados para traçado rápido).
+// Bottom-level: triângulos de uma malha (otimizados para traçado rápido).
 AccelStructure buildBlas(Context& ctx, const BlasInput& in);
 // Top-level: instâncias de BLAS com transformações.
 AccelStructure buildTlas(Context& ctx, const std::vector<TlasInstance>& instances);

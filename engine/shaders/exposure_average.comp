@@ -1,0 +1,42 @@
+#version 460
+// Auto-exposição, passo 2: luminância média entre os percentis 40% e 95% (ignora céu estourado
+// e sombras profundas), adaptação temporal como o olho humano, e limpeza do histograma.
+#extension GL_GOOGLE_include_directive : require
+#include "frame.glsl"
+#include "exposure.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, std430) buffer Histogram { uint bins[]; };
+layout(set = 1, binding = 1, std430) buffer ExposureState { vec4 state; };  // x = exposição, y = luminância adaptada
+layout(push_constant) uniform Push { float compensation; float manualExposure; float speedUp; float speedDown; } pc;
+
+void main() {
+  if (gl_LocalInvocationIndex == 0u) {
+    uint total = 0u;
+    for (uint i = 1u; i < HISTOGRAM_BINS; ++i) total += bins[i];
+    float lo = float(total) * 0.40, hi = float(total) * 0.95;
+    float acc = 0.0, sumLog = 0.0, count = 0.0;
+    for (uint i = 1u; i < HISTOGRAM_BINS; ++i) {
+      float n = float(bins[i]);
+      float take = clamp(acc + n, lo, hi) - clamp(acc, lo, hi);  // parte do bin dentro da faixa
+      acc += n;
+      float logLum = MIN_LOG_LUM + (float(i - 1u) + 0.5) / float(HISTOGRAM_BINS - 2u) * (MAX_LOG_LUM - MIN_LOG_LUM);
+      sumLog += take * logLum;
+      count += take;
+    }
+    float avgLog = count > 0.0 ? sumLog / count : 0.0;
+    float target = max(exp2(avgLog), 1e-4);
+
+    float adapted = state.y;
+    if (adapted <= 0.0 || !historyValid()) {
+      adapted = target;
+    } else {
+      float speed = target > adapted ? pc.speedUp : pc.speedDown;
+      adapted = exp2(mix(log2(adapted), log2(target), 1.0 - exp(-frame.params.y * speed)));
+    }
+    float exposure = pc.manualExposure > 0.0 ? pc.manualExposure : 0.18 / adapted * exp2(pc.compensation);
+    state = vec4(exposure, adapted, target, 0.0);
+  }
+  barrier();
+  for (uint i = gl_LocalInvocationIndex; i < HISTOGRAM_BINS; i += 64u) bins[i] = 0u;
+}

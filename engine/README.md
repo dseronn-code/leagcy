@@ -2,31 +2,49 @@
 
 Motor gráfico em **C++20 + Vulkan 1.3** com **ray tracing em tempo real**, feito para chegar no nível visual de RDR2 / GTA 6 / Cyberpunk 2077.
 
-![Dia 1](docs/screenshots/dia01.png)
+![Dia 2 — Sponza à noite com 512 luzes (ReSTIR)](docs/screenshots/dia02_sponza_noite.png)
 
-## O que já tem (Dia 1)
+| | |
+|---|---|
+| ![Dia 2 — Sponza de dia](docs/screenshots/dia02_sponza_dia.png) | ![Dia 2 — profundidade de campo com autofoco](docs/screenshots/dia02_dof.png) |
+| Sponza de dia: sol entrando no átrio + GI | Profundidade de campo com autofoco + bloom |
+
+[Dia 1](docs/screenshots/dia01.png) · [Comparação com o motor do GTA 6](docs/gta6-analise.md)
+
+## O que já tem
 
 | Sistema | Técnica | Onde |
 |---|---|---|
-| RHI Vulkan moderno | Dynamic rendering, synchronization2, buffer device address, VMA | `src/rhi/` |
-| Ray tracing | BLAS/TLAS + `VK_KHR_ray_query` | `src/rhi/accel.*` |
-| Sombras | Traçadas por raio, penumbra física pelo disco solar | `shaders/forward.glsl` |
-| Iluminação global | 1 rebote difuso traçado (sangramento de cor) | `shaders/forward.glsl` |
-| Reflexões | Traçadas, amostragem VNDF do GGX (Dupuy & Benyoub 2023) | `shaders/brdf.glsl` |
-| Materiais | PBR metálico/rugosidade: GGX + Smith correlacionado + Fresnel-Schlick | `shaders/brdf.glsl` |
+| RHI Vulkan moderno | Dynamic rendering, synchronization2, push descriptors, texturas bindless, VMA | `src/rhi/` |
+| Assets | glTF 2.0 (cgltf), texturas JPG/PNG com mipmaps gerados na GPU, normal maps | `src/scene/gltf_loader.cpp` |
+| Renderização | Deferred: G-buffer + iluminação em compute | `src/renderer/` |
+| Ray tracing | BLAS/TLAS + `VK_KHR_ray_query`, com teste de alfa (folhagem, grades) | `shaders/raytracing.glsl` |
+| Sombras | Traçadas por raio, penumbra física (sol e luzes) | `shaders/lighting.glsl` |
+| Milhares de luzes | **ReSTIR DI**: RIS + reuso temporal e espacial + visibilidade | `shaders/restir*.glsl` |
+| Iluminação global | 1 rebote difuso traçado + reflexões VNDF (GGX) | `shaders/lighting.glsl` |
+| Denoiser | **SVGF**: acumulação temporal com reprojeção + à-trous guiado por variância | `shaders/svgf_*.comp` |
+| Anti-aliasing / upscaling | **TAAU** próprio: jitter Halton, Catmull-Rom, clipping YCoCg; renderiza a 67% | `shaders/taa.comp` |
+| Pós-processamento | Auto-exposição por histograma, bloom físico (COD:AW), DOF com autofoco, motion blur, ACES | `shaders/` |
+| Materiais | PBR metálico/rugosidade (glTF), GGX + Smith correlacionado + Fresnel-Schlick | `shaders/brdf.glsl` |
 | Céu | Atmosfera física Rayleigh/Mie/ozônio + sky-view LUT (Hillaire 2020) | `shaders/atmosphere.glsl` |
-| Neblina | Névoa exponencial por altura com in-scattering do sol | `shaders/frame.glsl` |
-| Câmera | Reverse-Z com plano distante infinito (precisão para mundo aberto) | `src/scene/camera.h` |
-| Pipeline HDR | RGBA16F → acumulação temporal → ACES filmic | `src/renderer/` |
-| Fallback | Roda sem ray tracing (sem sombras ainda) | `--no-rt` |
+| Câmera | Reverse-Z com plano distante infinito | `src/scene/camera.h` |
+
+Pipeline de um frame:
+
+```
+Sky LUT → G-buffer → ReSTIR temporal → ReSTIR espacial → Iluminação RT (difuso | especular)
+→ SVGF temporal → à-trous ×4 / ×2 → Composição (céu, névoa) → TAAU
+→ Auto-exposição → DOF → Motion blur → Bloom → Tonemap ACES
+```
 
 ## Compilar
 
 Requisitos: CMake 3.24+, compilador C++20, [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) (traz o `glslangValidator`).
-VMA, GLM e GLFW são baixados automaticamente.
+VMA, GLM, GLFW, cgltf e stb são baixados automaticamente.
 
 ```bash
 cd engine
+cmake -P tools/fetch_assets.cmake   # baixa Sponza e DamagedHelmet (~55 MB, uma vez só)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j
 ```
@@ -38,42 +56,49 @@ GPU recomendada para ray tracing: NVIDIA RTX 20xx+, AMD RX 6000+ ou Intel Arc.
 ## Rodar
 
 ```bash
-./build/legacy                 # janela interativa
-./build/legacy --no-vsync      # sem limite de FPS
-./build/legacy --validation    # liga as camadas de validação do Vulkan (debug)
-./build/legacy --headless --frames 64 --width 1920 --height 1080 --out shot.png
+./build/legacy                             # Sponza, de dia, janela interativa
+./build/legacy --night                     # noite: 512 luzes coloridas com sombra (ReSTIR)
+./build/legacy --scene outdoor --dof       # cena externa com profundidade de campo
+./build/legacy --lights 4000 --night       # teste de estresse de luzes
+./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
+./build/legacy --validation                # camadas de validação do Vulkan (debug)
+./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png
+./build/legacy --help                      # todas as opções
 ```
 
 Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sobe · **Shift** rápido ·
-**setas** movem o sol · **+/-** exposição · **Esc** sai.
+**setas** movem o sol · **+/-** compensação de exposição · **F** liga/desliga DOF · **M** motion blur · **Esc** sai.
 
-Com a câmera parada a imagem converge (acumulação). Em movimento você vê 1 amostra por pixel, com ruído. O denoiser é o próximo passo.
+## Limitações conhecidas
+
+- Upscaling é o TAAU próprio; DLSS / FSR 3 / XeSS ainda não estão integrados.
+- Texturas sobem para a GPU sem compressão (BC7 pendente), então cenas grandes usam bastante VRAM.
+- Materiais com transparência (`BLEND`) são tratados como recorte por alfa.
+- Sem ray tracing (`--no-rt`) não há sombras; shadow maps em cascata entram depois.
+- Objetos são estáticos (TLAS construído uma vez); cena dinâmica é o próximo passo.
+- Desempenho ainda não foi medido em GPU real (desenvolvido e validado com o driver por software lavapipe).
 
 ## Arquitetura
 
 ```
 src/
-  rhi/        camada fina sobre Vulkan (contexto, recursos, pipelines, swapchain, BLAS/TLAS)
-  scene/      malhas, materiais, câmera, cena de demonstração
+  rhi/        camada fina sobre Vulkan (contexto, recursos, passes com push descriptors, swapchain, BLAS/TLAS)
+  scene/      malhas, materiais, luzes, câmera, carregador glTF, cenas de demonstração
   renderer/   organização dos passes do frame
   util/       PNG
-shaders/      GLSL -> SPIR-V compilado no build
+shaders/      GLSL -> SPIR-V compilado no build (variantes *_rt com ray tracing)
+tools/        fetch_assets.cmake
 ```
-
-Passes por frame: `Sky LUT (compute) → Forward HDR + ray queries → Céu → Acumulação (compute) → Tonemap`.
 
 ## Roadmap
 
 Comparação detalhada com o motor do GTA 6: [docs/gta6-analise.md](docs/gta6-analise.md).
 
-Em ordem: cada etapa destrava a próxima.
-
-1. **Denoiser + TAA**: reprojeção temporal com motion vectors e um filtro estilo SVGF/ReLAX. Tira o ruído em movimento.
-2. **Assets reais**: carregar glTF 2.0 com texturas (albedo, normal, ORM), mipmaps, compressão BC7, descritores bindless.
-3. **Pós-processamento de cinema**: bloom físico, auto-exposição por histograma, profundidade de campo, motion blur, color grading por LUT.
-4. **Upscaling**: DLSS / FSR 3 / XeSS (renderizar em resolução menor e reconstruir).
-5. **GI de verdade**: ReSTIR DI (milhares de luzes com sombra) e ReSTIR GI / radiance cache multi-rebote, a direção do Lumen e do RTX Global Illumination.
-6. **Geometria massiva**: GPU-driven rendering, culling em compute, mesh shaders, meshlets com LOD contínuo (a ideia do Nanite).
-7. **Mundo aberto**: terreno com clipmaps e streaming, vegetação instanciada com vento, nuvens volumétricas, ciclo dia/noite, clima.
-8. **Pele, cabelo e água**: subsurface scattering, strands de cabelo, oceano FFT.
-9. **Path tracing completo** como modo "Overdrive" (como o Cyberpunk RT Overdrive).
+- [x] **Dia 1**: RHI Vulkan, ray tracing, PBR, atmosfera física
+- [x] **Dia 2**: denoiser + TAAU, glTF e texturas, pós-processamento de cinema, ReSTIR DI (milhares de luzes)
+- [ ] Cena dinâmica: TLAS por frame, skinning de personagens, motion vectors por objeto
+- [ ] Escala de mundo aberto: GPU-driven rendering, culling, LOD, streaming
+- [ ] Atmosfera viva: nuvens volumétricas, clima, chuva e superfícies molhadas
+- [ ] Água: oceano FFT, rios, espuma, cena subaquática
+- [ ] Personagens AAA: pele com SSS, cabelo por fios, tecido
+- [ ] DLSS / FSR 3, texturas BC7, shadow maps em cascata (fallback sem RT)

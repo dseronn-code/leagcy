@@ -22,14 +22,25 @@ void destroyBuffer(Context& ctx, Buffer& b);
 
 struct Image {
   VkImage handle = VK_NULL_HANDLE;
-  VkImageView view = VK_NULL_HANDLE;
+  VkImageView view = VK_NULL_HANDLE;  // todos os mips
   VmaAllocation allocation = VK_NULL_HANDLE;
   VkFormat format = VK_FORMAT_UNDEFINED;
   VkExtent2D extent{};
+  uint32_t mipLevels = 1;
 };
 
-Image createImage2D(Context& ctx, VkExtent2D extent, VkFormat format, VkImageUsageFlags usage);
+uint32_t mipCount(VkExtent2D extent);
+Image createImage2D(Context& ctx, VkExtent2D extent, VkFormat format, VkImageUsageFlags usage, uint32_t mipLevels = 1);
+// View de um único mip (para escrita em compute, ex.: cadeia do bloom). Quem chama destrói.
+VkImageView createMipView(Context& ctx, const Image& img, uint32_t mip);
 void destroyImage(Context& ctx, Image& img);
+
+// Textura RGBA8 com cadeia completa de mipmaps gerada na GPU; termina em SHADER_READ_ONLY_OPTIMAL.
+Image createTexture(Context& ctx, const uint8_t* rgba, uint32_t width, uint32_t height, bool srgb);
+
+// Barreira de memória global (todas as escritas -> todas as leituras). Simples e correta;
+// um render graph poderá refinar isso no futuro.
+void memoryBarrier(VkCommandBuffer cmd);
 
 // Barreira de layout de imagem (synchronization2) com estágios/acessos amplos e explícitos.
 void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,

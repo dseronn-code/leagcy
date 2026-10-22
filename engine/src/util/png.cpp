@@ -27,12 +27,16 @@ void put32(std::vector<uint8_t>& v, uint32_t x) {
 }
 
 void chunk(std::ofstream& f, const char* type, const std::vector<uint8_t>& data) {
-  std::vector<uint8_t> buf;
-  put32(buf, uint32_t(data.size()));
-  buf.insert(buf.end(), type, type + 4);
-  if (!data.empty()) buf.insert(buf.end(), data.begin(), data.end());
-  put32(buf, crc32(buf.data() + 4, buf.size() - 4) ^ 0xFFFFFFFFu);
-  f.write(reinterpret_cast<const char*>(buf.data()), std::streamsize(buf.size()));
+  std::vector<uint8_t> len;
+  put32(len, uint32_t(data.size()));
+  f.write(reinterpret_cast<const char*>(len.data()), 4);
+  f.write(type, 4);
+  if (!data.empty()) f.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));
+  uint32_t crc = crc32(reinterpret_cast<const uint8_t*>(type), 4);
+  crc = crc32(data.data(), data.size(), crc) ^ 0xFFFFFFFFu;
+  std::vector<uint8_t> tail;
+  put32(tail, crc);
+  f.write(reinterpret_cast<const char*>(tail.data()), 4);
 }
 
 }  // namespace

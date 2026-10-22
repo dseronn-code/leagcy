@@ -29,11 +29,14 @@ struct Camera {
 
   glm::mat4 view() const { return glm::lookAt(position, position + forward(), glm::vec3(0, 1, 0)); }
 
-  glm::mat4 projection(float aspect) const {
+  // jitterNdc: deslocamento subpixel em NDC (TAA); soma-se diretamente à posição na tela.
+  glm::mat4 projection(float aspect, glm::vec2 jitterNdc = glm::vec2(0.0f)) const {
     float f = 1.0f / std::tan(fovY * 0.5f);
     glm::mat4 p(0.0f);
     p[0][0] = f / aspect;
     p[1][1] = -f;  // Vulkan: Y do clip space aponta para baixo
+    p[2][0] = -jitterNdc.x;  // multiplicado por z (negativo) e dividido por w = -z
+    p[2][1] = -jitterNdc.y;
     p[2][3] = -1.0f;
     p[3][2] = nearPlane;
     return p;

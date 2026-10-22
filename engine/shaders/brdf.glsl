@@ -23,22 +23,23 @@ float G1_Smith(float NoX, float a) {
   float a2 = a * a;
   return 2.0 * NoX / (NoX + sqrt(a2 + (1.0 - a2) * NoX * NoX));
 }
+float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
-// BRDF * NoL para uma luz direcional.
-vec3 evalBRDF(vec3 N, vec3 V, vec3 L, vec3 diffuseColor, vec3 f0, float roughness) {
-  float NoL = max(dot(N, L), 0.0);
-  if (NoL <= 0.0) return vec3(0.0);
+// Separa a resposta a uma luz em difuso "demodulado" (sem albedo, para o denoiser)
+// e especular. Ambos já incluem NoL.
+void evalBRDFSplit(vec3 N, vec3 V, vec3 L, vec3 f0, float roughness, out vec3 diffuse, out vec3 specular) {
+  float NoL = dot(N, L);
+  diffuse = specular = vec3(0.0);
+  if (NoL <= 0.0) return;
   vec3 H = normalize(V + L);
   float NoV = max(dot(N, V), 1e-4), NoH = max(dot(N, H), 0.0), VoH = max(dot(V, H), 0.0);
   float a = max(roughness * roughness, 0.002);
   vec3 F = F_Schlick(f0, VoH);
-  vec3 spec = D_GGX(NoH, a) * V_SmithGGXCorrelated(NoV, NoL, a) * F;
-  vec3 diff = diffuseColor / PI * (1.0 - F);
-  return (diff + spec) * NoL;
+  specular = D_GGX(NoH, a) * V_SmithGGXCorrelated(NoV, NoL, a) * F * NoL;
+  diffuse = (1.0 - F) / PI * NoL;
 }
 
-// Amostragem da distribuição de normais visíveis (VNDF) por calotas esféricas
-// (Dupuy & Benyoub 2023) — Ve em espaço tangente.
+// Amostragem VNDF por calotas esféricas (Dupuy & Benyoub 2023), Ve em espaço tangente.
 vec3 sampleGGXVNDF(vec3 Ve, float a, vec2 u) {
   vec3 Vh = normalize(vec3(a * Ve.x, a * Ve.y, Ve.z));
   float phi = TWO_PI * u.x;
