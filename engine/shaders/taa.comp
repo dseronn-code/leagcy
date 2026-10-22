@@ -1,0 +1,93 @@
+#version 460
+// TAA com upscaling temporal (TAAU): roda na resolução de SAÍDA. Cada frame a cena é
+// renderizada em resolução menor com jitter subpixel diferente; o histórico reprojetado
+// acumula essas amostras e reconstrói detalhe acima da resolução interna.
+#extension GL_GOOGLE_include_directive : require
+#include "frame.glsl"
+#include "brdf.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0) uniform sampler2D sceneColor;   // resolução interna (sampler linear)
+layout(set = 1, binding = 1) uniform sampler2D gDepth;       // resolução interna
+layout(set = 1, binding = 2) uniform sampler2D gMotion;      // resolução interna
+layout(set = 1, binding = 3) uniform sampler2D history;      // saída do frame anterior (sampler linear)
+layout(set = 1, binding = 4, rgba16f) uniform writeonly image2D outColor;
+
+vec3 rgbToYCoCg(vec3 c) {
+  return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25)));
+}
+vec3 yCoCgToRgb(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
+
+// Catmull-Rom com 5 leituras bilineares (Jimenez): histórico nítido, sem borrar a cada frame.
+vec3 sampleHistory(vec2 uv) {
+  vec2 size = frame.outputSize.xy;
+  vec2 pos = uv * size;
+  vec2 tc = floor(pos - 0.5) + 0.5;
+  vec2 f = pos - tc;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  vec2 w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2;
+  vec2 tc0 = (tc - 1.0) / size, tc3 = (tc + 2.0) / size, tc12 = (tc + w2 / w12) / size;
+  vec3 r = textureLod(history, vec2(tc12.x, tc0.y), 0.0).rgb * (w12.x * w0.y) +
+           textureLod(history, vec2(tc0.x, tc12.y), 0.0).rgb * (w0.x * w12.y) +
+           textureLod(history, vec2(tc12.x, tc12.y), 0.0).rgb * (w12.x * w12.y) +
+           textureLod(history, vec2(tc3.x, tc12.y), 0.0).rgb * (w3.x * w12.y) +
+           textureLod(history, vec2(tc12.x, tc3.y), 0.0).rgb * (w12.x * w3.y);
+  float wsum = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+  return max(r / wsum, vec3(0.0));
+}
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, ivec2(frame.outputSize.xy)))) return;
+  vec2 uv = (vec2(id) + 0.5) * frame.outputSize.zw;
+
+  // Cor atual "sem jitter": o pixel interno em u mostra o ponto que, sem jitter, estaria em u - jitter.
+  vec2 renderUv = uv + frame.jitter.xy;
+  vec3 current = textureLod(sceneColor, renderUv, 0.0).rgb;
+
+  // Vizinhança 3x3 na resolução interna: limites para o histórico + pixel mais próximo (dilatação).
+  ivec2 rp = ivec2(renderUv * frame.renderSize.xy);
+  ivec2 maxP = ivec2(frame.renderSize.xy) - 1;
+  vec3 m1 = vec3(0.0), m2 = vec3(0.0);
+  float closest = -1.0;
+  ivec2 closestP = clamp(rp, ivec2(0), maxP);
+  for (int y = -1; y <= 1; ++y) {
+    for (int x = -1; x <= 1; ++x) {
+      ivec2 q = clamp(rp + ivec2(x, y), ivec2(0), maxP);
+      vec3 c = rgbToYCoCg(texelFetch(sceneColor, q, 0).rgb);
+      m1 += c;
+      m2 += c * c;
+      float d = texelFetch(gDepth, q, 0).r;
+      if (d > closest) { closest = d; closestP = q; }  // reverse-Z: maior = mais perto
+    }
+  }
+  vec3 mean = m1 / 9.0;
+  vec3 sigma = sqrt(max(m2 / 9.0 - mean * mean, 0.0));
+
+  vec2 prevUv = uv - texelFetch(gMotion, closestP, 0).xy;
+  vec3 result = current;
+  if (historyValid() && all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0)))) {
+    // Clipping de variância em YCoCg: descarta histórico que não "cabe" na vizinhança (anti-ghosting).
+    vec3 h = rgbToYCoCg(sampleHistory(prevUv));
+    vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
+    vec3 center = 0.5 * (lo + hi), ext = max(0.5 * (hi - lo), vec3(1e-4));
+    vec3 rel = (h - center) / ext;
+    float maxRel = max(abs(rel.x), max(abs(rel.y), abs(rel.z)));
+    if (maxRel > 1.0) h = center + (h - center) / maxRel;
+    vec3 hist = yCoCgToRgb(h);
+
+    // Upscaling: confia mais na amostra atual quando ela cai perto do centro do pixel de saída.
+    vec2 texelDist = abs(fract(renderUv * frame.renderSize.xy) - 0.5) * frame.outputSize.xy * frame.renderSize.zw;
+    float proximity = exp(-2.0 * dot(texelDist, texelDist));
+    float alpha = mix(0.04, 0.15, proximity);
+    // Pesos por luminância (Karis): evita que pontos muito brilhantes cintilem.
+    float wc = alpha / (1.0 + luminance(current));
+    float wh = (1.0 - alpha) / (1.0 + luminance(hist));
+    result = (current * wc + hist * wh) / (wc + wh);
+  }
+  if (any(isnan(result)) || any(isinf(result))) result = vec3(0.0);
+  imageStore(outColor, id, vec4(result, 1.0));
+}

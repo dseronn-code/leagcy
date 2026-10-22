@@ -6,11 +6,14 @@
 
 namespace scene {
 
+// 48 bytes; espelhado em shaders/scene.glsl (leitura via buffer device address no ray tracing).
 struct Vertex {
   glm::vec3 position;
   glm::vec3 normal;
   glm::vec2 uv;
+  glm::vec4 tangent;  // xyz = tangente, w = sinal da bitangente
 };
+static_assert(sizeof(Vertex) == 48);
 
 struct MeshData {
   std::vector<Vertex> vertices;
@@ -23,5 +26,7 @@ MeshData makeCube();
 MeshData makeTerrain(float size, uint32_t res, const std::function<float(float, float)>& heightFn);
 
 float fbm(float x, float y, int octaves = 6);
+// Tangentes por acúmulo das derivadas de UV de cada triângulo (aproxima MikkTSpace).
+void computeTangents(MeshData& mesh);
 
 }  // namespace scene

@@ -90,13 +90,14 @@ void Context::createDevice(VkSurfaceKHR surface) {
     vkGetPhysicalDeviceProperties(candidate, &p);
     if (p.apiVersion < VK_API_VERSION_1_3) continue;
     if (hasSurface_ && !hasDeviceExtension(candidate, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
+    if (!hasDeviceExtension(candidate, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) continue;
     int score = 1;
     if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 1000;
     else if (p.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) score += 100;
     if (supportsRayQuery(candidate)) score += 500;
     if (score > bestScore) { bestScore = score; gpu = candidate; }
   }
-  if (!gpu) FATAL("Nenhuma GPU com Vulkan 1.3 encontrada.");
+  if (!gpu) FATAL("Nenhuma GPU com Vulkan 1.3 + VK_KHR_push_descriptor encontrada.");
   vkGetPhysicalDeviceProperties(gpu, &properties);
   rayTracing = wantRayTracing_ && supportsRayQuery(gpu);
 
@@ -115,7 +116,7 @@ void Context::createDevice(VkSurfaceKHR surface) {
   }
   if (!found) FATAL("Nenhuma fila gráfica/compute/present adequada.");
 
-  std::vector<const char*> exts;
+  std::vector<const char*> exts = {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME};
   if (hasSurface_) exts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
   if (rayTracing) {
     exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
@@ -143,11 +144,14 @@ void Context::createDevice(VkSurfaceKHR surface) {
   f12.descriptorBindingPartiallyBound = VK_TRUE;
   f12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
   f12.scalarBlockLayout = VK_TRUE;
+  f12.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
   f12.pNext = &f13;
 
   VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
   f2.features.samplerAnisotropy = VK_TRUE;
   f2.features.shaderInt64 = VK_TRUE;
+  f2.features.shaderStorageImageReadWithoutFormat = VK_TRUE;
+  f2.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
   f2.pNext = &f12;
 
   float priority = 1.0f;
@@ -164,6 +168,7 @@ void Context::createDevice(VkSurfaceKHR surface) {
   dci.ppEnabledExtensionNames = exts.data();
   VK_CHECK(vkCreateDevice(gpu, &dci, nullptr, &device));
   vkGetDeviceQueue(device, queueFamily, 0, &queue);
+  vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR");
 
   if (rayTracing) {
 #define LOAD_RT(fn) rt.fn = (PFN_##fn)vkGetDeviceProcAddr(device, #fn)

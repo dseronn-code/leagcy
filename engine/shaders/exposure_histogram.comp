@@ -1,0 +1,30 @@
+#version 460
+// Auto-exposição, passo 1: histograma de log2(luminância) da imagem.
+#extension GL_GOOGLE_include_directive : require
+#include "frame.glsl"
+#include "brdf.glsl"
+#include "exposure.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0) uniform sampler2D colorIn;
+layout(set = 1, binding = 1, std430) buffer Histogram { uint bins[]; };
+
+shared uint localBins[HISTOGRAM_BINS];
+
+void main() {
+  for (uint i = gl_LocalInvocationIndex; i < HISTOGRAM_BINS; i += 64u) localBins[i] = 0u;
+  barrier();
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (all(lessThan(id, ivec2(frame.outputSize.xy)))) {
+    float lum = luminance(texelFetch(colorIn, id, 0).rgb);
+    uint bin = 0u;  // bin 0 = preto (ignorado na média)
+    if (lum > 1e-6) {
+      float t = clamp((log2(lum) - MIN_LOG_LUM) / (MAX_LOG_LUM - MIN_LOG_LUM), 0.0, 1.0);
+      bin = uint(t * float(HISTOGRAM_BINS - 2u)) + 1u;
+    }
+    atomicAdd(localBins[bin], 1u);
+  }
+  barrier();
+  for (uint i = gl_LocalInvocationIndex; i < HISTOGRAM_BINS; i += 64u)
+    if (localBins[i] > 0u) atomicAdd(bins[i], localBins[i]);
+}

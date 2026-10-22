@@ -1,71 +1,98 @@
 #pragma once
 #include <array>
+#include <vector>
 
 #include <glm/glm.hpp>
 
-#include "rhi/resources.h"
+#include "rhi/pass.h"
 #include "scene/camera.h"
 #include "scene/scene.h"
 
 namespace renderer {
 
 struct Settings {
-  float exposure = 0.35f;
+  float renderScale = 0.67f;        // resolução interna / saída (0.67 ~ "Quality" do FSR/DLSS)
+  float exposureCompensation = 0.0f;  // EV somado à auto-exposição
+  float manualExposure = 0.0f;      // > 0 desliga a auto-exposição
   float sunAngularRadius = 0.012f;  // rad (o sol real tem ~0.0047; maior = penumbra mais suave)
   float fogDensity = 0.0015f;       // por metro, ao nível do chão
   float fogFalloff = 0.035f;        // queda exponencial com a altura
+  bool denoiser = true;
+  bool depthOfField = false;
+  float dofFocusDistance = 0.0f;    // 0 = autofoco no centro da tela
+  float dofAperture = 8.0f;         // CoC (px) de um objeto no infinito
+  float dofMaxCoc = 14.0f;
+  bool motionBlur = true;
+  float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
+  float bloomStrength = 0.05f;
 };
 
-// Pipeline de um frame:
-//   1. Sky-view LUT (compute)       — atmosfera física
-//   2. Forward HDR (raster)         — PBR + ray queries (sombras, GI, reflexões)
-//   3. Céu (fullscreen)             — só nos pixels sem geometria (teste de profundidade)
-//   4. Acumulação (compute)         — convergência progressiva com câmera parada
-//   5. Tonemap ACES (fullscreen)    — HDR -> imagem de saída
+// Frame (deferred, todos os alvos em VK_IMAGE_LAYOUT_GENERAL):
+//   Sky LUT → G-buffer → ReSTIR (temporal, espacial) → Iluminação RT (difuso / especular)
+//   → Denoiser SVGF (temporal + à-trous) → Composição (céu, névoa) → TAAU (upscale)
+//   → Auto-exposição → DOF → Motion blur → Bloom → Tonemap ACES
 class Renderer {
  public:
   static constexpr uint32_t kFramesInFlight = 2;
-  static constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-  static constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 
-  void init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D extent, VkFormat outputFormat);
-  void resize(VkExtent2D extent);
+  void init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExtent, VkFormat outputFormat,
+            const Settings& initialSettings = {});
+  void resize(VkExtent2D outputExtent);
   void destroy();
 
   // Grava todos os passes. A imagem de saída termina em COLOR_ATTACHMENT_OPTIMAL.
-  void record(VkCommandBuffer cmd, uint32_t frameSlot, const scene::Camera& camera, VkImage output, VkImageView outputView);
+  void record(VkCommandBuffer cmd, uint32_t frameSlot, const scene::Camera& camera, VkImage output,
+              VkImageView outputView, float dt);
 
-  void resetAccumulation() { accumFrame_ = 0; }
-  uint32_t accumulatedFrames() const { return accumFrame_; }
+  // Descarta todo o histórico temporal (corte de câmera, mudança de cena).
+  void resetHistory() { historyValid_ = false; }
+  VkExtent2D renderExtent() const { return renderExtent_; }
 
   Settings settings;
 
  private:
+  struct Targets {
+    std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
+    rhi::Image albedo, motion, emissive;
+    rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
+    std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
+    rhi::Image tmpA, tmpB, tmpC, sceneColor;
+    std::array<rhi::Image, 2> taa;
+    rhi::Image postA, postB, bloom;
+    std::vector<VkImageView> bloomMips;
+    std::array<rhi::Buffer, 2> reservoirs;  // [0] = após reuso temporal, [1] = final (persistente)
+  };
+
   void createTargets();
   void destroyTargets();
-  void writePostDescriptors();
+  void writeGlobalDescriptors();
 
   rhi::Context* ctx_ = nullptr;
   scene::Scene* scene_ = nullptr;
-  VkExtent2D extent_{};
+  VkExtent2D outputExtent_{}, renderExtent_{};
   VkFormat outputFormat_ = VK_FORMAT_UNDEFINED;
+  Targets t_;
 
-  rhi::Image hdr_, depth_, accum_, skyLut_;
-  VkSampler skySampler_ = VK_NULL_HANDLE;
+  rhi::Image skyLut_;
+  VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::array<rhi::Buffer, kFramesInFlight> frameUbo_;
-  rhi::Buffer instanceBuffer_;
+  rhi::Buffer histogram_, exposureState_;
 
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
-  VkDescriptorSetLayout frameLayout_ = VK_NULL_HANDLE, postLayout_ = VK_NULL_HANDLE;
-  std::array<VkDescriptorSet, kFramesInFlight> frameSets_{};
-  VkDescriptorSet postSet_ = VK_NULL_HANDLE;
+  VkDescriptorSetLayout globalLayout_ = VK_NULL_HANDLE;
+  std::array<VkDescriptorSet, kFramesInFlight> globalSets_{};
 
-  VkPipelineLayout framePipelineLayout_ = VK_NULL_HANDLE, postPipelineLayout_ = VK_NULL_HANDLE;
-  VkPipeline skyLutPipeline_ = VK_NULL_HANDLE, forwardPipeline_ = VK_NULL_HANDLE, skyPipeline_ = VK_NULL_HANDLE;
-  VkPipeline accumulatePipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
+  rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
+  rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_;
+  rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;
+  rhi::PassLayout gbufferLayout_, tonemapLayout_;
+  VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
 
-  uint32_t accumFrame_ = 0;
-  uint32_t frameCounter_ = 0;
+  uint64_t frameIndex_ = 0;
+  bool historyValid_ = false;
+  glm::mat4 prevViewProj_{1.0f};
+  glm::vec3 prevCameraPos_{0.0f};
+  glm::vec2 prevJitter_{0.0f};
 };
 
 }  // namespace renderer

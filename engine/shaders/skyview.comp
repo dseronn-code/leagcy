@@ -3,13 +3,15 @@
 #include "frame.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 0, binding = 2, rgba16f) uniform writeonly image2D skyViewOut;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D skyViewOut;
 
 void main() {
   ivec2 size = imageSize(skyViewOut);
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (any(greaterThanEqual(id, size))) return;
   vec3 dir = lutDirection((vec2(id) + 0.5) / vec2(size));
-  vec3 L = integrateSky(planetPos(frame.cameraPos.xyz), dir, frame.sunDir.xyz, frame.sunDir.w);
+  vec3 L = frame.sunDir.w > 0.0 ? integrateSky(planetPos(frame.cameraPos.xyz), dir, frame.sunDir.xyz, frame.sunDir.w) : vec3(0.0);
+  // Céu noturno: um mínimo de luz azulada (luar/poluição luminosa) para não ser preto absoluto.
+  L += vec3(0.0008, 0.0012, 0.0025) * max(dir.y, 0.0);
   imageStore(skyViewOut, id, vec4(L, 1.0));
 }

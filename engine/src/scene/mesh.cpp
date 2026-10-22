@@ -13,7 +13,7 @@ MeshData makeSphere(uint32_t segments, uint32_t rings) {
     for (uint32_t x = 0; x <= segments; ++x) {
       float u = float(x) / segments, phi = u * glm::two_pi<float>();
       glm::vec3 n(std::sin(theta) * std::cos(phi), std::cos(theta), std::sin(theta) * std::sin(phi));
-      m.vertices.push_back({n, n, {u, v}});
+      m.vertices.push_back({n, n, {u, v}, {}});
     }
   }
   for (uint32_t y = 0; y < rings; ++y) {
@@ -22,6 +22,7 @@ MeshData makeSphere(uint32_t segments, uint32_t rings) {
       m.indices.insert(m.indices.end(), {a, a + 1, b, b, a + 1, b + 1});
     }
   }
+  computeTangents(m);
   return m;
 }
 
@@ -37,10 +38,11 @@ MeshData makeCube() {
   for (uint32_t f = 0; f < 6; ++f) {
     auto [n, u, v] = faces[f];
     for (auto& c : corners)
-      m.vertices.push_back({n + u * c[0] + v * c[1], n, {(c[0] + 1) * 0.5f, (c[1] + 1) * 0.5f}});
+      m.vertices.push_back({n + u * c[0] + v * c[1], n, {(c[0] + 1) * 0.5f, (c[1] + 1) * 0.5f}, {}});
     uint32_t o = f * 4;
     m.indices.insert(m.indices.end(), {o, o + 1, o + 2, o, o + 2, o + 3});
   }
+  computeTangents(m);
   return m;
 }
 
@@ -51,7 +53,7 @@ MeshData makeTerrain(float size, uint32_t res, const std::function<float(float, 
     for (uint32_t i = 0; i <= res; ++i) {
       float x = -half + i * step, z = -half + j * step;
       glm::vec3 n = glm::normalize(glm::vec3(h(x - e, z) - h(x + e, z), 2 * e, h(x, z - e) - h(x, z + e)));
-      m.vertices.push_back({{x, h(x, z), z}, n, {x, z}});  // UV em metros (para texturas repetidas)
+      m.vertices.push_back({{x, h(x, z), z}, n, {x, z}, {}});  // UV em metros (para texturas repetidas)
     }
   }
   for (uint32_t j = 0; j < res; ++j) {
@@ -60,6 +62,7 @@ MeshData makeTerrain(float size, uint32_t res, const std::function<float(float, 
       m.indices.insert(m.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
     }
   }
+  computeTangents(m);
   return m;
 }
 
@@ -84,6 +87,32 @@ float fbm(float x, float y, int octaves) {
     amp *= 0.5f;
   }
   return sum;
+}
+
+void computeTangents(MeshData& m) {
+  std::vector<glm::vec3> tan(m.vertices.size(), glm::vec3(0.0f)), bit(m.vertices.size(), glm::vec3(0.0f));
+  for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+    uint32_t i0 = m.indices[i], i1 = m.indices[i + 1], i2 = m.indices[i + 2];
+    const Vertex &a = m.vertices[i0], &b = m.vertices[i1], &c = m.vertices[i2];
+    glm::vec3 e1 = b.position - a.position, e2 = c.position - a.position;
+    glm::vec2 d1 = b.uv - a.uv, d2 = c.uv - a.uv;
+    float det = d1.x * d2.y - d2.x * d1.y;
+    if (std::abs(det) < 1e-12f) continue;
+    float r = 1.0f / det;
+    glm::vec3 t = (e1 * d2.y - e2 * d1.y) * r;
+    glm::vec3 bt = (e2 * d1.x - e1 * d2.x) * r;
+    for (uint32_t idx : {i0, i1, i2}) { tan[idx] += t; bit[idx] += bt; }
+  }
+  for (size_t i = 0; i < m.vertices.size(); ++i) {
+    glm::vec3 n = m.vertices[i].normal;
+    glm::vec3 t = tan[i] - n * glm::dot(n, tan[i]);  // Gram-Schmidt
+    if (glm::dot(t, t) < 1e-12f) {
+      t = std::abs(n.x) < 0.9f ? glm::cross(n, glm::vec3(1, 0, 0)) : glm::cross(n, glm::vec3(0, 1, 0));
+    }
+    t = glm::normalize(t);
+    float w = glm::dot(glm::cross(n, t), bit[i]) < 0.0f ? -1.0f : 1.0f;
+    m.vertices[i].tangent = glm::vec4(t, w);
+  }
 }
 
 }  // namespace scene

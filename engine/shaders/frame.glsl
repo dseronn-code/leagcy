@@ -1,4 +1,4 @@
-// Dados por frame (set 0) — espelha FrameUniforms em renderer.cpp.
+// Dados globais do frame (set 0, bindings 0-1) — espelha FrameUniforms em renderer.cpp.
 #ifndef FRAME_GLSL
 #define FRAME_GLSL
 
@@ -7,24 +7,42 @@
 
 layout(set = 0, binding = 0) uniform FrameData {
   mat4 view;
-  mat4 proj;
-  mat4 viewProj;
-  mat4 invViewProj;
-  vec4 cameraPos;   // xyz = posição (m), w = tempo (s)
-  vec4 sunDir;      // xyz = direção PARA o sol, w = irradiância solar
-  vec4 params;      // x = raio angular do sol (rad), y = exposição, z = densidade da névoa, w = queda da névoa
-  uvec4 frameInfo;  // x = semente do frame, y = ray tracing ativo
+  mat4 proj;                  // com jitter de subpixel (TAA)
+  mat4 viewProj;              // com jitter
+  mat4 invViewProj;           // com jitter
+  mat4 viewProjNoJitter;
+  mat4 prevViewProjNoJitter;
+  vec4 cameraPos;             // xyz = posição (m), w = near plane
+  vec4 prevCameraPos;
+  vec4 sunDir;                // xyz = direção PARA o sol, w = irradiância
+  vec4 params;                // x = raio angular do sol, y = dt (s), z = densidade da névoa, w = queda da névoa
+  vec4 jitter;                // xy = deslocamento do jitter em UV, zw = do frame anterior
+  vec4 renderSize;            // xy = resolução interna, zw = 1/xy
+  vec4 outputSize;            // xy = resolução de saída, zw = 1/xy
+  uvec4 frameInfo;            // x = índice do frame, y = ray tracing, z = nº de luzes, w = histórico válido
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2D skyViewLut;
 
-// Posição em km relativa ao centro do planeta (câmera sobre o "polo norte").
+bool historyValid() { return frame.frameInfo.w != 0u; }
+
+// Reverse-Z infinito: profundidade = near / distância.
+float linearDepth(float d) { return frame.cameraPos.w / max(d, 1e-7); }
+
+vec3 worldPosFromDepth(vec2 uv, float depth) {
+  vec4 p = frame.invViewProj * vec4(uv * 2.0 - 1.0, depth, 1.0);
+  return p.xyz / p.w;
+}
+vec3 viewDirFromUv(vec2 uv) {
+  return normalize(worldPosFromDepth(uv, 0.5) - frame.cameraPos.xyz);
+}
+
+// Posição em km relativa ao centro do planeta.
 vec3 planetPos(vec3 worldMeters) {
   return vec3(0.0, R_GROUND + max(worldMeters.y * 0.001, 0.0) + 0.002, 0.0);
 }
 
-// Parametrização da sky-view LUT (Hillaire 2020): azimute linear, latitude não linear
-// para concentrar resolução no horizonte.
+// Sky-view LUT (Hillaire 2020): azimute linear, latitude não linear (resolução no horizonte).
 vec2 skyLutUv(vec3 dir) {
   float az = atan(dir.z, dir.x);
   float lat = asin(clamp(dir.y, -1.0, 1.0));
@@ -41,24 +59,30 @@ vec3 lutDirection(vec2 uv) {
 vec3 sampleSky(vec3 dir) { return textureLod(skyViewLut, skyLutUv(dir), 0.0).rgb; }
 
 vec3 sunIrradianceAt(vec3 worldPos) {
+  if (frame.sunDir.w <= 0.0) return vec3(0.0);
   return frame.sunDir.w * transmittanceToSun(planetPos(worldPos), frame.sunDir.xyz);
 }
 
-// Névoa exponencial por altura com in-scattering do sol e do céu (a "neblina dourada").
+vec3 sunDisk(vec3 dir) {
+  float cosR = cos(frame.params.x);
+  float mu = dot(dir, frame.sunDir.xyz);
+  if (mu <= cosR || frame.sunDir.w <= 0.0) return vec3(0.0);
+  float r = sqrt(max(0.0, 1.0 - mu * mu)) / sin(frame.params.x);
+  float limb = 1.0 - 0.6 * (1.0 - sqrt(max(0.0, 1.0 - r * r)));  // escurecimento de borda
+  return sunIrradianceAt(frame.cameraPos.xyz) / (TWO_PI * (1.0 - cosR)) * limb;
+}
+
+// Névoa exponencial por altura com in-scattering do sol e do céu.
 vec3 applyHeightFog(vec3 color, vec3 worldPos) {
   float density = frame.params.z, falloff = frame.params.w;
   vec3 ro = frame.cameraPos.xyz;
   vec3 d = worldPos - ro;
   float dist = length(d);
   vec3 v = d / max(dist, 1e-4);
-  // Integral analítica de density * exp(-falloff * y) ao longo do raio.
   float k = falloff * d.y;
   float lineIntegral = abs(k) > 1e-4 ? (1.0 - exp(-k)) / k : 1.0;
-  float opticalDepth = density * exp(-falloff * ro.y) * lineIntegral * dist;
-  float T = exp(-opticalDepth);
-
-  float mu = dot(v, frame.sunDir.xyz);
-  vec3 sunLight = sunIrradianceAt(ro) * henyeyGreenstein(mu, 0.65);
+  float T = exp(-density * exp(-falloff * ro.y) * lineIntegral * dist);
+  vec3 sunLight = sunIrradianceAt(ro) * henyeyGreenstein(dot(v, frame.sunDir.xyz), 0.65);
   vec3 ambient = sampleSky(normalize(vec3(v.x, 0.15, v.z)));
   return color * T + (sunLight + ambient) * (1.0 - T);
 }

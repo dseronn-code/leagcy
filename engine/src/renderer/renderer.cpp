@@ -1,5 +1,6 @@
 #include "renderer/renderer.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "rhi/pipeline.h"
@@ -9,53 +10,82 @@ namespace renderer {
 namespace {
 
 constexpr VkExtent2D kSkyLutExtent{256, 128};
+constexpr uint32_t kMaxTextures = 4096;
+constexpr uint32_t kMaxBloomMips = 6;
+constexpr uint32_t kHistogramBins = 256;
+constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;
+constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
 
-// Layouts espelhados nos shaders (frame.glsl, forward.glsl, accumulate.comp, tonemap.frag).
+constexpr VkDescriptorType CIS = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+constexpr VkDescriptorType SI = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+constexpr VkDescriptorType SB = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+
+// Espelha FrameData em shaders/frame.glsl (std140).
 struct FrameUniforms {
-  glm::mat4 view, proj, viewProj, invViewProj;
-  glm::vec4 cameraPos, sunDir, params;
+  glm::mat4 view, proj, viewProj, invViewProj, viewProjNoJitter, prevViewProjNoJitter;
+  glm::vec4 cameraPos, prevCameraPos, sunDir, params, jitter, renderSize, outputSize;
   glm::uvec4 frameInfo;
 };
-struct InstanceGpu {
-  uint64_t vertices, indices;
-  glm::vec4 albedoRough, emissiveMetal;
-  glm::uvec4 flags;
-};
-static_assert(sizeof(InstanceGpu) == 64);
-struct ForwardPush {
+static_assert(sizeof(FrameUniforms) == 512);
+
+struct GBufferPush {
   glm::mat4 model;
-  glm::vec4 albedoRough, emissiveMetal;
-  glm::uvec4 flags;
+  uint32_t material;
 };
-struct PostPush {
-  uint32_t accumFrame;
-  float exposure;
+struct AtrousPush {
+  int32_t stepSize;
+  float phiColor, phiNormal, phiPlane;
+};
+struct ExposurePush {
+  float compensation, manualExposure, speedUp, speedDown;
+};
+struct DofPush {
+  float focusDistance, aperture, maxCoc, pad;
+};
+struct MotionBlurPush {
+  float shutter, maxPixels, pad0, pad1;
+};
+struct BloomPush {
+  glm::vec2 texel;
+  uint32_t karisOrPad;
+  float radius;
+};
+struct TonemapPush {
+  float bloomStrength, bloomNorm;
   uint32_t manualSrgb;
-  uint32_t pad;
+  float pad;
 };
 
 bool isSrgb(VkFormat f) {
   return f == VK_FORMAT_B8G8R8A8_SRGB || f == VK_FORMAT_R8G8B8A8_SRGB || f == VK_FORMAT_A8B8G8R8_SRGB_PACK32;
 }
 
-VkPipeline createComputePipeline(rhi::Context& ctx, const char* shader, VkPipelineLayout layout) {
-  VkShaderModule m = rhi::loadShader(ctx, shader);
-  VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-  ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main"};
-  ci.layout = layout;
-  VkPipeline p;
-  VK_CHECK(vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &ci, nullptr, &p));
-  vkDestroyShaderModule(ctx.device, m, nullptr);
-  return p;
+// Sequência de Halton (bases 2 e 3) para o jitter subpixel do TAA.
+float halton(uint32_t i, uint32_t base) {
+  float f = 1.0f, r = 0.0f;
+  while (i > 0) {
+    f /= float(base);
+    r += f * float(i % base);
+    i /= base;
+  }
+  return r;
 }
 
-VkRenderingAttachmentInfo colorAttachment(VkImageView view, VkAttachmentLoadOp load) {
-  VkRenderingAttachmentInfo a{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-  a.imageView = view;
-  a.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-  a.loadOp = load;
-  a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-  return a;
+VkSampler makeSampler(rhi::Context& ctx, VkFilter filter, VkSamplerAddressMode u, VkSamplerAddressMode v,
+                      bool mips = false, float anisotropy = 0.0f) {
+  VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+  si.magFilter = si.minFilter = filter;
+  si.mipmapMode = mips ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+  si.addressModeU = u;
+  si.addressModeV = si.addressModeW = v;
+  si.maxLod = mips ? VK_LOD_CLAMP_NONE : 0.0f;
+  si.anisotropyEnable = anisotropy > 0.0f;
+  si.maxAnisotropy = anisotropy;
+  VkSampler s;
+  VK_CHECK(vkCreateSampler(ctx.device, &si, nullptr, &s));
+  return s;
 }
 
 void setViewport(VkCommandBuffer cmd, VkExtent2D e) {
@@ -65,329 +95,456 @@ void setViewport(VkCommandBuffer cmd, VkExtent2D e) {
   vkCmdSetScissor(cmd, 0, 1, &sc);
 }
 
+VkRenderingAttachmentInfo attachment(VkImageView view, VkImageLayout layout, VkAttachmentLoadOp load) {
+  VkRenderingAttachmentInfo a{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+  a.imageView = view;
+  a.imageLayout = layout;
+  a.loadOp = load;
+  a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+  return a;
+}
+
 }  // namespace
 
-void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D extent, VkFormat outputFormat) {
+void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExtent, VkFormat outputFormat,
+                    const Settings& initialSettings) {
   ctx_ = &ctx;
   scene_ = &scene;
-  extent_ = extent;
+  settings = initialSettings;
+  outputExtent_ = outputExtent;
   outputFormat_ = outputFormat;
   VkDevice dev = ctx.device;
 
   // ---- Recursos persistentes ----
-  skyLut_ = rhi::createImage2D(ctx, kSkyLutExtent, VK_FORMAT_R16G16B16A16_SFLOAT,
-                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-  VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-  si.magFilter = si.minFilter = VK_FILTER_LINEAR;
-  si.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;  // azimute dá a volta
-  si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-  VK_CHECK(vkCreateSampler(dev, &si, nullptr, &skySampler_));
+  nearest_ = makeSampler(ctx, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+  linear_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+  skySampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+  textureSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, true, 8.0f);
+  skyLut_ = rhi::createImage2D(ctx, kSkyLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   for (auto& b : frameUbo_)
     b = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+  std::vector<uint32_t> zeros(kHistogramBins, 0);
+  histogram_ = rhi::createBufferWithData(ctx, zeros.data(), zeros.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  glm::vec4 exposureInit(1.0f, -1.0f, 0.0f, 0.0f);
+  exposureState_ = rhi::createBufferWithData(ctx, &exposureInit, sizeof(exposureInit), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
-  if (ctx.rayTracing) {
-    std::vector<InstanceGpu> inst;
-    for (uint32_t i = 0; i < scene.objects.size(); ++i) {
-      const auto& o = scene.objects[i];
-      const auto& m = scene.meshes[o.mesh];
-      inst.push_back({m.vertices.address, m.indices.address, glm::vec4(o.material.albedo, o.material.roughness),
-                      glm::vec4(o.material.emissive, o.material.metallic), glm::uvec4(i, o.material.type, 0, 0)});
-    }
-    instanceBuffer_ = rhi::createBufferWithData(ctx, inst.data(), inst.size() * sizeof(InstanceGpu),
-                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-  }
-
-  // ---- Descritores ----
-  std::vector<VkDescriptorSetLayoutBinding> frameBindings = {
+  // ---- Descritores globais (set 0) ----
+  std::vector<VkDescriptorSetLayoutBinding> bindings = {
       {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_ALL, nullptr},
-      {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_ALL, nullptr},
-      {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
+      {1, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {2, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {3, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {4, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {5, CIS, kMaxTextures, VK_SHADER_STAGE_ALL, nullptr},
   };
-  if (ctx.rayTracing) {
-    frameBindings.push_back({3, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
-    frameBindings.push_back({4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr});
-  }
+  if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
+  std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
+  flags[5] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;  // texturas bindless: só as existentes são escritas
+  VkDescriptorSetLayoutBindingFlagsCreateInfo fi{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+  fi.bindingCount = uint32_t(flags.size());
+  fi.pBindingFlags = flags.data();
   VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-  li.bindingCount = uint32_t(frameBindings.size());
-  li.pBindings = frameBindings.data();
-  VK_CHECK(vkCreateDescriptorSetLayout(dev, &li, nullptr, &frameLayout_));
-
-  VkDescriptorSetLayoutBinding postBindings[] = {
-      {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr},
-      {1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-  };
-  li.bindingCount = 2;
-  li.pBindings = postBindings;
-  VK_CHECK(vkCreateDescriptorSetLayout(dev, &li, nullptr, &postLayout_));
+  li.pNext = &fi;
+  li.bindingCount = uint32_t(bindings.size());
+  li.pBindings = bindings.data();
+  VK_CHECK(vkCreateDescriptorSetLayout(dev, &li, nullptr, &globalLayout_));
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kFramesInFlight},
-      {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, kFramesInFlight + 2},
+      {CIS, kFramesInFlight * (1 + kMaxTextures)},
+      {SB, kFramesInFlight * 3},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
-      {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-  pi.maxSets = kFramesInFlight + 1;
-  pi.poolSizeCount = ctx.rayTracing ? 5 : 3;
+  pi.maxSets = kFramesInFlight;
+  pi.poolSizeCount = ctx.rayTracing ? 4 : 3;
   pi.pPoolSizes = sizes;
   VK_CHECK(vkCreateDescriptorPool(dev, &pi, nullptr, &pool_));
-
   std::array<VkDescriptorSetLayout, kFramesInFlight> layouts;
-  layouts.fill(frameLayout_);
+  layouts.fill(globalLayout_);
   VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
   ai.descriptorPool = pool_;
   ai.descriptorSetCount = kFramesInFlight;
   ai.pSetLayouts = layouts.data();
-  VK_CHECK(vkAllocateDescriptorSets(dev, &ai, frameSets_.data()));
-  ai.descriptorSetCount = 1;
-  ai.pSetLayouts = &postLayout_;
-  VK_CHECK(vkAllocateDescriptorSets(dev, &ai, &postSet_));
+  VK_CHECK(vkAllocateDescriptorSets(dev, &ai, globalSets_.data()));
+  writeGlobalDescriptors();
 
-  for (uint32_t i = 0; i < kFramesInFlight; ++i) {
-    VkDescriptorBufferInfo ubo{frameUbo_[i].handle, 0, VK_WHOLE_SIZE};
-    VkDescriptorImageInfo lutSampled{skySampler_, skyLut_.view, VK_IMAGE_LAYOUT_GENERAL};
-    VkDescriptorImageInfo lutStorage{VK_NULL_HANDLE, skyLut_.view, VK_IMAGE_LAYOUT_GENERAL};
-    std::vector<VkWriteDescriptorSet> w(3, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
-    w[0].dstSet = frameSets_[i]; w[0].dstBinding = 0; w[0].descriptorCount = 1;
-    w[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; w[0].pBufferInfo = &ubo;
-    w[1].dstSet = frameSets_[i]; w[1].dstBinding = 1; w[1].descriptorCount = 1;
-    w[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; w[1].pImageInfo = &lutSampled;
-    w[2].dstSet = frameSets_[i]; w[2].dstBinding = 2; w[2].descriptorCount = 1;
-    w[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w[2].pImageInfo = &lutStorage;
+  // ---- Passes ----
+  VkDescriptorSetLayout g = globalLayout_;
+  const bool rt = ctx.rayTracing;
+  skyLutPass_.init(ctx, "skyview.comp", g, {SI});
+  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SB, SB});
+  restirSpatialPass_.init(ctx, "restir_spatial.comp", g, {CIS, CIS, CIS, SB, SB});
+  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, SB, SI, SI});
+  svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
+  svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
+  compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SI});
+  taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI});
+  histogramPass_.init(ctx, "exposure_histogram.comp", g, {CIS, SB});
+  exposurePass_.init(ctx, "exposure_average.comp", g, {SB, SB}, sizeof(ExposurePush));
+  dofPass_.init(ctx, "dof.comp", g, {CIS, CIS, SI}, sizeof(DofPush));
+  motionBlurPass_.init(ctx, "motion_blur.comp", g, {CIS, CIS, SI}, sizeof(MotionBlurPush));
+  bloomDownPass_.init(ctx, "bloom_down.comp", g, {CIS, SI}, sizeof(BloomPush));
+  bloomUpPass_.init(ctx, "bloom_up.comp", g, {CIS, SI}, sizeof(BloomPush));
 
-    VkWriteDescriptorSetAccelerationStructureKHR asWrite{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
-    VkDescriptorBufferInfo instInfo{instanceBuffer_.handle, 0, VK_WHOLE_SIZE};
-    if (ctx.rayTracing) {
-      asWrite.accelerationStructureCount = 1;
-      asWrite.pAccelerationStructures = &scene.tlas.handle;
-      VkWriteDescriptorSet a{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-      a.pNext = &asWrite; a.dstSet = frameSets_[i]; a.dstBinding = 3; a.descriptorCount = 1;
-      a.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-      VkWriteDescriptorSet b{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-      b.dstSet = frameSets_[i]; b.dstBinding = 4; b.descriptorCount = 1;
-      b.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; b.pBufferInfo = &instInfo;
-      w.push_back(a);
-      w.push_back(b);
-    }
-    vkUpdateDescriptorSets(dev, uint32_t(w.size()), w.data(), 0, nullptr);
-  }
-
-  // ---- Pipelines ----
-  VkPushConstantRange fwdPush{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(ForwardPush)};
-  VkPipelineLayoutCreateInfo pli{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-  pli.setLayoutCount = 1;
-  pli.pSetLayouts = &frameLayout_;
-  pli.pushConstantRangeCount = 1;
-  pli.pPushConstantRanges = &fwdPush;
-  VK_CHECK(vkCreatePipelineLayout(dev, &pli, nullptr, &framePipelineLayout_));
-
-  VkPushConstantRange postPush{VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PostPush)};
-  pli.pSetLayouts = &postLayout_;
-  pli.pPushConstantRanges = &postPush;
-  VK_CHECK(vkCreatePipelineLayout(dev, &pli, nullptr, &postPipelineLayout_));
-
-  skyLutPipeline_ = createComputePipeline(ctx, "skyview.comp", framePipelineLayout_);
-  accumulatePipeline_ = createComputePipeline(ctx, "accumulate.comp", postPipelineLayout_);
-
-  rhi::GraphicsPipelineDesc fwd;
-  fwd.vertexShader = "forward.vert";
-  fwd.fragmentShader = ctx.rayTracing ? "forward_rt.frag" : "forward.frag";
-  fwd.layout = framePipelineLayout_;
-  fwd.vertexBindings = {{0, sizeof(scene::Vertex), VK_VERTEX_INPUT_RATE_VERTEX}};
-  fwd.vertexAttributes = {
+  gbufferLayout_.init(ctx, g, {}, sizeof(GBufferPush));
+  rhi::GraphicsPipelineDesc gb;
+  gb.vertexShader = "gbuffer.vert";
+  gb.fragmentShader = "gbuffer.frag";
+  gb.layout = gbufferLayout_.pipelineLayout;
+  gb.vertexBindings = {{0, sizeof(scene::Vertex), VK_VERTEX_INPUT_RATE_VERTEX}};
+  gb.vertexAttributes = {
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(scene::Vertex, position)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(scene::Vertex, normal)},
       {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(scene::Vertex, uv)},
+      {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(scene::Vertex, tangent)},
   };
-  fwd.colorFormats = {kHdrFormat};
-  fwd.depthFormat = kDepthFormat;
-  fwd.depthTest = fwd.depthWrite = true;
-  fwd.cullMode = VK_CULL_MODE_BACK_BIT;
-  forwardPipeline_ = rhi::createGraphicsPipeline(ctx, fwd);
+  gb.colorFormats = {kAlbedoFormat, kHdrFormat, kMotionFormat, kHdrFormat};
+  gb.depthFormat = kDepthFormat;
+  gb.depthTest = gb.depthWrite = true;
+  gb.cullMode = VK_CULL_MODE_NONE;  // materiais de dois lados (folhagem, tecidos)
+  gbufferPipeline_ = rhi::createGraphicsPipeline(ctx, gb);
 
-  rhi::GraphicsPipelineDesc sky;
-  sky.vertexShader = "fullscreen.vert";
-  sky.fragmentShader = "sky.frag";
-  sky.layout = framePipelineLayout_;
-  sky.colorFormats = {kHdrFormat};
-  sky.depthFormat = kDepthFormat;
-  sky.depthTest = true;  // só onde a profundidade ainda é 0 (nada desenhado)
-  skyPipeline_ = rhi::createGraphicsPipeline(ctx, sky);
-
+  tonemapLayout_.init(ctx, g, {CIS, CIS, SB}, sizeof(TonemapPush));
   rhi::GraphicsPipelineDesc tm;
   tm.vertexShader = "fullscreen.vert";
   tm.fragmentShader = "tonemap.frag";
-  tm.layout = postPipelineLayout_;
+  tm.layout = tonemapLayout_.pipelineLayout;
   tm.colorFormats = {outputFormat};
   tonemapPipeline_ = rhi::createGraphicsPipeline(ctx, tm);
 
   ctx.immediateSubmit([&](VkCommandBuffer cmd) {
     rhi::imageBarrier(cmd, skyLut_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                      VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+                      VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                      VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
   });
   createTargets();
+}
+
+void Renderer::writeGlobalDescriptors() {
+  scene::Scene& s = *scene_;
+  std::vector<VkDescriptorImageInfo> texInfos;
+  for (auto& t : s.textures) texInfos.push_back({textureSampler_, t.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+  if (texInfos.size() > kMaxTextures) FATAL("Cena com mais de %u texturas", kMaxTextures);
+
+  for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+    VkDescriptorBufferInfo ubo{frameUbo_[i].handle, 0, VK_WHOLE_SIZE};
+    VkDescriptorImageInfo lut{skySampler_, skyLut_.view, VK_IMAGE_LAYOUT_GENERAL};
+    VkDescriptorBufferInfo bufs[3] = {{s.materialBuffer.handle, 0, VK_WHOLE_SIZE},
+                                      {s.instanceBuffer.handle, 0, VK_WHOLE_SIZE},
+                                      {s.lightBuffer.handle, 0, VK_WHOLE_SIZE}};
+    std::vector<VkWriteDescriptorSet> w;
+    auto add = [&](uint32_t binding, VkDescriptorType type, uint32_t count) -> VkWriteDescriptorSet& {
+      VkWriteDescriptorSet x{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+      x.dstSet = globalSets_[i];
+      x.dstBinding = binding;
+      x.descriptorCount = count;
+      x.descriptorType = type;
+      w.push_back(x);
+      return w.back();
+    };
+    add(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1).pBufferInfo = &ubo;
+    add(1, CIS, 1).pImageInfo = &lut;
+    for (uint32_t b = 0; b < 3; ++b) add(2 + b, SB, 1).pBufferInfo = &bufs[b];
+    if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
+    VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+    if (ctx_->rayTracing) {
+      asw.accelerationStructureCount = 1;
+      asw.pAccelerationStructures = &s.tlas.handle;
+      add(6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1).pNext = &asw;
+    }
+    vkUpdateDescriptorSets(ctx_->device, uint32_t(w.size()), w.data(), 0, nullptr);
+  }
 }
 
 void Renderer::createTargets() {
   rhi::Context& ctx = *ctx_;
-  hdr_ = rhi::createImage2D(ctx, extent_, kHdrFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
-  depth_ = rhi::createImage2D(ctx, extent_, kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
-  accum_ = rhi::createImage2D(ctx, extent_, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_USAGE_STORAGE_BIT);
-  ctx.immediateSubmit([&](VkCommandBuffer cmd) {
-    rhi::imageBarrier(cmd, accum_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                      VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  });
-  writePostDescriptors();
-  accumFrame_ = 0;
-}
+  renderExtent_ = {std::max(1u, uint32_t(float(outputExtent_.width) * settings.renderScale + 0.5f)),
+                   std::max(1u, uint32_t(float(outputExtent_.height) * settings.renderScale + 0.5f))};
+  const VkImageUsageFlags attach = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  VkExtent2D R = renderExtent_, O = outputExtent_;
 
-void Renderer::writePostDescriptors() {
-  VkDescriptorImageInfo hdrInfo{VK_NULL_HANDLE, hdr_.view, VK_IMAGE_LAYOUT_GENERAL};
-  VkDescriptorImageInfo accumInfo{VK_NULL_HANDLE, accum_.view, VK_IMAGE_LAYOUT_GENERAL};
-  VkWriteDescriptorSet w[2] = {{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}, {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
-  w[0].dstSet = postSet_; w[0].dstBinding = 0; w[0].descriptorCount = 1;
-  w[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w[0].pImageInfo = &hdrInfo;
-  w[1].dstSet = postSet_; w[1].dstBinding = 1; w[1].descriptorCount = 1;
-  w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w[1].pImageInfo = &accumInfo;
-  vkUpdateDescriptorSets(ctx_->device, 2, w, 0, nullptr);
+  for (int i = 0; i < 2; ++i) {
+    t_.depth[i] = rhi::createImage2D(ctx, R, kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    t_.normal[i] = rhi::createImage2D(ctx, R, kHdrFormat, attach);
+    t_.diffuseHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+    t_.specularHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+    t_.moments[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+    t_.historyLength[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+    t_.taa[i] = rhi::createImage2D(ctx, O, kHdrFormat, storage);
+    t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                         rhi::MemoryUsage::GpuOnly);
+  }
+  t_.albedo = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
+  t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach);
+  t_.emissive = rhi::createImage2D(ctx, R, kHdrFormat, attach);
+  for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
+                          &t_.tmpB, &t_.tmpC, &t_.sceneColor})
+    *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+  t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
+  t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
+  VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
+  t_.bloom = rhi::createImage2D(ctx, bloomExtent, kHdrFormat, storage, std::min(kMaxBloomMips, rhi::mipCount(bloomExtent)));
+  for (uint32_t m = 0; m < t_.bloom.mipLevels; ++m) t_.bloomMips.push_back(rhi::createMipView(ctx, t_.bloom, m));
+
+  // Tudo vive em GENERAL: o mesmo alvo é attachment, textura e storage em passes diferentes.
+  ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+    auto toGeneral = [&](rhi::Image& img, VkImageAspectFlags aspect) {
+      rhi::imageBarrier(cmd, img.handle, aspect, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE,
+                        0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+    };
+    for (int i = 0; i < 2; ++i) {
+      toGeneral(t_.depth[i], VK_IMAGE_ASPECT_DEPTH_BIT);
+      for (rhi::Image* img : {&t_.normal[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
+                              &t_.historyLength[i], &t_.taa[i]})
+        toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
+    }
+    for (rhi::Image* img : {&t_.albedo, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
+                            &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA, &t_.postB,
+                            &t_.bloom})
+      toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
+  });
+  historyValid_ = false;
 }
 
 void Renderer::destroyTargets() {
-  rhi::destroyImage(*ctx_, hdr_);
-  rhi::destroyImage(*ctx_, depth_);
-  rhi::destroyImage(*ctx_, accum_);
+  rhi::Context& ctx = *ctx_;
+  for (int i = 0; i < 2; ++i) {
+    for (rhi::Image* img : {&t_.depth[i], &t_.normal[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
+                            &t_.historyLength[i], &t_.taa[i]})
+      rhi::destroyImage(ctx, *img);
+    rhi::destroyBuffer(ctx, t_.reservoirs[i]);
+  }
+  for (rhi::Image* img : {&t_.albedo, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
+                          &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA, &t_.postB,
+                          &t_.bloom})
+    rhi::destroyImage(ctx, *img);
+  for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
+  t_.bloomMips.clear();
 }
 
-void Renderer::resize(VkExtent2D extent) {
+void Renderer::resize(VkExtent2D outputExtent) {
   vkDeviceWaitIdle(ctx_->device);
-  extent_ = extent;
+  outputExtent_ = outputExtent;
   destroyTargets();
   createTargets();
 }
 
-void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& cam, VkImage output, VkImageView outputView) {
-  // ---- Uniforms do frame ----
-  float aspect = float(extent_.width) / float(extent_.height);
+void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& cam, VkImage output, VkImageView outputView,
+                      float dt) {
+  using rhi::Binding;
+  const uint32_t cur = uint32_t(frameIndex_ & 1), prev = cur ^ 1u;
+  const VkExtent2D R = renderExtent_, O = outputExtent_;
+  const VkDescriptorSet gs = globalSets_[slot];
+  auto tex = [&](const rhi::Image& img) { return Binding::sampled(img.view, nearest_); };
+  auto texLinear = [&](const rhi::Image& img) { return Binding::sampled(img.view, linear_); };
+  auto storage = [&](const rhi::Image& img) { return Binding::storageImage(img.view); };
+  auto barrier = [&]() { rhi::memoryBarrier(cmd); };
+
+  // ---- Uniforms: jitter Halton (16 posições) em pixels internos ----
+  uint32_t hi = uint32_t(frameIndex_ % 16) + 1;
+  glm::vec2 jitterPx(halton(hi, 2) - 0.5f, halton(hi, 3) - 0.5f);
+  glm::vec2 jitterUv = jitterPx / glm::vec2(R.width, R.height);
+  float aspect = float(O.width) / float(O.height);
   FrameUniforms u{};
   u.view = cam.view();
-  u.proj = cam.projection(aspect);
+  u.proj = cam.projection(aspect, jitterUv * 2.0f);
   u.viewProj = u.proj * u.view;
   u.invViewProj = glm::inverse(u.viewProj);
-  u.cameraPos = glm::vec4(cam.position, 0.0f);
+  u.viewProjNoJitter = cam.projection(aspect) * u.view;
+  u.prevViewProjNoJitter = historyValid_ ? prevViewProj_ : u.viewProjNoJitter;
+  u.cameraPos = glm::vec4(cam.position, cam.nearPlane);
+  u.prevCameraPos = glm::vec4(historyValid_ ? prevCameraPos_ : cam.position, 0.0f);
   u.sunDir = glm::vec4(glm::normalize(scene_->sunDirection), scene_->sunIntensity);
-  u.params = glm::vec4(settings.sunAngularRadius, settings.exposure, settings.fogDensity, settings.fogFalloff);
-  u.frameInfo = glm::uvec4(frameCounter_++, ctx_->rayTracing ? 1u : 0u, 0u, 0u);
+  u.params = glm::vec4(settings.sunAngularRadius, dt, settings.fogDensity, settings.fogFalloff);
+  u.jitter = glm::vec4(jitterUv, prevJitter_);
+  u.renderSize = glm::vec4(R.width, R.height, 1.0f / R.width, 1.0f / R.height);
+  u.outputSize = glm::vec4(O.width, O.height, 1.0f / O.width, 1.0f / O.height);
+  u.frameInfo = glm::uvec4(uint32_t(frameIndex_), ctx_->rayTracing ? 1u : 0u, uint32_t(scene_->lights.size()),
+                           historyValid_ ? 1u : 0u);
   std::memcpy(frameUbo_[slot].mapped, &u, sizeof(u));
   vmaFlushAllocation(ctx_->allocator, frameUbo_[slot].allocation, 0, VK_WHOLE_SIZE);
 
-  // ---- 1. Sky-view LUT ----
-  rhi::imageBarrier(cmd, skyLut_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, skyLutPipeline_);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, framePipelineLayout_, 0, 1, &frameSets_[slot], 0, nullptr);
-  vkCmdDispatch(cmd, (kSkyLutExtent.width + 7) / 8, (kSkyLutExtent.height + 7) / 8, 1);
-  rhi::imageBarrier(cmd, skyLut_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+  barrier();  // ordena contra o frame anterior (mesmos alvos)
 
-  // ---- 2+3. Forward HDR + céu ----
-  rhi::imageBarrier(cmd, hdr_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
-                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-  rhi::imageBarrier(cmd, depth_.handle, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                    VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+  // ---- 1. Atmosfera ----
+  skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view)}, kSkyLutExtent);
+  barrier();
 
-  VkRenderingAttachmentInfo color = colorAttachment(hdr_.view, VK_ATTACHMENT_LOAD_OP_CLEAR);
-  VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-  depth.imageView = depth_.view;
-  depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-  depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-  depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  depth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = infinito
+  // ---- 2. G-buffer ----
+  {
+    VkRenderingAttachmentInfo colors[4] = {
+        attachment(t_.albedo.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
+        attachment(t_.normal[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
+        attachment(t_.motion.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
+        attachment(t_.emissive.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
+    };
+    VkRenderingAttachmentInfo depth = attachment(t_.depth[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR);
+    depth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = infinito
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, R};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 4;
+    ri.pColorAttachments = colors;
+    ri.pDepthAttachment = &depth;
+    vkCmdBeginRendering(cmd, &ri);
+    setViewport(cmd, R);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferPipeline_);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
+    for (const auto& o : scene_->objects) {
+      const auto& m = scene_->meshes[o.mesh];
+      GBufferPush p{o.transform, o.material};
+      vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
+      VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &m.vertices.handle, &offset);
+      vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
+      vkCmdDrawIndexed(cmd, m.indexCount, 1, 0, 0, 0);
+    }
+    vkCmdEndRendering(cmd);
+  }
+  barrier();
+
+  const Binding gDepth = tex(t_.depth[cur]), gNormal = tex(t_.normal[cur]), gAlbedo = tex(t_.albedo);
+  const Binding gDepthPrev = tex(t_.depth[prev]), gNormalPrev = tex(t_.normal[prev]), gMotion = tex(t_.motion);
+
+  // ---- 3. ReSTIR DI ----
+  restirTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, gDepthPrev, gNormalPrev, gMotion,
+                                         Binding::storageBuffer(t_.reservoirs[1]), Binding::storageBuffer(t_.reservoirs[0])}, R);
+  barrier();
+  restirSpatialPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, Binding::storageBuffer(t_.reservoirs[0]),
+                                        Binding::storageBuffer(t_.reservoirs[1])}, R);
+  barrier();
+
+  // ---- 4. Iluminação (ray tracing) ----
+  lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, Binding::storageBuffer(t_.reservoirs[1]),
+                                   storage(t_.diffuseRaw), storage(t_.specularRaw)}, R);
+  barrier();
+
+  // ---- 5. Denoiser ----
+  const rhi::Image* diffuseFinal = &t_.diffuseRaw;
+  const rhi::Image* specularFinal = &t_.specularRaw;
+  if (settings.denoiser) {
+    svgfTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, gDepthPrev, gNormalPrev, gMotion, tex(t_.diffuseRaw),
+                                         tex(t_.specularRaw), tex(t_.diffuseHistory[prev]), tex(t_.specularHistory[prev]),
+                                         tex(t_.moments[prev]), tex(t_.historyLength[prev]), storage(t_.diffuseIntegrated),
+                                         storage(t_.specularIntegrated), storage(t_.moments[cur]),
+                                         storage(t_.historyLength[cur])}, R);
+    barrier();
+    // A 1ª iteração do à-trous vira o histórico do próximo frame (como no SVGF original).
+    auto atrous = [&](const rhi::Image& in, const rhi::Image& out, int step, float phiColor) {
+      AtrousPush p{step, phiColor, 64.0f, 0.02f};
+      svgfAtrousPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, tex(in), storage(out)}, R, &p);
+      barrier();
+    };
+    atrous(t_.diffuseIntegrated, t_.diffuseHistory[cur], 1, 4.0f);
+    atrous(t_.diffuseHistory[cur], t_.tmpA, 2, 4.0f);
+    atrous(t_.tmpA, t_.tmpB, 4, 4.0f);
+    atrous(t_.tmpB, t_.tmpA, 8, 4.0f);
+    atrous(t_.specularIntegrated, t_.specularHistory[cur], 1, 2.0f);
+    atrous(t_.specularHistory[cur], t_.tmpC, 2, 2.0f);
+    diffuseFinal = &t_.tmpA;
+    specularFinal = &t_.tmpC;
+  }
+
+  // ---- 6. Composição ----
+  compositePass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, tex(t_.emissive), tex(*diffuseFinal), tex(*specularFinal),
+                                    storage(t_.sceneColor)}, R);
+  barrier();
+
+  // ---- 7. TAA + upscaling ----
+  taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur])}, O);
+  barrier();
+  const rhi::Image* color = &t_.taa[cur];
+
+  // ---- 8. Auto-exposição ----
+  histogramPass_.dispatch(cmd, gs, {tex(*color), Binding::storageBuffer(histogram_)}, O);
+  barrier();
+  ExposurePush ep{settings.exposureCompensation, settings.manualExposure, 3.0f, 1.5f};
+  exposurePass_.dispatch(cmd, gs, {Binding::storageBuffer(histogram_), Binding::storageBuffer(exposureState_)}, {1, 1}, &ep);
+  barrier();
+
+  // ---- 9. Profundidade de campo / motion blur ----
+  if (settings.depthOfField) {
+    DofPush p{settings.dofFocusDistance, settings.dofAperture * float(O.height) / 1080.0f,
+              settings.dofMaxCoc * float(O.height) / 1080.0f, 0};
+    dofPass_.dispatch(cmd, gs, {texLinear(*color), gDepth, storage(t_.postA)}, O, &p);
+    barrier();
+    color = &t_.postA;
+  }
+  if (settings.motionBlur) {
+    MotionBlurPush p{settings.shutter, 32.0f * float(O.height) / 1080.0f, 0, 0};
+    motionBlurPass_.dispatch(cmd, gs, {texLinear(*color), gMotion, storage(t_.postB)}, O, &p);
+    barrier();
+    color = &t_.postB;
+  }
+
+  // ---- 10. Bloom ----
+  uint32_t mips = t_.bloom.mipLevels;
+  auto mipExtent = [&](uint32_t m) {
+    return VkExtent2D{std::max(1u, t_.bloom.extent.width >> m), std::max(1u, t_.bloom.extent.height >> m)};
+  };
+  for (uint32_t m = 0; m < mips; ++m) {
+    VkExtent2D src = m == 0 ? O : mipExtent(m - 1);
+    BloomPush p{glm::vec2(1.0f / src.width, 1.0f / src.height), m == 0 ? 1u : 0u, 0.0f};
+    Binding in = m == 0 ? texLinear(*color) : Binding::sampled(t_.bloomMips[m - 1], linear_);
+    bloomDownPass_.dispatch(cmd, gs, {in, Binding::storageImage(t_.bloomMips[m])}, mipExtent(m), &p);
+    barrier();
+  }
+  for (uint32_t m = mips - 1; m-- > 0;) {
+    VkExtent2D lower = mipExtent(m + 1);
+    BloomPush p{glm::vec2(1.0f / lower.width, 1.0f / lower.height), 0u, 1.0f};
+    bloomUpPass_.dispatch(cmd, gs, {Binding::sampled(t_.bloomMips[m + 1], linear_), Binding::storageImage(t_.bloomMips[m])},
+                          mipExtent(m), &p);
+    barrier();
+  }
+
+  // ---- 11. Tonemap -> saída ----
+  rhi::imageBarrier(cmd, output, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+  VkRenderingAttachmentInfo out = attachment(outputView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ATTACHMENT_LOAD_OP_DONT_CARE);
   VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
-  ri.renderArea = {{0, 0}, extent_};
+  ri.renderArea = {{0, 0}, O};
   ri.layerCount = 1;
   ri.colorAttachmentCount = 1;
-  ri.pColorAttachments = &color;
-  ri.pDepthAttachment = &depth;
-  vkCmdBeginRendering(cmd, &ri);
-  setViewport(cmd, extent_);
-
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardPipeline_);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, framePipelineLayout_, 0, 1, &frameSets_[slot], 0, nullptr);
-  for (uint32_t i = 0; i < scene_->objects.size(); ++i) {
-    const auto& o = scene_->objects[i];
-    const auto& m = scene_->meshes[o.mesh];
-    ForwardPush p{o.transform, glm::vec4(o.material.albedo, o.material.roughness),
-                  glm::vec4(o.material.emissive, o.material.metallic), glm::uvec4(i, o.material.type, 0, 0)};
-    vkCmdPushConstants(cmd, framePipelineLayout_, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(p), &p);
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &m.vertices.handle, &offset);
-    vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(cmd, m.indexCount, 1, 0, 0, 0);
-  }
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, skyPipeline_);
-  vkCmdDraw(cmd, 3, 1, 0, 0);
-  vkCmdEndRendering(cmd);
-
-  // ---- 4. Acumulação ----
-  rhi::imageBarrier(cmd, hdr_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                    VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-  rhi::imageBarrier(cmd, accum_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
-  PostPush pp{accumFrame_, settings.exposure, isSrgb(outputFormat_) ? 0u : 1u, 0};
-  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, accumulatePipeline_);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, postPipelineLayout_, 0, 1, &postSet_, 0, nullptr);
-  vkCmdPushConstants(cmd, postPipelineLayout_, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pp), &pp);
-  vkCmdDispatch(cmd, (extent_.width + 7) / 8, (extent_.height + 7) / 8, 1);
-  rhi::imageBarrier(cmd, accum_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
-                    VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-  accumFrame_++;
-
-  // ---- 5. Tonemap -> saída ----
-  rhi::imageBarrier(cmd, output, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                    VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-  VkRenderingAttachmentInfo out = colorAttachment(outputView, VK_ATTACHMENT_LOAD_OP_DONT_CARE);
   ri.pColorAttachments = &out;
-  ri.pDepthAttachment = nullptr;
   vkCmdBeginRendering(cmd, &ri);
-  setViewport(cmd, extent_);
+  setViewport(cmd, O);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemapPipeline_);
-  vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, postPipelineLayout_, 0, 1, &postSet_, 0, nullptr);
+  TonemapPush tp{settings.bloomStrength, 1.0f / float(mips), isSrgb(outputFormat_) ? 0u : 1u, 0};
+  tonemapLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs,
+                      {tex(*color), Binding::sampled(t_.bloomMips[0], linear_), Binding::storageBuffer(exposureState_)}, &tp);
   vkCmdDraw(cmd, 3, 1, 0, 0);
   vkCmdEndRendering(cmd);
+
+  prevViewProj_ = u.viewProjNoJitter;
+  prevCameraPos_ = cam.position;
+  prevJitter_ = jitterUv;
+  historyValid_ = true;
+  ++frameIndex_;
 }
 
 void Renderer::destroy() {
   if (!ctx_) return;
-  VkDevice dev = ctx_->device;
-  vkDeviceWaitIdle(dev);
+  rhi::Context& ctx = *ctx_;
+  vkDeviceWaitIdle(ctx.device);
   destroyTargets();
-  rhi::destroyImage(*ctx_, skyLut_);
-  vkDestroySampler(dev, skySampler_, nullptr);
-  for (auto& b : frameUbo_) rhi::destroyBuffer(*ctx_, b);
-  rhi::destroyBuffer(*ctx_, instanceBuffer_);
-  for (VkPipeline p : {skyLutPipeline_, forwardPipeline_, skyPipeline_, accumulatePipeline_, tonemapPipeline_})
-    vkDestroyPipeline(dev, p, nullptr);
-  vkDestroyPipelineLayout(dev, framePipelineLayout_, nullptr);
-  vkDestroyPipelineLayout(dev, postPipelineLayout_, nullptr);
-  vkDestroyDescriptorPool(dev, pool_, nullptr);
-  vkDestroyDescriptorSetLayout(dev, frameLayout_, nullptr);
-  vkDestroyDescriptorSetLayout(dev, postLayout_, nullptr);
+  rhi::destroyImage(ctx, skyLut_);
+  for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
+  for (auto& b : frameUbo_) rhi::destroyBuffer(ctx, b);
+  rhi::destroyBuffer(ctx, histogram_);
+  rhi::destroyBuffer(ctx, exposureState_);
+  for (rhi::ComputePass* p : {&skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+                              &svgfAtrousPass_, &compositePass_, &taaPass_, &histogramPass_, &exposurePass_, &dofPass_,
+                              &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
+    p->destroy(ctx);
+  vkDestroyPipeline(ctx.device, gbufferPipeline_, nullptr);
+  vkDestroyPipeline(ctx.device, tonemapPipeline_, nullptr);
+  gbufferLayout_.destroy(ctx);
+  tonemapLayout_.destroy(ctx);
+  vkDestroyDescriptorPool(ctx.device, pool_, nullptr);
+  vkDestroyDescriptorSetLayout(ctx.device, globalLayout_, nullptr);
   ctx_ = nullptr;
 }
 

@@ -1,0 +1,59 @@
+#version 460
+// Denoiser, passo 2: filtro à-trous (wavelet) guiado por variância. Repetido com passos
+// 1, 2, 4, 8... — cobre raios grandes com poucas amostras, sem borrar bordas de
+// geometria (profundidade/normal) nem detalhes de iluminação (luminância vs. variância).
+#extension GL_GOOGLE_include_directive : require
+#include "gbuffer.glsl"
+#include "brdf.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 3) uniform sampler2D signalIn;  // rgb + variância
+layout(set = 1, binding = 4, rgba16f) uniform writeonly image2D signalOut;
+layout(push_constant) uniform Push { int stepSize; float phiColor; float phiNormal; float phiPlane; } pc;
+
+const float KERNEL[3] = float[](3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0);
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (!insideRender(id)) return;
+  vec4 c = texelFetch(signalIn, id, 0);
+  float depth = texelFetch(gDepth, id, 0).r;
+  if (depth <= 0.0) { imageStore(signalOut, id, c); return; }
+
+  vec3 N = texelFetch(gNormal, id, 0).xyz;
+  vec3 P = worldPosFromDepth((vec2(id) + 0.5) * frame.renderSize.zw, depth);
+  float z = linearDepth(depth);
+
+  // Variância suavizada 3x3: estimativa mais estável para a parada por luminância.
+  float var = 0.0;
+  for (int y = -1; y <= 1; ++y)
+    for (int x = -1; x <= 1; ++x) {
+      ivec2 q = clamp(id + ivec2(x, y), ivec2(0), ivec2(frame.renderSize.xy) - 1);
+      var += texelFetch(signalIn, q, 0).a * (x == 0 && y == 0 ? 0.25 : (x == 0 || y == 0 ? 0.125 : 0.0625));
+    }
+  float lc = luminance(c.rgb);
+  float lumDenom = pc.phiColor * sqrt(max(var, 0.0)) + 1e-4;
+
+  vec3 sum = c.rgb;
+  float sumVar = c.a, sumW = 1.0;
+  for (int y = -2; y <= 2; ++y) {
+    for (int x = -2; x <= 2; ++x) {
+      if (x == 0 && y == 0) continue;
+      ivec2 q = id + ivec2(x, y) * pc.stepSize;
+      if (!insideRender(q)) continue;
+      float dq = texelFetch(gDepth, q, 0).r;
+      if (dq <= 0.0) continue;
+      vec4 s = texelFetch(signalIn, q, 0);
+      vec3 Nq = texelFetch(gNormal, q, 0).xyz;
+      vec3 Pq = worldPosFromDepth((vec2(q) + 0.5) * frame.renderSize.zw, dq);
+      float wPlane = exp(-abs(dot(N, Pq - P)) / (pc.phiPlane * z + 1e-3));  // mesma superfície?
+      float wNormal = pow(max(dot(N, Nq), 0.0), pc.phiNormal);
+      float wLum = exp(-abs(lc - luminance(s.rgb)) / lumDenom);
+      float w = KERNEL[abs(x)] * KERNEL[abs(y)] * wPlane * wNormal * wLum;
+      sum += s.rgb * w;
+      sumVar += s.a * w * w;
+      sumW += w;
+    }
+  }
+  imageStore(signalOut, id, vec4(sum / sumW, sumVar / (sumW * sumW)));
+}

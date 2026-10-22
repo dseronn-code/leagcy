@@ -1,0 +1,90 @@
+#version 460
+// Denoiser, passo 1 (SVGF — Schied et al. 2017): acumulação temporal com reprojeção.
+// Cada pixel reaproveita o histórico filtrado do mesmo ponto no frame anterior
+// (validado por profundidade e normal) e estima a variância a partir dos momentos.
+#extension GL_GOOGLE_include_directive : require
+#include "gbuffer.glsl"
+#include "brdf.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 3) uniform sampler2D gDepthPrev;
+layout(set = 1, binding = 4) uniform sampler2D gNormalPrev;
+layout(set = 1, binding = 5) uniform sampler2D gMotion;
+layout(set = 1, binding = 6) uniform sampler2D diffuseIn;
+layout(set = 1, binding = 7) uniform sampler2D specularIn;
+layout(set = 1, binding = 8) uniform sampler2D diffuseHistory;
+layout(set = 1, binding = 9) uniform sampler2D specularHistory;
+layout(set = 1, binding = 10) uniform sampler2D momentsHistory;  // x,y = momentos difuso; z,w = especular
+layout(set = 1, binding = 11) uniform sampler2D lengthHistory;   // x = frames acumulados
+layout(set = 1, binding = 12, rgba16f) uniform writeonly image2D diffuseOut;   // rgb + variância
+layout(set = 1, binding = 13, rgba16f) uniform writeonly image2D specularOut;
+layout(set = 1, binding = 14, rgba16f) uniform writeonly image2D momentsOut;
+layout(set = 1, binding = 15, rgba16f) uniform writeonly image2D lengthOut;
+
+const float MAX_HISTORY = 48.0;
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (!insideRender(id)) return;
+  float depth = texelFetch(gDepth, id, 0).r;
+  vec3 cd = texelFetch(diffuseIn, id, 0).rgb;
+  vec3 cs = texelFetch(specularIn, id, 0).rgb;
+  if (depth <= 0.0) {
+    imageStore(diffuseOut, id, vec4(0.0));
+    imageStore(specularOut, id, vec4(0.0));
+    imageStore(momentsOut, id, vec4(0.0));
+    imageStore(lengthOut, id, vec4(0.0));
+    return;
+  }
+  vec3 N = texelFetch(gNormal, id, 0).xyz;
+  float z = linearDepth(depth);
+
+  // Reprojeção bilinear: cada um dos 4 texels só conta se for a mesma superfície.
+  vec3 hd = vec3(0.0), hs = vec3(0.0);
+  vec4 hm = vec4(0.0);
+  float hl = 0.0, wsum = 0.0;
+  if (historyValid()) {
+    vec2 uv = (vec2(id) + 0.5) * frame.renderSize.zw;
+    vec2 p = (uv - texelFetch(gMotion, id, 0).xy) * frame.renderSize.xy - 0.5;
+    ivec2 base = ivec2(floor(p));
+    vec2 f = fract(p);
+    for (int i = 0; i < 4; ++i) {
+      ivec2 o = ivec2(i & 1, i >> 1);
+      ivec2 q = base + o;
+      if (!insideRender(q)) continue;
+      float zq = linearDepth(texelFetch(gDepthPrev, q, 0).r);
+      vec3 nq = texelFetch(gNormalPrev, q, 0).xyz;
+      if (abs(zq - z) > 0.05 * z || dot(nq, N) < 0.85) continue;
+      float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+      hd += texelFetch(diffuseHistory, q, 0).rgb * w;
+      hs += texelFetch(specularHistory, q, 0).rgb * w;
+      hm += texelFetch(momentsHistory, q, 0) * w;
+      hl += texelFetch(lengthHistory, q, 0).x * w;
+      wsum += w;
+    }
+  }
+  bool valid = wsum > 0.01;
+  if (valid) { hd /= wsum; hs /= wsum; hm /= wsum; hl /= wsum; }
+  float len = valid ? min(hl + 1.0, MAX_HISTORY) : 1.0;
+
+  float ld = luminance(cd), ls = luminance(cs);
+  vec4 m = vec4(ld, ld * ld, ls, ls * ls);
+  float alpha = valid ? max(1.0 / len, 0.04) : 1.0;
+  float alphaSpec = valid ? max(1.0 / len, 0.12) : 1.0;  // reflexões mudam com o ponto de vista: menos histórico
+  float alphaM = valid ? max(1.0 / len, 0.2) : 1.0;
+  m = mix(hm, m, alphaM);
+  vec3 od = mix(hd, cd, alpha);
+  vec3 os = mix(hs, cs, alphaSpec);
+
+  // Variância temporal; com pouco histórico, assume alta para o filtro espacial agir forte.
+  float vd = max(m.y - m.x * m.x, 0.0), vs = max(m.w - m.z * m.z, 0.0);
+  if (len < 4.0) {
+    float boost = 4.0 / len;
+    vd = max(vd, ld * ld) * boost;
+    vs = max(vs, ls * ls) * boost;
+  }
+  imageStore(diffuseOut, id, vec4(od, vd));
+  imageStore(specularOut, id, vec4(os, vs));
+  imageStore(momentsOut, id, m);
+  imageStore(lengthOut, id, vec4(len, 0.0, 0.0, 0.0));
+}

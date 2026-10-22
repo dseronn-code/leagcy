@@ -1,6 +1,7 @@
 // Legacy Engine — ponto de entrada.
 //   legacy                      janela interativa (WASD + botão direito do mouse)
-//   legacy --headless --frames 64 --out frame.png
+//   legacy --headless --frames 32 --out frame.png
+//   legacy --scene outdoor --night --lights 1000
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -23,9 +24,14 @@ struct Options {
   bool rayTracing = true;
   bool vsync = true;
   uint32_t width = 1600, height = 900;
-  uint32_t frames = 64;  // amostras acumuladas no modo headless
+  uint32_t frames = 32;  // frames renderizados no modo headless (o último é salvo)
   std::string out = "frame.png";
-  float exposure = -1.0f;
+  uint32_t saveEvery = 0;  // > 0: salva também a cada N frames (frame_0007.png...)
+  float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
+  scene::DemoOptions scene;
+  bool customCamera = false;
+  glm::vec3 cameraPos{0.0f}, cameraTarget{0.0f, 0.0f, -1.0f};
+  renderer::Settings render;
 };
 
 Options parseArgs(int argc, char** argv) {
@@ -41,10 +47,37 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--height") o.height = uint32_t(std::atoi(next()));
     else if (a == "--frames") o.frames = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--out") o.out = next();
-    else if (a == "--exposure") o.exposure = float(std::atof(next()));
+    else if (a == "--save-every") o.saveEvery = uint32_t(std::max(0, std::atoi(next())));
+    else if (a == "--move") o.move = float(std::atof(next()));
+    else if (a == "--scene") o.scene.name = next();
+    else if (a == "--cam" || a == "--look") {
+      glm::vec3 v(0.0f);
+      if (std::sscanf(next(), "%f,%f,%f", &v.x, &v.y, &v.z) != 3) FATAL("%s espera x,y,z", a.c_str());
+      (a == "--cam" ? o.cameraPos : o.cameraTarget) = v;
+      o.customCamera = true;
+    }
+    else if (a == "--night") o.scene.night = true;
+    else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
+    else if (a == "--scale") o.render.renderScale = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
+    else if (a == "--exposure") o.render.manualExposure = float(std::atof(next()));
+    else if (a == "--ev") o.render.exposureCompensation = float(std::atof(next()));
+    else if (a == "--dof") o.render.depthOfField = true;
+    else if (a == "--focus") o.render.dofFocusDistance = float(std::atof(next()));
+    else if (a == "--no-denoiser") o.render.denoiser = false;
+    else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--help" || a == "-h") {
-      std::printf("uso: legacy [--headless] [--frames N] [--out arquivo.png] [--width W] [--height H]\n"
-                  "              [--no-rt] [--no-vsync] [--validation] [--exposure X]\n");
+      std::printf(
+          "uso: legacy [opções]\n"
+          "  --scene sponza|outdoor   cena de demonstração (padrão: sponza)\n"
+          "  --night                  noite: só luzes locais (ReSTIR)\n"
+          "  --lights N               número de luzes pontuais\n"
+          "  --scale S                resolução interna (0.25-1.0, padrão 0.67) — upscaling pelo TAA\n"
+          "  --dof [--focus M]        profundidade de campo (autofoco se --focus omitido)\n"
+          "  --ev X | --exposure X    compensação da auto-exposição | exposição manual\n"
+          "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
+          "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"
+          "  --width W --height H\n"
+          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s]\n");
       std::exit(0);
     }
   }
@@ -58,26 +91,46 @@ int runHeadless(const Options& opt) {
 
   scene::Scene scene;
   scene::Camera camera;
-  scene::buildDemoScene(scene, camera);
+  if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
+  if (opt.customCamera) {
+    camera.position = opt.cameraPos;
+    camera.lookAt(opt.cameraTarget);
+  }
   scene.upload(ctx);
 
   VkExtent2D extent{opt.width, opt.height};
   const VkFormat outFormat = VK_FORMAT_R8G8B8A8_SRGB;
   renderer::Renderer r;
-  r.init(ctx, scene, extent, outFormat);
-  if (opt.exposure > 0) r.settings.exposure = opt.exposure;
+  r.init(ctx, scene, extent, outFormat, opt.render);
+  LOG_INFO("Resolução interna %ux%u -> saída %ux%u", r.renderExtent().width, r.renderExtent().height, extent.width,
+           extent.height);
 
   rhi::Image output = rhi::createImage2D(ctx, extent, outFormat,
                                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
   rhi::Buffer readback = rhi::createBuffer(ctx, VkDeviceSize(extent.width) * extent.height * 4,
                                            VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::GpuToCpu);
 
+  auto savePng = [&](const std::string& path) {
+    vmaInvalidateAllocation(ctx.allocator, readback.allocation, 0, VK_WHOLE_SIZE);
+    if (util::writePng(path, static_cast<const uint8_t*>(readback.mapped), extent.width, extent.height)) {
+      LOG_INFO("Imagem salva em %s", path.c_str());
+      return true;
+    }
+    LOG_ERROR("Falha ao gravar %s", path.c_str());
+    return false;
+  };
+
+  const float dt = 1.0f / 30.0f;  // tempo simulado fixo: resultado determinístico
+  glm::vec3 moveDir = camera.forward();
   auto t0 = std::chrono::steady_clock::now();
+  bool ok = true;
   for (uint32_t f = 0; f < opt.frames; ++f) {
     bool last = f + 1 == opt.frames;
+    bool save = last || (opt.saveEvery && (f + 1) % opt.saveEvery == 0);
+    if (opt.move != 0.0f) camera.position += moveDir * (opt.move * dt);
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
-      r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view);
-      if (!last) return;
+      r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view, dt);
+      if (!save) return;
       rhi::imageBarrier(cmd, output.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                         VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
@@ -86,15 +139,19 @@ int runHeadless(const Options& opt) {
       region.imageExtent = {extent.width, extent.height, 1};
       vkCmdCopyImageToBuffer(cmd, output.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.handle, 1, &region);
     });
-    if (f == 0 || last || (f + 1) % 16 == 0) LOG_INFO("amostra %u/%u", f + 1, opt.frames);
+    if (f == 0 || last || (f + 1) % 16 == 0) LOG_INFO("frame %u/%u", f + 1, opt.frames);
+    if (save && !last) {
+      char name[32];
+      std::snprintf(name, sizeof(name), "_%04u.png", f + 1);
+      std::string path = opt.out;
+      size_t dot = path.rfind(".png");
+      path = (dot == std::string::npos ? path : path.substr(0, dot)) + name;
+      ok &= savePng(path);
+    }
   }
   double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   LOG_INFO("%u frames em %.2fs (%.1f ms/frame)", opt.frames, secs, secs * 1000.0 / opt.frames);
-
-  vmaInvalidateAllocation(ctx.allocator, readback.allocation, 0, VK_WHOLE_SIZE);
-  bool ok = util::writePng(opt.out, static_cast<const uint8_t*>(readback.mapped), extent.width, extent.height);
-  if (ok) LOG_INFO("Imagem salva em %s", opt.out.c_str());
-  else LOG_ERROR("Falha ao gravar %s", opt.out.c_str());
+  ok &= savePng(opt.out);
 
   rhi::destroyBuffer(ctx, readback);
   rhi::destroyImage(ctx, output);
@@ -127,7 +184,11 @@ int runWindowed(const Options& opt) {
 
   scene::Scene scene;
   scene::Camera camera;
-  scene::buildDemoScene(scene, camera);
+  if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
+  if (opt.customCamera) {
+    camera.position = opt.cameraPos;
+    camera.lookAt(opt.cameraTarget);
+  }
   scene.upload(ctx);
 
   int fbw, fbh;
@@ -135,8 +196,7 @@ int runWindowed(const Options& opt) {
   rhi::Swapchain swapchain;
   swapchain.create(ctx, surface, {uint32_t(fbw), uint32_t(fbh)}, opt.vsync);
   renderer::Renderer r;
-  r.init(ctx, scene, swapchain.extent, swapchain.format);
-  if (opt.exposure > 0) r.settings.exposure = opt.exposure;
+  r.init(ctx, scene, swapchain.extent, swapchain.format, opt.render);
 
   std::array<FrameSync, renderer::Renderer::kFramesInFlight> frames;
   for (auto& f : frames) {
@@ -169,7 +229,7 @@ int runWindowed(const Options& opt) {
   };
 
   LOG_INFO("Controles: botão direito + mouse = olhar | WASD = mover | Q/E = descer/subir | Shift = rápido");
-  LOG_INFO("           setas = mover o sol | +/- = exposição | Esc = sair");
+  LOG_INFO("           setas = mover o sol | +/- = exposição (EV) | F = foco/DOF | M = motion blur | Esc = sair");
 
   uint32_t slot = 0;
   double lastTime = glfwGetTime(), fpsTimer = lastTime, lastX = 0, lastY = 0;
@@ -215,9 +275,17 @@ int runWindowed(const Options& opt) {
     if (key(GLFW_KEY_RIGHT)) { sunAzim += sunStep; moved = true; }
     sunElev = glm::clamp(sunElev, -0.1f, 1.55f);
     scene.sunDirection = {std::cos(sunElev) * std::sin(sunAzim), std::sin(sunElev), -std::cos(sunElev) * std::cos(sunAzim)};
-    if (key(GLFW_KEY_EQUAL) || key(GLFW_KEY_KP_ADD)) r.settings.exposure *= 1.0f + dt;
-    if (key(GLFW_KEY_MINUS) || key(GLFW_KEY_KP_SUBTRACT)) r.settings.exposure /= 1.0f + dt;
-    if (moved) r.resetAccumulation();
+    if (key(GLFW_KEY_EQUAL) || key(GLFW_KEY_KP_ADD)) r.settings.exposureCompensation += dt;
+    if (key(GLFW_KEY_MINUS) || key(GLFW_KEY_KP_SUBTRACT)) r.settings.exposureCompensation -= dt;
+    auto toggle = [&](int k, bool& state, bool& setting) {
+      bool down = key(k);
+      if (down && !state) setting = !setting;
+      state = down;
+    };
+    static bool fDown = false, mDown = false;
+    toggle(GLFW_KEY_F, fDown, r.settings.depthOfField);
+    toggle(GLFW_KEY_M, mDown, r.settings.motionBlur);
+    (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
 
     // ---- Frame ----
     FrameSync& f = frames[slot];
@@ -232,7 +300,7 @@ int runWindowed(const Options& opt) {
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(f.cmd, &bi));
-    r.record(f.cmd, slot, camera, swapchain.images[imageIndex], swapchain.views[imageIndex]);
+    r.record(f.cmd, slot, camera, swapchain.images[imageIndex], swapchain.views[imageIndex], glm::clamp(dt, 0.0f, 0.1f));
     rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT,
                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -274,9 +342,9 @@ int runWindowed(const Options& opt) {
     ++fpsFrames;
     if (now - fpsTimer >= 0.5) {
       char title[160];
-      std::snprintf(title, sizeof(title), "Legacy Engine | %.0f FPS (%.2f ms) | %u amostras | RT: %s",
-                    fpsFrames / (now - fpsTimer), 1000.0 * (now - fpsTimer) / fpsFrames, r.accumulatedFrames(),
-                    ctx.rayTracing ? "on" : "off");
+      std::snprintf(title, sizeof(title), "Legacy Engine | %.0f FPS (%.2f ms) | %ux%u -> %ux%u | RT: %s",
+                    fpsFrames / (now - fpsTimer), 1000.0 * (now - fpsTimer) / fpsFrames, r.renderExtent().width,
+                    r.renderExtent().height, swapchain.extent.width, swapchain.extent.height, ctx.rayTracing ? "on" : "off");
       glfwSetWindowTitle(window, title);
       fpsTimer = now;
       fpsFrames = 0;
