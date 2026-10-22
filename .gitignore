@@ -8,3 +8,5 @@ apps/mobile/ios/
 coverage/
 marketing/*/out/
 __pycache__/
+.pytest_cache/
+video-ai/videos/
