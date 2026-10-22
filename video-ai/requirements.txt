@@ -1,0 +1,10 @@
+# Cena — IA de vídeo realista (tudo gratuito e de código aberto)
+torch>=2.4
+diffusers>=0.35
+transformers>=4.51
+accelerate>=1.6
+ftfy
+sentencepiece
+imageio
+imageio-ffmpeg
+gradio>=5
