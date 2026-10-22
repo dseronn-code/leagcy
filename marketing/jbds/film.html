@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>JBDS — Raio de 5 km</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; width: 100vw; height: auto; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/*
+ * JBDS — "Raio de 5 km". Comercial-paródia de um produto fictício.
+ * O filme é a função render(t), determinística e sincronizada com out/trilha.wav.
+ */
+const W = 1920, H = 1080, CX = W / 2, CY = H / 2;
+const cv = document.getElementById('c');
+let ctx = cv.getContext('2d');
+
+const C = { bg: '#060505', text: '#F4F2F0', dim: '#8E8A86', red: '#FF2B2B', redDeep: '#7A0A0A', hazard: '#FFD21F', metal1: '#2A2A2E', metal2: '#0E0E10', green: '#3DDC97' };
+const DISPLAY = '"Inter Display", Inter, sans-serif';
+const TEXT = 'Inter, sans-serif';
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, x) => a + (b - a) * x;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const life = (t, a, b, fin = 0.3, fout = 0.25) => Math.min(prog(t, a, a + fin), 1 - prog(t, b - fout, b));
+/** Decaimento após um evento (impacto, tambor). */
+const hit = (t, at, rate = 6) => (t < at ? 0 : Math.exp(-(t - at) * rate));
+
+function rand(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), a | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function text(str, x, y, { size = 72, weight = 800, color = C.text, alpha = 1, font = DISPLAY, align = 'center', spacing = 0, scale = 1, glow = 0, stroke = null } = {}) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = clamp(alpha);
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+  ctx.font = `${weight} ${size}px ${font}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  ctx.letterSpacing = `${spacing}px`;
+  if (glow) { ctx.shadowColor = color; ctx.shadowBlur = glow; }
+  if (stroke) { ctx.lineWidth = stroke.width; ctx.strokeStyle = stroke.color; ctx.strokeText(str, 0, 0); }
+  else { ctx.fillStyle = color; ctx.fillText(str, 0, 0); }
+  ctx.restore();
+}
+
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+
+function glowBlob(x, y, r, color, alpha) {
+  if (alpha <= 0) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.globalAlpha = clamp(alpha);
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.globalAlpha = 1;
+}
+
+function vignette(s = 0.7) {
+  const g = ctx.createRadialGradient(CX, CY, H * 0.25, CX, CY, H);
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(1, `rgba(0,0,0,${s})`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+const grainCanvas = document.createElement('canvas');
+grainCanvas.width = grainCanvas.height = 512;
+{
+  const g = grainCanvas.getContext('2d');
+  const img = g.createImageData(512, 512);
+  const r = rand(5);
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = r() * 255;
+    img.data[i + 3] = 22;
+  }
+  g.putImageData(img, 0, 0);
+}
+function grain(t) {
+  const o = Math.floor(t * 24) % 8;
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.translate(-(o * 61) % 512, -(o * 97) % 512);
+  ctx.fillStyle = ctx.createPattern(grainCanvas, 'repeat');
+  ctx.fillRect(0, 0, W + 512, H + 512);
+  ctx.restore();
+}
+
+/** Faixa de "perigo" amarela e preta. */
+function hazard(x, y, w, h, t = 0, alpha = 1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.fillStyle = C.hazard;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#111';
+  const off = (t * 80) % 80;
+  for (let i = -2; i < w / 40 + 4; i++) {
+    ctx.beginPath();
+    ctx.moveTo(x + i * 80 - off, y + h);
+    ctx.lineTo(x + i * 80 + 40 - off, y + h);
+    ctx.lineTo(x + i * 80 + 40 + h - off, y);
+    ctx.lineTo(x + i * 80 + h - off, y);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---------- o produto ----------
+function cone(x, y, r, excursion, ledAlpha) {
+  // anel de LED
+  ctx.save();
+  ctx.shadowColor = C.red;
+  ctx.shadowBlur = 40 * ledAlpha;
+  ctx.strokeStyle = `rgba(255,43,43,${0.25 + ledAlpha * 0.75})`;
+  ctx.lineWidth = r * 0.05;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 1.08, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+  // borda de borracha
+  ctx.fillStyle = '#151517';
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  // cone (o "excursion" aproxima o cone da câmera)
+  const rc = r * 0.86 * (1 + excursion * 0.06);
+  const g = ctx.createRadialGradient(x - rc * 0.3, y - rc * 0.35, rc * 0.05, x, y, rc);
+  g.addColorStop(0, '#4A4A50');
+  g.addColorStop(0.55, '#1C1C20');
+  g.addColorStop(1, '#09090A');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, rc, 0, Math.PI * 2);
+  ctx.fill();
+  // anéis concêntricos
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 2;
+  for (let k = 1; k <= 4; k++) {
+    ctx.beginPath();
+    ctx.arc(x, y, rc * (0.3 + k * 0.15), 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  // domo central
+  const dg = ctx.createRadialGradient(x - rc * 0.08, y - rc * 0.1, 2, x, y, rc * 0.28);
+  dg.addColorStop(0, '#77777F');
+  dg.addColorStop(1, '#141416');
+  ctx.fillStyle = dg;
+  ctx.beginPath();
+  ctx.arc(x, y, rc * 0.26 * (1 + excursion * 0.12), 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/**
+ * A caixa JBDS: monólito de 1,2 tonelada, dois woofers, um tweeter e LEDs vermelhos.
+ * light: 0 = silhueta, 1 = iluminada. rim: intensidade do contorno vermelho.
+ */
+function speaker(x, y, s, { light = 1, rim = 0.5, excursion = 0, led = 0.5 } = {}) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  const w = 440, h = 700;
+  // contorno de luz
+  ctx.save();
+  ctx.shadowColor = C.red;
+  ctx.shadowBlur = 80 * rim;
+  rr(-w / 2, -h / 2, w, h, 36);
+  ctx.strokeStyle = `rgba(255,60,60,${rim})`;
+  ctx.lineWidth = 4;
+  ctx.stroke();
+  ctx.restore();
+  // corpo
+  const g = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+  g.addColorStop(0, C.metal1);
+  g.addColorStop(1, C.metal2);
+  rr(-w / 2, -h / 2, w, h, 36);
+  ctx.fillStyle = g;
+  ctx.fill();
+  if (light > 0) {
+    ctx.globalAlpha = light;
+    cone(0, 150, 170, excursion, led);
+    cone(0, -120, 110, excursion * 0.7, led);
+    // tweeter
+    ctx.fillStyle = '#18181B';
+    ctx.beginPath();
+    ctx.arc(0, -290, 34, 0, Math.PI * 2);
+    ctx.fill();
+    const tg = ctx.createRadialGradient(-6, -296, 2, 0, -290, 26);
+    tg.addColorStop(0, '#9A9AA4');
+    tg.addColorStop(1, '#202024');
+    ctx.fillStyle = tg;
+    ctx.beginPath();
+    ctx.arc(0, -290, 24, 0, Math.PI * 2);
+    ctx.fill();
+    // plaquinha
+    ctx.font = `900 30px ${DISPLAY}`;
+    ctx.textAlign = 'center';
+    ctx.letterSpacing = '8px';
+    ctx.fillStyle = '#D9D6D2';
+    ctx.fillText('JBDS', 0, 335);
+  }
+  // sombra para a silhueta
+  if (light < 1) {
+    ctx.globalAlpha = 1 - light;
+    rr(-w / 2, -h / 2, w, h, 36);
+    ctx.fillStyle = '#050505';
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---------- cenas ----------
+function sIntro(t) {
+  // 0–5: silhueta quase invisível, batimento cardíaco
+  const beats = [0.6, 1.9, 3.2, 4.4].reduce((a, b) => a + hit(t, b, 8), 0);
+  glowBlob(CX, CY + 40, 600, 'rgba(120,10,10,0.9)', 0.1 + beats * 0.15);
+  speaker(CX, CY + 20, 0.95, { light: 0, rim: 0.05 + 0.25 * prog(t, 0, 5) + beats * 0.15 });
+  text('Algumas coisas não foram feitas para todo mundo.', CX, H - 150, { size: 46, weight: 500, font: TEXT, alpha: life(t, 0.6, 4.9, 0.5, 0.3), color: '#CFCAC6' });
+}
+
+function sReveal(t) {
+  // 5–8: contorno vermelho revela a forma
+  const k = easeOut(prog(t, 5, 6.5));
+  glowBlob(CX, CY, 800, 'rgba(160,10,10,0.9)', 0.25 + hit(t, 5, 2) * 0.4);
+  speaker(CX, CY + 20, lerp(0.95, 1.0, k), { light: k * 0.35, rim: 0.4 + hit(t, 5, 1.5) * 0.6, led: k * 0.6, excursion: hit(t, 5, 3) });
+  text('Esta é uma delas.', CX, H - 150, { size: 54, weight: 700, alpha: life(t, 5.25, 8, 0.3, 0.15) });
+}
+
+function sLogo(t) {
+  // 8–12: JBDS, com a tela tremendo
+  glowBlob(CX, CY, 1000, 'rgba(200,20,20,0.9)', 0.35 + hit(t, 8, 1.5) * 0.4);
+  const k = easeOutBack(prog(t, 8, 8.5));
+  // A marca aparece sozinha; depois a caixa sobe na frente e o logo recua.
+  const rise = easeOut(prog(t, 9.2, 9.9));
+  text('JBDS', CX, CY - 10, { size: 520, weight: 900, spacing: lerp(80, -10, easeOut(prog(t, 8, 9.5))), color: C.red, alpha: clamp(k) * lerp(0.95, 0.35, rise), scale: lerp(1.25, 1, clamp(k)), glow: 40 });
+  if (rise > 0) speaker(CX, lerp(H + 420, CY + 40, rise), 0.95, { light: 1, rim: 0.8, led: 0.7 + hit(t, 8, 2) * 0.3, excursion: hit(t, 8, 2.5) + 0.3 * Math.sin(t * 28) * hit(t, 8, 0.8) });
+  text('A caixa de som mais alta já construída.', CX, H - 90, { size: 44, weight: 600, font: TEXT, alpha: life(t, 9.3, 12, 0.3, 0.15) });
+}
+
+function sSeismo(t) {
+  // 12–14: sismógrafo
+  ctx.fillStyle = '#EDE8E0';
+  ctx.fillRect(0, 300, W, 480);
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x - ((t * 300) % 40), 300); ctx.lineTo(x - ((t * 300) % 40), 780); ctx.stroke(); }
+  for (let y = 300; y <= 780; y += 40) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.strokeStyle = '#B00000';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  const r = rand(3);
+  const pen = W * 0.78;
+  for (let x = 0; x <= pen; x += 3) {
+    const age = (pen - x) / 300; // segundos atrás
+    const when = t - age;
+    const big = hit(when, 12.0, 3) + hit(when, 12.75, 4) * 0.5;
+    const amp = 6 + big * 230;
+    const y = 540 + Math.sin(x * 0.9 + r() * 6) * amp * (0.4 + r() * 0.6);
+    x ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#111';
+  ctx.fillRect(pen, 300, 6, 480);
+  text('Grave registrado por sismógrafos.', CX, 170, { size: 72, weight: 800, alpha: life(t, 12.1, 14, 0.2, 0.08) });
+  rr(CX - 250, 840, 500, 90, 45);
+  ctx.globalAlpha = prog(t, 12.4, 12.6) * (1 - prog(t, 13.92, 14));
+  ctx.fillStyle = C.red;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  text('2,1 NA ESCALA RICHTER', CX, 886, { size: 34, weight: 800, font: TEXT, spacing: 3, alpha: prog(t, 12.4, 12.6) * (1 - prog(t, 13.92, 14)) });
+}
+
+function wineGlass(x, y, s, crack) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.strokeStyle = 'rgba(230,240,255,0.9)';
+  ctx.lineWidth = 4;
+  ctx.shadowColor = '#BFD8FF';
+  ctx.shadowBlur = 20;
+  ctx.beginPath();
+  ctx.moveTo(-120, -260);
+  ctx.bezierCurveTo(-130, -60, -60, 20, 0, 30);
+  ctx.bezierCurveTo(60, 20, 130, -60, 120, -260);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, 30); ctx.lineTo(0, 230);
+  ctx.moveTo(-100, 240); ctx.quadraticCurveTo(0, 215, 100, 240);
+  ctx.stroke();
+  if (crack > 0) {
+    const r = rand(17);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)';
+    for (let i = 0; i < 9; i++) {
+      let px = -20 + r() * 40, py = -130 + r() * 40;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      const ang = r() * Math.PI * 2;
+      const len = (60 + r() * 120) * crack;
+      for (let k = 0; k < 5; k++) {
+        px += Math.cos(ang + (r() - 0.5) * 1.2) * len / 5;
+        py += Math.sin(ang + (r() - 0.5) * 1.2) * len / 5;
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function sGlass(t) {
+  // 14–16: taça trincando
+  glowBlob(CX, CY, 700, 'rgba(120,160,255,0.6)', 0.18);
+  const crack = easeOut(prog(t, 14.35, 14.7));
+  const shake = hit(t, 14.35, 10) * 8;
+  wineGlass(CX + Math.sin(t * 90) * shake, CY + 80, 1.3, crack);
+  if (t > 14.35) {
+    const r = rand(23);
+    for (let i = 0; i < 40; i++) {
+      const k = prog(t, 14.35, 16);
+      const sx = CX + (r() - 0.5) * 200 + (r() - 0.5) * 900 * k;
+      const sy = CY - 80 + (r() - 0.8) * 300 * k + 500 * k * k;
+      ctx.fillStyle = `rgba(220,235,255,${(1 - k) * 0.8})`;
+      ctx.fillRect(sx, sy, 4 + r() * 8, 2 + r() * 6);
+    }
+  }
+  text('Agudo que trinca cristal a 300 m.', CX, 150, { size: 72, weight: 800, alpha: life(t, 14.1, 16, 0.2, 0.08) });
+}
+
+function knob(x, y, r, angle, label) {
+  ctx.save();
+  ctx.translate(x, y);
+  // escala
+  const marks = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '∞'];
+  marks.forEach((m, i) => {
+    const a = -Math.PI * 0.75 + (i / (marks.length - 1)) * Math.PI * 1.5 - Math.PI / 2;
+    const isInf = m === '∞';
+    ctx.font = `${isInf ? 900 : 600} ${isInf ? 56 : 30}px ${DISPLAY}`;
+    ctx.fillStyle = isInf ? C.red : i >= 11 ? '#FF8A8A' : C.dim;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m, Math.cos(a) * (r + 70), Math.sin(a) * (r + 70));
+  });
+  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 10, 0, 0, r);
+  g.addColorStop(0, '#5A5A62');
+  g.addColorStop(1, '#141416');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.rotate(angle);
+  ctx.fillStyle = C.red;
+  ctx.shadowColor = C.red;
+  ctx.shadowBlur = 20;
+  rr(-8, -r + 14, 16, r * 0.42, 8);
+  ctx.fill();
+  ctx.restore();
+  if (label) text(label, x, y, { size: 80, weight: 900, color: '#FFFFFF' });
+}
+
+function knobAngle(v) {
+  // v de 0 a 12 (12 = ∞)
+  return -Math.PI * 0.75 + (v / 12) * Math.PI * 1.5;
+}
+
+function sKnob(t) {
+  // 16–18: o volume vai até ∞
+  glowBlob(CX, CY + 60, 700, 'rgba(200,20,20,0.9)', 0.15 + prog(t, 16.5, 18) * 0.35);
+  const v = lerp(9, 12, easeInOut(prog(t, 16.2, 17.6)));
+  const shown = v >= 11.9 ? '∞' : String(Math.floor(v));
+  knob(CX, CY + 90, 210, knobAngle(v), shown);
+  text('Volume: vai até ∞.', CX, 150, { size: 72, weight: 800, alpha: life(t, 16.1, 18, 0.2, 0.08) });
+}
+
+function stamp(x, y, label, k, color = C.red) {
+  if (k <= 0) return;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(-0.18);
+  ctx.scale(lerp(2.2, 1, easeOut(k)), lerp(2.2, 1, easeOut(k)));
+  ctx.globalAlpha = clamp(k * 1.5) * 0.92;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 7;
+  rr(-200, -48, 400, 96, 10);
+  ctx.stroke();
+  ctx.font = `900 50px ${DISPLAY}`;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '4px';
+  ctx.fillText(label, 0, 3);
+  ctx.restore();
+}
+
+function sRequirements(t) {
+  // 18–24: requisitos legais
+  hazard(0, 0, W, 34, t);
+  hazard(0, H - 34, W, 34, t);
+  text('Para usar a JBDS legalmente, você precisa de:', CX, 150, { size: 56, weight: 700, alpha: life(t, 18.1, 24, 0.25, 0.1) });
+  const card = (i, a, title, sub, drawIcon, stampAt) => {
+    const k = easeOutBack(prog(t, a, a + 0.45));
+    const x = i === 0 ? 180 : W / 2 + 40;
+    const y = 280;
+    ctx.save();
+    ctx.globalAlpha = clamp(k) * (1 - prog(t, 23.9, 24));
+    ctx.translate(0, (1 - clamp(k)) * 80);
+    rr(x, y, 760, 620, 30);
+    ctx.fillStyle = '#141212';
+    ctx.fill();
+    ctx.strokeStyle = '#2E2A2A';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    text(String(i + 1), x + 70, y + 80, { size: 80, weight: 900, color: C.red });
+    drawIcon(x + 380, y + 270, t);
+    text(title, x + 380, y + 470, { size: 46, weight: 800 });
+    text(sub, x + 380, y + 530, { size: 28, weight: 500, font: TEXT, color: C.dim });
+    ctx.restore();
+    stamp(x + 560, y + 120, 'OBRIGATÓRIO', prog(t, stampAt, stampAt + 0.18) * (1 - prog(t, 23.9, 24)));
+  };
+  card(0, 18.6, 'Uma sala com isolamento acústico', 'A caixa vai lá dentro. Você também.', (x, y) => {
+    // sala com espuma acústica
+    ctx.fillStyle = '#2A2424';
+    ctx.fillRect(x - 220, y - 150, 440, 300);
+    for (let i = 0; i < 11; i++) for (let j = 0; j < 7; j++) {
+      ctx.fillStyle = (i + j) % 2 ? '#3A3030' : '#4A3C3C';
+      ctx.beginPath();
+      const px = x - 220 + i * 40, py = y - 150 + j * 43;
+      ctx.moveTo(px, py + 43); ctx.lineTo(px + 20, py); ctx.lineTo(px + 40, py + 43);
+      ctx.fill();
+    }
+    ctx.save();
+    speaker(x, y + 20, 0.3, { light: 1, rim: 0.4, led: 0.8 });
+    ctx.restore();
+  }, 20.3);
+  card(1, 20.9, 'Ninguém num raio de 5 km', 'Ninguém mesmo.', (x, y) => {
+    for (let k = 5; k >= 1; k--) {
+      ctx.strokeStyle = `rgba(255,43,43,${0.2 + (5 - k) * 0.12})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(x, y, k * 30, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = C.red;
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fill();
+    text('5 km', x - 190, y - 120, { size: 40, weight: 900, color: C.red });
+  }, 22.6);
+}
+
+function sRadar(t) {
+  // 24–30: varredura dos 5 km
+  const rx = CX - 260, ry = CY + 30, R = 400;
+  ctx.fillStyle = '#031208';
+  ctx.beginPath();
+  ctx.arc(rx, ry, R + 20, 0, Math.PI * 2);
+  ctx.fill();
+  for (let k = 1; k <= 5; k++) {
+    ctx.strokeStyle = 'rgba(61,220,151,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(rx, ry, (R * k) / 5, 0, Math.PI * 2);
+    ctx.stroke();
+    text(`${k} km`, rx + (R * k) / 5 - 26, ry - 14, { size: 18, weight: 600, font: TEXT, color: 'rgba(61,220,151,0.7)' });
+  }
+  ctx.strokeStyle = 'rgba(61,220,151,0.2)';
+  ctx.beginPath(); ctx.moveTo(rx - R, ry); ctx.lineTo(rx + R, ry); ctx.moveTo(rx, ry - R); ctx.lineTo(rx, ry + R); ctx.stroke();
+  // feixe
+  const ang = (t - 24) * 2.2;
+  const g = ctx.createConicGradient(ang - 0.9, rx, ry);
+  g.addColorStop(0, 'rgba(61,220,151,0)');
+  g.addColorStop(0.14, 'rgba(61,220,151,0.45)');
+  g.addColorStop(0.145, 'rgba(61,220,151,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(rx, ry, R, 0, Math.PI * 2);
+  ctx.fill();
+  // a caixa no centro
+  ctx.fillStyle = C.red;
+  ctx.beginPath();
+  ctx.arc(rx, ry, 10, 0, Math.PI * 2);
+  ctx.fill();
+  // o Sr. Antônio, a 4,2 km
+  const found = t >= 26.2;
+  const bx = rx + Math.cos(-0.6) * R * 0.84, by = ry + Math.sin(-0.6) * R * 0.84;
+  if (found) {
+    const blink = 0.5 + 0.5 * Math.sin(t * 14);
+    glowBlob(bx, by, 60, 'rgba(255,43,43,0.9)', 0.6 * blink);
+    ctx.fillStyle = C.red;
+    ctx.beginPath();
+    ctx.arc(bx, by, 11, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // painel
+  const px = CX + 260;
+  text('VARREDURA DE SEGURANÇA', px, 220, { size: 26, weight: 700, font: TEXT, color: C.green, spacing: 4, align: 'left' });
+  text(found ? 'Pessoas detectadas: 1' : 'Pessoas detectadas: 0', px, 290, { size: 52, weight: 800, color: found ? C.red : C.text, align: 'left' });
+  if (found) {
+    const k = prog(t, 26.4, 26.7);
+    rr(px, 340, 620, 150, 20);
+    ctx.globalAlpha = k;
+    ctx.fillStyle = '#1A0B0B';
+    ctx.fill();
+    ctx.strokeStyle = C.red;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    text('Sr. Antônio', px + 30, 385, { size: 40, weight: 800, align: 'left', alpha: k });
+    text('4,2 km · regando as plantas · sem fone', px + 30, 440, { size: 28, weight: 500, font: TEXT, color: '#FF9A9A', align: 'left', alpha: k });
+  }
+  text('Ele vai ficar surdo.', px, 600, { size: 64, weight: 900, align: 'left', alpha: life(t, 27.2, 28.5, 0.15, 0.15) });
+  text('A não ser que…', px, 600, { size: 64, weight: 900, align: 'left', alpha: life(t, 28.6, 30, 0.2, 0.08), color: C.hazard });
+}
+
+function headphones(x, y, s, glow) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.shadowColor = C.red;
+  ctx.shadowBlur = 50 * glow;
+  ctx.strokeStyle = '#2C2C30';
+  ctx.lineWidth = 46;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(0, 40, 230, Math.PI * 1.08, Math.PI * 1.92);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  for (const side of [-1, 1]) {
+    const g = ctx.createLinearGradient(side * 230 - 70, -40, side * 230 + 70, 220);
+    g.addColorStop(0, '#3C3C42');
+    g.addColorStop(1, '#0F0F11');
+    rr(side * 230 - 75, -20, 150, 250, 70);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,43,43,${0.4 + glow * 0.6})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(side * 230, 105, 42, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function meter(x, y, label, value, color) {
+  text(label, x, y - 34, { size: 26, weight: 800, font: TEXT, align: 'left', spacing: 4, color: C.dim });
+  rr(x, y, 560, 34, 17);
+  ctx.fillStyle = '#1C1A1A';
+  ctx.fill();
+  rr(x, y, 560 * value, 34, 17);
+  ctx.fillStyle = color;
+  ctx.fill();
+  text(`${Math.round(value * 100)}%`, x + 580, y + 18, { size: 32, weight: 800, align: 'left' });
+}
+
+function sPods(t) {
+  // 30–36: o fone que vem junto
+  glowBlob(CX - 400, CY, 700, 'rgba(200,20,20,0.9)', 0.25 + hit(t, 30, 1.5) * 0.4);
+  const k = easeOutBack(prog(t, 30, 30.6));
+  headphones(CX - 420, CY + 30, lerp(0.6, 1, clamp(k)), hit(t, 30, 1.2) + 0.3);
+  text('JBDS Pods', CX + 120, 260, { size: 120, weight: 900, align: 'left', alpha: prog(t, 30.1, 30.4), spacing: -3 });
+  text('Abaixa a caixa. Aumenta a conversa.', CX + 120, 370, { size: 46, weight: 600, font: TEXT, align: 'left', alpha: prog(t, 31.0, 31.4) });
+  const m = easeInOut(prog(t, 32, 34.4));
+  const ma = prog(t, 31.6, 31.9);
+  ctx.globalAlpha = ma;
+  meter(CX + 120, 520, 'CAIXA', lerp(1, 0.08, m), C.red);
+  meter(CX + 120, 650, 'CONVERSA', lerp(0.2, 1, m), C.green);
+  ctx.globalAlpha = 1;
+  text('Incluso na caixa. Use sempre. Sério.', CX + 120, 790, { size: 30, weight: 500, font: TEXT, align: 'left', color: C.dim, alpha: prog(t, 34.5, 34.9) });
+}
+
+const TERMOS = [
+  'Não use perto de aeroportos, baleias ou do seu vizinho.',
+  'Requer autorização prévia da companhia de energia elétrica.',
+  'Peso: 1,2 tonelada. Alça inclusa.',
+  'Pode causar marés fora de época.',
+  'O cachorro do vizinho já assinou o termo de ciência.',
+  'Não aponte para a Lua.',
+];
+function sTerms(t) {
+  // 36–42: letras miúdas rápidas demais para ler
+  hazard(0, 0, W, 26, t * 2);
+  text('TERMOS DE USO', CX, 110, { size: 40, weight: 900, spacing: 10, color: C.hazard });
+  const r = rand(77);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(260, 170, W - 520, 760);
+  ctx.clip();
+  const scroll = (t - 36) * 900;
+  ctx.font = `500 20px ${TEXT}`;
+  ctx.fillStyle = 'rgba(244,242,240,0.38)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  for (let i = 0; i < 260; i++) {
+    const y = 170 + i * 30 - scroll;
+    if (y < 140 || y > 960) continue;
+    let line = '';
+    while (line.length < 120) line += ['o usuário', 'declara', 'ciência', 'de que', 'decibéis', 'irreversíveis', 'conforme', 'cláusula', 'raio de 5 km', 'isolamento', 'acústico', 'em caso de', 'surdez', 'o fabricante', 'não se responsabiliza'][Math.floor(r() * 15)] + ' ';
+    ctx.fillText(`${i + 1}. ${line}`, 280, y);
+  }
+  ctx.restore();
+  // uma cláusula legível por segundo
+  const idx = Math.floor(t - 36);
+  const k = prog(t, 36 + idx, 36 + idx + 0.12) * (1 - prog(t, 36 + idx + 0.88, 37 + idx));
+  if (idx >= 0 && idx < TERMOS.length) {
+    rr(CX - 820, CY - 70, 1640, 140, 20);
+    ctx.globalAlpha = k;
+    ctx.fillStyle = '#0E0C0C';
+    ctx.fill();
+    ctx.strokeStyle = C.hazard;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    text(TERMOS[idx], CX, CY, { size: 50, weight: 800, alpha: k });
+  }
+}
+
+function sCountdown(t) {
+  // 42–44: 3, 2, 1
+  glowBlob(CX, CY, 900, 'rgba(220,20,20,0.9)', 0.2 + prog(t, 42, 44) * 0.6);
+  knob(CX, CY + 40, 260, knobAngle(lerp(10, 12, easeInOut(prog(t, 42, 43.9)))), null);
+  const n = t < 42.66 ? '3' : t < 43.33 ? '2' : '1';
+  const start = n === '3' ? 42 : n === '2' ? 42.66 : 43.33;
+  const k = prog(t, start, start + 0.12);
+  text(n, CX, CY + 40, { size: 260, weight: 900, color: '#FFFFFF', alpha: k, scale: lerp(1.4, 1, easeOut(k)) });
+}
+
+function sBlast(t) {
+  // 44–46.5: volume máximo. Branco, rachaduras, e o mundo fica abafado.
+  const white = hit(t, 44, 2.2);
+  ctx.save();
+  ctx.filter = `blur(${lerp(0, 14, prog(t, 44.2, 45))}px) saturate(${lerp(1, 0.2, prog(t, 44.2, 45))})`;
+  glowBlob(CX, CY, 1000, 'rgba(255,40,40,1)', 0.8);
+  speaker(CX, CY + 40, 1.05, { light: 1, rim: 1, led: 1, excursion: 1.5 * hit(t, 44, 1.5) * Math.sin(t * 60) + hit(t, 44, 3) });
+  ctx.restore();
+  // rachaduras na "tela"
+  const r = rand(8);
+  ctx.strokeStyle = `rgba(255,255,255,${0.85 * (1 - prog(t, 45.4, 46.4))})`;
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 14; i++) {
+    let px = CX + (r() - 0.5) * 80, py = CY + (r() - 0.5) * 80;
+    const ang = (i / 14) * Math.PI * 2 + r() * 0.3;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    for (let k = 0; k < 7; k++) {
+      px += Math.cos(ang + (r() - 0.5)) * 140;
+      py += Math.sin(ang + (r() - 0.5)) * 140;
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = `rgba(255,255,255,${white})`;
+  ctx.fillRect(0, 0, W, H);
+  // escurece para o "silêncio"
+  ctx.fillStyle = `rgba(0,0,0,${prog(t, 45.2, 46.4)})`;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function sEnd(t) {
+  // 46.5–52: assinatura
+  const k = easeOut(prog(t, 46.5, 47.4));
+  const out = 1 - prog(t, 51.0, 51.9);
+  glowBlob(CX, CY - 60, 900, 'rgba(200,20,20,0.9)', 0.3 * k * out);
+  text('JBDS', CX, CY - 90, { size: 300, weight: 900, color: C.red, alpha: k * out, spacing: lerp(40, -6, k), glow: 30 });
+  text('Ouça uma vez. Lembre pra sempre.', CX, CY + 110, { size: 58, weight: 700, alpha: prog(t, 47.4, 47.9) * out });
+  text('Fone JBDS Pods incluso. Seus ouvidos, não.', CX, CY + 195, { size: 34, weight: 500, font: TEXT, color: C.dim, alpha: prog(t, 48.4, 48.9) * out });
+  text('Produto fictício. Peça de humor. Nenhum ouvido foi ferido na produção deste filme.', CX, H - 70, { size: 22, weight: 500, font: TEXT, color: '#6A6662', alpha: prog(t, 49.2, 49.7) * out });
+}
+
+const SCENES = [
+  [0, 5, sIntro], [5, 8, sReveal], [8, 12, sLogo], [12, 14, sSeismo], [14, 16, sGlass], [16, 18, sKnob],
+  [18, 24, sRequirements], [24, 30, sRadar], [30, 36, sPods], [36, 42, sTerms], [42, 44, sCountdown], [44, 46.5, sBlast], [46.5, 52.1, sEnd],
+];
+
+/** Tremor de câmera: somatório dos impactos da trilha. */
+function shake(t) {
+  const s = hit(t, 5, 4) * 6 + hit(t, 8, 2.2) * 26 + hit(t, 12, 6) * 10 + hit(t, 14.35, 8) * 8 + hit(t, 30, 4) * 10 + hit(t, 44, 1.6) * 48;
+  return [Math.sin(t * 97) * s, Math.cos(t * 83) * s];
+}
+
+window.DURATION = 52;
+window.STILLS = [2.5, 6.6, 8.6, 9.8, 11.0, 12.5, 14.8, 17.5, 21.5, 23.2, 26.9, 27.6, 29.0, 31.0, 33.5, 35.0, 37.4, 39.5, 42.9, 44.1, 45.0, 47.3, 49.8];
+window.render = function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.filter = 'none';
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+  const [sx, sy] = shake(t);
+  ctx.translate(sx, sy);
+  for (const [a, b, fn] of SCENES) if (t >= a && t < b) fn(t);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  vignette();
+  grain(t);
+};
+
+if (!location.search.includes('render')) {
+  document.fonts.ready.then(() => {
+    const t0 = performance.now();
+    const loop = () => {
+      render(((performance.now() - t0) / 1000) % window.DURATION);
+      requestAnimationFrame(loop);
+    };
+    loop();
+  });
+}
+</script>
+</body>
+</html>
