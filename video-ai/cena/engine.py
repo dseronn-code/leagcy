@@ -81,6 +81,21 @@ class Resultado:
 Progresso = Callable[[int, int], None]
 
 
+def ram_gb() -> float:
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
+    except (ValueError, OSError, AttributeError):
+        return 0.0
+
+
+def usar_economia() -> bool:
+    """Pouca RAM (Colab grátis tem ~12 GB): nunca deixa o modelo inteiro na memória do sistema."""
+    forcado = os.environ.get("CENA_ECONOMIA")
+    if forcado is not None:
+        return forcado == "1"
+    return 0 < ram_gb() < 24
+
+
 def info_gpu() -> dict[str, Any]:
     """Descreve a GPU (ou a falta dela) para escolher modo e descarregamento."""
     try:
@@ -172,23 +187,37 @@ class Motor:
         return saida.frames[0]
 
 
-def carregar_pipeline(m: Modelo) -> Any:
-    """Carrega o Wan com as otimizações que fazem caber numa GPU gratuita."""
+def _dtype() -> Any:
     import torch
-    from diffusers import AutoencoderKLWan, WanPipeline
-    from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+
+    # bf16 é o formato nativo do Wan, mas só GPUs Ampere+ (RTX 30xx, A100...) o fazem em hardware.
+    # A T4 gratuita do Kaggle/Colab emularia bf16 muitas vezes mais devagar, então nela usamos fp16.
+    # CENA_DTYPE=bf16|fp16 força a escolha.
+    escolha = os.environ.get("CENA_DTYPE")
+    nativo_bf16 = torch.cuda.get_device_capability(0)[0] >= 8
+    return torch.bfloat16 if escolha == "bf16" or (escolha is None and nativo_bf16) else torch.float16
+
+
+def _exigir_gpu() -> None:
+    import torch
 
     if not torch.cuda.is_available():
         raise RuntimeError(
             "Nenhuma GPU encontrada. No Kaggle: Settings → Accelerator → GPU T4 x2. "
             "No Colab: Ambiente de execução → Alterar tipo → GPU T4."
         )
-    # bf16 é o formato nativo do Wan, mas só GPUs Ampere+ (RTX 30xx, A100...) o fazem em hardware.
-    # A T4 gratuita do Kaggle/Colab emularia bf16 muitas vezes mais devagar, então nela usamos fp16.
-    # CENA_DTYPE=bf16|fp16 força a escolha.
-    escolha = os.environ.get("CENA_DTYPE")
-    nativo_bf16 = torch.cuda.get_device_capability(0)[0] >= 8
-    dtype = torch.bfloat16 if escolha == "bf16" or (escolha is None and nativo_bf16) else torch.float16
+
+
+def carregar_pipeline(m: Modelo) -> Any:
+    """Carrega o Wan com as otimizações que fazem caber numa GPU gratuita."""
+    import torch
+    from diffusers import AutoencoderKLWan, WanPipeline
+    from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+
+    _exigir_gpu()
+    if usar_economia():
+        return PipelineEconomico(m)
+    dtype = _dtype()
     vae = AutoencoderKLWan.from_pretrained(m.repo, subfolder="vae", torch_dtype=torch.float32)
     pipe = WanPipeline.from_pretrained(m.repo, vae=vae, torch_dtype=dtype)
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config, flow_shift=m.flow_shift)
@@ -221,3 +250,79 @@ def exportar_mp4(quadros: Any, arquivo: Path, fps: int) -> Path:
                 a = (np.clip(a, 0, 1) * 255).round().astype(np.uint8)
             w.append_data(a)
     return arquivo
+
+
+class PipelineEconomico:
+    """Wan para máquinas com pouca RAM (ex.: Colab grátis, ~12 GB).
+
+    O codificador de texto (UMT5-XXL, ~11 GB) e o gerador de vídeo não cabem
+    juntos na RAM nem na VRAM de uma T4. Então, a cada vídeo:
+      1. carrega só o codificador de texto direto na GPU, processa o pedido e o descarta;
+      2. carrega (ou reaproveita) o gerador de vídeo direto na GPU, sem passar pela RAM,
+         e gera a partir do texto já processado.
+    É mais lento por vídeo (recarrega o codificador), mas cabe.
+    """
+
+    def __init__(self, m: Modelo):
+        self.m = m
+        self._pipe: Any = None
+
+    def _codificar(self, prompt: str, negativo: str) -> tuple[Any, Any]:
+        import torch
+        from diffusers import WanPipeline
+        from transformers import AutoTokenizer, UMT5EncoderModel
+
+        dtype = _dtype()
+        tokenizer = AutoTokenizer.from_pretrained(self.m.repo, subfolder="tokenizer")
+        encoder = UMT5EncoderModel.from_pretrained(self.m.repo, subfolder="text_encoder", dtype=dtype, device_map="cuda")
+        # Reaproveita o encode_prompt oficial do pipeline (mesmo pré-processamento e preenchimento).
+        so_texto = WanPipeline(tokenizer=tokenizer, text_encoder=encoder, vae=None, scheduler=None, transformer=None)
+        with torch.no_grad():
+            pos, neg = so_texto.encode_prompt(
+                prompt=prompt,
+                negative_prompt=negativo,
+                do_classifier_free_guidance=True,
+                max_sequence_length=512,
+                device=torch.device("cuda"),
+                dtype=dtype,
+            )
+        del so_texto, encoder
+        gc.collect()
+        torch.cuda.empty_cache()
+        return pos, neg
+
+    def _gerador(self) -> Any:
+        if self._pipe is not None:
+            return self._pipe
+        import torch
+        from diffusers import AutoencoderKLWan, WanPipeline, WanTransformer3DModel
+        from diffusers.schedulers.scheduling_unipc_multistep import UniPCMultistepScheduler
+
+        dtype = _dtype()
+        transformer = WanTransformer3DModel.from_pretrained(self.m.repo, subfolder="transformer", torch_dtype=dtype, device_map="cuda")
+        vae = AutoencoderKLWan.from_pretrained(self.m.repo, subfolder="vae", torch_dtype=torch.float32, device_map="cuda")
+        pipe = WanPipeline.from_pretrained(self.m.repo, transformer=transformer, vae=vae, text_encoder=None, tokenizer=None, torch_dtype=dtype)
+        pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config, flow_shift=self.m.flow_shift)
+        pipe.vae.enable_tiling()
+        lora = os.environ.get("CENA_LORA")
+        if lora:
+            pipe.load_lora_weights(lora)
+        self._pipe = pipe
+        return pipe
+
+    def _liberar_gerador(self) -> None:
+        import torch
+
+        self._pipe = None
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def __call__(self, *, prompt: str, negative_prompt: str, **kwargs: Any) -> Any:
+        import torch
+
+        vram = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        # O 5B (~10 GB) e o codificador de texto (~11 GB) não cabem juntos numa GPU de 15 GB.
+        if self.m.vram_ideal_gb > 16 and vram < 26:
+            self._liberar_gerador()
+        pos, neg = self._codificar(prompt, negative_prompt)
+        return self._gerador()(prompt_embeds=pos, negative_prompt_embeds=neg, **kwargs)

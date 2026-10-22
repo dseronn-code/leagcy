@@ -2,18 +2,24 @@
 
 Você escreve o que quer ver e a Cena gera um vídeo realista com pessoas, lugares, luz e movimento de câmera.
 
-- **Custo zero.** O modelo é o **Wan 2.2**, de código aberto, com licença Apache 2.0, que permite uso comercial. A GPU vem do plano gratuito do Kaggle ou do Colab, ou do seu próprio PC. Nada de assinatura nem de cartão de crédito.
+- **Custo zero.** O modelo é o **Wan 2.2**, de código aberto, com licença Apache 2.0, que permite uso comercial. A GPU vem do plano gratuito do Colab ou do Kaggle, ou do seu próprio PC. Nada de assinatura nem de cartão de crédito.
 - **O "diretor".** Ele transforma o seu pedido, em português, num roteiro de câmera de cinema (lente, luz, movimento) e aplica um filtro contra o "visual de IA": pele de plástico, mãos deformadas, cara de 3D.
 - **Interface própria.** Uma página web onde você digita, escolhe o estilo e a câmera e assiste o resultado. No Kaggle/Colab ela ganha um link público que abre até no celular.
 
-## Jeito mais fácil: Kaggle (grátis, ~30 h de GPU por semana)
+## Jeito mais fácil: Google Colab (grátis, sem telefone)
 
-1. Crie uma conta em [kaggle.com](https://www.kaggle.com) e **verifique o telefone** (Settings → Phone verification). A verificação é grátis e libera GPU e internet.
-2. **Create → New Notebook → File → Import Notebook** e envie o arquivo [`notebooks/cena.ipynb`](notebooks/cena.ipynb).
-3. No painel direito: **Accelerator → GPU T4 x2** e **Internet → On**.
-4. **Run → Run all**. Na célula "Opção 1" aparece um link `https://….gradio.live`: abra e use.
+Só precisa de uma conta Google (um Gmail).
 
-No **Google Colab** é igual: *Arquivo → Fazer upload de notebook*, *Ambiente de execução → GPU T4*, *Executar tudo*.
+1. Abra [colab.research.google.com](https://colab.research.google.com) → **Arquivo → Fazer upload de notebook** e envie [`notebooks/cena.ipynb`](notebooks/cena.ipynb).
+2. **Ambiente de execução → Alterar o tipo de ambiente de execução → GPU T4 → Salvar**.
+3. **Ambiente de execução → Executar tudo**. Se aparecer um aviso de que o notebook não é do Google, clique em **Executar mesmo assim**.
+4. Na célula "Opção 1" aparece um link `https://….gradio.live`: abra e use, até no celular.
+
+O Colab grátis tem pouca RAM (~12 GB). A Cena percebe isso e entra sozinha no **modo econômico**: processa o texto, libera a memória e só então carrega o gerador de vídeo. Isso cabe na máquina, mas cada vídeo demora alguns minutos a mais. O Colab também limita o uso diário de GPU: quando acabar a cota, volte no dia seguinte.
+
+## Alternativa: Kaggle (~30 h de GPU por semana, exige telefone)
+
+Crie uma conta e **verifique o telefone** (Settings → Phone verification). Depois, **Create → New Notebook → File → Import Notebook** com o mesmo arquivo, *Accelerator* **GPU T4 x2**, *Internet* **On** e *Run all*.
 
 ## No seu PC (com placa NVIDIA)
 
@@ -51,6 +57,7 @@ Seja concreto: **quem** (idade, aparência, roupa), **onde**, **fazendo o quê**
 |---|---|
 | `CENA_LORA` | Carrega um LoRA (personagem, estilo ou aceleração) compatível com o modelo, do Hugging Face ou de um arquivo local. |
 | `CENA_MODELO_MAXIMA` / `CENA_MODELO_RAPIDA` | Troca o modelo de cada modo (ex.: uma versão mais nova do Wan, quando sair). |
+| `CENA_ECONOMIA` | `1` força e `0` desliga o modo econômico. O padrão liga sozinho com menos de 24 GB de RAM. |
 | `CENA_DTYPE` | `bf16` ou `fp16`. O padrão escolhe sozinho: fp16 na T4, que não tem bf16 nativo; bf16 em RTX 30xx e mais novas. |
 
 ## Uso responsável
@@ -61,6 +68,6 @@ Vídeo realista gerado por IA deve ser **identificado como IA** ao publicar; You
 
 ```bash
 pip install gradio numpy imageio imageio-ffmpeg pytest
-python -m pytest -q                 # 12 testes, rodam sem GPU (modelo falso)
+python -m pytest -q                 # 13 testes, rodam sem GPU (modelo falso)
 python tools/build_notebook.py      # regenera notebooks/cena.ipynb depois de mudar cena/
 ```

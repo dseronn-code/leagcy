@@ -78,3 +78,15 @@ def test_interface_monta_sem_gpu(tmp_path):
 
     demo = criar_app(MotorFalso(tmp_path, carregar=lambda m: PipeFalso()))
     assert isinstance(demo, gr.Blocks)
+
+
+def test_economia_de_ram(monkeypatch):
+    from cena import engine
+
+    monkeypatch.delenv("CENA_ECONOMIA", raising=False)
+    monkeypatch.setattr(engine, "ram_gb", lambda: 12.7)  # Colab grátis
+    assert engine.usar_economia()
+    monkeypatch.setattr(engine, "ram_gb", lambda: 29.0)  # Kaggle
+    assert not engine.usar_economia()
+    monkeypatch.setenv("CENA_ECONOMIA", "1")
+    assert engine.usar_economia()

@@ -26,15 +26,16 @@ celulas = [
     md("""
 # Cena: IA de vídeo realista, 100% gratuita
 
-Modelo **Wan 2.2** (código aberto, Apache 2.0) rodando em GPU gratuita.
+Modelo **Wan** (código aberto, Apache 2.0) rodando em GPU gratuita.
 
-**Antes de rodar (Kaggle):**
-1. Painel direito → **Session options** → *Accelerator*: **GPU T4 x2**.
-2. *Internet*: **On**. Para ligar GPU e internet, o Kaggle pede verificação de telefone, que é grátis.
-3. Menu **Run → Run all**.
+**Google Colab (só precisa de uma conta Google, sem telefone):**
+1. Menu **Ambiente de execução → Alterar o tipo de ambiente de execução → GPU T4 → Salvar**.
+2. Menu **Ambiente de execução → Executar tudo**.
+3. Se aparecer um aviso de que o notebook não é do Google, clique em **Executar mesmo assim**.
 
-No **Colab**: *Ambiente de execução → Alterar o tipo → GPU T4* e depois *Executar tudo*.
-O plano grátis do Colab tem pouca RAM (~12 GB): se travar ao carregar, use o modo **Rápida**.
+A Cena detecta a pouca RAM do Colab grátis e entra sozinha no **modo econômico**.
+
+**Kaggle** (exige verificação de telefone): *Accelerator* **GPU T4 x2**, *Internet* **On**, *Run all*.
 
 A primeira execução baixa ~20–30 GB de pesos do modelo, o que leva alguns minutos.
 Na T4 gratuita, cada vídeo leva **de ~5 a ~30 min**, conforme duração, resolução e qualidade.
