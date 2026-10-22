@@ -10,7 +10,7 @@ import argparse
 import threading
 
 from .director import ESTILOS, MOVIMENTOS, dirigir
-from .engine import MODELOS, Motor, Pedido, info_gpu, modo_recomendado
+from .engine import MODELOS, Motor, Pedido, info_gpu, modo_recomendado, usar_economia
 
 EXEMPLOS = [
     ["Um homem de 30 anos acorda com o despertador do celular, se espreguiça e sorri enquanto o sol entra pela janela", "comercial", "aproximando"],
@@ -29,7 +29,8 @@ def criar_app(motor: Motor | None = None):
     motor = motor or Motor()
     trava = threading.Lock()  # uma geração por vez: a GPU gratuita não aguenta duas
     gpu = info_gpu()
-    modo_padrao = modo_recomendado(gpu["vram_gb"]) if gpu["cuda"] else "rapida"
+    # Com pouca RAM (Colab grátis) a Máxima recarrega o modelo a cada vídeo: começa pela Rápida.
+    modo_padrao = modo_recomendado(gpu["vram_gb"]) if gpu["cuda"] and not usar_economia() else "rapida"
     res_padrao = "720p" if gpu["vram_gb"] >= 20 else "480p"
 
     def gerar(pedido, estilo, movimento, modo, resolucao, segundos, vertical, semente, passos, evitar, progress=gr.Progress()):
