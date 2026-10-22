@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>iPhone 30 — Um dia (conceito de fã)</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  canvas { display: block; width: 100vw; height: auto; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script>
+/*
+ * "iPhone 30 — Um dia". Filme-conceito de fã, sem relação com a Apple.
+ * Sem logotipo, fonte ou sons da Apple: tudo desenhado aqui, em função do tempo (render(t)).
+ */
+const W = 1920, H = 1080, CX = W / 2, CY = H / 2;
+const BEAT = 0.5;
+const cv = document.getElementById('c');
+let ctx = cv.getContext('2d');
+
+const F = '"Inter Display", Inter, sans-serif';
+const FT = 'Inter, sans-serif';
+const JP = '"IPAPGothic", "IPAGothic", sans-serif';
+const SKIN = '#E2B08C', SKIN_D = '#C98F6B';
+
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, x) => a + (b - a) * x;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+const easeIn = (x) => x * x * x;
+const easeInOut = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+const life = (t, a, b, fin = 0.3, fout = 0.25) => Math.min(prog(t, a, a + fin), 1 - prog(t, b - fout, b));
+
+function rand(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), a | 1);
+    x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function text(str, x, y, { size = 40, weight = 600, color = '#fff', alpha = 1, font = FT, align = 'left', spacing = 0, base = 'middle' } = {}) {
+  if (alpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha *= clamp(alpha);
+  ctx.font = `${weight} ${size}px ${font}`;
+  ctx.textAlign = align;
+  ctx.textBaseline = base;
+  ctx.letterSpacing = `${spacing}px`;
+  ctx.fillStyle = color;
+  ctx.fillText(str, x, y);
+  ctx.restore();
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function fillRR(x, y, w, h, r, color) { rr(x, y, w, h, r); ctx.fillStyle = color; ctx.fill(); }
+function lin(x0, y0, x1, y1, stops) { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; }
+function blob(x, y, r, color, alpha = 1) {
+  if (alpha <= 0) return;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, color);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.save();
+  ctx.globalAlpha *= clamp(alpha);
+  ctx.fillStyle = g;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  ctx.restore();
+}
+
+const grainCanvas = document.createElement('canvas');
+grainCanvas.width = grainCanvas.height = 512;
+{
+  const g = grainCanvas.getContext('2d');
+  const img = g.createImageData(512, 512);
+  const r = rand(4);
+  for (let i = 0; i < img.data.length; i += 4) {
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = r() * 255;
+    img.data[i + 3] = 14;
+  }
+  g.putImageData(img, 0, 0);
+}
+function grain(t) {
+  const o = Math.floor(t * 24) % 8;
+  ctx.save();
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.translate(-(o * 61) % 512, -(o * 97) % 512);
+  ctx.fillStyle = ctx.createPattern(grainCanvas, 'repeat');
+  ctx.fillRect(0, 0, W + 512, H + 512);
+  ctx.restore();
+}
+
+/** Legenda de recurso, discreta, no canto inferior esquerdo (como nos filmes de produto). */
+function callout(str, t, a, b, sub = null, dark = false) {
+  const k = life(t, a, b, 0.35, 0.25);
+  if (k <= 0) return;
+  const dy = (1 - easeOut(prog(t, a, a + 0.5))) * 16;
+  ctx.save();
+  const color = dark ? '#1D1D1F' : '#FFFFFF';
+  ctx.shadowColor = dark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.45)';
+  ctx.shadowBlur = 18;
+  text(str, 110, H - 128 + dy, { size: 42, weight: 600, alpha: k, font: F, color });
+  if (sub) text(sub, 110, H - 80 + dy, { size: 28, weight: 500, alpha: k * 0.85, color });
+  ctx.restore();
+}
+
+// ---------- o aparelho ----------
+const SW = 390, SH = 844; // tela lógica
+
+/**
+ * iPhone 30 (desenho original): moldura de titânio, tela borda a borda, ilha no topo.
+ * `screen(t)` desenha o conteúdo em coordenadas da tela (0..390 × 0..844).
+ */
+function phone(x, y, s, screen, { rot = 0, on = 1, shadow = 0.5 } = {}) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.scale(s, s);
+  ctx.translate(-SW / 2 - 12, -SH / 2 - 12);
+  // sombra
+  ctx.save();
+  ctx.shadowColor = `rgba(0,0,0,${shadow})`;
+  ctx.shadowBlur = 60;
+  ctx.shadowOffsetY = 30;
+  fillRR(0, 0, SW + 24, SH + 24, 68, '#6E6E74');
+  ctx.restore();
+  // moldura de titânio escovado
+  rr(0, 0, SW + 24, SH + 24, 68);
+  ctx.fillStyle = lin(0, 0, SW + 24, SH + 24, [[0, '#C9C6C0'], [0.35, '#7E7B76'], [0.65, '#B4B0AA'], [1, '#5F5C58']]);
+  ctx.fill();
+  fillRR(4, 4, SW + 16, SH + 16, 64, '#050506');
+  // tela
+  ctx.save();
+  rr(12, 12, SW, SH, 56);
+  ctx.clip();
+  ctx.translate(12, 12);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, SW, SH);
+  if (on > 0) {
+    ctx.globalAlpha = on;
+    screen();
+    ctx.globalAlpha = 1;
+  }
+  // ilha
+  fillRR(SW / 2 - 62, 14, 124, 36, 18, '#000');
+  // reflexo de vidro
+  ctx.fillStyle = lin(0, 0, SW, SH, [[0, 'rgba(255,255,255,0.10)'], [0.4, 'rgba(255,255,255,0)'], [1, 'rgba(255,255,255,0.03)']]);
+  ctx.fillRect(0, 0, SW, SH);
+  ctx.restore();
+  ctx.restore();
+}
+
+function statusBar(time, { signal = 'full', battery = 0.86, dark = false } = {}) {
+  const c = dark ? '#111' : '#fff';
+  text(time, 46, 33, { size: 17, weight: 700, color: c, align: 'center' });
+  if (signal === 'full') for (let i = 0; i < 4; i++) fillRR(286 + i * 6, 38 - i * 3 - 4, 4, i * 3 + 5, 1, c);
+  if (signal === 'none') text('Sem serviço', 300, 33, { size: 13, weight: 600, color: c, align: 'center' });
+  if (signal === 'sat') { text('SAT', 296, 33, { size: 13, weight: 800, color: '#34C759', align: 'center' }); }
+  rr(322, 26, 28, 14, 4);
+  ctx.strokeStyle = c;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  fillRR(324, 28, 24 * battery, 10, 2, battery < 0.1 ? '#FF3B30' : c);
+}
+
+function wallpaper(t, hue = 0) {
+  ctx.fillStyle = lin(0, 0, SW, SH, [[0, `hsl(${215 + hue},55%,22%)`], [0.55, `hsl(${255 + hue},45%,30%)`], [1, `hsl(${20 + hue},55%,40%)`]]);
+  ctx.fillRect(0, 0, SW, SH);
+  blob(80, 650, 380, `hsla(${30 + hue},90%,65%,0.55)`);
+  blob(330, 220, 300, `hsla(${200 + hue},90%,65%,0.35)`);
+}
+
+function lockTime(time, date, y = 150, color = '#fff') {
+  text(date, SW / 2, y - 62, { size: 20, weight: 600, color, align: 'center', alpha: 0.9 });
+  text(time, SW / 2, y + 10, { size: 104, weight: 600, color, align: 'center', font: F, spacing: -3 });
+}
+
+function card(x, y, w, h, alpha = 1, color = 'rgba(40,40,46,0.72)') {
+  ctx.save();
+  ctx.globalAlpha *= clamp(alpha);
+  fillRR(x, y, w, h, 26, color);
+  ctx.restore();
+}
+
+// ---------- mão e pessoa (ilustração) ----------
+function hand(x, y, s, rot = 0, press = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.scale(s, s);
+  // antebraço e palma
+  ctx.fillStyle = lin(-80, 0, 80, 0, [[0, SKIN_D], [0.5, SKIN], [1, SKIN_D]]);
+  rr(-70, 40, 140, 420, 60);
+  ctx.fill();
+  rr(-85, -40, 170, 170, 70);
+  ctx.fill();
+  // dedo indicador estendido
+  rr(-22, -190 + press * 10, 44, 200, 22);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,230,215,0.7)';
+  rr(-14, -184 + press * 10, 28, 30, 12);
+  ctx.fill();
+  // dedos dobrados
+  ctx.fillStyle = SKIN_D;
+  for (let i = 0; i < 3; i++) { rr(28 + i * 2, -30 + i * 38, 70, 36, 18); ctx.fill(); }
+  ctx.restore();
+}
+
+/** Pessoa estilizada (contraluz) sentada na cama; stretch 0..1 levanta os braços. */
+function person(x, y, s, stretch, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  // tronco
+  ctx.beginPath();
+  ctx.moveTo(-70, 0);
+  ctx.quadraticCurveTo(-80, -150, -50, -230);
+  ctx.lineTo(50, -230);
+  ctx.quadraticCurveTo(80, -150, 70, 0);
+  ctx.fill();
+  // cabeça e cabelo
+  ctx.beginPath();
+  ctx.arc(0, -290, 50, 0, Math.PI * 2);
+  ctx.fill();
+  // braços: do repouso até o alto (espreguiçando)
+  ctx.lineWidth = 34;
+  for (const side of [-1, 1]) {
+    const sx = side * 52, sy = -215;
+    const ang = lerp(side > 0 ? 1.35 : Math.PI - 1.35, side > 0 ? -1.25 : Math.PI + 1.25, easeInOut(stretch));
+    const ex = sx + Math.cos(ang) * 120, ey = sy + Math.sin(ang) * 120;
+    const ang2 = ang + side * lerp(0.4, -0.25, stretch);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(ex + Math.cos(ang2) * 110, ey + Math.sin(ang2) * 110);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function wood(x, y, w, h, base = '#8A5A3A', t = 0) {
+  ctx.fillStyle = base;
+  ctx.fillRect(x, y, w, h);
+  const r = rand(12);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  for (let i = 0; i < 70; i++) {
+    const yy = y + r() * h;
+    ctx.strokeStyle = `rgba(${r() < 0.5 ? '40,20,10' : '255,220,180'},${0.05 + r() * 0.08})`;
+    ctx.lineWidth = 1 + r() * 4;
+    ctx.beginPath();
+    ctx.moveTo(x, yy);
+    ctx.bezierCurveTo(x + w * 0.3, yy + (r() - 0.5) * 30, x + w * 0.7, yy + (r() - 0.5) * 30, x + w, yy + (r() - 0.5) * 20);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- telas ----------
+function screenAlarm(t, stopAt) {
+  wallpaper(t, 10);
+  ctx.fillStyle = 'rgba(0,0,10,0.35)';
+  ctx.fillRect(0, 0, SW, SH);
+  statusBar('6:47');
+  lockTime('6:47', 'Terça-feira, 22 de outubro');
+  const pulse = 0.5 + 0.5 * Math.sin(t * 8);
+  card(22, 300, SW - 44, 260, 1);
+  text('ALARME', 48, 340, { size: 15, weight: 700, alpha: 0.7, spacing: 1.5 });
+  text('Bom dia', 48, 380, { size: 30, weight: 700 });
+  text('Você estava em sono leve', 48, 418, { size: 17, weight: 500, alpha: 0.75 });
+  // gráfico de fases do sono
+  ctx.strokeStyle = '#7FD1FF';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let i = 0; i <= 60; i++) {
+    const x = 48 + i * 5;
+    const yv = 470 + Math.sin(i * 0.33) * 18 + Math.sin(i * 0.11) * 10 - (i > 54 ? (i - 54) * 6 : 0);
+    i ? ctx.lineTo(x, yv) : ctx.moveTo(x, yv);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#FFD60A';
+  ctx.beginPath();
+  ctx.arc(348, 440, 6 + pulse * 2, 0, Math.PI * 2);
+  ctx.fill();
+  // botões
+  const pressed = t >= stopAt;
+  fillRR(40, 690, SW - 80, 74, 37, pressed ? 'rgba(255,149,0,0.6)' : '#FF9500');
+  text('Parar', SW / 2, 727, { size: 24, weight: 700, align: 'center' });
+  text('Adiar', SW / 2, 800, { size: 20, weight: 600, align: 'center', alpha: 0.75 });
+  if (pressed) {
+    const k = prog(t, stopAt, stopAt + 0.4);
+    ctx.strokeStyle = `rgba(255,255,255,${1 - k})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(SW / 2, 727, 20 + k * 140, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function screenLock(time, date, extra) {
+  return () => {
+    wallpaper(0, 10);
+    statusBar(time);
+    lockTime(time, date);
+    if (extra) extra();
+  };
+}
+
+// ---------- cenas ----------
+function sAlarm(t) {
+  // 0–3: madrugada; despertador na cabeceira, vista de cima
+  wood(0, 0, W, H, '#3A2618');
+  ctx.fillStyle = 'rgba(10,20,60,0.55)';
+  ctx.fillRect(0, 0, W, H);
+  const on = prog(t, 0.12, 0.3);
+  blob(CX + 80, CY, 700, 'rgba(160,190,255,0.9)', on * 0.35);
+  phone(CX + 80, CY, 1.05, () => screenAlarm(t, 2.82), { rot: -0.12, on, shadow: 0.6 });
+  // mão entrando para tocar em "Parar"
+  const k = easeInOut(prog(t, 1.9, 2.75));
+  const back = easeIn(prog(t, 2.95, 3.0));
+  if (k > 0) hand(lerp(CX + 360, CX + 120, k), lerp(H + 380, CY + 420, k) + back * 200, 1.05, -0.35, t > 2.75 ? 1 : 0);
+  callout('Despertar no sono leve', t, 0.6, 3.0);
+}
+
+function sMorning(t) {
+  // 3–6: a cortina abre e ele se espreguiça
+  const k = easeOut(prog(t, 3.0, 4.2));
+  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#F3E3CF'], [1, '#E2C9AE']]);
+  ctx.fillRect(0, 0, W, H);
+  // janela com sol
+  const wx = 1080, wy = 140, ww = 620, wh = 560;
+  ctx.fillStyle = lin(wx, wy, wx, wy + wh, [[0, '#FFE7B8'], [1, '#FFF6E6']]);
+  ctx.fillRect(wx, wy, ww, wh);
+  blob(wx + ww * 0.6, wy + 160, 420, 'rgba(255,214,140,1)', 0.8 * k);
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = 14;
+  ctx.strokeRect(wx, wy, ww, wh);
+  ctx.beginPath(); ctx.moveTo(wx + ww / 2, wy); ctx.lineTo(wx + ww / 2, wy + wh); ctx.stroke();
+  // cortinas abrindo
+  const open = lerp(0, ww / 2 - 40, k);
+  ctx.fillStyle = '#C9A98A';
+  ctx.fillRect(wx - 40, wy - 40, ww / 2 + 40 - open, wh + 140);
+  ctx.fillRect(wx + ww / 2 + open, wy - 40, ww / 2 + 40 - open, wh + 140);
+  // raios de luz no chão
+  ctx.save();
+  ctx.globalAlpha = 0.35 * k;
+  ctx.fillStyle = lin(wx, wy, 600, H, [[0, 'rgba(255,220,150,0.9)'], [1, 'rgba(255,220,150,0)']]);
+  ctx.beginPath();
+  ctx.moveTo(wx + ww / 2 - open, wy + wh);
+  ctx.lineTo(wx + ww / 2 + open, wy + wh);
+  ctx.lineTo(700, H);
+  ctx.lineTo(100, H);
+  ctx.fill();
+  ctx.restore();
+  // cama
+  fillRR(80, 640, 1100, 300, 30, '#FFFFFF');
+  fillRR(80, 700, 1100, 300, 30, '#D9CFC4');
+  fillRR(120, 610, 260, 90, 40, '#FFFFFF');
+  // ele, em contraluz suave
+  const stretch = Math.sin(clamp((t - 3.6) / 2.2) * Math.PI);
+  person(640, 720, 1.1, stretch, '#5B4B42');
+  // cabeceira com o celular
+  fillRR(1240, 700, 220, 240, 14, '#A57B57');
+  phone(1350, 670, 0.22, screenLock('6:48', 'Terça-feira, 22 de outubro'), { rot: -1.45, shadow: 0.3 });
+}
+
+function sDrop(t) {
+  // 6–10: o celular escorrega e cai (câmera lenta); não quebra
+  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#EADBC8'], [1, '#D8C4AC']]);
+  ctx.fillRect(0, 0, W, H);
+  wood(0, 860, W, 220, '#9C6B45');
+  // tampo da cabeceira
+  fillRR(-40, 300, 820, 60, 8, '#B88B64');
+  ctx.fillStyle = '#9C7350';
+  ctx.fillRect(-40, 360, 780, 500);
+  // trajetória: desliza até a borda (6,2–6,9), cai em câmera lenta (7,0–7,9), quica (7,9–8,6)
+  let px, py, rot;
+  const slide = easeIn(prog(t, 6.2, 6.95));
+  if (t < 6.95) { px = lerp(520, 790, slide); py = 284; rot = Math.PI / 2 + slide * 0.2; }
+  else if (t < 7.9) {
+    const f = prog(t, 6.95, 7.9);
+    px = 790 + f * 160;
+    py = 284 + easeIn(f) * 520;
+    rot = Math.PI / 2 + 0.2 + f * (Math.PI - 0.35);
+  } else {
+    // quica uma vez e assenta deitado (tela para cima, de lado para a câmera)
+    const b = prog(t, 7.9, 8.6);
+    px = 950 + b * 120;
+    py = 804 - Math.sin(b * Math.PI) * 70 * (1 - b * 0.5);
+    rot = Math.PI * 1.5 - 0.15 * (1 - b) + Math.sin(b * Math.PI * 2) * 0.08 * (1 - b);
+  }
+  const shake = t >= 7.9 ? Math.exp(-(t - 7.9) * 12) * 10 : 0;
+  ctx.translate(Math.sin(t * 90) * shake, 0);
+  phone(px, py, 0.34, screenLock('6:52', 'Terça-feira, 22 de outubro'), { rot, shadow: 0.35 });
+  // brilho percorrendo a tela intacta
+  if (t > 8.6) blob(px + lerp(-80, 80, prog(t, 8.6, 9.4)), py - 20, 120, 'rgba(255,255,255,0.9)', (1 - Math.abs(prog(t, 8.6, 9.4) - 0.5) * 2) * 0.5);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  callout('Escudo de Diamante.', t, 8.1, 10.0, 'Cai. Não quebra.');
+}
+
+function sCoffee(t) {
+  // 10–16: Inteligência Visual na cozinha
+  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#F7F4EF'], [1, '#E9E2D8']]);
+  ctx.fillRect(0, 0, W, H);
+  fillRR(0, 720, W, 360, 0, '#D2C3B0');
+  fillRR(0, 700, W, 30, 0, '#BCA98F');
+  // pote de café vazio (fora de foco à esquerda)
+  ctx.save();
+  ctx.filter = 'blur(3px)';
+  const jar = (x, y, s) => {
+    fillRR(x - 90 * s, y - 230 * s, 180 * s, 230 * s, 26 * s, 'rgba(220,235,240,0.55)');
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 4 * s;
+    rr(x - 90 * s, y - 230 * s, 180 * s, 230 * s, 26 * s);
+    ctx.stroke();
+    fillRR(x - 96 * s, y - 262 * s, 192 * s, 40 * s, 10 * s, '#5B3A26');
+    fillRR(x - 80 * s, y - 24 * s, 160 * s, 16 * s, 6 * s, 'rgba(90,58,38,0.6)'); // restinho de pó
+  };
+  jar(520, 705, 1.2);
+  ctx.restore();
+  // mão segurando o celular, apontando a câmera
+  const k = easeOut(prog(t, 10.0, 10.6));
+  const px = lerp(1500, 1260, k), py = lerp(700, 520, k);
+  phone(px, py, 0.95, () => {
+    // visor da câmera: o pote em foco
+    ctx.fillStyle = '#E9E2D8';
+    ctx.fillRect(0, 0, SW, SH);
+    ctx.fillStyle = '#D2C3B0';
+    ctx.fillRect(0, 560, SW, 300);
+    ctx.save();
+    jar(195, 560, 0.95);
+    ctx.restore();
+    // reconhecimento
+    const r1 = prog(t, 11.0, 11.4);
+    ctx.strokeStyle = `rgba(255,255,255,${r1})`;
+    ctx.lineWidth = 4;
+    const corner = (x, y, dx, dy) => { ctx.beginPath(); ctx.moveTo(x, y + dy * 30); ctx.lineTo(x, y); ctx.lineTo(x + dx * 30, y); ctx.stroke(); };
+    corner(90, 300, 1, 1); corner(300, 300, -1, 1); corner(90, 580, 1, -1); corner(300, 580, -1, -1);
+    card(26, 110, SW - 52, 120, r1, 'rgba(255,255,255,0.9)');
+    text('Café torrado médio · 250 g', 50, 150, { size: 19, weight: 700, color: '#111', alpha: r1 });
+    text('Você comprou há 3 semanas', 50, 185, { size: 15, weight: 500, color: '#555', alpha: r1 });
+    const r2 = prog(t, 12.0, 12.35);
+    const done = t >= 13.0;
+    fillRR(40, 690, SW - 80, 70, 35, done ? '#34C759' : '#0A84FF');
+    ctx.globalAlpha = r2;
+    text(done ? '✓  Chega hoje às 8:30' : 'Pedir de novo · R$ 39,90', SW / 2, 726, { size: 20, weight: 700, align: 'center' });
+    ctx.globalAlpha = 1;
+    statusBar('7:04', { dark: true });
+  }, { rot: 0.06, shadow: 0.35 });
+  hand(px + 70, py + 420, 1.0, -0.15, t > 12.85 && t < 13.05 ? 1 : 0);
+  callout('Inteligência Visual', t, 10.8, 16.0, null, true);
+}
+
+function sRain(t) {
+  // 16–22: rua com chuva; bateria de 5 dias
+  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#7D8A99'], [1, '#4B5563']]);
+  ctx.fillRect(0, 0, W, H);
+  const r = rand(5);
+  for (let i = 0; i < 9; i++) {
+    const bw = 160 + r() * 200, bh = 300 + r() * 500, bx = i * 230 - 60;
+    ctx.fillStyle = `rgba(40,48,60,${0.35 + r() * 0.3})`;
+    ctx.fillRect(bx, H - 260 - bh, bw, bh);
+    for (let k = 0; k < 18; k++) {
+      ctx.fillStyle = r() < 0.35 ? 'rgba(255,214,140,0.35)' : 'rgba(200,210,220,0.12)';
+      ctx.fillRect(bx + 20 + (k % 4) * (bw / 4 - 4), H - 240 - bh + 20 + Math.floor(k / 4) * 60, bw / 4 - 30, 34);
+    }
+  }
+  ctx.fillStyle = '#2E3640';
+  ctx.fillRect(0, H - 260, W, 260);
+  // chuva
+  ctx.strokeStyle = 'rgba(220,230,240,0.35)';
+  ctx.lineWidth = 2;
+  const rr2 = rand(9);
+  for (let i = 0; i < 260; i++) {
+    const x0 = rr2() * (W + 300), sp = 900 + rr2() * 500;
+    const y0 = ((rr2() * H + t * sp) % (H + 100)) - 50;
+    ctx.beginPath();
+    ctx.moveTo(x0 - y0 * 0.18, y0);
+    ctx.lineTo(x0 - y0 * 0.18 - 10, y0 + 40);
+    ctx.stroke();
+  }
+  // guarda-chuva
+  ctx.save();
+  ctx.translate(560, 330);
+  ctx.fillStyle = '#1F2937';
+  ctx.beginPath();
+  ctx.arc(0, 0, 330, Math.PI, 0);
+  ctx.quadraticCurveTo(250, -40, 165, 0);
+  ctx.quadraticCurveTo(80, -40, 0, 0);
+  ctx.quadraticCurveTo(-80, -40, -165, 0);
+  ctx.quadraticCurveTo(-250, -40, -330, 0);
+  ctx.fill();
+  ctx.fillRect(-6, 0, 12, 420);
+  ctx.restore();
+  // celular com widgets
+  const k = easeOut(prog(t, 16.0, 16.6));
+  phone(1300, lerp(700, 540, k), 0.92, () => {
+    wallpaper(t, -30);
+    statusBar('7:42', { battery: 0.92 });
+    text('Terça-feira, 22 de outubro', SW / 2, 90, { size: 18, weight: 600, align: 'center', alpha: 0.85 });
+    text('7:42', SW / 2, 160, { size: 96, weight: 600, align: 'center', font: F, spacing: -3 });
+    // widget bateria
+    const b = easeOut(prog(t, 16.8, 18.4));
+    card(26, 260, 160, 160, 1);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.lineWidth = 10;
+    ctx.beginPath(); ctx.arc(106, 330, 46, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#34C759';
+    ctx.beginPath(); ctx.arc(106, 330, 46, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * 0.92 * b); ctx.stroke();
+    text('92%', 106, 332, { size: 22, weight: 700, align: 'center' });
+    text(`${Math.round(lerp(0, 5, b))} dias`, 106, 400, { size: 17, weight: 700, align: 'center', color: '#34C759' });
+    // widget clima
+    card(204, 260, 160, 160, 1);
+    text('☔', 284, 312, { size: 40, align: 'center', font: '"Noto Color Emoji"' });
+    text('A chuva para', 284, 362, { size: 15, weight: 600, align: 'center' });
+    text('em 12 min', 284, 386, { size: 15, weight: 700, align: 'center', color: '#64D2FF' });
+  }, { rot: -0.05, shadow: 0.4 });
+  hand(1370, lerp(1120, 960, k), 1.0, -0.12);
+  callout('Bateria para 5 dias', t, 16.9, 22.0);
+}
+
+function sTunnel(t) {
+  // 22–28: metrô sem sinal; a mensagem sai pelo satélite
+  ctx.fillStyle = '#0B0F17';
+  ctx.fillRect(0, 0, W, H);
+  // luzes do túnel passando
+  for (let i = 0; i < 14; i++) {
+    const x = ((i * 300 - t * 2400) % (W + 600) + W + 600) % (W + 600) - 300;
+    ctx.fillStyle = lin(x, 0, x + 220, 0, [[0, 'rgba(255,190,120,0)'], [0.5, 'rgba(255,190,120,0.55)'], [1, 'rgba(255,190,120,0)']]);
+    ctx.fillRect(x, 180, 220, 14);
+    ctx.fillRect(x - 100, 860, 320, 10);
+  }
+  // janela do vagão
+  ctx.strokeStyle = 'rgba(180,190,210,0.25)';
+  ctx.lineWidth = 30;
+  rr(80, 120, W - 160, 820, 60);
+  ctx.stroke();
+  blob(CX, CY, 700, 'rgba(90,120,200,0.9)', 0.12);
+  const sent = t >= 24.4;
+  const sat = t >= 25.2;
+  phone(CX + 260, CY + 40, 0.98, () => {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, SW, SH);
+    statusBar('8:03', { signal: sat ? 'sat' : 'none' });
+    fillRR(0, 54, SW, 70, 0, 'rgba(30,30,32,0.9)');
+    text('Ana ♥', SW / 2, 92, { size: 20, weight: 700, align: 'center' });
+    fillRR(22, 170, 240, 60, 22, '#262628');
+    text('Já saiu de casa?', 42, 200, { size: 18, weight: 500 });
+    // digitando e enviando
+    const msg = 'Chego em 10 min ❤️';
+    const typed = Math.floor(prog(t, 22.6, 24.2) * msg.length);
+    if (sent) {
+      const k = easeOutBack(prog(t, 24.4, 24.8));
+      ctx.save();
+      ctx.translate(SW - 30, 300);
+      ctx.scale(clamp(k, 0, 1.1), clamp(k, 0, 1.1));
+      fillRR(-230, -30, 230, 60, 22, '#0A84FF');
+      text(msg, -212, 2, { size: 18, weight: 600 });
+      ctx.restore();
+      text(sat ? 'Entregue via satélite' : 'Enviando…', SW - 32, 350, { size: 14, weight: 600, align: 'right', color: sat ? '#34C759' : '#8E8E93' });
+    }
+    fillRR(16, 760, SW - 32, 50, 25, '#1C1C1E');
+    text(sent ? 'iMessage' : msg.slice(0, Math.max(0, typed)), 40, 785, { size: 17, weight: 500, alpha: sent ? 0.4 : 1, color: sent ? '#8E8E93' : '#fff' });
+    if (sat) {
+      // satélite + arcos de sinal
+      const a = prog(t, 25.2, 25.6);
+      card(70, 440, SW - 140, 180, a, 'rgba(28,28,30,0.95)');
+      text('🛰️', SW / 2, 500, { size: 48, align: 'center', alpha: a, font: '"Noto Color Emoji"' });
+      text('Conectado ao satélite', SW / 2, 570, { size: 17, weight: 700, align: 'center', alpha: a });
+    }
+  }, { rot: 0.04, shadow: 0.6 });
+  hand(CX + 330, CY + 520, 1.0, -0.1, t > 24.3 && t < 24.45 ? 1 : 0);
+  callout('Satélite em qualquer lugar', t, 25.0, 28.0, 'Até sem sinal nenhum.');
+}
+
+function sTranslate(t) {
+  // 28–36: chamada com Tóquio, traduzida ao vivo na voz dela
+  ctx.fillStyle = lin(0, 0, 0, H, [[0, '#F5F7FA'], [1, '#E4E8EE']]);
+  ctx.fillRect(0, 0, W, H);
+  fillRR(0, 760, W, 320, 0, '#CBD2DB');
+  // planta e caneca (cenário de escritório)
+  fillRR(300, 600, 120, 160, 14, '#FFFFFF');
+  ctx.fillStyle = '#4F7F5A';
+  for (let i = 0; i < 7; i++) { ctx.beginPath(); ctx.ellipse(360 + Math.cos(i) * 40, 520 + Math.sin(i * 2) * 30, 22, 70, i * 0.5, 0, Math.PI * 2); ctx.fill(); }
+  fillRR(1620, 650, 110, 110, 20, '#2F6FED');
+  // celular no suporte, de pé
+  phone(CX + 40, CY - 10, 0.98, () => {
+    ctx.fillStyle = lin(0, 0, 0, SH, [[0, '#2B2D42'], [1, '#14151F']]);
+    ctx.fillRect(0, 0, SW, SH);
+    statusBar('10:30');
+    // avatar da Yui
+    ctx.fillStyle = '#F2C6A8';
+    ctx.beginPath(); ctx.arc(SW / 2, 230, 92, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#1C1C1C';
+    ctx.beginPath(); ctx.arc(SW / 2, 205, 96, Math.PI * 1.02, Math.PI * 1.98); ctx.fill();
+    ctx.fillRect(SW / 2 - 96, 200, 30, 120); ctx.fillRect(SW / 2 + 66, 200, 30, 120);
+    ctx.fillStyle = '#1C1C1C';
+    ctx.beginPath(); ctx.arc(SW / 2 - 30, 238, 7, 0, Math.PI * 2); ctx.arc(SW / 2 + 30, 238, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#B5654A'; ctx.lineWidth = 4;
+    const talk = Math.abs(Math.sin(t * 14)) * (t > 28.6 && t < 31.6 ? 1 : 0);
+    ctx.beginPath(); ctx.ellipse(SW / 2, 278, 18, 4 + talk * 8, 0, 0, Math.PI * 2); ctx.stroke();
+    text('Yui · Tóquio', SW / 2, 365, { size: 22, weight: 700, align: 'center' });
+    text('10:30 aqui · 22:30 lá', SW / 2, 395, { size: 14, weight: 500, align: 'center', alpha: 0.6 });
+    // onda da voz
+    ctx.fillStyle = '#64D2FF';
+    for (let i = 0; i < 28; i++) {
+      const h = (6 + Math.abs(Math.sin(i * 1.3 + t * 9)) * 34) * (talk > 0 || (t > 32.4 && t < 34.8) ? 1 : 0.15);
+      fillRR(60 + i * 10, 450 - h / 2, 5, h, 3, '#64D2FF');
+    }
+    // legenda original → tradução
+    const jp = life(t, 28.6, 30.4, 0.3, 0.3);
+    card(22, 520, SW - 44, 150, Math.max(jp, prog(t, 30.1, 30.3)), 'rgba(255,255,255,0.1)');
+    text('おはようございます！', 44, 570, { size: 22, weight: 700, font: JP, alpha: jp });
+    text('数字はとても良かったです。', 44, 610, { size: 22, weight: 700, font: JP, alpha: jp });
+    const pt = prog(t, 30.2, 30.6);
+    text('Bom dia! Os números', 44, 570, { size: 24, weight: 700, alpha: pt });
+    text('ficaram ótimos.', 44, 610, { size: 24, weight: 700, alpha: pt });
+    text('Traduzido ao vivo · voz da Yui', 44, 645, { size: 13, weight: 600, alpha: pt * 0.7, color: '#64D2FF' });
+    // a resposta dele
+    const me = prog(t, 32.4, 32.8);
+    card(60, 690, SW - 82, 100, me, '#0A84FF');
+    text('Que notícia boa!', 84, 725, { size: 20, weight: 700, alpha: me });
+    text('素晴らしいニュースです！', 84, 760, { size: 17, weight: 700, font: JP, alpha: prog(t, 33.4, 33.8) * 0.9 });
+  }, { shadow: 0.3 });
+  fillRR(CX - 10, CY + 430, 100, 170, 10, '#9AA3AE');
+  callout('Tradução ao vivo.', t, 29.0, 36.0, 'Na voz de quem fala.', true);
+}
+
+function sCharge(t) {
+  // 36–42: 3% → 100% em um minuto
+  ctx.fillStyle = '#0D0D10';
+  ctx.fillRect(0, 0, W, H);
+  wood(0, 0, W, H, '#2B2420');
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(0, 0, W, H);
+  const plugged = t >= 36.8;
+  const k = easeInOut(prog(t, 37.0, 41.0));
+  const pct = plugged ? Math.round(lerp(3, 100, k)) : 3;
+  blob(CX, CY, 600, pct === 100 ? 'rgba(52,199,89,0.9)' : 'rgba(255,59,48,0.9)', plugged ? 0.25 : 0.15);
+  // cabo
+  const cy = lerp(H + 200, CY + 405, easeOut(prog(t, 36.2, 36.8)));
+  fillRR(CX - 18, cy, 36, 600, 10, '#EDEDED');
+  fillRR(CX - 26, cy - 40, 52, 70, 14, '#F5F5F5');
+  phone(CX, CY - 40, 0.98, () => {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, SW, SH);
+    statusBar('14:12', { battery: pct / 100 });
+    const color = pct < 20 ? '#FF3B30' : pct < 100 ? '#FFD60A' : '#34C759';
+    ctx.lineWidth = 22;
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+    ctx.beginPath(); ctx.arc(SW / 2, 380, 130, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(SW / 2, 380, 130, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * pct / 100); ctx.stroke();
+    text(`${pct}%`, SW / 2, 385, { size: 72, weight: 700, align: 'center', font: F, color });
+    const secs = plugged ? Math.max(0, Math.round(60 * (1 - k))) : 60;
+    text(plugged ? (pct === 100 ? 'Carregado' : `Completo em 0:${String(secs).padStart(2, '0')}`) : 'Bateria fraca', SW / 2, 570, { size: 22, weight: 600, align: 'center', alpha: 0.85 });
+  }, { shadow: 0.6 });
+  callout('Carga completa em 1 minuto', t, 37.2, 42.0);
+}
+
+function sStage(t) {
+  // 42–50: a apresentação da filha, filmada no escuro
+  ctx.fillStyle = '#050508';
+  ctx.fillRect(0, 0, W, H);
+  // palco distante, quase no escuro
+  const stage = (dark) => {
+    ctx.fillStyle = dark ? '#100C0A' : '#6B3E23';
+    ctx.fillRect(0, 0, W, 560);
+    ctx.fillStyle = dark ? '#1A1210' : '#C68B59';
+    ctx.fillRect(0, 560, W, 160);
+    blob(CX, 520, 420, dark ? 'rgba(255,200,140,0.5)' : 'rgba(255,230,180,1)', dark ? 0.35 : 0.9);
+    // a menina dançando
+    const sway = Math.sin(t * 3.2) * 0.3;
+    ctx.save();
+    ctx.translate(CX, 600);
+    ctx.fillStyle = dark ? '#2A1E1A' : '#F06292';
+    ctx.beginPath();
+    ctx.moveTo(-70, 0); ctx.lineTo(70, 0); ctx.lineTo(20, -150); ctx.lineTo(-20, -150); ctx.fill();
+    ctx.fillStyle = dark ? '#2A1E1A' : '#F2C6A8';
+    ctx.beginPath(); ctx.arc(0, -190, 36, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = dark ? '#2A1E1A' : '#F2C6A8';
+    ctx.lineWidth = 14; ctx.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(side * 16, -140);
+      ctx.lineTo(side * 80, -200 + Math.sin(t * 3.2 + side) * 40);
+      ctx.stroke();
+    }
+    ctx.rotate(sway);
+    ctx.restore();
+  };
+  ctx.save();
+  ctx.filter = 'blur(6px) brightness(0.5)';
+  stage(true);
+  ctx.restore();
+  // fileira de cabeças da plateia
+  ctx.fillStyle = '#0A0A0E';
+  for (let i = 0; i < 12; i++) { ctx.beginPath(); ctx.arc(80 + i * 170, 980, 95, 0, Math.PI * 2); ctx.fill(); }
+  // celular gravando: a tela mostra a cena clara e nítida
+  const k = easeOut(prog(t, 42.0, 42.8));
+  phone(CX + 120, lerp(1300, 600, k), 0.95, () => {
+    ctx.save();
+    ctx.translate(SW / 2, SH / 2);
+    ctx.rotate(0);
+    ctx.scale(0.42, 0.42);
+    ctx.translate(-CX, -420);
+    stage(false);
+    ctx.restore();
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(0, 0, SW, 110);
+    ctx.fillRect(0, SH - 150, SW, 150);
+    const rec = Math.floor(t * 2) % 2;
+    ctx.fillStyle = '#FF3B30';
+    ctx.beginPath(); ctx.arc(SW / 2 - 70, 80, 7 * (rec ? 1 : 0.6), 0, Math.PI * 2); ctx.fill();
+    text(`00:0${Math.min(9, Math.floor(prog(t, 42.8, 50) * 8))}:${String(Math.floor((t * 10) % 60)).padStart(2, '0')}`, SW / 2 + 10, 80, { size: 18, weight: 600, align: 'center' });
+    fillRR(SW / 2 - 92, 120, 184, 34, 17, 'rgba(255,214,10,0.9)');
+    text('CINEMA NOTURNO', SW / 2, 138, { size: 13, weight: 800, align: 'center', color: '#111', spacing: 1 });
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(SW / 2, SH - 75, 36, 0, Math.PI * 2); ctx.stroke();
+    fillRR(SW / 2 - 16, SH - 91, 32, 32, 6, '#FF3B30');
+  }, { shadow: 0.6 });
+  hand(CX + 200, lerp(1700, 1020, k), 1.0, -0.1);
+  callout('Cinema Noturno', t, 43.0, 50.0, 'Para os momentos que só acontecem uma vez.');
+}
+
+function sNight(t) {
+  // 50–55: de volta à cabeceira; foco Dormir; alarme para amanhã
+  wood(0, 0, W, H, '#3A2618');
+  ctx.fillStyle = 'rgba(5,10,40,0.7)';
+  ctx.fillRect(0, 0, W, H);
+  const dim = lerp(1, 0.25, prog(t, 52.5, 55));
+  const k = easeOut(prog(t, 50.0, 50.8));
+  blob(CX + 80, CY, 600, 'rgba(120,140,255,0.9)', 0.25 * dim);
+  phone(CX + 80, lerp(CY - 160, CY, k), 1.05, () => {
+    ctx.fillStyle = lin(0, 0, 0, SH, [[0, '#0B1030'], [1, '#1C1446']]);
+    ctx.fillRect(0, 0, SW, SH);
+    statusBar('22:41');
+    lockTime('22:41', 'Terça-feira, 22 de outubro');
+    card(70, 280, SW - 140, 64, 1);
+    text('🌙', 104, 312, { size: 24, font: '"Noto Color Emoji"' });
+    text('Dormir', 140, 313, { size: 20, weight: 700 });
+    card(22, 640, SW - 44, 96, prog(t, 51.2, 51.6));
+    text('⏰', 50, 688, { size: 28, font: '"Noto Color Emoji"', alpha: prog(t, 51.2, 51.6) });
+    text('Alarme · amanhã, 6:47', 96, 676, { size: 18, weight: 700, alpha: prog(t, 51.2, 51.6) });
+    text('No seu sono leve, entre 6:30 e 6:47', 96, 704, { size: 14, weight: 500, alpha: prog(t, 51.2, 51.6) * 0.7 });
+  }, { rot: -0.12, on: dim, shadow: 0.6 });
+  ctx.fillStyle = `rgba(0,0,0,${prog(t, 54, 55)})`;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function sEnd(t) {
+  // 55–60: assinatura
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  const out = 1 - prog(t, 59.2, 60);
+  text('iPhone 30', CX, CY - 30, { size: 150, weight: 600, font: F, align: 'center', spacing: -4, alpha: prog(t, 55.3, 56.0) * out });
+  text('Feito para o seu dia.', CX, CY + 90, { size: 46, weight: 500, align: 'center', alpha: prog(t, 56.4, 57.0) * out, color: '#D1D1D6' });
+  text('Filme-conceito de fã. Não afiliado nem endossado pela Apple Inc. iPhone é marca registrada da Apple Inc. Recursos fictícios.', CX, H - 70, { size: 20, weight: 500, align: 'center', alpha: prog(t, 57.2, 57.7) * out, color: '#6E6E73' });
+}
+
+const SCENES = [
+  [0, 3, sAlarm], [3, 6, sMorning], [6, 10, sDrop], [10, 16, sCoffee], [16, 22, sRain], [22, 28, sTunnel],
+  [28, 36, sTranslate], [36, 42, sCharge], [42, 50, sStage], [50, 55, sNight], [55, 60.1, sEnd],
+];
+
+window.DURATION = 60;
+window.STILLS = [1.0, 2.8, 4.2, 5.2, 7.3, 8.3, 9.2, 11.6, 13.4, 18.5, 20.5, 23.6, 25.8, 29.5, 31.0, 33.6, 36.5, 39.0, 41.5, 44.5, 48.0, 51.8, 56.0, 58.0];
+window.render = function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.filter = 'none';
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  for (const [a, b, fn] of SCENES) if (t >= a && t < b) {
+    ctx.save();
+    fn(t);
+    ctx.restore();
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  // cortes com um "piscar" mínimo de 2 quadros, como num corte seco de montagem
+  grain(t);
+};
+
+if (!location.search.includes('render')) {
+  document.fonts.ready.then(() => {
+    const t0 = performance.now();
+    const loop = () => {
+      render(((performance.now() - t0) / 1000) % window.DURATION);
+      requestAnimationFrame(loop);
+    };
+    loop();
+  });
+}
+</script>
+</body>
+</html>
