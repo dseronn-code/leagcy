@@ -64,6 +64,8 @@ Passes por frame: `Sky LUT (compute) → Forward HDR + ray queries → Céu → 
 
 ## Roadmap
 
+Comparação detalhada com o motor do GTA 6: [docs/gta6-analise.md](docs/gta6-analise.md).
+
 Em ordem: cada etapa destrava a próxima.
 
 1. **Denoiser + TAA**: reprojeção temporal com motion vectors e um filtro estilo SVGF/ReLAX. Tira o ruído em movimento.
