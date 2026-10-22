@@ -1,0 +1,15 @@
+#version 460
+// Acumulação progressiva: média móvel das amostras enquanto a câmera está parada.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, rgba16f) uniform readonly image2D hdrIn;
+layout(set = 0, binding = 1, rgba32f) uniform image2D accum;
+layout(push_constant) uniform Push { uint accumFrame; float exposure; uint manualSrgb; uint pad; } pc;
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, imageSize(accum)))) return;
+  vec3 c = imageLoad(hdrIn, id).rgb;
+  if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+  vec3 prev = pc.accumFrame == 0u ? c : imageLoad(accum, id).rgb;
+  imageStore(accum, id, vec4(mix(prev, c, 1.0 / float(pc.accumFrame + 1u)), 1.0));
+}
