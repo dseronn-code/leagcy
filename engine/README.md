@@ -1,6 +1,20 @@
 # Legacy Engine
 
-Motor gráfico em **C++20 + Vulkan 1.3** com **ray tracing em tempo real**, feito para chegar no nível visual de RDR2 / GTA 6 / Cyberpunk 2077.
+Motor gráfico em **C++20 + Vulkan 1.3** com **ray tracing em tempo real**.
+
+## Meta
+
+Um motor gráfico **completo e de ponta**. A régua tem dois níveis:
+
+1. **Piso obrigatório:** tudo o que o motor gráfico da Rockstar faz no GTA 6, o Legacy faz igual ou melhor —
+   se um estúdio fizesse um jogo desse porte com o Legacy, o resultado seria equivalente ou superior.
+2. **Objetivo:** ir além — recursos que nenhum motor do mercado tem juntos, todos com qualidade de ponta.
+
+Escopo: o motor gráfico (tudo o que é desenhado na tela). Prioridade absoluta: qualidade.
+
+![Dia 3 — carro com faróis, personagens animados e luzes em movimento](docs/screenshots/dia03_carro.png)
+
+Vídeos (Dia 3): [Sponza à noite com personagens](docs/videos/dia03_sponza_noite.mp4) · [cena externa com carro](docs/videos/dia03_externa.mp4)
 
 ![Dia 2 — Sponza à noite com 512 luzes (ReSTIR)](docs/screenshots/dia02_sponza_noite.png)
 
@@ -18,6 +32,8 @@ Motor gráfico em **C++20 + Vulkan 1.3** com **ray tracing em tempo real**, feit
 | RHI Vulkan moderno | Dynamic rendering, synchronization2, push descriptors, texturas bindless, VMA | `src/rhi/` |
 | Assets | glTF 2.0 (cgltf), texturas JPG/PNG com mipmaps gerados na GPU, normal maps | `src/scene/gltf_loader.cpp` |
 | Renderização | Deferred: G-buffer + iluminação em compute | `src/renderer/` |
+| Cena dinâmica | Transformações por frame, vetores de movimento por objeto, TLAS reconstruído na GPU, luzes móveis | `src/renderer/renderer.cpp` |
+| Animação esquelética | Esqueletos e clipes glTF, skinning em compute, refit de BLAS (sombras/reflexos seguem a pose) | `shaders/skinning.comp` |
 | Ray tracing | BLAS/TLAS + `VK_KHR_ray_query`, com teste de alfa (folhagem, grades) | `shaders/raytracing.glsl` |
 | Sombras | Traçadas por raio, penumbra física (sol e luzes) | `shaders/lighting.glsl` |
 | Milhares de luzes | **ReSTIR DI**: RIS + reuso temporal e espacial + visibilidade | `shaders/restir*.glsl` |
@@ -32,7 +48,7 @@ Motor gráfico em **C++20 + Vulkan 1.3** com **ray tracing em tempo real**, feit
 Pipeline de um frame:
 
 ```
-Sky LUT → G-buffer → ReSTIR temporal → ReSTIR espacial → Iluminação RT (difuso | especular)
+Cena dinâmica (skinning, refit BLAS, TLAS) → Sky LUT → G-buffer → ReSTIR temporal → ReSTIR espacial → Iluminação RT (difuso | especular)
 → SVGF temporal → à-trous ×4 / ×2 → Composição (céu, névoa) → TAAU
 → Auto-exposição → DOF → Motion blur → Bloom → Tonemap ACES
 ```
@@ -44,7 +60,7 @@ VMA, GLM, GLFW, cgltf e stb são baixados automaticamente.
 
 ```bash
 cd engine
-cmake -P tools/fetch_assets.cmake   # baixa Sponza e DamagedHelmet (~55 MB, uma vez só)
+cmake -P tools/fetch_assets.cmake   # baixa Sponza, DamagedHelmet, Fox e CesiumMan (~57 MB, uma vez só)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j
 ```
@@ -75,7 +91,8 @@ Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sob
 - Texturas sobem para a GPU sem compressão (BC7 pendente), então cenas grandes usam bastante VRAM.
 - Materiais com transparência (`BLEND`) são tratados como recorte por alfa.
 - Sem ray tracing (`--no-rt`) não há sombras; shadow maps em cascata entram depois.
-- Objetos são estáticos (TLAS construído uma vez); cena dinâmica é o próximo passo.
+- Animação: morph targets ainda não suportados; interpolação CUBICSPLINE usa só os valores-chave.
+- Cada personagem tem sua própria cópia da malha deformável (multidões instanciadas vêm depois).
 - Desempenho ainda não foi medido em GPU real (desenvolvido e validado com o driver por software lavapipe).
 
 ## Arquitetura
@@ -96,7 +113,7 @@ Comparação detalhada com o motor do GTA 6: [docs/gta6-analise.md](docs/gta6-an
 
 - [x] **Dia 1**: RHI Vulkan, ray tracing, PBR, atmosfera física
 - [x] **Dia 2**: denoiser + TAAU, glTF e texturas, pós-processamento de cinema, ReSTIR DI (milhares de luzes)
-- [ ] Cena dinâmica: TLAS por frame, skinning de personagens, motion vectors por objeto
+- [x] **Dia 3**: cena dinâmica (TLAS por frame, vetores de movimento por objeto, luzes móveis), animação esquelética na GPU
 - [ ] Escala de mundo aberto: GPU-driven rendering, culling, LOD, streaming
 - [ ] Atmosfera viva: nuvens volumétricas, clima, chuva e superfícies molhadas
 - [ ] Água: oceano FFT, rios, espuma, cena subaquática

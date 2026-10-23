@@ -128,6 +128,7 @@ int runHeadless(const Options& opt) {
     bool last = f + 1 == opt.frames;
     bool save = last || (opt.saveEvery && (f + 1) % opt.saveEvery == 0);
     if (opt.move != 0.0f) camera.position += moveDir * (opt.move * dt);
+    scene.update(dt);
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
       r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view, dt);
       if (!save) return;
@@ -286,6 +287,8 @@ int runWindowed(const Options& opt) {
     toggle(GLFW_KEY_F, fDown, r.settings.depthOfField);
     toggle(GLFW_KEY_M, mDown, r.settings.motionBlur);
     (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
+
+    scene.update(glm::clamp(dt, 0.0f, 0.1f));
 
     // ---- Frame ----
     FrameSync& f = frames[slot];

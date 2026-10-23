@@ -1,6 +1,6 @@
 # O que tem no motor do GTA 6 e o que falta no Legacy Engine
 
-Pesquisa de 22/10/2026, status atualizado no Dia 2. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Series).
+Pesquisa de 22/10/2026, status atualizado no Dia 3. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Series).
 
 **Sobre as fontes:** a Rockstar quase não publica detalhes técnicos do RAGE. O nome "RAGE 9" aparece só em blogs de fãs. O que existe de mais confiável é a análise da Digital Foundry sobre o Trailer 2 (capturado em um PS5 comum). O resto da lista vem do que já se sabe do GTA V e do RDR2, de patentes da Take-Two e do que todo mundo aberto AAA precisa.
 
@@ -56,7 +56,7 @@ Pesquisa de 22/10/2026, status atualizado no Dia 2. O GTA 6 está previsto para 
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| Skinning (esqueleto) | ❌ | Pré-requisito de qualquer personagem |
+| Skinning (esqueleto) | ✅ | Skinning em compute + refit de BLAS (Dia 3) |
 | Pele com subsurface scattering, olhos | ❌ | |
 | Cabelo por fios | ❌ | |
 | Tecido simulado | ❌ | |
@@ -72,7 +72,19 @@ Pesquisa de 22/10/2026, status atualizado no Dia 2. O GTA 6 está previsto para 
 | Vegetação instanciada com vento | ❌ | |
 | Terreno grande (clipmaps) | 🟡 | Temos terreno procedural de tamanho fixo |
 | Partículas e VFX (fogo, fumaça, explosões) | ❌ | |
-| Ray tracing com geometria dinâmica (carros e pessoas se movendo) | ❌ | Hoje o TLAS é estático |
+| Ray tracing com geometria dinâmica (carros e pessoas se movendo) | ✅ | TLAS por frame, BLAS deformáveis (Dia 3) |
+
+## Além do RAGE: diferenciais planejados
+
+Paridade é o piso. Estes recursos dariam ao Legacy vantagem sobre o motor do GTA 6:
+
+- **Modo path tracing completo** (como o RT Overdrive do Cyberpunk), alternável em tempo real com o modo híbrido.
+- **ReSTIR GI + cache de radiância neural**: iluminação global multi-rebote com custo de 1 rebote.
+- **Geometria virtualizada** (estilo Nanite): bilhões de triângulos sem LOD manual.
+- **Gaussian splatting** integrado à cena com ray tracing: capturas fotorreais do mundo real como asset.
+- **Nuvens, neblina e fumaça volumétricas com ray tracing**: sombras e luz atravessando o volume.
+- **Câmera física completa**: abertura, ISO, obturador e bokeh com formato de lâmina real.
+- **Modo foto de cinema**: path tracing com acumulação para screenshots de qualidade de render offline.
 
 ## Além do gráfico
 

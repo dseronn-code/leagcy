@@ -1,0 +1,47 @@
+#version 460
+// Skinning na GPU (linear blend skinning): deforma a malha de repouso pelas matrizes das juntas.
+// A saída alimenta o G-buffer e o refit da BLAS — sombras e reflexos seguem a animação.
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 64) in;
+
+layout(buffer_reference, scalar) readonly buffer RestVertices { float v[]; };  // 12 floats por vértice
+layout(buffer_reference, scalar) writeonly buffer OutVertices { float v[]; };
+struct SkinVertex { uvec4 joints; vec4 weights; };
+layout(buffer_reference, scalar) readonly buffer SkinData { SkinVertex s[]; };
+layout(buffer_reference, scalar) readonly buffer Joints { mat4 m[]; };
+
+layout(push_constant) uniform Push {
+  uint64_t rest;
+  uint64_t skin;
+  uint64_t joints;
+  uint64_t out_;
+  uint vertexCount;
+} pc;
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  if (i >= pc.vertexCount) return;
+  RestVertices rv = RestVertices(pc.rest);
+  OutVertices ov = OutVertices(pc.out_);
+  SkinVertex sv = SkinData(pc.skin).s[i];
+  Joints J = Joints(pc.joints);
+  mat4 M = J.m[sv.joints.x] * sv.weights.x + J.m[sv.joints.y] * sv.weights.y +
+           J.m[sv.joints.z] * sv.weights.z + J.m[sv.joints.w] * sv.weights.w;
+
+  uint b = i * 12u;
+  vec3 p = vec3(rv.v[b], rv.v[b + 1u], rv.v[b + 2u]);
+  vec3 n = vec3(rv.v[b + 3u], rv.v[b + 4u], rv.v[b + 5u]);
+  vec4 t = vec4(rv.v[b + 8u], rv.v[b + 9u], rv.v[b + 10u], rv.v[b + 11u]);
+  p = (M * vec4(p, 1.0)).xyz;
+  mat3 N = mat3(M);  // juntas sem escala não uniforme
+  n = normalize(N * n);
+  t.xyz = normalize(N * t.xyz);
+
+  ov.v[b] = p.x; ov.v[b + 1u] = p.y; ov.v[b + 2u] = p.z;
+  ov.v[b + 3u] = n.x; ov.v[b + 4u] = n.y; ov.v[b + 5u] = n.z;
+  ov.v[b + 6u] = rv.v[b + 6u]; ov.v[b + 7u] = rv.v[b + 7u];
+  ov.v[b + 8u] = t.x; ov.v[b + 9u] = t.y; ov.v[b + 10u] = t.z; ov.v[b + 11u] = t.w;
+}

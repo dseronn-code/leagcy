@@ -66,6 +66,8 @@ class Renderer {
   void createTargets();
   void destroyTargets();
   void writeGlobalDescriptors();
+  // Transformações, skinning, refit das BLAS e reconstrução do TLAS para este frame.
+  void updateDynamicScene(VkCommandBuffer cmd, uint32_t slot);
 
   rhi::Context* ctx_ = nullptr;
   scene::Scene* scene_ = nullptr;
@@ -75,13 +77,14 @@ class Renderer {
 
   rhi::Image skyLut_;
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
-  std::array<rhi::Buffer, kFramesInFlight> frameUbo_;
+  std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_;
   rhi::Buffer histogram_, exposureState_;
 
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
   VkDescriptorSetLayout globalLayout_ = VK_NULL_HANDLE;
   std::array<VkDescriptorSet, kFramesInFlight> globalSets_{};
 
+  rhi::ComputePass skinningPass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
   rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_;
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;

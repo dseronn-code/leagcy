@@ -31,8 +31,16 @@ struct FrameUniforms {
 static_assert(sizeof(FrameUniforms) == 512);
 
 struct GBufferPush {
-  glm::mat4 model;
+  uint32_t object;
   uint32_t material;
+};
+// Espelha ObjectData em shaders/scene.glsl.
+struct ObjectGpu {
+  glm::mat4 model, prevModel;
+};
+struct SkinningPush {
+  uint64_t rest, skin, joints, out;
+  uint32_t vertexCount, pad;
 };
 struct AtrousPush {
   int32_t stepSize;
@@ -121,8 +129,16 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   skySampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
   textureSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, true, 8.0f);
   skyLut_ = rhi::createImage2D(ctx, kSkyLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-  for (auto& b : frameUbo_)
-    b = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+  for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+    frameUbo_[i] = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    objectBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.objects.size()) * sizeof(ObjectGpu),
+                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    lightBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.lights.size()) * sizeof(scene::PointLight),
+                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    jointBuffers_[i] = rhi::createBuffer(ctx, std::max<VkDeviceSize>(1, scene.totalJoints) * sizeof(glm::mat4),
+                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                         rhi::MemoryUsage::CpuToGpu);
+  }
   std::vector<uint32_t> zeros(kHistogramBins, 0);
   histogram_ = rhi::createBufferWithData(ctx, zeros.data(), zeros.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
   glm::vec4 exposureInit(1.0f, -1.0f, 0.0f, 0.0f);
@@ -136,6 +152,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {3, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {4, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {5, CIS, kMaxTextures, VK_SHADER_STAGE_ALL, nullptr},
+      {7, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -152,7 +169,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (1 + kMaxTextures)},
-      {SB, kFramesInFlight * 3},
+      {SB, kFramesInFlight * 4},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -172,6 +189,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   // ---- Passes ----
   VkDescriptorSetLayout g = globalLayout_;
   const bool rt = ctx.rayTracing;
+  skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SB, SB});
   restirSpatialPass_.init(ctx, "restir_spatial.comp", g, {CIS, CIS, CIS, SB, SB});
@@ -192,12 +210,15 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   gb.vertexShader = "gbuffer.vert";
   gb.fragmentShader = "gbuffer.frag";
   gb.layout = gbufferLayout_.pipelineLayout;
-  gb.vertexBindings = {{0, sizeof(scene::Vertex), VK_VERTEX_INPUT_RATE_VERTEX}};
+  // Binding 1: vértices do frame anterior (só a posição é lida) para o movimento de malhas deformáveis.
+  gb.vertexBindings = {{0, sizeof(scene::Vertex), VK_VERTEX_INPUT_RATE_VERTEX},
+                       {1, sizeof(scene::Vertex), VK_VERTEX_INPUT_RATE_VERTEX}};
   gb.vertexAttributes = {
       {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(scene::Vertex, position)},
       {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(scene::Vertex, normal)},
       {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(scene::Vertex, uv)},
       {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(scene::Vertex, tangent)},
+      {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(scene::Vertex, position)},
   };
   gb.colorFormats = {kAlbedoFormat, kHdrFormat, kMotionFormat, kHdrFormat};
   gb.depthFormat = kDepthFormat;
@@ -232,7 +253,8 @@ void Renderer::writeGlobalDescriptors() {
     VkDescriptorImageInfo lut{skySampler_, skyLut_.view, VK_IMAGE_LAYOUT_GENERAL};
     VkDescriptorBufferInfo bufs[3] = {{s.materialBuffer.handle, 0, VK_WHOLE_SIZE},
                                       {s.instanceBuffer.handle, 0, VK_WHOLE_SIZE},
-                                      {s.lightBuffer.handle, 0, VK_WHOLE_SIZE}};
+                                      {lightBuffers_[i].handle, 0, VK_WHOLE_SIZE}};
+    VkDescriptorBufferInfo objs{objectBuffers_[i].handle, 0, VK_WHOLE_SIZE};
     std::vector<VkWriteDescriptorSet> w;
     auto add = [&](uint32_t binding, VkDescriptorType type, uint32_t count) -> VkWriteDescriptorSet& {
       VkWriteDescriptorSet x{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -246,11 +268,12 @@ void Renderer::writeGlobalDescriptors() {
     add(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1).pBufferInfo = &ubo;
     add(1, CIS, 1).pImageInfo = &lut;
     for (uint32_t b = 0; b < 3; ++b) add(2 + b, SB, 1).pBufferInfo = &bufs[b];
+    add(7, SB, 1).pBufferInfo = &objs;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
       asw.accelerationStructureCount = 1;
-      asw.pAccelerationStructures = &s.tlas.handle;
+      asw.pAccelerationStructures = &s.tlas.tlas.handle;
       add(6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1).pNext = &asw;
     }
     vkUpdateDescriptorSets(ctx_->device, uint32_t(w.size()), w.data(), 0, nullptr);
@@ -368,6 +391,10 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   barrier();  // ordena contra o frame anterior (mesmos alvos)
 
+  // ---- 0. Cena dinâmica ----
+  updateDynamicScene(cmd, slot);
+  barrier();
+
   // ---- 1. Atmosfera ----
   skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view)}, kSkyLutExtent);
   barrier();
@@ -392,12 +419,14 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     setViewport(cmd, R);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferPipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
-    for (const auto& o : scene_->objects) {
+    for (uint32_t i = 0; i < scene_->objects.size(); ++i) {
+      const auto& o = scene_->objects[i];
       const auto& m = scene_->meshes[o.mesh];
-      GBufferPush p{o.transform, o.material};
+      GBufferPush p{i, o.material};
       vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
-      VkDeviceSize offset = 0;
-      vkCmdBindVertexBuffers(cmd, 0, 1, &m.vertices.handle, &offset);
+      VkBuffer vbs[2] = {m.vertices.handle, m.skinned ? m.prevVertices.handle : m.vertices.handle};
+      VkDeviceSize offsets[2] = {0, 0};
+      vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
       vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
       vkCmdDrawIndexed(cmd, m.indexCount, 1, 0, 0, 0);
     }
@@ -525,6 +554,70 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   ++frameIndex_;
 }
 
+void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
+  scene::Scene& s = *scene_;
+  rhi::Context& ctx = *ctx_;
+
+  // Transformações atual e anterior de cada objeto (vetores de movimento por objeto).
+  auto* objs = static_cast<ObjectGpu*>(objectBuffers_[slot].mapped);
+  for (size_t i = 0; i < s.objects.size(); ++i)
+    objs[i] = {s.objects[i].transform, historyValid_ ? s.objects[i].prevTransform : s.objects[i].transform};
+  vmaFlushAllocation(ctx.allocator, objectBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+
+  // Luzes (podem se mover: faróis, tochas carregadas, etc.).
+  if (!s.lights.empty()) {
+    std::memcpy(lightBuffers_[slot].mapped, s.lights.data(), s.lights.size() * sizeof(scene::PointLight));
+    vmaFlushAllocation(ctx.allocator, lightBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+  }
+
+  // Matrizes das juntas de todos os esqueletos.
+  auto* joints = static_cast<glm::mat4*>(jointBuffers_[slot].mapped);
+  bool anySkinned = false;
+  for (const auto& m : s.meshes) {
+    if (!m.skinned) continue;
+    anySkinned = true;
+    const auto& src = s.models[size_t(m.skinModel)].jointMatrices[size_t(m.skin)];
+    std::copy(src.begin(), src.end(), joints + m.jointOffset);
+  }
+  vmaFlushAllocation(ctx.allocator, jointBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+
+  if (anySkinned) {
+    // Guarda a pose anterior antes de sobrescrever (para os vetores de movimento da deformação).
+    if (historyValid_) {
+      for (const auto& m : s.meshes) {
+        if (!m.skinned) continue;
+        VkBufferCopy region{0, 0, m.vertices.size};
+        vkCmdCopyBuffer(cmd, m.vertices.handle, m.prevVertices.handle, 1, &region);
+      }
+      rhi::memoryBarrier(cmd);
+    }
+    for (const auto& m : s.meshes) {
+      if (!m.skinned) continue;
+      SkinningPush p{m.restVertices.address, m.skinData.address,
+                     jointBuffers_[slot].address + VkDeviceAddress(m.jointOffset) * sizeof(glm::mat4), m.vertices.address,
+                     m.vertexCount, 0};
+      skinningPass_.dispatchGroups(cmd, globalSets_[slot], {}, (m.vertexCount + 63) / 64, 1, &p);
+    }
+    rhi::memoryBarrier(cmd);
+    if (!historyValid_) {  // primeiro frame: anterior = atual
+      for (const auto& m : s.meshes) {
+        if (!m.skinned) continue;
+        VkBufferCopy region{0, 0, m.vertices.size};
+        vkCmdCopyBuffer(cmd, m.vertices.handle, m.prevVertices.handle, 1, &region);
+      }
+    }
+    if (ctx.rayTracing) {
+      for (auto& m : s.meshes) {
+        if (!m.skinned) continue;
+        rhi::BlasInput in{m.vertices.address, m.vertexCount, sizeof(scene::Vertex), m.indices.address, m.indexCount};
+        rhi::recordBlasUpdate(ctx, cmd, m.blas, in, rhi::alignScratch(ctx, s.skinScratch.address + m.updateScratchOffset));
+      }
+      rhi::memoryBarrier(cmd);
+    }
+  }
+  if (ctx.rayTracing) s.tlas.record(cmd, slot, s.tlasInstances());
+}
+
 void Renderer::destroy() {
   if (!ctx_) return;
   rhi::Context& ctx = *ctx_;
@@ -532,10 +625,11 @@ void Renderer::destroy() {
   destroyTargets();
   rhi::destroyImage(ctx, skyLut_);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
-  for (auto& b : frameUbo_) rhi::destroyBuffer(ctx, b);
+  for (auto* arr : {&frameUbo_, &objectBuffers_, &jointBuffers_, &lightBuffers_})
+    for (auto& b : *arr) rhi::destroyBuffer(ctx, b);
   rhi::destroyBuffer(ctx, histogram_);
   rhi::destroyBuffer(ctx, exposureState_);
-  for (rhi::ComputePass* p : {&skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&skinningPass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
