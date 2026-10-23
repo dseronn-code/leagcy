@@ -44,26 +44,40 @@ void main() {
   if (any(greaterThanEqual(id, ivec2(frame.outputSize.xy)))) return;
   vec2 uv = (vec2(id) + 0.5) * frame.outputSize.zw;
 
-  // Cor atual "sem jitter": o pixel interno em u mostra o ponto que, sem jitter, estaria em u - jitter.
+  // Posição do centro deste pixel de saída no frame interno, já sem o jitter (o pixel interno em u mostra o
+  // ponto que, sem jitter, estaria em u - jitter).
   vec2 renderUv = uv + frame.jitter.xy;
-  vec3 current = textureLod(sceneColor, renderUv, 0.0).rgb;
-
-  // Vizinhança 3x3 na resolução interna: limites para o histórico + pixel mais próximo (dilatação).
-  ivec2 rp = ivec2(renderUv * frame.renderSize.xy);
+  vec2 renderPos = renderUv * frame.renderSize.xy - 0.5;  // coordenada contínua: o pixel q tem centro em q
+  ivec2 rp = ivec2(floor(renderPos + 0.5));
   ivec2 maxP = ivec2(frame.renderSize.xy) - 1;
-  vec3 m1 = vec3(0.0), m2 = vec3(0.0);
+
+  // Reconstrução da amostra atual por kernel (Karis, "High Quality Temporal Supersampling", 2014): os 3x3
+  // pixels internos vizinhos pesados por Blackman-Harris (aprox. gaussiana) da distância até o centro do pixel
+  // de saída — no lugar da leitura bilinear, que borrava a imagem a cada frame. Peso extra 1/(1+L) para um
+  // ponto muito brilhante não dominar (vagalumes). A mesma vizinhança dá os limites do histórico e o pixel mais
+  // próximo (vetor de movimento dilatado).
+  vec3 m1 = vec3(0.0), m2 = vec3(0.0), sum = vec3(0.0);
+  float wsum = 0.0, wmax = 0.0;
   float closest = -1.0;
   ivec2 closestP = clamp(rp, ivec2(0), maxP);
   for (int y = -1; y <= 1; ++y) {
     for (int x = -1; x <= 1; ++x) {
       ivec2 q = clamp(rp + ivec2(x, y), ivec2(0), maxP);
-      vec3 c = rgbToYCoCg(texelFetch(sceneColor, q, 0).rgb);
+      vec3 rgb = texelFetch(sceneColor, q, 0).rgb;
+      vec3 c = rgbToYCoCg(rgb);
       m1 += c;
       m2 += c * c;
+      vec2 dq = vec2(rp + ivec2(x, y)) - renderPos;  // em pixels internos
+      float w = exp(-2.29 * dot(dq, dq));           // Blackman-Harris de raio ~1,5 px
+      wmax = max(wmax, w);
+      w /= 1.0 + luminance(rgb);
+      sum += rgb * w;
+      wsum += w;
       float d = texelFetch(gDepth, q, 0).r;
       if (d > closest) { closest = d; closestP = q; }  // reverse-Z: maior = mais perto
     }
   }
+  vec3 current = sum / max(wsum, 1e-8);
   vec3 mean = m1 / 9.0;
   vec3 sigma = sqrt(max(m2 / 9.0 - mean * mean, 0.0));
 
@@ -79,10 +93,8 @@ void main() {
     if (maxRel > 1.0) h = center + (h - center) / maxRel;
     vec3 hist = yCoCgToRgb(h);
 
-    // Upscaling: confia mais na amostra atual quando ela cai perto do centro do pixel de saída.
-    vec2 texelDist = abs(fract(renderUv * frame.renderSize.xy) - 0.5) * frame.outputSize.xy * frame.renderSize.zw;
-    float proximity = exp(-2.0 * dot(texelDist, texelDist));
-    float alpha = mix(0.04, 0.15, proximity);
+    // Upscaling: confia mais no frame atual quando alguma amostra caiu perto do centro do pixel de saída.
+    float alpha = mix(0.04, 0.15, wmax);
     // Pesos por luminância (Karis): evita que pontos muito brilhantes cintilem.
     float wc = alpha / (1.0 + luminance(current));
     float wh = (1.0 - alpha) / (1.0 + luminance(hist));
