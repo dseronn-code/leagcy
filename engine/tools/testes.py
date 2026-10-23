@@ -53,9 +53,11 @@ def teste_validacao(binario, tmp, rapido):
 
 def teste_fornalha(binario, tmp, rapido):
     """Fornalha branca: esferas brancas sob céu uniforme devem ter o brilho do fundo (0,93–1,03)."""
+    # Teste de energia, não de velocidade: 96 frames deixam convergir o metal de rugosidade 1 (o sinal mais
+    # ruidoso), que o NRD acumula devagar por causa do clamp estatístico do histórico (0,925 em 48 → 0,937 em 96).
     img = os.path.join(tmp, 'fornalha.png')
     rodar(binario, ['--headless', '--scene', 'furnace', '--quality', 'cinema', '--exposure', '2.2', '--no-motion-blur',
-                    '--width', '960', '--height', '540', '--frames', '24' if rapido else '48', '--out', img])
+                    '--width', '960', '--height', '540', '--frames', '48' if rapido else '96', '--out', img])
     lum = linear(img) @ np.array([0.2126, 0.7152, 0.0722])
     H, W = lum.shape
     hh = 13 * np.tan(np.radians(30)); hw = hh * W / H
