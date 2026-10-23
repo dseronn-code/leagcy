@@ -254,3 +254,42 @@ N·L puro (moiré do normal map do tecido), não são sombra. Suíte completa pa
 Limite conhecido: o resíduo de 2,4% a 4 km com sol rasante é a precisão do float32 nessa distância (0,5 mm por
 passo). A solução definitiva é **renderização relativa à câmera** (origem flutuante, como UE5/Frostbite), que
 entra no item de mundo aberto/streaming porque mexe em todos os shaders.
+
+### Item 4 recuperado — ReSTIR de produção ✅
+
+Medição primeiro (`tools/restir.py`, nova visualização `--debug-view luzes|luzes-ref`): a luz das luzes locais
+crua (sem denoiser) contra uma referência por força bruta (todas as luzes no alcance, 16 amostras cada, com
+sombra), nas cenas noturnas congeladas. **O ReSTIR antigo perdia luz: viés de −15% (Sponza) e −31% (externa).**
+
+Causas encontradas, uma a uma, com experimentos isolados (`--restir-no-reuse temporal|spatial|all`):
+1. O reservatório guardava só *qual* luz; o teste de visibilidade ia ao centro dela e o sombreamento sorteava
+   outro ponto — luzes parcialmente visíveis eram descartadas inteiras.
+2. Combinação temporal/espacial com pesos 1/M (versão enviesada de 2020): domínios que não geram uma amostra
+   recebiam crédito por ela.
+3. A visibilidade muda entre frames (jitter do TAA, objetos que se movem), então o histórico também recebia
+   crédito por pontos que nunca teria gerado.
+
+O que mudou:
+- **Amostra = ponto na superfície da luz** (luz + coordenadas na esfera, medida de área). O mesmo ponto é
+  testado, sombreado e reaproveitado; descartar amostras ocultas deixa de enviesar.
+- **BVH de luzes** (Conty Estevez & Kulla 2018, como PBRT-v4/Cycles), reconstruída por frame na CPU: candidatos
+  por importância (potência, distância, alcance, horizonte da normal) com pdf exata; escala para cidades.
+  Também escolhe a luz nos pontos atingidos pela GI (antes: uniforme).
+- **GRIS** (Lin et al. 2022): reuso temporal com balance heuristic avaliando as amostras na **superfície exata
+  do frame anterior** (visibility buffer anterior + transformações e câmera anteriores) e reuso espacial com
+  **MIS em pares** (Bitterli 2022 / Wyman et al. 2023), vizinhos com superfície exata.
+- **Correção de viés por ray tracing** (presets Alto/Ultra/Cinema): visibilidade da amostra central vista de
+  cada vizinho e da superfície anterior; amostra do histórico retestada no ponto atual.
+- **Filtro de boiling** (como no RTXDI) e **reuso da visibilidade final** (amostra oculta no sombreamento não
+  volta no próximo frame).
+- Erro achado no caminho: conversão de pdf de ângulo sólido para área estava invertida (corrigida e conferida
+  numericamente em Python); raio de visibilidade cortado a 0,999·d vazava luz de esferas encostadas em paredes.
+
+| | Viés Sponza | Viés externa | Erro mediano/pixel Sponza | Erro mediano/pixel externa | Brilhinhos (teste) |
+|---|---|---|---|---|---|
+| Antes | −15,5% | −30,7% | 0,231 | 0,428 | 0,24% |
+| Depois | **−0,5%** | **−1,4%** | **0,216** | **0,250** | **0,05%** |
+
+Achado lateral (fica para a correção 3 — luzes reais): as esferas "lâmpada" das cenas têm o raio exato da luz,
+e um raio que vai até a superfície da esfera às vezes bate na malha da lâmpada. Por isso todos os raios de
+luz param 1e-5·d antes do ponto (a referência também).

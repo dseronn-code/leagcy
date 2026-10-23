@@ -101,7 +101,7 @@ O console mostra, a cada 3 segundos, o tempo de GPU de cada passe (ms).
 ./build/legacy --validation                # camadas de validação do Vulkan (debug)
 ./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png
 ./build/legacy --scene outdoor --sun-elevation 3   # pôr do sol (atmosfera física)
-./build/legacy --scene shadows --debug-view sol     # depuração: visibilidade crua do sol (sol, sol-luz, nl, normal)
+./build/legacy --scene shadows --debug-view sol     # depuração: valor cru (sol, sol-luz, nl, normal, luzes, luzes-ref)
 ./build/legacy --help                      # todas as opções
 ```
 

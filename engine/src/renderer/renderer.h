@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include "rhi/pass.h"
+#include "renderer/light_bvh.h"
 #include "rhi/profiler.h"
 #include "scene/camera.h"
 #include "scene/scene.h"
@@ -28,6 +29,7 @@ struct Quality {
   uint32_t dofSamples = 64;
   uint32_t motionBlurSamples = 16;
   float anisotropy = 16.0f;
+  bool restirBiasCorrection = true;  // raios que tiram o viés de visibilidade do reuso do ReSTIR (1 + vizinhos)
 };
 
 enum class QualityPreset { Low, Medium, High, Ultra, Cinema };
@@ -50,6 +52,8 @@ struct Settings {
   bool energyCompensation = true;   // compensação de múltiplo espalhamento do BRDF (Turquin 2019)
   // Visualização de depuração (valor cru da iluminação, sem denoiser/TAA/tonemap): ver DebugView.
   uint32_t debugView = 0;
+  // Depuração do ReSTIR: bit 0 desliga o reuso temporal, bit 1 o espacial (medir cada etapa isolada).
+  uint32_t restirDisableMask = 0;
 };
 
 // Modos de --debug-view. Os valores ficam em [0, 1] e saem direto na tela (linear).
@@ -59,6 +63,10 @@ enum DebugView : uint32_t {
   kDebugSunShading = 2,     // "sol-luz": só o difuso do sol (N·L × visibilidade × sombreamento do relevo)
   kDebugGeometricNormal = 3,  // "normal": normal geométrica (0,5 + 0,5 n)
   kDebugSunCosine = 4,      // "nl": N·L do sol sem sombra (referência para medir sombra falsa)
+  // Luz direta das luzes locais (radiância × exposição manual de --exposure), codificada como v/(1+v):
+  // estimativa do ReSTIR e referência por força bruta (todas as luzes no alcance, com sombra).
+  kDebugLocalLights = 5,          // "luzes"
+  kDebugLocalLightsReference = 6, // "luzes-ref"
 };
 bool parseDebugView(const char* name, uint32_t& out);
 
@@ -95,7 +103,7 @@ class Renderer {
   struct Targets {
     std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
     rhi::Image diffuse, specular, motion, emissive;
-    rhi::Image visibility;  // visibility buffer: x = objeto + 1 (0 = céu), y = triângulo
+    std::array<rhi::Image, 2> visibility;  // visibility buffer (atual / anterior): x = objeto + 1 (0 = céu), y = triângulo
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
@@ -120,7 +128,7 @@ class Renderer {
   rhi::Image skyLut_, dfgLut_, transmittanceLut_, multiScatterLut_, aerialPerspective_;
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
-  std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_;
+  std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_, lightBvhBuffers_;
   rhi::Buffer histogram_, exposureState_;
 
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
@@ -138,6 +146,8 @@ class Renderer {
   uint64_t frameIndex_ = 0;
   bool historyValid_ = false;
   glm::mat4 prevViewProj_{1.0f};
+  glm::mat4 prevInvViewProj_{1.0f};  // com o jitter daquele frame (reconstrói a superfície anterior)
+  std::vector<LightBvhNode> lightBvhNodes_;
   glm::vec3 prevCameraPos_{0.0f};
   glm::vec2 prevJitter_{0.0f};
 };

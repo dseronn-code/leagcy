@@ -55,6 +55,18 @@ float traceVisibility(vec3 origin, vec3 dir, float tMax) {
   return rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
 }
 
+#ifdef SURFACE_GLSL
+#ifdef RESTIR_GLSL
+// Visibilidade de um ponto de luz a partir da superfície exata de outro pixel (pesos de MIS do ReSTIR).
+float visibleFrom(PixelSurface s, uint li, vec2 uv) {
+  vec3 L, Le;
+  float dist, G;
+  if (!lightPoint(li, uv, s.g.P, L, dist, Le, G) || dot(s.Nb, L) <= 0.0) return 0.0;
+  return traceVisibility(offsetRayOrigin(s.Pshadow, s.g.Ng, s.rayBias), L, dist * 0.99999);
+}
+#endif
+#endif
+
 struct HitInfo {
   vec3 P;
   vec3 Pshadow;  // origem dos raios de sombra corrigida para o terminator (Hanika 2021)

@@ -12,6 +12,7 @@ layout(set = 0, binding = 0) uniform FrameData {
   mat4 invViewProj;           // com jitter
   mat4 viewProjNoJitter;
   mat4 prevViewProjNoJitter;
+  mat4 prevInvViewProj;       // do frame anterior, com o jitter dele
   vec4 cameraPos;             // xyz = posição (m), w = near plane
   vec4 prevCameraPos;
   vec4 sunDir;                // xyz = direção PARA o sol, w = iluminância solar no topo da atmosfera (lux)
@@ -23,6 +24,7 @@ layout(set = 0, binding = 0) uniform FrameData {
   uvec4 quality0;             // x = amostras por pixel, y = candidatos ReSTIR, z = vizinhos ReSTIR, w = amostras do DOF
   vec4 quality1;              // x = mip das texturas nos raios, y = limite de vagalumes, z = amostras do motion blur,
                               // w = compensação de energia do BRDF (1 = ligada)
+  uvec4 quality2;             // x = correção de viés do ReSTIR por ray tracing (1 = ligada)
   vec4 environment;           // x = céu uniforme em nits (> 0: teste da fornalha branca)
 } frame;
 

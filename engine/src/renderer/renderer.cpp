@@ -31,14 +31,16 @@ constexpr VkDescriptorType SB = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 
 // Espelha FrameData em shaders/frame.glsl (std140).
 struct FrameUniforms {
-  glm::mat4 view, proj, viewProj, invViewProj, viewProjNoJitter, prevViewProjNoJitter;
+  glm::mat4 view, proj, viewProj, invViewProj, viewProjNoJitter, prevViewProjNoJitter, prevInvViewProj;
   glm::vec4 cameraPos, prevCameraPos, sunDir, params, jitter, renderSize, outputSize;
   glm::uvec4 frameInfo;
   glm::uvec4 quality0;  // spp, candidatos ReSTIR, vizinhos ReSTIR, amostras DOF
   glm::vec4 quality1;   // mip nos raios, limite de vagalumes, amostras de motion blur, compensação de energia
-  glm::vec4 environment;  // x = céu uniforme (nits), y = modo de depuração
+  glm::uvec4 quality2;  // correção de viés do ReSTIR
+  glm::vec4 environment;  // x = céu uniforme (nits), y = modo de depuração, z = exposição da depuração,
+                          // w = reusos do ReSTIR desligados (bit 0 temporal, bit 1 espacial)
 };
-static_assert(sizeof(FrameUniforms) == 560);
+static_assert(sizeof(FrameUniforms) == 640);
 
 struct GBufferPush {
   uint32_t object;
@@ -128,18 +130,18 @@ Quality qualityPreset(QualityPreset preset) {
   Quality q;  // Ultra
   switch (preset) {
     case QualityPreset::Low:
-      q = {0.5f, 1, 4, 3, 3, 1, 3.0f, 8.0f, 256, 128, 5, 24, 8, 4.0f};
+      q = {0.5f, 1, 4, 3, 3, 1, 3.0f, 8.0f, 256, 128, 5, 24, 8, 4.0f, false};
       break;
     case QualityPreset::Medium:
-      q = {0.6f, 1, 8, 4, 4, 2, 2.0f, 12.0f, 256, 128, 6, 32, 12, 8.0f};
+      q = {0.6f, 1, 8, 4, 4, 2, 2.0f, 12.0f, 256, 128, 6, 32, 12, 8.0f, false};
       break;
     case QualityPreset::High:
-      q = {0.75f, 1, 12, 6, 5, 3, 1.0f, 16.0f, 384, 192, 6, 48, 12, 16.0f};
+      q = {0.75f, 1, 12, 6, 5, 3, 1.0f, 16.0f, 384, 192, 6, 48, 12, 16.0f, true};
       break;
     case QualityPreset::Ultra:
       break;
     case QualityPreset::Cinema:
-      q = {1.0f, 4, 32, 12, 5, 5, 0.0f, 64.0f, 1024, 512, 8, 128, 32, 16.0f};
+      q = {1.0f, 4, 32, 12, 5, 5, 0.0f, 64.0f, 1024, 512, 8, 128, 32, 16.0f, true};
       break;
   }
   return q;
@@ -147,7 +149,8 @@ Quality qualityPreset(QualityPreset preset) {
 
 bool parseDebugView(const char* name, uint32_t& out) {
   const std::pair<const char*, uint32_t> names[] = {{"sol", kDebugSunVisibility}, {"sol-luz", kDebugSunShading},
-                                                    {"normal", kDebugGeometricNormal}, {"nl", kDebugSunCosine}};
+                                                    {"normal", kDebugGeometricNormal}, {"nl", kDebugSunCosine},
+                                                    {"luzes", kDebugLocalLights}, {"luzes-ref", kDebugLocalLightsReference}};
   for (auto& [n, v] : names)
     if (std::strcmp(name, n) == 0) { out = v; return true; }
   return false;
@@ -190,6 +193,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     lightBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.lights.size()) * sizeof(scene::PointLight),
                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    lightBvhBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, 2 * scene.lights.size()) * sizeof(LightBvhNode),
+                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     jointBuffers_[i] = rhi::createBuffer(ctx, std::max<VkDeviceSize>(1, scene.totalJoints) * sizeof(glm::mat4),
                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                          rhi::MemoryUsage::CpuToGpu);
@@ -215,6 +220,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {10, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {11, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {12, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {13, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -231,7 +237,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (5 + kMaxTextures)},
-      {SB, kFramesInFlight * 5},
+      {SB, kFramesInFlight * 6},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -254,8 +260,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
   aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
-  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS});
-  restirSpatialPass_.init(ctx, "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB});
+  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS});
+  restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS});
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS});
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
@@ -333,6 +339,7 @@ void Renderer::writeGlobalDescriptors() {
                                       {lightBuffers_[i].handle, 0, VK_WHOLE_SIZE}};
     VkDescriptorBufferInfo objs{objectBuffers_[i].handle, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo exposure{exposureState_.handle, 0, VK_WHOLE_SIZE};
+    VkDescriptorBufferInfo lightBvh{lightBvhBuffers_[i].handle, 0, VK_WHOLE_SIZE};
     std::vector<VkWriteDescriptorSet> w;
     auto add = [&](uint32_t binding, VkDescriptorType type, uint32_t count) -> VkWriteDescriptorSet& {
       VkWriteDescriptorSet x{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -348,6 +355,7 @@ void Renderer::writeGlobalDescriptors() {
     for (uint32_t b = 0; b < 3; ++b) add(2 + b, SB, 1).pBufferInfo = &bufs[b];
     add(7, SB, 1).pBufferInfo = &objs;
     add(8, SB, 1).pBufferInfo = &exposure;
+    add(13, SB, 1).pBufferInfo = &lightBvh;
     VkDescriptorImageInfo dfg{linear_, dfgLut_.view, VK_IMAGE_LAYOUT_GENERAL};
     add(9, CIS, 1).pImageInfo = &dfg;
     VkDescriptorImageInfo atmo[3] = {{linear_, transmittanceLut_.view, VK_IMAGE_LAYOUT_GENERAL},
@@ -377,19 +385,19 @@ void Renderer::createTargets() {
   for (int i = 0; i < 2; ++i) {
     t_.depth[i] = rhi::createImage2D(ctx, R, kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
     t_.normal[i] = rhi::createImage2D(ctx, R, kHdrFormat, attach);
+    t_.visibility[i] = rhi::createImage2D(ctx, R, kVisibilityFormat, attach);
     t_.diffuseHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.specularHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.moments[i] = rhi::createImage2D(ctx, R, VK_FORMAT_R32G32B32A32_SFLOAT, storage);  // luminância² precisa de float32
     t_.historyLength[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.taa[i] = rhi::createImage2D(ctx, O, kHdrFormat, storage);
-    t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                          rhi::MemoryUsage::GpuOnly);
   }
   t_.diffuse = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
   t_.specular = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
   t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach);
   t_.emissive = rhi::createImage2D(ctx, R, kHdrFormat, attach);
-  t_.visibility = rhi::createImage2D(ctx, R, kVisibilityFormat, attach);
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
                           &t_.tmpB, &t_.tmpC, &t_.sceneColor})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
@@ -407,11 +415,11 @@ void Renderer::createTargets() {
     };
     for (int i = 0; i < 2; ++i) {
       toGeneral(t_.depth[i], VK_IMAGE_ASPECT_DEPTH_BIT);
-      for (rhi::Image* img : {&t_.normal[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
+      for (rhi::Image* img : {&t_.normal[i], &t_.visibility[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
                               &t_.historyLength[i], &t_.taa[i]})
         toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-    for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.visibility, &t_.diffuseRaw, &t_.specularRaw,
+    for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                             &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                             &t_.postB, &t_.bloom})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -422,12 +430,12 @@ void Renderer::createTargets() {
 void Renderer::destroyTargets() {
   rhi::Context& ctx = *ctx_;
   for (int i = 0; i < 2; ++i) {
-    for (rhi::Image* img : {&t_.depth[i], &t_.normal[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
+    for (rhi::Image* img : {&t_.depth[i], &t_.normal[i], &t_.visibility[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
                             &t_.historyLength[i], &t_.taa[i]})
       rhi::destroyImage(ctx, *img);
     rhi::destroyBuffer(ctx, t_.reservoirs[i]);
   }
-  for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.visibility, &t_.diffuseRaw, &t_.specularRaw,
+  for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                           &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                           &t_.postB, &t_.bloom})
     rhi::destroyImage(ctx, *img);
@@ -465,6 +473,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.invViewProj = glm::inverse(u.viewProj);
   u.viewProjNoJitter = cam.projection(aspect) * u.view;
   u.prevViewProjNoJitter = historyValid_ ? prevViewProj_ : u.viewProjNoJitter;
+  u.prevInvViewProj = historyValid_ ? prevInvViewProj_ : u.invViewProj;
   u.cameraPos = glm::vec4(cam.position, cam.nearPlane);
   u.prevCameraPos = glm::vec4(historyValid_ ? prevCameraPos_ : cam.position, 0.0f);
   u.sunDir = glm::vec4(glm::normalize(scene_->sunDirection), scene_->sunIlluminance);
@@ -479,7 +488,11 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                           std::max(q.dofSamples, 1u));
   u.quality1 = glm::vec4(q.rayTextureLod, q.fireflyLimit, float(std::max(q.motionBlurSamples, 1u)),
                          settings.energyCompensation ? 1.0f : 0.0f);
-  u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), 0.0f, 0.0f);
+  u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, 0u, 0u, 0u);
+  // z: exposição das visualizações de luz (EV100 manual; EV 0 sem --exposure).
+  float debugEV = std::isnan(settings.manualEV100) ? 0.0f : settings.manualEV100;
+  u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), std::exp2(-debugEV) / 1.2f,
+                            float(settings.restirDisableMask));
   std::memcpy(frameUbo_[slot].mapped, &u, sizeof(u));
   vmaFlushAllocation(ctx_->allocator, frameUbo_[slot].allocation, 0, VK_WHOLE_SIZE);
 
@@ -506,7 +519,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
         attachment(t_.motion.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.emissive.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.specular.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
-        attachment(t_.visibility.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),  // 0 = sem objeto
+        attachment(t_.visibility[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),  // 0 = sem objeto
     };
     VkRenderingAttachmentInfo depth = attachment(t_.depth[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR);
     depth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = infinito
@@ -543,16 +556,16 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // ---- 3. ReSTIR DI ----
   restirTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion,
                                          Binding::storageBuffer(t_.reservoirs[1]), Binding::storageBuffer(t_.reservoirs[0]),
-                                         tex(t_.visibility)}, R);
+                                         tex(t_.visibility[cur]), tex(t_.visibility[prev])}, R);
   barrier();
   restirSpatialPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[0]),
-                                        Binding::storageBuffer(t_.reservoirs[1])}, R);
+                                        Binding::storageBuffer(t_.reservoirs[1]), tex(t_.visibility[cur])}, R);
   barrier();
   profiler_.mark(cmd, "restir");
 
   // ---- 4. Iluminação (ray tracing) ----
   lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[1]),
-                                   storage(t_.diffuseRaw), storage(t_.specularRaw), tex(t_.visibility)}, R);
+                                   storage(t_.diffuseRaw), storage(t_.specularRaw), tex(t_.visibility[cur])}, R);
   barrier();
   profiler_.mark(cmd, "iluminacao_rt");
 
@@ -678,6 +691,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   profiler_.mark(cmd, "tonemap");
 
   prevViewProj_ = u.viewProjNoJitter;
+  prevInvViewProj_ = u.invViewProj;
   prevCameraPos_ = cam.position;
   prevJitter_ = jitterUv;
   historyValid_ = true;
@@ -694,10 +708,13 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
     objs[i] = {s.objects[i].transform, historyValid_ ? s.objects[i].prevTransform : s.objects[i].transform};
   vmaFlushAllocation(ctx.allocator, objectBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
 
-  // Luzes (podem se mover: faróis, tochas carregadas, etc.).
+  // Luzes (podem se mover: faróis, tochas carregadas, etc.) e a BVH de luzes reconstruída para elas.
   if (!s.lights.empty()) {
     std::memcpy(lightBuffers_[slot].mapped, s.lights.data(), s.lights.size() * sizeof(scene::PointLight));
     vmaFlushAllocation(ctx.allocator, lightBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+    buildLightBvh(s.lights, lightBvhNodes_);
+    std::memcpy(lightBvhBuffers_[slot].mapped, lightBvhNodes_.data(), lightBvhNodes_.size() * sizeof(LightBvhNode));
+    vmaFlushAllocation(ctx.allocator, lightBvhBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
   }
 
   // Matrizes das juntas de todos os esqueletos.
@@ -808,7 +825,7 @@ void Renderer::destroy() {
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
-  for (auto* arr : {&frameUbo_, &objectBuffers_, &jointBuffers_, &lightBuffers_})
+  for (auto* arr : {&frameUbo_, &objectBuffers_, &jointBuffers_, &lightBuffers_, &lightBvhBuffers_})
     for (auto& b : *arr) rhi::destroyBuffer(ctx, b);
   rhi::destroyBuffer(ctx, histogram_);
   rhi::destroyBuffer(ctx, exposureState_);

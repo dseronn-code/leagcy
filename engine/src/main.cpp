@@ -86,10 +86,13 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-denoiser") o.render.denoiser = false;
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
-    else if (a == "--debug-view") {
+    else if (a == "--restir-no-reuse") {
+      std::string v = next();
+      o.render.restirDisableMask = v == "temporal" ? 1u : v == "spatial" ? 2u : 3u;
+    } else if (a == "--debug-view") {
       const char* v = next();
       if (!renderer::parseDebugView(v, o.render.debugView)) {
-        std::fprintf(stderr, "Visualização desconhecida: %s (use sol, sol-luz, normal ou nl)\n", v);
+        std::fprintf(stderr, "Visualização desconhecida: %s (use sol, sol-luz, normal, nl, luzes ou luzes-ref)\n", v);
         std::exit(1);
       }
     }
@@ -107,7 +110,8 @@ Options parseArgs(int argc, char** argv) {
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
           "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"
           "  --sun-elevation G --sun-azimuth G   posição do sol em graus\n"
-          "  --debug-view sol|sol-luz|normal|nl  valor cru da iluminação (depuração de sombras)\n"
+          "  --debug-view sol|sol-luz|normal|nl|luzes|luzes-ref  valor cru (depuração)\n"
+          "  --restir-no-reuse temporal|spatial|all   desliga reusos do ReSTIR (depuração)\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s] [--pause]\n");

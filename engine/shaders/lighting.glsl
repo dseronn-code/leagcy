@@ -13,7 +13,8 @@
 #endif
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 1, binding = 4, std430) readonly buffer Reservoirs { Reservoir reservoirs[]; };
+// Escrito também: a visibilidade final volta para o reservatório (o próximo frame não reaproveita amostra oculta).
+layout(set = 1, binding = 4, std430) buffer Reservoirs { Reservoir reservoirs[]; };
 layout(set = 1, binding = 5, rgba16f) uniform writeonly image2D outDiffuse;
 layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D outSpecular;
 
@@ -55,16 +56,17 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce) {
     }
   }
 
-  uint lightCount = frame.frameInfo.z;
-  if (lightCount > 0u) {
-    float pick = sample2D(sg, DIM_HIT_LIGHT_PICK + dimBase).x;
-    PointLight l = lights[min(uint(pick * float(lightCount)), lightCount - 1u)];
+  // Uma luz local escolhida pela BVH de luzes no ponto atingido (pdf exata).
+  uint rngLight = pcg3d(uvec3(floatBitsToUint(sample2D(sg, DIM_HIT_LIGHT_PICK + dimBase).x), bounce, frame.frameInfo.x)).x;
+  uint li;
+  float pmf;
+  if (sampleLightBvh(hit.P, hit.N, rngLight, li, pmf)) {
     vec3 L, E;
     float tSurface;
-    if (sampleSphereLight(l, hit.P, sample2D(sg, DIM_HIT_LIGHT + dimBase), L, tSurface, E) && dot(hit.N, L) > 0.0) {
+    if (sampleSphereLight(lights[li], hit.P, sample2D(sg, DIM_HIT_LIGHT + dimBase), L, tSurface, E) && dot(hit.N, L) > 0.0) {
       evalBRDF(bc, L, -1.0, kd, ks);
       if (dot(kd + ks, vec3(1.0)) > 0.0 && dot(E, E) > 0.0)
-        radiance += (kd * s.diffuseColor + ks) * E * preExposure() * float(lightCount) * traceVisibility(shadowOrigin2, L, tSurface);
+        radiance += (kd * s.diffuseColor + ks) * E * (preExposure() / pmf) * traceVisibility(shadowOrigin2, L, tSurface * 0.99999);
     }
   }
   // Ambiente nos rebotes seguintes (sem oclusão — auditoria 3.1): difuso pelo céu acima da normal e
@@ -72,6 +74,28 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce) {
   radiance += s.diffuseColor * bc.diffuseWeight * sampleSky(normalize(hit.N + vec3(0, 1, 0))) * 0.5;
   radiance += specularAlbedo(s.f0, s.f90, bc.dfg) * bc.energyCompensation * sampleSky(reflect(dir, hit.N));
   return clampFirefly(radiance);
+}
+
+// Referência por força bruta para medir o ReSTIR: todas as luzes no alcance, 16 amostras estratificadas
+// na esfera de cada uma, com sombra. Lento de propósito (só --debug-view luzes-ref).
+vec3 localLightsReference(PixelSurface sf, BrdfContext bc) {
+  GSample g = sf.g;
+  vec3 origin = offsetRayOrigin(sf.Pshadow, g.Ng, sf.rayBias);
+  vec3 sum = vec3(0.0), kd, ks;
+  for (uint li = 0u; li < frame.frameInfo.z; ++li) {
+    PointLight l = lights[li];
+    if (distance(l.position, g.P) >= l.range) continue;
+    for (uint s = 0u; s < 16u; ++s) {
+      vec2 u = (vec2(s % 4u, s / 4u) + vec2(0.5)) / 4.0;
+      vec3 L, E;
+      float tSurface;
+      if (!sampleSphereLight(l, g.P, u, L, tSurface, E) || dot(sf.Nb, L) <= 0.0) continue;
+      evalBRDF(bc, L, -1.0, kd, ks);
+      if (dot(kd + ks, vec3(1.0)) <= 0.0) continue;
+      sum += (kd * g.diffuseColor + ks) * E * bumpShadowing(sf.Nb, g.N, L) * traceVisibility(origin, L, tSurface * 0.99999) / 16.0;
+    }
+  }
+  return sum * preExposure();
 }
 #endif
 
@@ -91,7 +115,8 @@ void main() {
   vec3 origin = offsetRayOrigin(g.P, g.Ng, sf.rayBias);
   vec3 shadowOrigin = offsetRayOrigin(sf.Pshadow, g.Ng, sf.rayBias);
 #endif
-  Reservoir r = reservoirs[uint(id.y) * uint(frame.renderSize.x) + uint(id.x)];
+  uint resIdx = uint(id.y) * uint(frame.renderSize.x) + uint(id.x);
+  Reservoir r = reservoirs[resIdx];
   vec3 sunE = sunIrradianceAt(g.P);
   BrdfContext bc = brdfContextFor(g);
 
@@ -126,24 +151,6 @@ void main() {
       specular += sunKs * sunE * vis;
     }
 
-    // Luzes locais: a luz escolhida pelo ReSTIR, integrada sobre sua esfera (ângulo sólido).
-    if (r.light != NO_LIGHT && r.W > 0.0) {
-      PointLight l = lights[r.light];
-      vec3 L, E;
-      float tSurface;
-      if (sampleSphereLight(l, g.P, sample2D(sg, DIM_LIGHT), L, tSurface, E)) {
-        evalBRDF(bc, L, -1.0, kd, ks);
-#ifdef RAY_TRACING
-        float vis = dot(sf.Nb, L) > 0.0 ? traceVisibility(shadowOrigin, L, tSurface) : 0.0;
-#else
-        float vis = 1.0;
-#endif
-        vec3 Li = E * preExposure() * r.W * vis * bumpShadowing(sf.Nb, g.N, L);
-        diffuse += kd * Li;
-        specular += ks * Li;
-      }
-    }
-
 #ifdef RAY_TRACING
     // GI difusa: amostragem por cosseno => estimador = peso difuso × Li. Direções abaixo da faceta
     // geométrica (possíveis com normal map) atravessariam a superfície: são descartadas.
@@ -166,7 +173,36 @@ void main() {
   diffuse /= float(spp);
   specular /= float(spp);
 
+  // Luzes locais: o ponto de luz escolhido pelo ReSTIR (o mesmo testado e reaproveitado), com sombra.
+  vec3 localLight = vec3(0.0);
+  if (r.light != NO_LIGHT && r.W > 0.0) {
+    vec3 kdl, ksl, L;
+    float dist;
+    if (lightContribution(g, bc, r.light, r.uv, kdl, ksl, L, dist) && dot(sf.Nb, L) > 0.0) {
+#ifdef RAY_TRACING
+      float vis = traceVisibility(shadowOrigin, L, dist * 0.99999);
+      if (vis == 0.0) reservoirs[resIdx].W = 0.0;  // visibilidade final reaproveitada no próximo frame
+#else
+      float vis = 1.0;
+#endif
+      float w = r.W * vis * bumpShadowing(sf.Nb, g.N, L) * preExposure();
+      diffuse += kdl * w;
+      specular += ksl * w;
+      localLight = (kdl * g.diffuseColor + ksl) * w;
+    }
+  }
+
   uint debugView = uint(frame.environment.y);
+  if (debugView == 5u || debugView == 6u) {
+    vec3 v = localLight;
+#ifdef RAY_TRACING
+    if (debugView == 6u) v = localLightsReference(sf, bc);
+#endif
+    v = v / preExposure() * frame.environment.z;
+    imageStore(outDiffuse, id, vec4(v / (1.0 + v), 1.0));  // codificação inversível: nada satura no PNG
+    imageStore(outSpecular, id, vec4(0.0));
+    return;
+  }
   if (debugView != 0u) {
     float sunVis = sunVisSum / float(spp);
     vec3 v = debugView == 1u ? vec3(sunVis)

@@ -28,33 +28,22 @@ struct PixelSurface {
   vec3 Pshadow;   // origem dos raios de sombra (antes do deslocamento de Wächter-Binder)
 };
 
-PixelSurface loadSurface(ivec2 id) {
-  PixelSurface s;
-  s.g = loadGBuffer(id);
-  s.Nb = s.g.N;
-  s.Pshadow = s.g.P;
-  s.rayBias = RAY_BIAS_DEPTH * length(frame.cameraPos.xyz - s.g.P);
-  uvec2 vis = texelFetch(gVisibility, id, 0).xy;
-  if (vis.x == 0u || s.g.depth <= 0.0) return s;
-  uint obj = vis.x - 1u, prim = vis.y;
-
+// Interseção exata do raio (C, dir) com o triângulo `prim` do objeto `obj` (transformação `model`).
+// Preenche P, Ng, V, Nb, Pshadow e rayBias de `s`; falso se o triângulo está de lado para o raio.
+bool intersectTriangle(uint obj, uint prim, mat4 model, vec3 C, vec3 dir, inout PixelSurface s) {
   InstanceData d = instances[obj];
   IndexData ib = IndexData(d.indices);
   VertexData vb = VertexData(d.vertices);
   uint i0 = ib.i[prim * 3u], i1 = ib.i[prim * 3u + 1u], i2 = ib.i[prim * 3u + 2u];
-  mat4 model = objects[obj].model;
   mat3 normalMatrix = transpose(inverse(mat3(model)));
   vec3 p0 = (model * vec4(fetchVertexPosition(vb, i0), 1.0)).xyz;
   vec3 p1 = (model * vec4(fetchVertexPosition(vb, i1), 1.0)).xyz;
   vec3 p2 = (model * vec4(fetchVertexPosition(vb, i2), 1.0)).xyz;
 
-  // Raio do centro do pixel (mesma projeção com jitter do rasterizador) contra o plano do triângulo.
-  vec3 C = frame.cameraPos.xyz;
-  vec3 dir = normalize(worldPosFromDepth((vec2(id) + 0.5) * frame.renderSize.zw, 0.5) - C);
   vec3 e1 = p1 - p0, e2 = p2 - p0;
   vec3 ng = cross(e1, e2);
   float denom = dot(dir, ng);
-  if (abs(denom) < 1e-12 * length(ng)) return s;  // triângulo visto de lado: fica com o depth
+  if (abs(denom) < 1e-12 * length(ng)) return false;
   float t = dot(p0 - C, ng) / denom;
   vec3 P = C + dir * t;
 
@@ -62,7 +51,7 @@ PixelSurface loadSurface(ivec2 id) {
   vec3 q = P - p0;
   float d11 = dot(e1, e1), d12 = dot(e1, e2), d22 = dot(e2, e2), q1 = dot(q, e1), q2 = dot(q, e2);
   float det = d11 * d22 - d12 * d12;
-  if (det <= 0.0) return s;
+  if (det <= 0.0) return false;
   float b1 = (d22 * q1 - d12 * q2) / det, b2 = (d11 * q2 - d12 * q1) / det;
   vec3 b = clamp(vec3(1.0 - b1 - b2, b1, b2), 0.0, 1.0);
   b /= b.x + b.y + b.z;
@@ -83,7 +72,46 @@ PixelSurface loadSurface(ivec2 id) {
   s.Nb = Nb;
   s.Pshadow = shadowTerminatorPoint(P, p0, p1, p2, n0, n1, n2, b);
   s.rayBias = RAY_BIAS_EXACT * t;
+  return true;
+}
+
+PixelSurface loadSurface(ivec2 id) {
+  PixelSurface s;
+  s.g = loadGBuffer(id);
+  s.Nb = s.g.N;
+  s.Pshadow = s.g.P;
+  s.rayBias = RAY_BIAS_DEPTH * length(frame.cameraPos.xyz - s.g.P);
+  uvec2 vis = texelFetch(gVisibility, id, 0).xy;
+  if (vis.x == 0u || s.g.depth <= 0.0) return s;
+  // Raio do centro do pixel (mesma projeção com jitter do rasterizador).
+  vec3 C = frame.cameraPos.xyz;
+  vec3 dir = normalize(worldPosFromDepth((vec2(id) + 0.5) * frame.renderSize.zw, 0.5) - C);
+  intersectTriangle(vis.x - 1u, vis.y, objects[vis.x - 1u].model, C, dir, s);
   return s;
 }
+
+#ifdef SURFACE_PREV_VISIBILITY_BINDING
+layout(set = 1, binding = SURFACE_PREV_VISIBILITY_BINDING) uniform usampler2D gVisibilityPrev;
+
+// Superfície exata do pixel `pid` no FRAME ANTERIOR: triângulo do visibility buffer anterior, transformação
+// anterior do objeto, câmera e jitter anteriores. g.N/roughness vêm do G-buffer anterior; o material é o de
+// `current` (mesma superfície). Falso se não havia geometria ali.
+bool loadPreviousSurface(ivec2 pid, sampler2D normalPrev, GSample current, out PixelSurface s) {
+  s.g = current;
+  s.Nb = current.N;
+  s.Pshadow = current.P;
+  s.rayBias = 0.0;
+  uvec2 vis = texelFetch(gVisibilityPrev, pid, 0).xy;
+  if (vis.x == 0u) return false;
+  vec3 C = frame.prevCameraPos.xyz;
+  vec4 far = frame.prevInvViewProj * vec4(((vec2(pid) + 0.5) * frame.renderSize.zw) * 2.0 - 1.0, 0.5, 1.0);
+  vec3 dir = normalize(far.xyz / far.w - C);
+  if (!intersectTriangle(vis.x - 1u, vis.y, objects[vis.x - 1u].prevModel, C, dir, s)) return false;
+  vec4 n = texelFetch(normalPrev, pid, 0);
+  s.g.N = normalize(n.xyz);
+  s.g.roughness = n.w;
+  return true;
+}
+#endif
 
 #endif

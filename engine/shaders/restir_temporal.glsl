@@ -1,7 +1,9 @@
-// ReSTIR passo 1: candidatos iniciais (RIS) + teste de visibilidade + reuso temporal.
+// ReSTIR passo 1: candidatos iniciais pela BVH de luzes (RIS), visibilidade do escolhido e reuso temporal
+// com pesos de MIS generalizados avaliando as amostras na superfície exata do frame anterior; filtro de boiling.
 #extension GL_GOOGLE_include_directive : require
 #include "restir.glsl"
 #define SURFACE_VISIBILITY_BINDING 9
+#define SURFACE_PREV_VISIBILITY_BINDING 10
 #include "surface.glsl"
 #ifdef RAY_TRACING
 #include "raytracing.glsl"
@@ -16,54 +18,89 @@ layout(set = 1, binding = 8, std430) writeonly buffer OutReservoirs { Reservoir 
 
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
-  if (!insideRender(id)) return;
+  bool working = insideRender(id);
   uint idx = uint(id.y) * uint(frame.renderSize.x) + uint(id.x);
-  PixelSurface sf = loadSurface(id);
-  GSample g = sf.g;
-  uint lightCount = frame.frameInfo.z;
-  if (g.depth <= 0.0 || lightCount == 0u) { outReservoirs[idx] = emptyReservoir(); return; }
-
-  uint rng = seedFor(uvec2(id), frame.frameInfo.x, 1u);
-  BrdfContext bc = brdfContextFor(g);
-
-  // 1) RIS: escolhe entre candidatos uniformes proporcionalmente a p̂.
-  Reservoir r = emptyReservoir();
-  for (uint i = 0u; i < restirCandidates(); ++i) {
-    uint li = min(uint(rand(rng) * float(lightCount)), lightCount - 1u);
-    updateReservoir(r, li, targetPdf(li, g, bc) * float(lightCount), 1.0, rand(rng));
+  PixelSurface sf;
+  GSample g;
+  if (working) {
+    sf = loadSurface(id);
+    g = sf.g;
   }
-  finalizeReservoir(r, g, bc);
+  uint lightCount = frame.frameInfo.z;
+  working = working && g.depth > 0.0 && lightCount > 0u;
+
+  Reservoir r = emptyReservoir();
+  if (working) {
+    uint rng = seedFor(uvec2(id), frame.frameInfo.x, 1u);
+    BrdfContext bc = brdfContextFor(g);
+
+    // 1) RIS: candidatos pela BVH de luzes (pdf exata) e um ponto do cone visível de cada luz.
+    uint C = restirCandidates();
+    ResamplingState s = beginResampling();
+    for (uint i = 0u; i < C; ++i) {
+      uint li;
+      float pmf, pdfArea;
+      vec2 uv;
+      if (!sampleLightBvh(g.P, g.N, rng, li, pmf) || !sampleLightPoint(li, g.P, rand2(rng), uv, pdfArea)) {
+        s.r.M += 1.0;
+        continue;
+      }
+      float p = targetPdf(g, bc, li, uv);
+      streamSample(s, li, uv, p / (float(C) * pmf * pdfArea), p, 1.0, rand(rng));
+    }
+    r = finishResampling(s);
 
 #ifdef RAY_TRACING
-  // 2) Visibilidade: amostra ocluída não deve se espalhar para os vizinhos.
-  if (r.W > 0.0) {
-    PointLight l = lights[r.light];
-    vec3 Lv = l.position - g.P;
-    float dist = length(Lv);
-    vec3 origin = offsetRayOrigin(sf.Pshadow, g.Ng, sf.rayBias);
-    if (dist > l.radius && (dot(sf.Nb, Lv) <= 0.0 || traceVisibility(origin, Lv / dist, dist - l.radius) == 0.0)) r.W = 0.0;
-  }
+    // 2) Visibilidade do ponto escolhido (o mesmo que será sombreado): oculto => contribuição zero.
+    if (r.light != NO_LIGHT) {
+      vec3 kd, ks, L;
+      float dist;
+      lightContribution(g, bc, r.light, r.uv, kd, ks, L, dist);
+      vec3 origin = offsetRayOrigin(sf.Pshadow, g.Ng, sf.rayBias);
+      if (dot(sf.Nb, L) <= 0.0 || traceVisibility(origin, L, dist * 0.99999) == 0.0) {
+        r.light = NO_LIGHT;
+        r.W = r.pHat = 0.0;
+      }
+    }
 #endif
 
-  // 3) Reuso temporal: combina com o reservatório do mesmo ponto no frame anterior.
-  if (historyValid()) {
-    vec2 uv = (vec2(id) + 0.5) * frame.renderSize.zw;
-    vec2 prevUv = uv - texelFetch(gMotion, id, 0).xy;
-    ivec2 pid = ivec2(prevUv * frame.renderSize.xy);
-    if (insideRender(pid)) {
-      float zPrev = linearDepth(texelFetch(gDepthPrev, pid, 0).r);
-      float zCur = linearDepth(g.depth);
-      vec3 nPrev = texelFetch(gNormalPrev, pid, 0).xyz;
-      if (abs(zPrev - zCur) < 0.1 * zCur && dot(nPrev, g.N) > 0.9) {
+    // 3) Reuso temporal: a amostra do frame anterior entra com peso de MIS (balance heuristic com
+    //    confiança M) avaliando as duas amostras nas duas superfícies — sem viés em bordas e movimento.
+    if (historyValid() && (uint(frame.environment.w) & 1u) == 0u) {
+      vec2 prevUv = (vec2(id) + 0.5) * frame.renderSize.zw - texelFetch(gMotion, id, 0).xy;
+      ivec2 pid = ivec2(prevUv * frame.renderSize.xy);
+      PixelSurface sp;
+      if (insideRender(pid) && loadPreviousSurface(pid, gNormalPrev, g, sp)) {
+        GSample gp = sp.g;
+        float zPrev = length(gp.P - frame.prevCameraPos.xyz), zCur = length(g.P - frame.cameraPos.xyz);
         Reservoir p = prevReservoirs[uint(pid.y) * uint(frame.renderSize.x) + uint(pid.x)];
-        p.M = min(p.M, RESTIR_MAX_HISTORY * float(restirCandidates()));
-        Reservoir s = emptyReservoir();
-        updateReservoir(s, r.light, targetPdf(r.light, g, bc) * r.W * r.M, r.M, rand(rng));
-        updateReservoir(s, p.light, targetPdf(p.light, g, bc) * p.W * p.M, p.M, rand(rng));
-        finalizeReservoir(s, g, bc);
-        r = s;
+        if (p.light != NO_LIGHT && p.light >= lightCount) p = emptyReservoir();
+        if (abs(zPrev - zCur) < 0.1 * zCur && dot(gp.N, g.N) > 0.5 && p.M > 0.0) {
+          p.M = min(p.M, RESTIR_MAX_HISTORY * float(C));
+          BrdfContext bcp = brdfContextFor(gp);
+          float pcXc = r.pHat, ppXc = targetPdf(gp, bcp, r.light, r.uv);
+#ifdef RAY_TRACING
+          // Correção de viés por ray tracing: a visibilidade muda entre frames (jitter do TAA, objetos que se
+          // movem); o histórico só "poderia ter gerado" a amostra atual se ela fosse visível da superfície
+          // anterior. Sem isto o histórico leva crédito por pontos que nunca teria e a imagem escurece.
+          if (restirBiasCorrection() && ppXc > 0.0) ppXc *= visibleFrom(sp, r.light, r.uv);
+#endif
+          float pcXp = targetPdf(g, bc, p.light, p.uv), ppXp = targetPdf(gp, bcp, p.light, p.uv);
+#ifdef RAY_TRACING
+          // A amostra do histórico foi verificada do ponto anterior; com o jitter/movimento ela pode estar
+          // oculta agora. Retestada, todo reservatório que sai daqui é visível do ponto atual — a premissa
+          // da correção de viés no reuso espacial.
+          if (restirBiasCorrection() && pcXp > 0.0 && p.W > 0.0 && visibleFrom(sf, p.light, p.uv) == 0.0) p.W = 0.0;
+#endif
+          ResamplingState t = beginResampling();
+          streamSample(t, r.light, r.uv, pairwiseMis(pcXc, r.M, ppXc, p.M) * pcXc * r.W, pcXc, r.M, rand(rng));
+          streamSample(t, p.light, p.uv, pairwiseMis(ppXp, p.M, pcXp, r.M) * pcXp * p.W, pcXp, p.M, rand(rng));
+          r = finishResampling(t);
+        }
       }
     }
   }
-  outReservoirs[idx] = r;
+
+  boilingFilter(gl_LocalInvocationIndex, r);
+  if (insideRender(id)) outReservoirs[idx] = r;
 }

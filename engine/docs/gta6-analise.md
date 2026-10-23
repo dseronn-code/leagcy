@@ -26,7 +26,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Reflexos por ray tracing | 🟡 | Funciona, mas o especular estoura float16 e o denoiser não reprojeta reflexos (auditoria 1.2, 1.13) |
 | Sombra do sol | ✅ | Ray tracing com penumbra física do disco solar; sem acne e sem degraus no terminator (visibility buffer + Hanika 2021 + Chiang 2019, medido em `tools/sombras.py`) |
 | Shadow maps em cascata (fallback e performance) | ❌ | |
-| Milhares de luzes (neon, faróis, postes) | 🟡 | ReSTIR básico: amostragem uniforme, reuso enviesado, sem ReGIR (auditoria 1.7–1.9) |
+| Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR de produção: BVH de luzes, GRIS/MIS em pares, correção de viés por ray tracing, filtro de boiling; viés < 1,5% contra força bruta (`tools/restir.py`) |
 | Céu e atmosfera física | ✅ | Pipeline completa de Hillaire (transmitância, múltiplo espalhamento, sky-view, perspectiva aérea), 4% de erro contra path tracing de referência |
 | Nuvens volumétricas, raios de luz (god rays) | ❌ | Hoje só temos névoa por altura |
 | Ciclo dia/noite | 🟡 | O sol se move; faltam lua, estrelas e luzes da cidade |
