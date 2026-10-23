@@ -23,7 +23,12 @@ void main() {
   } else {
     GSample g = loadGBuffer(id);
     BrdfContext bc = makeBrdfContext(g.N, g.V, g.f0, g.f90, g.roughness, energyCompensationEnabled());
-    color = texelFetch(diffuseIn, id, 0).rgb * g.diffuseColor + texelFetch(specularIn, id, 0).rgb * specularDemodulation(bc) +
+    vec3 dIn = texelFetch(diffuseIn, id, 0).rgb, sIn = texelFetch(specularIn, id, 0).rgb;
+    if (reblurSignal()) {  // REBLUR_BackEnd_UnpackRadianceAndNormHitDist
+      dIn = nrdYCoCgToLinear(dIn);
+      sIn = nrdYCoCgToLinear(sIn);
+    }
+    color = dIn * g.diffuseColor + sIn * specularDemodulation(bc) +
             texelFetch(gEmissive, id, 0).rgb;
     color = applyAerialPerspective(color, uv, g.P);
     color = applyHeightFog(color, g.P);

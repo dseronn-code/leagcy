@@ -293,3 +293,36 @@ O que mudou:
 Achado lateral (fica para a correção 3 — luzes reais): as esferas "lâmpada" das cenas têm o raio exato da luz,
 e um raio que vai até a superfície da esfera às vezes bate na malha da lâmpada. Por isso todos os raios de
 luz param 1e-5·d antes do ponto (a referência também).
+
+### Item 5 — denoiser: NVIDIA NRD integrado, mas o SVGF próprio continua o padrão (medido)
+
+O que entrou:
+- **NVIDIA NRD v4.18.0** (ReLAX e ReBLUR) pela camada oficial NRDIntegration + NRI, embrulhando o nosso
+  VkDevice (`--denoiser relax|reblur`). Normal em R10G10B10A2 (a codificação testada pela NVIDIA), viewZ e
+  distância dos raios de GI/reflexo gravadas pela iluminação; ReBLUR recebe YCoCg + distância normalizada.
+  Validação Vulkan com sincronização limpa (achou e corrigimos: a imagem de movimento precisava de uso STORAGE).
+- **Demodulação do especular** (o NRD recomenda; vale também para o SVGF): o especular vai ao denoiser dividido
+  pela refletância especular esperada (DFG) e é remultiplicado na composição — o detalhe das texturas de f0 não
+  é mais borrado com o ruído. Fornalha idêntica (a conta é exata).
+- `--nrd-validation`: camada de validação do NRD (histórico acumulado, desoclusão, vetores de movimento).
+- `tools/denoiser.py`: câmera andando 24 frames contra a referência na mesma pose (`--move-stop`), média dos
+  dois denoisers convergidos para não favorecer nenhum.
+
+Medições (Sponza à noite, 640x360, Ultra):
+
+| | Parado: cintilação | Parado: brilhinhos | Andando: erro | Andando: brilhinhos |
+|---|---|---|---|---|
+| SVGF próprio | 0,0216 | 0,02% | **0,112** | **0,44%** |
+| NRD ReLAX | **0,0162** | **0,00%** | 0,139 | 0,75% |
+| NRD ReBLUR | — | — | 0,173 | 1,29% |
+
+Investigado antes de concluir: sinal dos vetores de movimento, sinal do jitter, convenção do eixo Y da projeção,
+anti-lag, histórico rápido, filtro espacial mais forte, peso da distância dos raios. A camada de validação do
+NRD confirma vetores corretos e histórico mantido em movimento. Em movimento o NRD deixa "confete" colorido (as
+amostras de luzes coloridas do ReSTIR em pixels de histórico curto), que o SVGF (guiado por variância) espalha.
+**Decisão pelos números:** SVGF continua o padrão (jogo = câmera em movimento); NRD fica disponível e é melhor
+parado. Próximo passo para o NRD render mais: entrada de confiança do histórico (`IN_DIFF_CONFIDENCE`) vinda do
+ReSTIR e testar no PC com RTX 3070 Ti (lá o NRD roda nos tempos para que foi ajustado).
+
+Achado lateral: o metal de rugosidade 1 converge mais devagar com o NRD (fornalha 0,925 em 48 frames, 0,937 em
+96); o teste de energia passou a usar 96 frames.

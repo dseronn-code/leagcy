@@ -35,7 +35,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| Denoiser | 🟡 | SVGF com estouro de float16 e sem anti-firefly — causa dos brilhinhos (auditoria 1.1, 1.13) |
+| Denoiser | 🟡 | SVGF (padrão) + NVIDIA NRD ReLAX/ReBLUR integrados e medidos: NRD melhor parado, SVGF melhor andando; falta o NRD superar em movimento (confiança do histórico) |
 | TAA | 🟡 | Funciona, mas a reconstrução bilinear deixa a imagem mole (auditoria 4.1) |
 | Upscaling (FSR, DLSS, XeSS) | 🟡 | TAAU próprio (Dia 2); faltam DLSS/FSR 3/XeSS |
 | Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | 🟡 | Tudo menos lens flare (Dia 2) |

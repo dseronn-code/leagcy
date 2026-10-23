@@ -152,9 +152,12 @@ void Context::createDevice(VkSurfaceKHR surface) {
   vkGetPhysicalDeviceFeatures(gpu, &supported);
   // gl_PrimitiveID no fragment shader (visibility buffer). Toda GPU desktop tem.
   if (!supported.geometryShader) FATAL("A GPU não suporta geometryShader (gl_PrimitiveID no fragment shader).");
+  // Formatos estendidos em storage (RG16F etc.): o NRD lê/escreve as entradas como imagens de storage.
+  if (!supported.shaderStorageImageExtendedFormats) FATAL("A GPU não suporta shaderStorageImageExtendedFormats.");
 
   VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
   f2.features.geometryShader = VK_TRUE;
+  f2.features.shaderStorageImageExtendedFormats = VK_TRUE;
   f2.features.samplerAnisotropy = VK_TRUE;
   f2.features.shaderInt64 = VK_TRUE;
   f2.features.shaderStorageImageReadWithoutFormat = VK_TRUE;

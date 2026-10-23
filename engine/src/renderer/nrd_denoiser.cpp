@@ -13,7 +13,7 @@
 namespace renderer {
 
 namespace {
-constexpr nrd::Identifier kRelax = 0;
+constexpr nrd::Identifier kDenoiser = 0;
 
 void copyMatrix(float dst[16], const glm::mat4& m) { std::memcpy(dst, &m[0][0], sizeof(float) * 16); }  // coluna principal, como o NRD
 }  // namespace
@@ -25,10 +25,11 @@ struct NrdDenoiser::Impl {
 NrdDenoiser::NrdDenoiser() = default;
 NrdDenoiser::~NrdDenoiser() { destroy(); }
 
-bool NrdDenoiser::init(rhi::Context& ctx, VkExtent2D size, uint32_t framesInFlight) {
+bool NrdDenoiser::init(rhi::Context& ctx, VkExtent2D size, uint32_t framesInFlight, bool reblur) {
   destroy();
   impl_ = std::make_unique<Impl>();
   size_ = size;
+  reblur_ = reblur;
 
   const nrd::LibraryDesc& lib = *nrd::GetLibraryDesc();
   nri::QueueFamilyVKDesc queueFamily{};
@@ -58,18 +59,19 @@ bool NrdDenoiser::init(rhi::Context& ctx, VkExtent2D size, uint32_t framesInFlig
   integrationDesc.queuedFrameNum = uint8_t(framesInFlight);
   integrationDesc.autoWaitForIdle = true;
 
-  const nrd::DenoiserDesc denoisers[] = {{kRelax, nrd::Denoiser::RELAX_DIFFUSE_SPECULAR}};
+  const nrd::DenoiserDesc denoisers[] = {
+      {kDenoiser, reblur ? nrd::Denoiser::REBLUR_DIFFUSE_SPECULAR : nrd::Denoiser::RELAX_DIFFUSE_SPECULAR}};
   nrd::InstanceCreationDesc instanceDesc{};
   instanceDesc.denoisers = denoisers;
   instanceDesc.denoisersNum = 1;
 
   if (impl_->integration.RecreateVK(integrationDesc, instanceDesc, deviceDesc) != nrd::Result::SUCCESS) {
-    LOG_ERROR("NRD: falha ao criar a instância (ReLAX)");
+    LOG_ERROR("NRD: falha ao criar a instância");
     impl_.reset();
     return false;
   }
-  LOG_INFO("NRD %u.%u.%u: ReLAX difuso + especular (%ux%u)", lib.versionMajor, lib.versionMinor, lib.versionBuild,
-           size.width, size.height);
+  LOG_INFO("NRD %u.%u.%u: %s difuso + especular (%ux%u)", lib.versionMajor, lib.versionMinor, lib.versionBuild,
+           reblur ? "ReBLUR" : "ReLAX", size.width, size.height);
   return true;
 }
 
@@ -89,7 +91,7 @@ void NrdDenoiser::denoise(VkCommandBuffer cmd, const Inputs& in, const Frame& f)
   copyMatrix(common.worldToViewMatrix, f.view);
   copyMatrix(common.worldToViewMatrixPrev, f.prevView);
   // Nossos vetores guardam (atual - anterior) em UV; o NRD quer uvAnterior = uv + mv · escala.
-  common.motionVectorScale[0] = -1.0f;
+  common.motionVectorScale[0] = -1.0f;  // conferido pela camada de validação do NRD (painel "MV")
   common.motionVectorScale[1] = -1.0f;
   common.motionVectorScale[2] = 0.0f;
   common.cameraJitter[0] = f.jitterPixels.x;
@@ -101,13 +103,21 @@ void NrdDenoiser::denoise(VkCommandBuffer cmd, const Inputs& in, const Frame& f)
   common.timeDeltaBetweenFrames = f.frameTimeMs;
   common.denoisingRange = 100000.0f;  // 100 km; o céu é gravado além disso
   common.frameIndex = f.frameIndex;
+  common.enableValidation = in.validation.image != VK_NULL_HANDLE;
   common.accumulationMode = f.resetHistory ? nrd::AccumulationMode::CLEAR_AND_RESTART : nrd::AccumulationMode::CONTINUE;
   nrd.SetCommonSettings(common);
 
+  if (reblur_) {
+    nrd::ReblurSettings reblur{};  // normalização da distância = padrão (A=3, B=0,1, C=20), igual à do shader
+    reblur.enableAntiFirefly = true;
+    nrd.SetDenoiserSettings(kDenoiser, &reblur);
+  } else {
   nrd::RelaxSettings relax{};
   relax.enableAntiFirefly = true;  // vagalumes são exatamente os "brilhinhos"
-  relax.minHitDistanceWeight = 0.05f;  // recomendado para sinais limpos de ReSTIR
-  nrd.SetDenoiserSettings(kRelax, &relax);
+  // Máximo da faixa: a nossa distância do difuso vem de 1-2 raios de GI (ruidosa), não de um sinal limpo.
+  relax.minHitDistanceWeight = 0.2f;
+  nrd.SetDenoiserSettings(kDenoiser, &relax);
+  }
 
   nrd::ResourceSnapshot snapshot{};
   snapshot.restoreInitialState = true;  // tudo volta para GENERAL
@@ -126,11 +136,12 @@ void NrdDenoiser::denoise(VkCommandBuffer cmd, const Inputs& in, const Frame& f)
   snapshot.SetResource(nrd::ResourceType::IN_SPEC_RADIANCE_HITDIST, resource(in.specular));
   snapshot.SetResource(nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST, resource(in.outDiffuse));
   snapshot.SetResource(nrd::ResourceType::OUT_SPEC_RADIANCE_HITDIST, resource(in.outSpecular));
+  if (in.validation.image) snapshot.SetResource(nrd::ResourceType::OUT_VALIDATION, resource(in.validation));
 
   nri::CommandBufferVKDesc cmdDesc{};
   cmdDesc.vkCommandBuffer = (VKHandle)cmd;
   cmdDesc.queueType = nri::QueueType::GRAPHICS;
-  nrd.DenoiseVK(&kRelax, 1, cmdDesc, snapshot);
+  nrd.DenoiseVK(&kDenoiser, 1, cmdDesc, snapshot);
 }
 
 }  // namespace renderer

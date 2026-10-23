@@ -24,11 +24,20 @@ layout(set = 0, binding = 0) uniform FrameData {
   uvec4 quality0;             // x = amostras por pixel, y = candidatos ReSTIR, z = vizinhos ReSTIR, w = amostras do DOF
   vec4 quality1;              // x = mip das texturas nos raios, y = limite de vagalumes, z = amostras do motion blur,
                               // w = compensação de energia do BRDF (1 = ligada)
-  uvec4 quality2;             // x = correção de viés do ReSTIR por ray tracing (1 = ligada)
+  uvec4 quality2;             // x = correção de viés do ReSTIR por ray tracing (1 = ligada),
+                              // y = difuso/especular no formato do NRD ReBLUR (YCoCg + distância normalizada)
   vec4 environment;           // x = céu uniforme em nits (> 0: teste da fornalha branca)
 } frame;
 
 bool energyCompensationEnabled() { return frame.quality1.w > 0.5; }
+bool reblurSignal() { return frame.quality2.y != 0u; }
+
+// Conversões YCoCg do NRD (_NRD_LinearToYCoCg / _NRD_YCoCgToLinear).
+vec3 nrdLinearToYCoCg(vec3 c) { return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25))); }
+vec3 nrdYCoCgToLinear(vec3 c) {
+  float t = c.x - c.z;
+  return max(vec3(t + c.y, c.x + c.z, t - c.y), vec3(0.0));
+}
 
 layout(set = 0, binding = 1) uniform sampler2D skyViewLut;
 

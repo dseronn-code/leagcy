@@ -26,6 +26,7 @@ class NrdDenoiser {
     Image viewZ;            // R32: z em espaço de câmera
     Image diffuse, specular;        // radiância (difuso demodulado) + distância do raio em .w
     Image outDiffuse, outSpecular;  // saída filtrada
+    Image validation;               // opcional: camada de validação do NRD
   };
   struct Frame {
     glm::mat4 view, prevView, proj, prevProj;  // projeções SEM jitter
@@ -38,7 +39,10 @@ class NrdDenoiser {
   NrdDenoiser();
   ~NrdDenoiser();
   // Todas as imagens ficam em VK_IMAGE_LAYOUT_GENERAL e voltam a ele depois de denoise().
-  bool init(rhi::Context& ctx, VkExtent2D size, uint32_t framesInFlight);
+  // reblur = true: REBLUR_DIFFUSE_SPECULAR (entrada em YCoCg + distância normalizada, ver lighting.glsl);
+  // false: RELAX_DIFFUSE_SPECULAR (radiância linear + distância em metros).
+  bool init(rhi::Context& ctx, VkExtent2D size, uint32_t framesInFlight, bool reblur);
+  bool reblur() const { return reblur_; }
   void destroy();
   void denoise(VkCommandBuffer cmd, const Inputs& in, const Frame& frame);
 
@@ -46,6 +50,7 @@ class NrdDenoiser {
   struct Impl;
   std::unique_ptr<Impl> impl_;
   VkExtent2D size_{};
+  bool reblur_ = false;
 };
 
 }  // namespace renderer

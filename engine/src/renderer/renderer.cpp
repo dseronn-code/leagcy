@@ -36,7 +36,7 @@ struct FrameUniforms {
   glm::uvec4 frameInfo;
   glm::uvec4 quality0;  // spp, candidatos ReSTIR, vizinhos ReSTIR, amostras DOF
   glm::vec4 quality1;   // mip nos raios, limite de vagalumes, amostras de motion blur, compensação de energia
-  glm::uvec4 quality2;  // correção de viés do ReSTIR
+  glm::uvec4 quality2;  // x = correção de viés do ReSTIR, y = sinal no formato do ReBLUR
   glm::vec4 environment;  // x = céu uniforme (nits), y = modo de depuração, z = exposição da depuração,
                           // w = reusos do ReSTIR desligados (bit 0 temporal, bit 1 espacial)
 };
@@ -396,7 +396,8 @@ void Renderer::createTargets() {
   }
   t_.diffuse = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
   t_.specular = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
-  t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach);
+  // STORAGE: o NRD cria views de storage de todas as entradas (exige shaderStorageImageExtendedFormats).
+  t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach | VK_IMAGE_USAGE_STORAGE_BIT);
   t_.emissive = rhi::createImage2D(ctx, R, kHdrFormat, attach);
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
                           &t_.tmpB, &t_.tmpC, &t_.sceneColor})
@@ -405,6 +406,7 @@ void Renderer::createTargets() {
   t_.nrdNormalRoughness = rhi::createImage2D(ctx, R, VK_FORMAT_A2B10G10R10_UNORM_PACK32, storage);
   t_.diffuseDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.specularDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+  t_.nrdValidation = rhi::createImage2D(ctx, R, VK_FORMAT_R8G8B8A8_UNORM, storage);
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
@@ -426,12 +428,12 @@ void Renderer::createTargets() {
     for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                             &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
-                            &t_.specularDenoised})
+                            &t_.specularDenoised, &t_.nrdValidation})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   historyValid_ = false;
   // O NRD cria texturas internas do tamanho da resolução de render: recriado junto com os alvos.
-  nrdReady_ = nrd_.init(ctx, R, kFramesInFlight);
+  nrdReady_ = nrd_.init(ctx, R, kFramesInFlight, settings.nrdReblur);
 }
 
 void Renderer::destroyTargets() {
@@ -447,7 +449,7 @@ void Renderer::destroyTargets() {
   for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                           &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
-                          &t_.specularDenoised})
+                          &t_.specularDenoised, &t_.nrdValidation})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -498,7 +500,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                           std::max(q.dofSamples, 1u));
   u.quality1 = glm::vec4(q.rayTextureLod, q.fireflyLimit, float(std::max(q.motionBlurSamples, 1u)),
                          settings.energyCompensation ? 1.0f : 0.0f);
-  u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, 0u, 0u, 0u);
+  const bool reblurSignal = settings.denoiser && settings.nrd && settings.nrdReblur && settings.debugView == kDebugNone;
+  u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, reblurSignal ? 1u : 0u, 0u, 0u);
   // z: exposição das visualizações de luz (EV100 manual; EV 0 sem --exposure).
   float debugEV = std::isnan(settings.manualEV100) ? 0.0f : settings.manualEV100;
   u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), std::exp2(-debugEV) / 1.2f,
@@ -582,12 +585,15 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // Depuração: o valor cru da iluminação vai direto para a tela (sem denoiser, TAA, exposição nem tonemap).
   const bool debug = settings.debugView != kDebugNone;
+  bool showValidation = false;  // camada de validação do NRD no lugar da imagem final
   const rhi::Image* color = &t_.diffuseRaw;
   uint32_t mips = t_.bloom.mipLevels;
   if (!debug) {
   // ---- 5. Denoiser ----
   const rhi::Image* diffuseFinal = &t_.diffuseRaw;
   const rhi::Image* specularFinal = &t_.specularRaw;
+  if (settings.denoiser && settings.nrd && nrdReady_ && nrd_.reblur() != settings.nrdReblur)
+    nrdReady_ = nrd_.init(*ctx_, R, kFramesInFlight, settings.nrdReblur);  // trocou de denoiser
   if (settings.denoiser && settings.nrd && nrdReady_) {
     // NVIDIA NRD ReLAX: entradas em GENERAL, o NRD faz as próprias barreiras e devolve tudo em GENERAL.
     NrdDenoiser::Inputs in;
@@ -598,6 +604,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     in.specular = {t_.specularRaw.handle, kHdrFormat};
     in.outDiffuse = {t_.diffuseDenoised.handle, kHdrFormat};
     in.outSpecular = {t_.specularDenoised.handle, kHdrFormat};
+    if (settings.nrdValidation) in.validation = {t_.nrdValidation.handle, VK_FORMAT_R8G8B8A8_UNORM};
     NrdDenoiser::Frame f;
     f.view = u.view;
     f.proj = cam.projection(aspect);
@@ -614,6 +621,10 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     diffuseFinal = &t_.diffuseDenoised;
     specularFinal = &t_.specularDenoised;
     profiler_.mark(cmd, "denoiser");
+    if (settings.nrdValidation) {
+      showValidation = true;
+      color = &t_.nrdValidation;
+    }
   } else if (settings.denoiser) {
     svgfTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion, tex(t_.diffuseRaw),
                                          tex(t_.specularRaw), tex(t_.diffuseHistory[prev]), tex(t_.specularHistory[prev]),
@@ -650,6 +661,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     profiler_.mark(cmd, "denoiser");
   }
 
+  if (!showValidation) {
   // ---- 6. Composição ----
   compositePass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.emissive), tex(*diffuseFinal), tex(*specularFinal),
                                     storage(t_.sceneColor)}, R);
@@ -706,6 +718,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
 
   profiler_.mark(cmd, "bloom");
+  }  // !showValidation
   }  // !debug
   // ---- 11. Tonemap -> saída ----
   rhi::imageBarrier(cmd, output, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -720,7 +733,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   vkCmdBeginRendering(cmd, &ri);
   setViewport(cmd, O);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemapPipeline_);
-  TonemapPush tp{settings.bloomStrength, 1.0f / float(mips), isSrgb(outputFormat_) ? 0u : 1u, debug ? 1u : 0u};
+  TonemapPush tp{settings.bloomStrength, 1.0f / float(mips), isSrgb(outputFormat_) ? 0u : 1u, (debug || showValidation) ? 1u : 0u};
   tonemapLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs,
                       {tex(*color), Binding::sampled(t_.bloomMips[0], linear_), Binding::storageBuffer(exposureState_)}, &tp);
   vkCmdDraw(cmd, 3, 1, 0, 0);
