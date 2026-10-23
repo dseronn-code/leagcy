@@ -145,3 +145,22 @@ Conclusões: (1) efeito neutro na cintilação — o valor desta correção é e
 ruído; (2) **com a cena parada a externa praticamente não cintila**: os "brilhinhos" dela vinham de objetos em
 movimento (tarefa do denoiser, correção 6); (3) o ruído noturno restante vem da escolha de luzes do ReSTIR
 (correção 5). Validação com sincronização limpa em 7 configurações.
+
+### Correção 2b — orçamentos de qualidade escaláveis (presets)
+
+Os orçamentos por pixel estavam fixos no código (resolução interna de 67%, 1 amostra por pixel, 8 candidatos do
+ReSTIR, 2 passadas do denoiser no especular, texturas no mip 2 nos raios, sol 2,5x maior que o real). Agora vêm de
+presets — **Baixo, Médio, Alto, Ultra (padrão) e Cinema** — enviados aos shaders a cada frame. O sol passou a ter o
+tamanho angular real (0,00465 rad).
+
+| Preset | Resolução interna | Amostras/pixel | Candidatos ReSTIR | Vizinhos | Denoiser (dif./esp.) | Mip nos raios |
+|---|---|---|---|---|---|---|
+| Baixo | 50% | 1 | 4 | 3 | 3 / 1 | 3 |
+| Médio | 60% | 1 | 8 | 4 | 4 / 2 | 2 |
+| Alto | 75% | 1 | 12 | 6 | 5 / 3 | 1 |
+| **Ultra** | **100%** | **2** | **16** | **8** | **5 / 4** | **0** |
+| Cinema | 100% | 4 | 32 | 12 | 5 / 5 | 0 |
+
+Medição (Sponza noite, cena congelada; antes = padrão anterior com cintilação 0,0471 e 0,63% de brilhinhos):
+Alto 0,0393 / 0,45% · **Ultra 0,0307 / 0,27% (−57% de brilhinhos)** · Cinema 0,0272 / 0,16% (−75%).
+Validação com sincronização limpa nos 5 presets × 4 configurações (20 casos). Desempenho a medir na RTX 3070 Ti.

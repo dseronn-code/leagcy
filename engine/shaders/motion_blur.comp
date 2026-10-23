@@ -9,7 +9,6 @@ layout(set = 1, binding = 1) uniform sampler2D gMotion;
 layout(set = 1, binding = 2, rgba16f) uniform writeonly image2D colorOut;
 layout(push_constant) uniform Push { float shutter; float maxPixels; float pad0; float pad1; } pc;
 
-const int SAMPLES = 12;
 
 vec2 motionPixels(vec2 uv) {
   vec2 m = texelFetch(gMotion, ivec2(clamp(uv, 0.0, 1.0) * frame.renderSize.xy), 0).xy * frame.outputSize.xy * pc.shutter;
@@ -29,8 +28,9 @@ void main() {
   vec3 sum = center;
   float wsum = 1.0;
   float jitter = fract(52.9829189 * fract(dot(vec2(id), vec2(0.06711056, 0.00583715))));  // ruído IGN
-  for (int i = 0; i < SAMPLES; ++i) {
-    float t = (float(i) + jitter) / float(SAMPLES) - 0.5;
+  int samples = int(frame.quality1.z);
+  for (int i = 0; i < samples; ++i) {
+    float t = (float(i) + jitter) / float(samples) - 0.5;
     vec2 suv = uv + v * t * frame.outputSize.zw;
     // Só borra com amostras que também se movem o bastante para cobrir este pixel.
     float w = clamp(length(motionPixels(suv)) / max(abs(t) * speed * 2.0, 1e-3), 0.0, 1.0);

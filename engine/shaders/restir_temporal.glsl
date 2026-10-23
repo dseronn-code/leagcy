@@ -24,7 +24,7 @@ void main() {
 
   // 1) RIS: escolhe entre candidatos uniformes proporcionalmente a p̂.
   Reservoir r = emptyReservoir();
-  for (uint i = 0u; i < RESTIR_INITIAL_CANDIDATES; ++i) {
+  for (uint i = 0u; i < restirCandidates(); ++i) {
     uint li = min(uint(rand(rng) * float(lightCount)), lightCount - 1u);
     updateReservoir(r, li, targetPdf(li, g) * float(lightCount), 1.0, rand(rng));
   }
@@ -52,7 +52,7 @@ void main() {
       vec3 nPrev = texelFetch(gNormalPrev, pid, 0).xyz;
       if (abs(zPrev - zCur) < 0.1 * zCur && dot(nPrev, g.N) > 0.9) {
         Reservoir p = prevReservoirs[uint(pid.y) * uint(frame.renderSize.x) + uint(pid.x)];
-        p.M = min(p.M, RESTIR_MAX_HISTORY * float(RESTIR_INITIAL_CANDIDATES));
+        p.M = min(p.M, RESTIR_MAX_HISTORY * float(restirCandidates()));
         Reservoir s = emptyReservoir();
         updateReservoir(s, r.light, targetPdf(r.light, g) * r.W * r.M, r.M, rand(rng));
         updateReservoir(s, p.light, targetPdf(p.light, g) * p.W * p.M, p.M, rand(rng));

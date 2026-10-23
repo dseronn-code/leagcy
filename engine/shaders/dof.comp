@@ -10,7 +10,6 @@ layout(set = 1, binding = 1) uniform sampler2D gDepth;
 layout(set = 1, binding = 2, rgba16f) uniform writeonly image2D colorOut;
 layout(push_constant) uniform Push { float focusDistance; float aperture; float maxCoc; float pad; } pc;
 
-const int SAMPLES = 40;
 const float GOLDEN_ANGLE = 2.39996323;
 
 float depthAt(vec2 uv) {
@@ -34,8 +33,9 @@ void main() {
   float cc = coc(zc, focus);
   vec3 sum = texelFetch(colorIn, id, 0).rgb;
   float wsum = 1.0;
-  for (int i = 0; i < SAMPLES; ++i) {
-    float r = sqrt((float(i) + 0.5) / float(SAMPLES)) * pc.maxCoc;
+  int samples = int(frame.quality0.w);
+  for (int i = 0; i < samples; ++i) {
+    float r = sqrt((float(i) + 0.5) / float(samples)) * pc.maxCoc;
     float a = float(i) * GOLDEN_ANGLE;
     vec2 suv = uv + vec2(cos(a), sin(a)) * r * frame.outputSize.zw;
     float zs = depthAt(suv);

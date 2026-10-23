@@ -7,7 +7,6 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 1, binding = 3, std430) readonly buffer InReservoirs { Reservoir inReservoirs[]; };
 layout(set = 1, binding = 4, std430) writeonly buffer OutReservoirs { Reservoir outReservoirs[]; };
 
-const uint NEIGHBORS = 5u;
 const float RADIUS = 24.0;  // pixels
 
 void main() {
@@ -23,7 +22,7 @@ void main() {
   Reservoir s = emptyReservoir();
   updateReservoir(s, center.light, targetPdf(center.light, g) * center.W * center.M, center.M, rand(rng));
   float zCur = linearDepth(g.depth);
-  for (uint k = 0u; k < NEIGHBORS; ++k) {
+  for (uint k = 0u; k < frame.quality0.z; ++k) {
     vec2 u = rand2(rng);
     float r = RADIUS * sqrt(u.x), phi = TWO_PI * u.y;
     ivec2 q = id + ivec2(round(vec2(cos(phi), sin(phi)) * r));

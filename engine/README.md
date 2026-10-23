@@ -95,6 +95,8 @@ O console mostra, a cada 3 segundos, o tempo de GPU de cada passe (ms).
 ./build/legacy --night                     # noite: 512 luzes coloridas com sombra (ReSTIR)
 ./build/legacy --scene outdoor --dof       # cena externa com profundidade de campo
 ./build/legacy --lights 4000 --night       # teste de estresse de luzes
+./build/legacy --quality cinema            # presets: baixo | medio | alto | ultra (padrão) | cinema
+./build/legacy --fullscreen                # tela cheia na resolução nativa do monitor
 ./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
 ./build/legacy --validation                # camadas de validação do Vulkan (debug)
 ./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png

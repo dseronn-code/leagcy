@@ -15,7 +15,7 @@ struct Reservoir {
 };
 
 const uint NO_LIGHT = 0xFFFFFFFFu;
-const uint RESTIR_INITIAL_CANDIDATES = 8u;
+uint restirCandidates() { return max(frame.quality0.y, 1u); }  // candidatos iniciais por pixel (preset)
 const float RESTIR_MAX_HISTORY = 20.0;  // limite de M temporal (múltiplo dos candidatos iniciais)
 
 Reservoir emptyReservoir() { return Reservoir(NO_LIGHT, 0.0, 0.0, 0.0); }
