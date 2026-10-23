@@ -72,6 +72,13 @@ void ComputePass::dispatch(VkCommandBuffer cmd, VkDescriptorSet globalSet, std::
   vkCmdDispatch(cmd, (threads.width + 7) / 8, (threads.height + 7) / 8, 1);
 }
 
+void ComputePass::dispatchGroups(VkCommandBuffer cmd, VkDescriptorSet globalSet, std::initializer_list<Binding> bindings,
+                                 uint32_t groupsX, uint32_t groupsY, const void* push) const {
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline_);
+  layout.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_COMPUTE, globalSet, bindings, push);
+  vkCmdDispatch(cmd, groupsX, groupsY, 1);
+}
+
 void ComputePass::destroy(Context& ctx) {
   if (pipeline_) vkDestroyPipeline(ctx.device, pipeline_, nullptr);
   pipeline_ = VK_NULL_HANDLE;

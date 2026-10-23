@@ -18,6 +18,11 @@ static_assert(sizeof(Vertex) == 48);
 struct MeshData {
   std::vector<Vertex> vertices;
   std::vector<uint32_t> indices;
+  // Skinning (opcional): até 4 juntas por vértice, índices relativos à skin do modelo.
+  std::vector<glm::uvec4> joints;
+  std::vector<glm::vec4> weights;
+  int skinModel = -1;  // índice em Scene::models
+  int skin = -1;       // índice em Model::skins
 };
 
 MeshData makeSphere(uint32_t segments = 96, uint32_t rings = 48);
@@ -28,5 +33,7 @@ MeshData makeTerrain(float size, uint32_t res, const std::function<float(float, 
 float fbm(float x, float y, int octaves = 6);
 // Tangentes por acúmulo das derivadas de UV de cada triângulo (aproxima MikkTSpace).
 void computeTangents(MeshData& mesh);
+// Normais suaves ponderadas por área (para malhas sem NORMAL, ex.: Fox do glTF-Sample-Assets).
+void computeNormals(MeshData& mesh);
 
 }  // namespace scene

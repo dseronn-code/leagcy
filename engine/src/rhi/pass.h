@@ -43,6 +43,9 @@ class ComputePass {
             std::initializer_list<VkDescriptorType> bindings, uint32_t pushSize = 0);
   void dispatch(VkCommandBuffer cmd, VkDescriptorSet globalSet, std::initializer_list<Binding> bindings,
                 VkExtent2D threads, const void* push = nullptr) const;
+  // Número de grupos explícito (shaders com outro local_size, ex.: 64x1).
+  void dispatchGroups(VkCommandBuffer cmd, VkDescriptorSet globalSet, std::initializer_list<Binding> bindings,
+                      uint32_t groupsX, uint32_t groupsY, const void* push = nullptr) const;
   void destroy(Context& ctx);
 
   PassLayout layout;

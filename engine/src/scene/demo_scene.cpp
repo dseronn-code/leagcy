@@ -1,8 +1,10 @@
 #include "scene/demo_scene.h"
 
 #include <cmath>
+#include <functional>
 #include <random>
 
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace scene {
@@ -35,6 +37,60 @@ float terrainHeight(float x, float z) {
 }
 
 const std::string kAssets = ASSET_DIR;
+// O CesiumMan é exportado olhando para +X; gira -90° para alinhar a frente com +Z.
+const float kCesiumManFacing = -glm::half_pi<float>();
+
+// Carrega um personagem animado com a escala dada; devolve o modelo e o deslocamento que põe os pés no chão.
+int loadCharacter(Scene& s, const std::string& file, float scale, const std::string& clip, float& footOffset) {
+  int model = -1;
+  if (!loadGltf(s, kAssets + "/" + file, glm::scale(glm::mat4(1.0f), glm::vec3(scale)), &model) || model < 0) return -1;
+  Model& m = s.models[size_t(model)];
+  int a = m.findAnimation(clip);
+  m.animation = a >= 0 ? a : 0;
+  // Pose inicial para medir a altura dos pés.
+  s.update(0.0f);
+  glm::vec3 lo, hi;
+  s.modelBounds(model, lo, hi);
+  footOffset = -lo.y;
+  return model;
+}
+
+// Faz um modelo percorrer uma elipse no plano XZ, virado na direção do movimento.
+// facingYaw: rotação extra para alinhar a "frente" do modelo com +Z.
+void walkEllipse(Scene& s, int model, glm::vec3 center, glm::vec2 radii, float speed, float scale, float footOffset,
+                 float facingYaw, float phase, std::function<float(float, float)> ground) {
+  if (model < 0) return;
+  float meanRadius = 0.5f * (radii.x + radii.y);
+  s.addAnimator([=](Scene& sc, float t, float) {
+    float th = phase + speed / meanRadius * t;
+    glm::vec3 p = center + glm::vec3(radii.x * std::cos(th), 0.0f, radii.y * std::sin(th));
+    glm::vec3 v(-radii.x * std::sin(th), 0.0f, radii.y * std::cos(th));
+    if (ground) p.y = ground(p.x, p.z);
+    float yaw = std::atan2(v.x, v.z) + facingYaw;
+    glm::mat4 m = glm::translate(glm::mat4(1.0f), p + glm::vec3(0.0f, footOffset, 0.0f));
+    m = glm::rotate(m, yaw, glm::vec3(0, 1, 0));
+    sc.models[size_t(model)].root = glm::scale(m, glm::vec3(scale));
+  });
+}
+
+// Luzes coloridas orbitando um ponto, cada uma com uma pequena esfera emissiva.
+void addOrbitingLights(Scene& s, uint32_t sphereMesh, glm::vec3 center, float radius, int count, float intensity) {
+  for (int i = 0; i < count; ++i) {
+    glm::vec3 color = hue(float(i) / float(count));
+    Material m;
+    m.baseColor = glm::vec4(color, 1.0f);
+    m.emissive = color * 30.0f;
+    uint32_t object = s.addObject(sphereMesh, glm::mat4(1.0f), s.addMaterial(m));
+    uint32_t light = s.addLight({center, 0.08f, color * intensity, 12.0f});
+    float phase = glm::two_pi<float>() * float(i) / float(count);
+    s.addAnimator([=](Scene& sc, float t, float) {
+      float a = phase + 0.8f * t;
+      glm::vec3 p = center + glm::vec3(radius * std::cos(a), 0.4f * std::sin(2.0f * a), radius * std::sin(a));
+      sc.objects[object].transform = glm::scale(glm::translate(glm::mat4(1.0f), p), glm::vec3(0.08f));
+      sc.lights[light].position = p;
+    });
+  }
+}
 
 bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   uint32_t terrain = s.addMesh(makeTerrain(1200.0f, 640, terrainHeight));
@@ -103,6 +159,46 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
     s.addLight({{x, terrainHeight(x, z) + glm::mix(0.3f, 2.0f, u(rng)), z}, 0.05f, c, 8.0f});
   }
 
+  // ---- Conteúdo dinâmico ----
+  float foxFoot = 0, manFoot = 0;
+  int fox = loadCharacter(s, "Fox/Fox.gltf", 0.012f, "Run", foxFoot);
+  walkEllipse(s, fox, {0.0f, 0.0f, 4.0f}, {7.0f, 3.0f}, 5.0f, 0.012f, foxFoot, 0.0f, 0.0f, terrainHeight);
+  int man = loadCharacter(s, "CesiumMan/CesiumMan.gltf", 1.0f, "", manFoot);
+  walkEllipse(s, man, {-5.0f, 0.0f, 6.0f}, {2.5f, 2.5f}, 1.2f, 1.0f, manFoot, kCesiumManFacing, 1.0f, terrainHeight);
+  addOrbitingLights(s, sphere, {hx, hy + 2.0f, hz}, 1.4f, 3, 6.0f);
+
+  // Carro: carroceria, cabine, rodas e faróis (luzes que se movem com ele).
+  uint32_t paint = mat({0.02f, 0.05f, 0.25f}, 0.25f, 1.0f);
+  uint32_t glass = mat({0.02f, 0.02f, 0.02f}, 0.05f, 0.0f);
+  uint32_t tire = mat({0.03f, 0.03f, 0.03f}, 0.9f, 0.0f);
+  uint32_t lamp = mat({1, 1, 1}, 0.3f, 0.0f, {60.0f, 55.0f, 45.0f});
+  struct Part { uint32_t object; glm::mat4 local; };
+  std::vector<Part> car;
+  auto part = [&](uint32_t mesh, uint32_t material, glm::vec3 t, glm::vec3 sc) {
+    glm::mat4 local = glm::scale(glm::translate(glm::mat4(1.0f), t), sc);
+    car.push_back({s.addObject(mesh, local, material), local});
+  };
+  part(cube, paint, {0, 0.55f, 0}, {0.95f, 0.32f, 2.2f});
+  part(cube, glass, {0, 1.05f, -0.2f}, {0.8f, 0.25f, 1.1f});
+  for (float x : {-0.95f, 0.95f})
+    for (float z : {-1.4f, 1.4f}) part(sphere, tire, {x, 0.36f, z}, {0.14f, 0.36f, 0.36f});
+  std::vector<std::pair<uint32_t, glm::vec3>> headlights;
+  for (float x : {-0.6f, 0.6f}) {
+    glm::vec3 local(x, 0.6f, 2.25f);
+    part(sphere, lamp, local, glm::vec3(0.1f));
+    headlights.push_back({s.addLight({glm::vec3(0.0f), 0.1f, glm::vec3(40.0f, 36.0f, 30.0f), 30.0f}), local});
+  }
+  s.addAnimator([=](Scene& sc, float t, float) {
+    const float radius = 20.0f, speed = 12.0f;  // ~43 km/h
+    float th = speed / radius * t;
+    glm::vec3 p(radius * std::cos(th), 0.0f, -4.0f + radius * std::sin(th));
+    p.y = terrainHeight(p.x, p.z);
+    glm::vec3 v(-std::sin(th), 0.0f, std::cos(th));
+    glm::mat4 body = glm::rotate(glm::translate(glm::mat4(1.0f), p), std::atan2(v.x, v.z), glm::vec3(0, 1, 0));
+    for (const Part& pt : car) sc.objects[pt.object].transform = body * pt.local;
+    for (auto [light, local] : headlights) sc.lights[light].position = glm::vec3(body * glm::vec4(local, 1.0f));
+  });
+
   s.sunDirection = sunFrom(16.0f, 55.0f);
   s.sunIntensity = opt.night ? 0.0f : 20.0f;
   camera.position = {2.0f, terrainHeight(2, 16) + 3.2f, 16.0f};
@@ -131,6 +227,14 @@ bool buildSponza(Scene& s, Camera& camera, const DemoOptions& opt) {
     glm::vec3 c = hue(u(rng)) * glm::mix(0.6f, 2.0f, u(rng));
     s.addLight({p, 0.04f, c, 5.0f});
   }
+
+  // ---- Conteúdo dinâmico: personagens andando pelo átrio e lanternas orbitando o capacete ----
+  float foxFoot = 0, manFoot = 0;
+  int fox = loadCharacter(s, "Fox/Fox.gltf", 0.01f, "Walk", foxFoot);
+  walkEllipse(s, fox, {0.0f, lo.y, 0.0f}, {7.0f, 1.6f}, 1.6f, 0.01f, foxFoot, 0.0f, 0.0f, nullptr);
+  int man = loadCharacter(s, "CesiumMan/CesiumMan.gltf", 1.0f, "", manFoot);
+  walkEllipse(s, man, {0.0f, lo.y, 0.0f}, {5.0f, 1.2f}, 1.2f, 1.0f, manFoot, kCesiumManFacing, 3.0f, nullptr);
+  addOrbitingLights(s, s.addMesh(makeSphere(32, 16)), {0.0f, lo.y + 1.6f, 0.0f}, 1.5f, 4, 4.0f);
 
   s.sunDirection = sunFrom(65.0f, 100.0f);
   s.sunIntensity = opt.night ? 0.0f : 20.0f;

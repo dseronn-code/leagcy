@@ -17,9 +17,13 @@
 
 #include <cstring>
 #include <filesystem>
+#include <algorithm>
 #include <map>
+#include <string>
 
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 
 #include "scene/scene.h"
 
@@ -32,9 +36,15 @@ struct Loader {
   cgltf_data* data;
   std::filesystem::path dir;
   std::map<std::pair<const cgltf_image*, bool>, int32_t> textureCache;  // (imagem, sRGB) -> índice
-  std::vector<std::vector<std::pair<uint32_t, uint32_t>>> meshPrims;   // malha glTF -> (malha, material)
+  struct Primitive {
+    MeshData data;
+    uint32_t material = 0;
+    int sceneMesh = -1;  // malha compartilhada (instâncias sem esqueleto)
+  };
+  std::vector<std::vector<Primitive>> meshPrims;  // malha glTF -> primitivas
   std::vector<uint32_t> materialMap;
   uint32_t defaultMaterial = 0;
+  int model = -1;  // índice do Model criado (arquivos com animação ou esqueleto)
 
   int32_t texture(const cgltf_texture_view& view, bool srgb) {
     if (!view.texture || !view.texture->image) return -1;
@@ -103,13 +113,15 @@ struct Loader {
       for (size_t pi = 0; pi < mesh.primitives_count; ++pi) {
         const cgltf_primitive& prim = mesh.primitives[pi];
         if (prim.type != cgltf_primitive_type_triangles) continue;
-        const cgltf_accessor *pos = nullptr, *nrm = nullptr, *uv = nullptr, *tan = nullptr;
+        const cgltf_accessor *pos = nullptr, *nrm = nullptr, *uv = nullptr, *tan = nullptr, *jnt = nullptr, *wgt = nullptr;
         for (size_t a = 0; a < prim.attributes_count; ++a) {
           const cgltf_attribute& attr = prim.attributes[a];
           if (attr.type == cgltf_attribute_type_position) pos = attr.data;
           else if (attr.type == cgltf_attribute_type_normal) nrm = attr.data;
           else if (attr.type == cgltf_attribute_type_texcoord && attr.index == 0) uv = attr.data;
           else if (attr.type == cgltf_attribute_type_tangent) tan = attr.data;
+          else if (attr.type == cgltf_attribute_type_joints && attr.index == 0) jnt = attr.data;
+          else if (attr.type == cgltf_attribute_type_weights && attr.index == 0) wgt = attr.data;
         }
         if (!pos) continue;
         MeshData md;
@@ -131,11 +143,94 @@ struct Loader {
           md.indices.resize(pos->count);
           for (size_t i = 0; i < pos->count; ++i) md.indices[i] = uint32_t(i);
         }
+        if (jnt && wgt) {
+          md.joints.resize(pos->count);
+          md.weights.resize(pos->count);
+          for (size_t v = 0; v < pos->count; ++v) {
+            cgltf_uint j[4] = {0, 0, 0, 0};
+            cgltf_accessor_read_uint(jnt, v, j, 4);
+            md.joints[v] = glm::uvec4(j[0], j[1], j[2], j[3]);
+            glm::vec4 w(0.0f);
+            cgltf_accessor_read_float(wgt, v, &w.x, 4);
+            float sum = w.x + w.y + w.z + w.w;
+            md.weights[v] = sum > 0.0f ? w / sum : glm::vec4(1, 0, 0, 0);
+          }
+        }
+        if (!nrm) computeNormals(md);
         if (!tan) computeTangents(md);
         uint32_t material = prim.material ? materialMap[size_t(prim.material - data->materials)] : defaultMaterial;
-        meshPrims[mi].push_back({scene.addMesh(std::move(md)), material});
+        meshPrims[mi].push_back({std::move(md), material, -1});
       }
     }
+  }
+
+  // Hierarquia, esqueletos e clipes — só para arquivos animados.
+  void loadModel(const glm::mat4& root) {
+    if (data->animations_count == 0 && data->skins_count == 0) return;
+    Model m;
+    m.root = root;
+    auto nodeIndex = [&](const cgltf_node* n) { return uint32_t(n - data->nodes); };
+    m.nodes.resize(data->nodes_count);
+    for (size_t i = 0; i < data->nodes_count; ++i) {
+      const cgltf_node& n = data->nodes[i];
+      ModelNode& mn = m.nodes[i];
+      mn.parent = n.parent ? int(nodeIndex(n.parent)) : -1;
+      if (n.has_matrix) {
+        glm::mat4 mat = glm::make_mat4(n.matrix);
+        glm::vec3 skew;
+        glm::vec4 persp;
+        glm::decompose(mat, mn.scale, mn.rotation, mn.translation, skew, persp);
+      } else {
+        if (n.has_translation) mn.translation = glm::make_vec3(n.translation);
+        if (n.has_rotation) mn.rotation = glm::quat(n.rotation[3], n.rotation[0], n.rotation[1], n.rotation[2]);
+        if (n.has_scale) mn.scale = glm::make_vec3(n.scale);
+      }
+    }
+    for (size_t i = 0; i < data->skins_count; ++i) {
+      const cgltf_skin& sk = data->skins[i];
+      Skin skin;
+      for (size_t j = 0; j < sk.joints_count; ++j) {
+        skin.joints.push_back(nodeIndex(sk.joints[j]));
+        glm::mat4 ibm(1.0f);
+        if (sk.inverse_bind_matrices) cgltf_accessor_read_float(sk.inverse_bind_matrices, j, &ibm[0][0], 16);
+        skin.inverseBind.push_back(ibm);
+      }
+      m.skins.push_back(std::move(skin));
+    }
+    for (size_t i = 0; i < data->animations_count; ++i) {
+      const cgltf_animation& src = data->animations[i];
+      Animation a;
+      a.name = src.name ? src.name : ("anim" + std::to_string(i));
+      for (size_t si = 0; si < src.samplers_count; ++si) {
+        const cgltf_animation_sampler& smp = src.samplers[si];
+        AnimationSampler as;
+        as.step = smp.interpolation == cgltf_interpolation_type_step;
+        bool cubic = smp.interpolation == cgltf_interpolation_type_cubic_spline;
+        as.times.resize(smp.input->count);
+        for (size_t k = 0; k < smp.input->count; ++k) cgltf_accessor_read_float(smp.input, k, &as.times[k], 1);
+        size_t comps = cgltf_num_components(smp.output->type);
+        as.values.resize(as.times.size(), glm::vec4(0.0f));
+        for (size_t k = 0; k < as.times.size(); ++k)  // CUBICSPLINE: (tangente, valor, tangente) por chave
+          cgltf_accessor_read_float(smp.output, cubic ? k * 3 + 1 : k, &as.values[k].x, std::min<size_t>(comps, 4));
+        if (!as.times.empty()) a.duration = std::max(a.duration, as.times.back());
+        a.samplers.push_back(std::move(as));
+      }
+      for (size_t ci = 0; ci < src.channels_count; ++ci) {
+        const cgltf_animation_channel& ch = src.channels[ci];
+        if (!ch.target_node) continue;
+        AnimationChannel c;
+        c.node = nodeIndex(ch.target_node);
+        c.sampler = uint32_t(ch.sampler - src.samplers);
+        if (ch.target_path == cgltf_animation_path_type_translation) c.path = AnimationChannel::kTranslation;
+        else if (ch.target_path == cgltf_animation_path_type_rotation) c.path = AnimationChannel::kRotation;
+        else if (ch.target_path == cgltf_animation_path_type_scale) c.path = AnimationChannel::kScale;
+        else continue;  // morph targets ainda não suportados
+        a.channels.push_back(c);
+      }
+      m.animations.push_back(std::move(a));
+    }
+    scene.models.push_back(std::move(m));
+    model = int(scene.models.size() - 1);
   }
 
   void loadNodes(const glm::mat4& root) {
@@ -145,14 +240,38 @@ struct Loader {
       float world[16];
       cgltf_node_transform_world(&node, world);
       glm::mat4 m = root * glm::make_mat4(world);
-      for (auto [mesh, material] : meshPrims[size_t(node.mesh - data->meshes)]) scene.addObject(mesh, m, material);
+      for (Primitive& p : meshPrims[size_t(node.mesh - data->meshes)]) {
+        bool skinned = model >= 0 && node.skin && !p.data.joints.empty();
+        uint32_t mesh;
+        if (skinned) {
+          // Cada personagem tem sua própria cópia deformável da malha.
+          MeshData copy = p.data;
+          copy.skinModel = model;
+          copy.skin = int(node.skin - data->skins);
+          mesh = scene.addMesh(std::move(copy));
+        } else {
+          if (p.sceneMesh < 0) {
+            MeshData copy = p.data;
+            copy.joints.clear();
+            copy.weights.clear();
+            p.sceneMesh = int(scene.addMesh(std::move(copy)));
+          }
+          mesh = uint32_t(p.sceneMesh);
+        }
+        uint32_t object = scene.addObject(mesh, m, p.material);
+        if (model >= 0) {
+          Model& md = scene.models[size_t(model)];
+          if (skinned) md.skinnedObjects.push_back(object);
+          else md.rigidObjects.push_back({uint32_t(i), object});
+        }
+      }
     }
   }
 };
 
 }  // namespace
 
-bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform) {
+bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform, int* modelOut) {
   cgltf_options options{};
   cgltf_data* data = nullptr;
   if (cgltf_parse_file(&options, path.c_str(), &data) != cgltf_result_success) {
@@ -164,11 +283,14 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
     cgltf_free(data);
     return false;
   }
-  Loader l{scene, data, std::filesystem::path(path).parent_path(), {}, {}, {}, 0};
+  Loader l{scene, data, std::filesystem::path(path).parent_path(), {}, {}, {}, 0, -1};
   l.loadMaterials();
   l.loadMeshes();
+  l.loadModel(rootTransform);
   l.loadNodes(rootTransform);
-  LOG_INFO("glTF: %s (%zu nós, %zu materiais)", path.c_str(), data->nodes_count, data->materials_count);
+  if (modelOut) *modelOut = l.model;
+  LOG_INFO("glTF: %s (%zu nós, %zu materiais, %zu esqueletos, %zu animações)", path.c_str(), data->nodes_count,
+           data->materials_count, data->skins_count, data->animations_count);
   cgltf_free(data);
   return true;
 }

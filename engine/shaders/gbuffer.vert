@@ -1,25 +1,32 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #include "frame.glsl"
+#include "scene.glsl"
 
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aUV;
 layout(location = 3) in vec4 aTangent;
+layout(location = 4) in vec3 aPrevPosition;  // posição do frame anterior (malhas deformáveis)
 
-layout(push_constant) uniform Push { mat4 model; uint material; } pc;
+layout(push_constant) uniform Push { uint object; uint material; } pc;
 
 layout(location = 0) out vec3 vWorldPos;
 layout(location = 1) out vec3 vNormal;
 layout(location = 2) out vec2 vUV;
 layout(location = 3) out vec4 vTangent;
+layout(location = 4) out vec4 vCurClip;   // sem jitter, para os vetores de movimento
+layout(location = 5) out vec4 vPrevClip;
 
 void main() {
-  vec4 world = pc.model * vec4(aPosition, 1.0);
-  mat3 normalMatrix = transpose(inverse(mat3(pc.model)));
+  ObjectData o = objects[pc.object];
+  vec4 world = o.model * vec4(aPosition, 1.0);
+  mat3 normalMatrix = transpose(inverse(mat3(o.model)));
   vWorldPos = world.xyz;
   vNormal = normalMatrix * aNormal;
-  vTangent = vec4(mat3(pc.model) * aTangent.xyz, aTangent.w);
+  vTangent = vec4(mat3(o.model) * aTangent.xyz, aTangent.w);
   vUV = aUV;
+  vCurClip = frame.viewProjNoJitter * world;
+  vPrevClip = frame.prevViewProjNoJitter * (o.prevModel * vec4(aPrevPosition, 1.0));
   gl_Position = frame.viewProj * world;
 }

@@ -1,4 +1,4 @@
-// Dados da cena (set 0, bindings 2-5): materiais, instâncias, luzes e texturas bindless.
+// Dados da cena (set 0, bindings 2-5 e 7): materiais, instâncias, luzes, texturas bindless e objetos.
 #ifndef SCENE_GLSL
 #define SCENE_GLSL
 
@@ -43,6 +43,12 @@ layout(set = 0, binding = 2, std430) readonly buffer Materials { Material materi
 layout(set = 0, binding = 3, std430) readonly buffer Instances { InstanceData instances[]; };
 layout(set = 0, binding = 4, std430) readonly buffer Lights { PointLight lights[]; };
 layout(set = 0, binding = 5) uniform sampler2D textures[];
+
+struct ObjectData {  // == ObjectGpu em renderer.cpp
+  mat4 model;
+  mat4 prevModel;
+};
+layout(set = 0, binding = 7, std430) readonly buffer Objects { ObjectData objects[]; };
 
 // Vértice: posição(3) normal(3) uv(2) tangente(4) = 12 floats.
 layout(buffer_reference, scalar) readonly buffer VertexData { float v[]; };

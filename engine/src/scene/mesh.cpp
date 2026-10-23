@@ -89,6 +89,18 @@ float fbm(float x, float y, int octaves) {
   return sum;
 }
 
+void computeNormals(MeshData& m) {
+  for (auto& v : m.vertices) v.normal = glm::vec3(0.0f);
+  for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
+    Vertex &a = m.vertices[m.indices[i]], &b = m.vertices[m.indices[i + 1]], &c = m.vertices[m.indices[i + 2]];
+    glm::vec3 n = glm::cross(b.position - a.position, c.position - a.position);  // comprimento = 2 x área
+    a.normal += n;
+    b.normal += n;
+    c.normal += n;
+  }
+  for (auto& v : m.vertices) v.normal = glm::dot(v.normal, v.normal) > 0.0f ? glm::normalize(v.normal) : glm::vec3(0, 1, 0);
+}
+
 void computeTangents(MeshData& m) {
   std::vector<glm::vec3> tan(m.vertices.size(), glm::vec3(0.0f)), bit(m.vertices.size(), glm::vec3(0.0f));
   for (size_t i = 0; i + 2 < m.indices.size(); i += 3) {
