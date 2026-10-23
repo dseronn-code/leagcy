@@ -127,7 +127,18 @@ def teste_sombras(binario, tmp, rapido):
     return ok, '; '.join(linhas)
 
 
-TESTES = [teste_validacao, teste_fornalha, teste_atmosfera, teste_cintilacao, teste_pixels, teste_sombras]
+def teste_restir(binario, tmp, rapido):
+    """ReSTIR sem viés: luz das luzes locais (média de 16 frames) contra força bruta, |viés| < 3%."""
+    import restir
+    linhas, ok = [], True
+    for cena in ('sponza',) if rapido else ('sponza', 'externa'):
+        relmse, vies = restir.medir(binario, cena, tmp, ['--quality', 'ultra'])
+        ok &= abs(vies) < 3.0
+        linhas.append(f'{cena}: viés {vies:+.2f}%, relMSE {relmse:.2f}')
+    return ok, '; '.join(linhas)
+
+
+TESTES = [teste_validacao, teste_fornalha, teste_atmosfera, teste_cintilacao, teste_pixels, teste_sombras, teste_restir]
 
 
 def main():
