@@ -147,7 +147,13 @@ void Context::createDevice(VkSurfaceKHR surface) {
   f12.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
   f12.pNext = &f13;
 
+  VkPhysicalDeviceFeatures supported{};
+  vkGetPhysicalDeviceFeatures(gpu, &supported);
+  // gl_PrimitiveID no fragment shader (visibility buffer). Toda GPU desktop tem.
+  if (!supported.geometryShader) FATAL("A GPU não suporta geometryShader (gl_PrimitiveID no fragment shader).");
+
   VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+  f2.features.geometryShader = VK_TRUE;
   f2.features.samplerAnisotropy = VK_TRUE;
   f2.features.shaderInt64 = VK_TRUE;
   f2.features.shaderStorageImageReadWithoutFormat = VK_TRUE;

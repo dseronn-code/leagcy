@@ -17,6 +17,7 @@ layout(location = 1) out vec4 outNormal;    // xyz = normal (mundo), w = rugosid
 layout(location = 2) out vec2 outMotion;    // deslocamento em UV desde o frame anterior
 layout(location = 3) out vec4 outEmissive;
 layout(location = 4) out vec4 outSpecular;  // rgb = f0, a = f90
+layout(location = 5) out uvec2 outVisibility;  // objeto + 1, triângulo (superfície exata nos passes de RT)
 
 layout(push_constant) uniform Push { uint object; uint material; } pc;
 
@@ -46,4 +47,5 @@ void main() {
   outNormal = vec4(s.normal, filterRoughness(s.normal, s.roughness, s.normalVariance));
   outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
   outSpecular = vec4(s.f0, s.f90);
+  outVisibility = uvec2(pc.object + 1u, uint(gl_PrimitiveID));
 }

@@ -4,6 +4,8 @@
 // Toda radiância sai pré-exposta (ver frame.glsl).
 #extension GL_GOOGLE_include_directive : require
 #include "restir.glsl"
+#define SURFACE_VISIBILITY_BINDING 7
+#include "surface.glsl"
 #define MATERIAL_SAMPLE(i, uv) textureLod(textures[nonuniformEXT(i)], uv, frame.quality1.x)
 #include "material.glsl"
 #ifdef RAY_TRACING
@@ -38,17 +40,18 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce) {
   Material m = materials[hit.material];
   Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
   BrdfContext bc = makeBrdfContext(hit.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
-  vec3 origin2 = offsetRayOrigin(hit.P, hit.Ng, hit.t);
   vec3 radiance = s.emissive * preExposure();
   uint dimBase = bounce * 3u;
   vec3 kd, ks;
 
+  // Ponto do raio: erro da ordem do epsilon do float × distância percorrida.
+  vec3 shadowOrigin2 = offsetRayOrigin(hit.Pshadow, hit.Ng, RAY_BIAS_EXACT * hit.t);
   vec3 sunE = sunIrradianceAt(hit.P);
   if (dot(sunE, sunE) > 0.0) {
     vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), sample2D(sg, DIM_HIT_SUN + dimBase));
-    if (dot(hit.Ng, Ls) > 0.0) {
+    if (dot(hit.N, Ls) > 0.0) {
       evalBRDF(bc, Ls, sqrt(min(s.roughness * s.roughness + 0.5 * frame.params.x, 1.0)), kd, ks);
-      if (dot(kd + ks, vec3(1.0)) > 0.0) radiance += (kd * s.diffuseColor + ks) * sunE * traceVisibility(origin2, Ls, 1e4);
+      if (dot(kd + ks, vec3(1.0)) > 0.0) radiance += (kd * s.diffuseColor + ks) * sunE * traceVisibility(shadowOrigin2, Ls, 1e4);
     }
   }
 
@@ -58,10 +61,10 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce) {
     PointLight l = lights[min(uint(pick * float(lightCount)), lightCount - 1u)];
     vec3 L, E;
     float tSurface;
-    if (sampleSphereLight(l, hit.P, sample2D(sg, DIM_HIT_LIGHT + dimBase), L, tSurface, E) && dot(hit.Ng, L) > 0.0) {
+    if (sampleSphereLight(l, hit.P, sample2D(sg, DIM_HIT_LIGHT + dimBase), L, tSurface, E) && dot(hit.N, L) > 0.0) {
       evalBRDF(bc, L, -1.0, kd, ks);
       if (dot(kd + ks, vec3(1.0)) > 0.0 && dot(E, E) > 0.0)
-        radiance += (kd * s.diffuseColor + ks) * E * preExposure() * float(lightCount) * traceVisibility(origin2, L, tSurface);
+        radiance += (kd * s.diffuseColor + ks) * E * preExposure() * float(lightCount) * traceVisibility(shadowOrigin2, L, tSurface);
     }
   }
   // Ambiente nos rebotes seguintes (sem oclusão — auditoria 3.1): difuso pelo céu acima da normal e
@@ -75,7 +78,8 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce) {
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (!insideRender(id)) return;
-  GSample g = loadGBuffer(id);
+  PixelSurface sf = loadSurface(id);
+  GSample g = sf.g;
   if (g.depth <= 0.0) {
     imageStore(outDiffuse, id, vec4(0.0));
     imageStore(outSpecular, id, vec4(0.0));
@@ -83,7 +87,9 @@ void main() {
   }
   vec3 diffuse = vec3(0.0), specular = vec3(0.0), kd, ks;
 #ifdef RAY_TRACING
-  vec3 origin = offsetRayOrigin(g.P, g.Ng, length(frame.cameraPos.xyz - g.P));
+  // Raios de GI/reflexo saem do ponto exato; raios de sombra, do ponto corrigido para o terminator.
+  vec3 origin = offsetRayOrigin(g.P, g.Ng, sf.rayBias);
+  vec3 shadowOrigin = offsetRayOrigin(sf.Pshadow, g.Ng, sf.rayBias);
 #endif
   Reservoir r = reservoirs[uint(id.y) * uint(frame.renderSize.x) + uint(id.x)];
   vec3 sunE = sunIrradianceAt(g.P);
@@ -91,13 +97,19 @@ void main() {
 
   // Sol como disco de verdade: o BRDF usa a direção central com a rugosidade alargada pelo tamanho
   // angular do disco (Karis 2013) — sem o pico de um sol pontual. É determinístico: fica fora do laço.
+  // O termo de relevo (Chiang 2019) suaviza o terminator do normal map.
   vec3 sunKd = vec3(0.0), sunKs = vec3(0.0);
-  if (dot(sunE, sunE) > 0.0)
+  if (dot(sunE, sunE) > 0.0) {
     evalBRDF(bc, frame.sunDir.xyz, sqrt(min(g.roughness * g.roughness + 0.5 * frame.params.x, 1.0)), sunKd, sunKs);
+    float bump = bumpShadowing(sf.Nb, g.N, frame.sunDir.xyz);
+    sunKd *= bump;
+    sunKs *= bump;
+  }
 
   // Amostras por pixel (preset de qualidade): a sequência de Sobol do pixel avança spp posições por
   // frame, então as amostras do mesmo frame e de frames seguintes continuam estratificadas entre si.
   uint spp = max(frame.quality0.x, 1u);
+  float sunVisSum = 0.0;  // só para as visualizações de depuração
   for (uint k = 0u; k < spp; ++k) {
     SampleGen sg = makeSampleGen(uvec2(id), frame.frameInfo.x * spp + k);
 
@@ -105,10 +117,11 @@ void main() {
     if (dot(sunE, sunE) > 0.0) {
 #ifdef RAY_TRACING
       vec3 L = sampleCone(frame.sunDir.xyz, cos(frame.params.x), sample2D(sg, DIM_SUN));
-      float vis = dot(g.Ng, L) > 0.0 ? traceVisibility(origin, L, 1e4) : 0.0;
+      float vis = dot(sf.Nb, L) > 0.0 ? traceVisibility(shadowOrigin, L, 1e4) : 0.0;
 #else
       float vis = 1.0;
 #endif
+      sunVisSum += vis;
       diffuse += sunKd * sunE * vis;
       specular += sunKs * sunE * vis;
     }
@@ -121,11 +134,11 @@ void main() {
       if (sampleSphereLight(l, g.P, sample2D(sg, DIM_LIGHT), L, tSurface, E)) {
         evalBRDF(bc, L, -1.0, kd, ks);
 #ifdef RAY_TRACING
-        float vis = dot(g.Ng, L) > 0.0 ? traceVisibility(origin, L, tSurface) : 0.0;
+        float vis = dot(sf.Nb, L) > 0.0 ? traceVisibility(shadowOrigin, L, tSurface) : 0.0;
 #else
         float vis = 1.0;
 #endif
-        vec3 Li = E * preExposure() * r.W * vis;
+        vec3 Li = E * preExposure() * r.W * vis * bumpShadowing(sf.Nb, g.N, L);
         diffuse += kd * Li;
         specular += ks * Li;
       }
@@ -152,6 +165,18 @@ void main() {
   }
   diffuse /= float(spp);
   specular /= float(spp);
+
+  uint debugView = uint(frame.environment.y);
+  if (debugView != 0u) {
+    float sunVis = sunVisSum / float(spp);
+    vec3 v = debugView == 1u ? vec3(sunVis)
+           : debugView == 2u ? vec3(max(dot(g.N, frame.sunDir.xyz), 0.0) * sunVis)
+           : debugView == 3u ? g.Ng * 0.5 + 0.5
+                             : vec3(max(dot(g.N, frame.sunDir.xyz), 0.0));
+    imageStore(outDiffuse, id, vec4(v, 1.0));
+    imageStore(outSpecular, id, vec4(0.0));
+    return;
+  }
 
 #ifndef RAY_TRACING
   diffuse += bc.diffuseWeight * sampleSky(normalize(g.N + vec3(0, 1, 0))) * 0.8;

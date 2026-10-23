@@ -285,6 +285,34 @@ bool buildFurnace(Scene& s, Camera& camera) {
   return true;
 }
 
+// Teste de sombras do sol: esferas de baixa a alta resolução com normais suavizadas (problema do
+// "terminator": a faceta real faz sombra onde a normal interpolada diz que é luz), placa fina deitada
+// no chão (sombra de contato, sem "peter panning"), caixas de quinas vivas (acne em luz rasante).
+// `origin` desloca tudo (ex.: 4 km) para testar precisão de float longe da origem, como num mapa aberto.
+bool buildShadowTest(Scene& s, Camera& camera, glm::vec3 origin) {
+  uint32_t cube = s.addMesh(makeCube());
+  auto mat = [&](glm::vec3 albedo, float rough) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    return s.addMaterial(m);
+  };
+  uint32_t grey = mat(glm::vec3(0.5f), 0.8f), white = mat(glm::vec3(0.8f), 0.5f);
+  s.addObject(cube, trs(origin + glm::vec3(0.0f, -0.5f, 0.0f), {60.0f, 0.5f, 60.0f}), grey);  // chão, topo em y = 0
+  const uint32_t res[][2] = {{6, 4}, {8, 6}, {12, 8}, {16, 10}, {24, 16}, {64, 32}};
+  for (int i = 0; i < 6; ++i)
+    s.addObject(s.addMesh(makeSphere(res[i][0], res[i][1])), trs(origin + glm::vec3(-7.5f + 3.0f * i, 1.4f, 0.0f), glm::vec3(1.0f)), white);
+  s.addObject(cube, trs(origin + glm::vec3(-4.0f, 0.01f, 4.0f), {1.0f, 0.01f, 1.0f}), white);  // placa de 2 cm no chão
+  s.addObject(cube, trs(origin + glm::vec3(1.0f, 0.5f, 4.5f), {0.5f, 0.5f, 0.5f}, 30.0f), white);
+  s.addObject(cube, trs(origin + glm::vec3(5.0f, 1.0f, 3.5f), {0.3f, 1.0f, 1.5f}), white);
+  s.sunDirection = sunFrom(20.0f, 45.0f);  // lateral e por trás: terminator no meio das esferas; a fila não se sombreia
+  s.sunIlluminance = 120000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = origin + glm::vec3(0.0f, 3.0f, 13.0f);
+  camera.lookAt(origin + glm::vec3(0.0f, 0.8f, 0.0f));
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
@@ -293,6 +321,8 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (endsWith(".gltf") || endsWith(".glb")) return buildFromFile(scene, camera, opt);
   if (opt.name == "outdoor") return buildOutdoor(scene, camera, opt);
   if (opt.name == "furnace") return buildFurnace(scene, camera);
+  if (opt.name == "shadows") return buildShadowTest(scene, camera, glm::vec3(0.0f));
+  if (opt.name == "shadows-far") return buildShadowTest(scene, camera, glm::vec3(4000.0f, 0.0f, -3000.0f));
   return buildSponza(scene, camera, opt);
 }
 
