@@ -84,6 +84,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--dof") o.render.depthOfField = true;
     else if (a == "--focus") o.render.dofFocusDistance = float(std::atof(next()));
     else if (a == "--no-denoiser") o.render.denoiser = false;
+    else if (a == "--denoiser") o.render.nrd = std::string(next()) != "svgf";  // nrd (padrão) | svgf
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
     else if (a == "--restir-no-reuse") {
@@ -107,6 +108,7 @@ Options parseArgs(int argc, char** argv) {
           "  --fullscreen             tela cheia na resolução nativa do monitor\n"
           "  --dof [--focus M]        profundidade de campo (autofoco se --focus omitido)\n"
           "  --ev X | --exposure EV   compensação da auto-exposição (EV) | exposição manual (EV100)\n"
+          "  --denoiser nrd|svgf        NVIDIA NRD ReLAX (padrão) ou o SVGF próprio\n"
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
           "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"
           "  --sun-elevation G --sun-azimuth G   posição do sol em graus\n"

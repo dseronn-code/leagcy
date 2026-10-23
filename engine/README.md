@@ -56,8 +56,10 @@ Cena dinâmica (skinning, refit BLAS, TLAS) → Sky LUT → G-buffer → ReSTIR 
 
 ## Compilar
 
-Requisitos: CMake 3.24+, compilador C++20, [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) (traz o `glslangValidator`).
-VMA, GLM, GLFW, cgltf e stb são baixados automaticamente.
+Requisitos: **CMake 3.30+**, compilador C++20, [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) (traz o `glslangValidator`) e Git.
+VMA, GLM, GLFW, cgltf, stb e o **NVIDIA NRD** (denoiser, com NRI, ShaderMake e o compilador DXC) são baixados
+automaticamente na primeira configuração (~60 MB). Licenças e obrigações em [docs/licencas.md](docs/licencas.md)
+— o NRD exige crédito à NVIDIA na tela de créditos de quem distribuir um jogo feito com o motor.
 
 ```bash
 cd engine
@@ -74,6 +76,7 @@ GPU recomendada para ray tracing: NVIDIA RTX 20xx+, AMD RX 6000+ ou Intel Arc.
 
 1. Instale (todos gratuitos): **Visual Studio 2022 Community** com a carga "Desenvolvimento para desktop com C++",
    **Git** (git-scm.com) e o **Vulkan SDK** (vulkan.lunarg.com/sdk/home — marque os componentes padrão).
+   O CMake que vem no Visual Studio 2022 17.12+ já é 3.30+; em versões mais antigas instale o CMake de cmake.org.
    Driver da GPU atualizado (NVIDIA: 550 ou mais novo).
 2. No "Developer PowerShell for VS 2022":
 
