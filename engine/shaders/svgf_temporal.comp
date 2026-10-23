@@ -18,7 +18,7 @@ layout(set = 1, binding = 10) uniform sampler2D momentsHistory;  // x,y = moment
 layout(set = 1, binding = 11) uniform sampler2D lengthHistory;   // x = frames acumulados
 layout(set = 1, binding = 12, rgba16f) uniform writeonly image2D diffuseOut;   // rgb + variância
 layout(set = 1, binding = 13, rgba16f) uniform writeonly image2D specularOut;
-layout(set = 1, binding = 14, rgba16f) uniform writeonly image2D momentsOut;
+layout(set = 1, binding = 14, rgba32f) uniform writeonly image2D momentsOut;  // float32: luminância² estoura float16
 layout(set = 1, binding = 15, rgba16f) uniform writeonly image2D lengthOut;
 
 const float MAX_HISTORY = 48.0;
@@ -64,7 +64,14 @@ void main() {
     }
   }
   bool valid = wsum > 0.01;
-  if (valid) { hd /= wsum; hs /= wsum; hm /= wsum; hl /= wsum; }
+  if (valid) {
+    hd /= wsum; hs /= wsum; hm /= wsum; hl /= wsum;
+    // Histórico foi gravado com a pré-exposição do frame anterior: traz para a escala atual.
+    float k = historyExposureScale();
+    hd *= k;
+    hs *= k;
+    hm *= vec4(k, k * k, k, k * k);
+  }
   float len = valid ? min(hl + 1.0, MAX_HISTORY) : 1.0;
 
   float ld = luminance(cd), ls = luminance(cs);
@@ -83,8 +90,8 @@ void main() {
     vd = max(vd, ld * ld) * boost;
     vs = max(vs, ls * ls) * boost;
   }
-  imageStore(diffuseOut, id, vec4(od, vd));
-  imageStore(specularOut, id, vec4(os, vs));
+  imageStore(diffuseOut, id, vec4(clampHalf(od), min(vd, HALF_SAFE_MAX)));
+  imageStore(specularOut, id, vec4(clampHalf(os), min(vs, HALF_SAFE_MAX)));
   imageStore(momentsOut, id, m);
   imageStore(lengthOut, id, vec4(len, 0.0, 0.0, 0.0));
 }

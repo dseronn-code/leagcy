@@ -25,5 +25,5 @@ void main() {
             texelFetch(gEmissive, id, 0).rgb;
     color = applyHeightFog(color, g.P);
   }
-  imageStore(sceneOut, id, vec4(color, 1.0));
+  imageStore(sceneOut, id, vec4(clampHalf(color), 1.0));
 }

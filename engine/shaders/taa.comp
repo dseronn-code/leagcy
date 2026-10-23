@@ -71,7 +71,7 @@ void main() {
   vec3 result = current;
   if (historyValid() && all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0)))) {
     // Clipping de variância em YCoCg: descarta histórico que não "cabe" na vizinhança (anti-ghosting).
-    vec3 h = rgbToYCoCg(sampleHistory(prevUv));
+    vec3 h = rgbToYCoCg(sampleHistory(prevUv) * historyExposureScale());
     vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
     vec3 center = 0.5 * (lo + hi), ext = max(0.5 * (hi - lo), vec3(1e-4));
     vec3 rel = (h - center) / ext;

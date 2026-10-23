@@ -1,6 +1,7 @@
 #include "renderer/renderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "rhi/pipeline.h"
@@ -47,7 +48,7 @@ struct AtrousPush {
   float phiColor, phiNormal, phiPlane;
 };
 struct ExposurePush {
-  float compensation, manualExposure, speedUp, speedDown;
+  float compensation, manualEV100, speedUp, speedDown;
 };
 struct DofPush {
   float focusDistance, aperture, maxCoc, pad;
@@ -141,7 +142,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   }
   std::vector<uint32_t> zeros(kHistogramBins, 0);
   histogram_ = rhi::createBufferWithData(ctx, zeros.data(), zeros.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
-  glm::vec4 exposureInit(1.0f, -1.0f, 0.0f, 0.0f);
+  // Pré-exposição inicial de EV100 = 10 (entre interior e exterior); a adaptação converge no 2º frame.
+  const float initialExposure = 1.0f / (1.2f * std::exp2(10.0f));
+  glm::vec4 exposureInit(initialExposure, -1.0f, 10.0f, initialExposure);
   exposureState_ = rhi::createBufferWithData(ctx, &exposureInit, sizeof(exposureInit), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
   // ---- Descritores globais (set 0) ----
@@ -153,6 +156,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {4, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {5, CIS, kMaxTextures, VK_SHADER_STAGE_ALL, nullptr},
       {7, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {8, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -169,7 +173,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (1 + kMaxTextures)},
-      {SB, kFramesInFlight * 4},
+      {SB, kFramesInFlight * 5},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -255,6 +259,7 @@ void Renderer::writeGlobalDescriptors() {
                                       {s.instanceBuffer.handle, 0, VK_WHOLE_SIZE},
                                       {lightBuffers_[i].handle, 0, VK_WHOLE_SIZE}};
     VkDescriptorBufferInfo objs{objectBuffers_[i].handle, 0, VK_WHOLE_SIZE};
+    VkDescriptorBufferInfo exposure{exposureState_.handle, 0, VK_WHOLE_SIZE};
     std::vector<VkWriteDescriptorSet> w;
     auto add = [&](uint32_t binding, VkDescriptorType type, uint32_t count) -> VkWriteDescriptorSet& {
       VkWriteDescriptorSet x{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -269,6 +274,7 @@ void Renderer::writeGlobalDescriptors() {
     add(1, CIS, 1).pImageInfo = &lut;
     for (uint32_t b = 0; b < 3; ++b) add(2 + b, SB, 1).pBufferInfo = &bufs[b];
     add(7, SB, 1).pBufferInfo = &objs;
+    add(8, SB, 1).pBufferInfo = &exposure;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -293,7 +299,7 @@ void Renderer::createTargets() {
     t_.normal[i] = rhi::createImage2D(ctx, R, kHdrFormat, attach);
     t_.diffuseHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.specularHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
-    t_.moments[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+    t_.moments[i] = rhi::createImage2D(ctx, R, VK_FORMAT_R32G32B32A32_SFLOAT, storage);  // luminância² precisa de float32
     t_.historyLength[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.taa[i] = rhi::createImage2D(ctx, O, kHdrFormat, storage);
     t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
@@ -379,7 +385,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.prevViewProjNoJitter = historyValid_ ? prevViewProj_ : u.viewProjNoJitter;
   u.cameraPos = glm::vec4(cam.position, cam.nearPlane);
   u.prevCameraPos = glm::vec4(historyValid_ ? prevCameraPos_ : cam.position, 0.0f);
-  u.sunDir = glm::vec4(glm::normalize(scene_->sunDirection), scene_->sunIntensity);
+  u.sunDir = glm::vec4(glm::normalize(scene_->sunDirection), scene_->sunIlluminance);
   u.params = glm::vec4(settings.sunAngularRadius, dt, settings.fogDensity, settings.fogFalloff);
   u.jitter = glm::vec4(jitterUv, prevJitter_);
   u.renderSize = glm::vec4(R.width, R.height, 1.0f / R.width, 1.0f / R.height);
@@ -489,7 +495,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // ---- 8. Auto-exposição ----
   histogramPass_.dispatch(cmd, gs, {tex(*color), Binding::storageBuffer(histogram_)}, O);
   barrier();
-  ExposurePush ep{settings.exposureCompensation, settings.manualExposure, 3.0f, 1.5f};
+  ExposurePush ep{settings.exposureCompensation, settings.manualEV100, 3.0f, 1.5f};
   exposurePass_.dispatch(cmd, gs, {Binding::storageBuffer(histogram_), Binding::storageBuffer(exposureState_)}, {1, 1}, &ep);
   barrier();
 

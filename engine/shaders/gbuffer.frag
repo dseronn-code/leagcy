@@ -30,5 +30,5 @@ void main() {
   outMotion = (vCurClip.xy / vCurClip.w - vPrevClip.xy / vPrevClip.w) * 0.5;
   outAlbedo = vec4(s.albedo, s.metallic);
   outNormal = vec4(s.normal, s.roughness);
-  outEmissive = vec4(s.emissive, 1.0);
+  outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
 }

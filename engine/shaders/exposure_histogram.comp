@@ -1,5 +1,5 @@
 #version 460
-// Auto-exposição, passo 1: histograma de log2(luminância) da imagem.
+// Auto-exposição, passo 1: histograma de log2(luminância absoluta) da imagem.
 #extension GL_GOOGLE_include_directive : require
 #include "frame.glsl"
 #include "brdf.glsl"
@@ -16,7 +16,7 @@ void main() {
   barrier();
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (all(lessThan(id, ivec2(frame.outputSize.xy)))) {
-    float lum = luminance(texelFetch(colorIn, id, 0).rgb);
+    float lum = luminance(texelFetch(colorIn, id, 0).rgb) / preExposure();  // volta para nits
     uint bin = 0u;  // bin 0 = preto (ignorado na média)
     if (lum > 1e-6) {
       float t = clamp((log2(lum) - MIN_LOG_LUM) / (MAX_LOG_LUM - MIN_LOG_LUM), 0.0, 1.0);

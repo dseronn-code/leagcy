@@ -78,7 +78,7 @@ Gravidade: **🔴 bug** (resultado errado) · **🟠 qualidade** (funciona, mas 
 
 ## Plano de correção (um item por vez, cada um com análise completa antes de contar como feito)
 
-1. **Base numérica e física**: unidades fotométricas + pré-exposição + float32 onde precisa (1.1, 1.2, 2.5)
+1. ✅ **Base numérica e física**: unidades fotométricas + pré-exposição + float32 onde precisa (1.1, 1.2, 2.5) — ver resultado abaixo
 2. **Ruído e amostragem**: STBN, amostragem correta da esfera, offset robusto com normal geométrica (1.5, 1.6, 1.11)
 3. **Luzes reais**: luzes como geometria emissiva + `KHR_lights_punctual` (1.3, 1.4, 2.2)
 4. **Assets profissionais**: DDS/BC7, especular/glossiness, MikkTSpace, samplers, doubleSided, alfa (2.1, 2.3, 2.6–2.10)
@@ -91,3 +91,29 @@ Fontes da pesquisa: [Intel GPU Research Samples](https://www.intel.com/content/w
 [NRD](https://developer.nvidia.com/nrd) · [FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) ·
 [Streamline/DLSS](https://developer.nvidia.com/rtx/streamline/get-started) · [Hillaire 2020](https://diglib.eg.org/handle/10.1111/cgf14050) ·
 [A Gentle Introduction to ReSTIR](https://par.nsf.gov/servlets/purl/10519651) · [Tone mapping overview](https://discourse.threejs.org/t/tone-mapping-overview/75204)
+
+---
+
+## Registro de correções
+
+### Correção 1 — unidades fotométricas, pré-exposição e precisão numérica
+
+O que mudou:
+- Unidades físicas: sol em lux (120.000 no topo da atmosfera), luzes em candela, emissão em nits, câmera em EV100
+  (Lagarde & de Rousiers, *Moving Frostbite to PBR*), calibrada para cinza médio de 18%.
+- Pré-exposição: toda radiância é multiplicada pela exposição do frame anterior antes de ir a um alvo float16;
+  históricos do denoiser e do TAA são reescalados quando a exposição muda; saturação segura em 60.000.
+- Momentos do denoiser em float32.
+- Especular do sol como disco (rugosidade equivalente de Karis): sem o pico de um sol pontual.
+
+Medição A/B (mesma cena, câmera parada, 16 frames, brilho igualado; métrica em `flicker.py`):
+
+| Cena | Cintilação média | Pior 1% | Pixels com brilhinho |
+|---|---|---|---|
+| Sponza noite | 0,0695 → 0,0550 (−21%) | 0,650 → 0,488 (−25%) | 2,58% → 1,34% (−48%) |
+| Sponza dia | 0,0291 → 0,0210 (−28%) | 0,241 → 0,145 (−40%) | 0,45% → 0,26% (−42%) |
+| Externa | 0,0175 → 0,0165 (−6%) | 0,463 → 0,465 (0%) | 1,14% → 1,10% (−4%) |
+
+Interferências verificadas: validação Vulkan com sincronização limpa em 7 configurações (com e sem ray tracing,
+DOF, sem denoiser, exposição manual); de dia as luzes decorativas (36–150 cd) deixam de dominar a cena, como na
+realidade. A cena externa melhora pouco porque sua causa principal é a 1.3 (lâmpada bloqueando a própria luz).

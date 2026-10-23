@@ -31,7 +31,7 @@ vec3 traceRadiance(vec3 origin, vec3 dir, inout uint rng) {
   Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
   vec3 diffuse = s.albedo * (1.0 - s.metallic) / PI;
   vec3 origin2 = hit.P + hit.N * RAY_EPS;
-  vec3 radiance = s.emissive;
+  vec3 radiance = s.emissive * preExposure();
 
   vec3 sunE = sunIrradianceAt(hit.P);
   vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), rand2(rng));
@@ -45,7 +45,8 @@ vec3 traceRadiance(vec3 origin, vec3 dir, inout uint rng) {
     float dist = length(Lv);
     float NoL = dot(hit.N, Lv / dist);
     if (NoL > 0.0 && dist < l.range)
-      radiance += diffuse * NoL * lightRadiance(l, dist) * float(lightCount) * traceVisibility(origin2, Lv / dist, dist - l.radius);
+      radiance += diffuse * NoL * lightRadiance(l, dist) * preExposure() * float(lightCount) *
+                  traceVisibility(origin2, Lv / dist, dist - l.radius);
   }
   // Rebotes seguintes aproximados pelo céu.
   radiance += s.albedo * (1.0 - s.metallic) * sampleSky(normalize(hit.N + vec3(0, 1, 0))) * 0.5;
@@ -66,12 +67,15 @@ void main() {
   vec3 diffuse = vec3(0.0), specular = vec3(0.0), kd, ks;
   vec3 origin = g.P + g.N * 0.01;
 
-  // Sol: disco amostrado => penumbra física.
+  // Sol como disco de verdade: o BRDF usa a direção central com a rugosidade alargada pelo tamanho
+  // angular do disco (Karis 2013) — sem o pico de um sol pontual, que gera brilhinhos. Só a
+  // visibilidade usa uma direção sorteada no disco (penumbra física).
   vec3 sunE = sunIrradianceAt(g.P);
   if (dot(sunE, sunE) > 0.0) {
-    vec3 L = sampleCone(frame.sunDir.xyz, cos(frame.params.x), rand2(rng));
-    evalBRDFSplit(g.N, g.V, L, g.f0, g.roughness, kd, ks);
+    float sunRoughness = sqrt(min(g.roughness * g.roughness + 0.5 * frame.params.x, 1.0));
+    evalBRDFSplit(g.N, g.V, frame.sunDir.xyz, g.f0, sunRoughness, kd, ks);
 #ifdef RAY_TRACING
+    vec3 L = sampleCone(frame.sunDir.xyz, cos(frame.params.x), rand2(rng));
     float vis = dot(g.N, L) > 0.0 ? traceVisibility(origin, L, 1e4) : 0.0;
 #else
     float vis = 1.0;
@@ -94,7 +98,7 @@ void main() {
 #else
     float vis = 1.0;
 #endif
-    vec3 Li = lightRadiance(l, dist) * r.W * vis;
+    vec3 Li = lightRadiance(l, dist) * preExposure() * r.W * vis;
     diffuse += kd * Li;
     specular += ks * Li;
   }
@@ -129,6 +133,6 @@ void main() {
   // Rede de segurança: um único NaN se espalharia pelo denoiser e pelo histórico do TAA.
   if (any(isnan(diffuse)) || any(isinf(diffuse))) diffuse = vec3(0.0);
   if (any(isnan(specular)) || any(isinf(specular))) specular = vec3(0.0);
-  imageStore(outDiffuse, id, vec4(diffuse, 1.0));
-  imageStore(outSpecular, id, vec4(specular, 1.0));
+  imageStore(outDiffuse, id, vec4(clampHalf(diffuse), 1.0));
+  imageStore(outSpecular, id, vec4(clampHalf(specular), 1.0));
 }

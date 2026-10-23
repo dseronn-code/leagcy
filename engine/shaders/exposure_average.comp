@@ -1,14 +1,19 @@
 #version 460
 // Auto-exposição, passo 2: luminância média entre os percentis 40% e 95% (ignora céu estourado
-// e sombras profundas), adaptação temporal como o olho humano, e limpeza do histograma.
+// e sombras profundas), adaptação temporal como o olho humano, exposição de câmera em EV100
+// (Lagarde & de Rousiers, "Moving Frostbite to PBR") e limpeza do histograma.
 #extension GL_GOOGLE_include_directive : require
 #include "frame.glsl"
 #include "exposure.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 1, binding = 0, std430) buffer Histogram { uint bins[]; };
-layout(set = 1, binding = 1, std430) buffer ExposureState { vec4 state; };  // x = exposição, y = luminância adaptada
-layout(push_constant) uniform Push { float compensation; float manualExposure; float speedUp; float speedDown; } pc;
+// x = exposição, y = luminância adaptada (nits), z = EV100, w = pré-exposição usada neste frame.
+layout(set = 1, binding = 1, std430) buffer ExposureOut { vec4 state; };
+layout(push_constant) uniform Push { float compensation; float manualEV100; float speedUp; float speedDown; } pc;
+
+// Exposição fotográfica: luminância máxima antes de saturar o sensor = 1,2 x 2^EV100.
+float exposureFromEV100(float ev100) { return 1.0 / (1.2 * exp2(ev100)); }
 
 void main() {
   if (gl_LocalInvocationIndex == 0u) {
@@ -24,8 +29,7 @@ void main() {
       sumLog += take * logLum;
       count += take;
     }
-    float avgLog = count > 0.0 ? sumLog / count : 0.0;
-    float target = max(exp2(avgLog), 1e-4);
+    float target = count > 0.0 ? exp2(sumLog / count) : exp2(MIN_LOG_LUM);
 
     float adapted = state.y;
     if (adapted <= 0.0 || !historyValid()) {
@@ -34,8 +38,14 @@ void main() {
       float speed = target > adapted ? pc.speedUp : pc.speedDown;
       adapted = exp2(mix(log2(adapted), log2(target), 1.0 - exp(-frame.params.y * speed)));
     }
-    float exposure = pc.manualExposure > 0.0 ? pc.manualExposure : 0.18 / adapted * exp2(pc.compensation);
-    state = vec4(exposure, adapted, target, 0.0);
+    // EV100 da luminância média com a constante de calibração K = 12,5 (padrão de fotômetros).
+    // A exposição fotográfica leva a média a 10,4% de cinza; jogos (UE) usam 18% —
+    // log2(0,18 / 0,104) ≈ 0,79 EV de calibração no modo automático.
+    const float MIDDLE_GREY_CALIBRATION = 0.79;
+    float ev100 = isnan(pc.manualEV100) ? log2(adapted * 100.0 / 12.5) - MIDDLE_GREY_CALIBRATION - pc.compensation
+                                        : pc.manualEV100;
+    float preExposureUsed = state.x;  // a exposição anterior foi a pré-exposição deste frame
+    state = vec4(exposureFromEV100(ev100), adapted, ev100, preExposureUsed);
   }
   barrier();
   for (uint i = gl_LocalInvocationIndex; i < HISTOGRAM_BINS; i += 64u) bins[i] = 0u;

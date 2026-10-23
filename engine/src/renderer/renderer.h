@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <limits>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -12,8 +13,8 @@ namespace renderer {
 
 struct Settings {
   float renderScale = 0.67f;        // resolução interna / saída (0.67 ~ "Quality" do FSR/DLSS)
-  float exposureCompensation = 0.0f;  // EV somado à auto-exposição
-  float manualExposure = 0.0f;      // > 0 desliga a auto-exposição
+  float exposureCompensation = 0.0f;  // EV somado à auto-exposição (+1 = imagem 2x mais clara)
+  float manualEV100 = std::numeric_limits<float>::quiet_NaN();  // definido = exposição manual (EV100)
   float sunAngularRadius = 0.012f;  // rad (o sol real tem ~0.0047; maior = penumbra mais suave)
   float fogDensity = 0.0015f;       // por metro, ao nível do chão
   float fogFalloff = 0.035f;        // queda exponencial com a altura

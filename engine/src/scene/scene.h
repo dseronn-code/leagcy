@@ -20,7 +20,7 @@ enum MaterialFlags : uint32_t {
 // Material PBR metálico/rugosidade no modelo do glTF 2.0. Espelhado em shaders/scene.glsl.
 struct Material {
   glm::vec4 baseColor{1.0f};
-  glm::vec3 emissive{0.0f};
+  glm::vec3 emissive{0.0f};  // luminância emitida em nits (cd/m²)
   float alphaCutoff = 0.5f;
   float metallic = 0.0f;
   float roughness = 0.5f;
@@ -33,12 +33,13 @@ struct Material {
 };
 static_assert(sizeof(Material) == 64);
 
-// Luz pontual esférica. intensity em "candela relativa": radiância ~ intensity / d².
+// Luz pontual esférica em unidades fotométricas: intensidade luminosa em candela (cd) por canal;
+// iluminância a uma distância d = intensity / d² (lux).
 struct PointLight {
   glm::vec3 position{0.0f};
-  float radius = 0.05f;  // tamanho físico (penumbra)
-  glm::vec3 intensity{1.0f};
-  float range = 10.0f;   // corte suave da influência
+  float radius = 0.05f;  // tamanho físico em metros (penumbra)
+  glm::vec3 intensity{100.0f};  // cd (lâmpada incandescente de 100 W ≈ 130 cd)
+  float range = 10.0f;   // corte suave da influência (m)
 };
 static_assert(sizeof(PointLight) == 32);
 
@@ -154,7 +155,8 @@ class Scene {
   float time = 0.0f;
 
   glm::vec3 sunDirection = glm::normalize(glm::vec3(0.4f, 0.35f, -0.6f));  // direção PARA o sol
-  float sunIntensity = 20.0f;  // irradiância (lux relativo); 0 = noite
+  // Iluminância solar no topo da atmosfera (lux); a atmosfera atenua até ~100.000 lux ao meio-dia.
+  float sunIlluminance = 120000.0f;  // 0 = noite
 
  private:
   void animateModel(Model& m, float dt);
