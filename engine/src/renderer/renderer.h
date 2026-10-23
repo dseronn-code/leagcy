@@ -43,7 +43,11 @@ struct Settings {
   float manualEV100 = std::numeric_limits<float>::quiet_NaN();  // definido = exposição manual (EV100)
   float sunAngularRadius = 0.00465f;  // rad: tamanho real do disco solar (penumbras físicas)
   bool denoiser = true;
-  bool nrd = true;                  // NVIDIA NRD ReLAX (padrão); false = SVGF próprio (comparação)
+  // false = SVGF próprio (padrão: medido melhor em movimento com o nosso sinal, ver docs/auditoria.md);
+  // true = NVIDIA NRD (melhor com a câmera parada).
+  bool nrd = false;
+  bool nrdReblur = false;           // NRD: ReBLUR em vez de ReLAX
+  bool nrdValidation = false;       // mostra a camada de validação do NRD (histórico, desoclusão, vetores)
   bool depthOfField = false;
   float dofFocusDistance = 0.0f;    // 0 = autofoco no centro da tela
   float dofAperture = 8.0f;         // CoC (px) de um objeto no infinito
@@ -106,7 +110,8 @@ class Renderer {
     std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
     rhi::Image diffuse, specular, motion, emissive;
     std::array<rhi::Image, 2> visibility;
-    rhi::Image viewZ, nrdNormalRoughness, diffuseDenoised, specularDenoised;  // entradas/saídas do NRD  // visibility buffer (atual / anterior): x = objeto + 1 (0 = céu), y = triângulo
+    rhi::Image viewZ, nrdNormalRoughness, diffuseDenoised, specularDenoised;  // entradas/saídas do NRD
+    rhi::Image nrdValidation;  // camada de depuração do NRD (RGBA8)  // visibility buffer (atual / anterior): x = objeto + 1 (0 = céu), y = triângulo
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;

@@ -262,6 +262,17 @@ void main() {
   specular /= specularDemodulation(bc);  // remultiplicado em composite.comp
   float diffHit = diffHitCount > 0.0 ? diffHitSum / diffHitCount : 0.0;  // 0 = nenhum raio lançado
   float specHit = specHitMin <= HIT_DIST_MISS ? specHitMin : 0.0;
-  imageStore(outDiffuse, id, vec4(clampHalf(diffuse), diffHit));
-  imageStore(outSpecular, id, vec4(clampHalf(specular), specHit));
+  if (reblurSignal()) {
+    // REBLUR_FrontEnd_PackRadianceAndNormHitDist: YCoCg + distância normalizada por
+    // _REBLUR_GetHitDistanceNormalization com os parâmetros padrão (A = 3, B = 0,1, C = 20).
+    float viewZ = abs((frame.view * vec4(g.P, 1.0)).z);
+    float smc = (1.0 - exp2(-200.0 * g.roughness * g.roughness)) * sqrt(clamp(g.roughness, 0.0, 1.0));
+    float specNorm = (3.0 + viewZ * 0.1) * mix(20.0, 1.0, smc);
+    float diffNorm = (3.0 + viewZ * 0.1);  // rugosidade 1: curva = 1
+    imageStore(outDiffuse, id, vec4(nrdLinearToYCoCg(clampHalf(diffuse)), clamp(diffHit / diffNorm, 0.0, 1.0)));
+    imageStore(outSpecular, id, vec4(nrdLinearToYCoCg(clampHalf(specular)), clamp(specHit / specNorm, 0.0, 1.0)));
+  } else {
+    imageStore(outDiffuse, id, vec4(clampHalf(diffuse), diffHit));
+    imageStore(outSpecular, id, vec4(clampHalf(specular), specHit));
+  }
 }
