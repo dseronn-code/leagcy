@@ -238,6 +238,7 @@ bool buildSponza(Scene& s, Camera& camera, const DemoOptions& opt) {
   addOrbitingLights(s, s.addMesh(makeSphere(32, 16)), {0.0f, lo.y + 1.6f, 0.0f}, 1.5f, 4, 160.0f);
 
   s.sunDirection = sunFrom(65.0f, 100.0f);
+  s.fogDensity = 0.0001f;  // átrio: névoa sem sombra volumétrica viraria um véu branco nas áreas de sombra
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   // Do fundo do átrio olhando ao longo do eixo X (o comprido).
   camera.position = {-8.5f, 1.6f, -0.6f};
@@ -257,6 +258,7 @@ bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
   camera.position = c + glm::vec3(0.0f, 0.1f * (hi.y - lo.y), 0.0f);
   camera.lookAt(c + glm::vec3(hi.x - lo.x, 0.0f, 0.0f));
   s.sunDirection = sunFrom(35.0f, 120.0f);
+  s.fogDensity = 0.0003f;
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   return true;
 }

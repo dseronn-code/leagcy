@@ -14,6 +14,51 @@ uint pcg(inout uint state) {
 float rand(inout uint state) { return float(pcg(state)) * (1.0 / 4294967296.0); }
 vec2 rand2(inout uint state) { return vec2(rand(state), rand(state)); }
 
+// Hash 3D robusto (Jarzynski & Olano, "Hash Functions for GPU Rendering", JCGT 2020).
+uvec3 pcg3d(uvec3 v) {
+  v = v * 1664525u + 1013904223u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  v ^= v >> 16u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  return v;
+}
+// Semente de PCG independente por pixel, frame e uso (salt): sem padrões entre pixels vizinhos.
+uint seedFor(uvec2 pixel, uint frameIndex, uint salt) { return pcg3d(uvec3(pixel, frameIndex ^ (salt * 0x9E3779B9u))).x | 1u; }
+
+// ---- Sobol com embaralhamento de Owen por hash (Burley, "Practical Hash-based Owen Scrambling", JCGT 2020) ----
+// Cada pixel recebe uma sequência de baixa discrepância própria ao longo dos frames: as amostras
+// de frames consecutivos se complementam, e o denoiser/TAA convergem mais rápido que com ruído branco.
+uint laineKarrasPermutation(uint x, uint seed) {
+  x += seed;
+  x ^= x * 0x6c50b47cu;
+  x ^= x * 0xb82f1e52u;
+  x ^= x * 0xc7afe638u;
+  x ^= x * 0x8d22f6e6u;
+  return x;
+}
+uint nestedUniformScramble(uint x, uint seed) {
+  return bitfieldReverse(laineKarrasPermutation(bitfieldReverse(x), seed));
+}
+uint sobolDim1(uint index) {  // 2ª dimensão de Sobol (polinômio x + 1)
+  uint result = 0u, v = 0x80000000u;
+  for (; index != 0u; index >>= 1u, v ^= v >> 1u)
+    if ((index & 1u) != 0u) result ^= v;
+  return result;
+}
+struct SampleGen {
+  uint pixelSeed;
+  uint index;  // número da amostra na sequência do pixel (= frame)
+};
+SampleGen makeSampleGen(uvec2 pixel, uint frameIndex) { return SampleGen(pcg3d(uvec3(pixel, 0x5bd1e995u)).x, frameIndex); }
+// Par 2D de Sobol para a dimensão `dim`; dimensões diferentes usam embaralhamentos independentes ("padding").
+vec2 sample2D(SampleGen g, uint dim) {
+  uint seed = pcg3d(uvec3(g.pixelSeed, dim, 0x68bc21ebu)).x;
+  uint i = nestedUniformScramble(g.index, seed);
+  uint x = nestedUniformScramble(bitfieldReverse(i), seed ^ 0xa511e9b3u);
+  uint y = nestedUniformScramble(sobolDim1(i), seed ^ 0x63d83595u);
+  return vec2(x >> 8u, y >> 8u) * (1.0 / 16777216.0);  // 24 bits: nunca chega a 1,0
+}
+
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);

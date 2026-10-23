@@ -28,6 +28,7 @@ struct Options {
   std::string out = "frame.png";
   uint32_t saveEvery = 0;  // > 0: salva também a cada N frames (frame_0007.png...)
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
+  bool pause = false;      // congela animações (medições de ruído com cena estática)
   scene::DemoOptions scene;
   bool customCamera = false;
   glm::vec3 cameraPos{0.0f}, cameraTarget{0.0f, 0.0f, -1.0f};
@@ -49,6 +50,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--out") o.out = next();
     else if (a == "--save-every") o.saveEvery = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--move") o.move = float(std::atof(next()));
+    else if (a == "--pause") o.pause = true;
     else if (a == "--scene") o.scene.name = next();
     else if (a == "--cam" || a == "--look") {
       glm::vec3 v(0.0f);
@@ -77,7 +79,7 @@ Options parseArgs(int argc, char** argv) {
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
           "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"
           "  --width W --height H\n"
-          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s]\n");
+          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s] [--pause]\n");
       std::exit(0);
     }
   }
@@ -128,7 +130,7 @@ int runHeadless(const Options& opt) {
     bool last = f + 1 == opt.frames;
     bool save = last || (opt.saveEvery && (f + 1) % opt.saveEvery == 0);
     if (opt.move != 0.0f) camera.position += moveDir * (opt.move * dt);
-    scene.update(dt);
+    scene.update(opt.pause ? 0.0f : dt);
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
       r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view, dt);
       if (!save) return;
@@ -288,7 +290,7 @@ int runWindowed(const Options& opt) {
     toggle(GLFW_KEY_M, mDown, r.settings.motionBlur);
     (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
 
-    scene.update(glm::clamp(dt, 0.0f, 0.1f));
+    scene.update(opt.pause ? 0.0f : glm::clamp(dt, 0.0f, 0.1f));
 
     // ---- Frame ----
     FrameSync& f = frames[slot];
