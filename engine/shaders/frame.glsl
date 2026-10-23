@@ -41,6 +41,8 @@ float historyExposureScale() { return exposureState.w > 0.0 ? exposureState.x / 
 const float HALF_SAFE_MAX = 60000.0;
 vec3 clampHalf(vec3 c) { return min(c, vec3(HALF_SAFE_MAX)); }
 
+#include "atmosphere_lut.glsl"
+
 bool historyValid() { return frame.frameInfo.w != 0u; }
 
 // Reverse-Z infinito: profundidade = near / distância.
@@ -89,6 +91,19 @@ vec3 sunDisk(vec3 dir) {
   float r = sqrt(max(0.0, 1.0 - mu * mu)) / sin(frame.params.x);
   float limb = 1.0 - 0.6 * (1.0 - sqrt(max(0.0, 1.0 - r * r)));  // escurecimento de borda
   return sunIrradianceAt(frame.cameraPos.xyz) / (TWO_PI * (1.0 - cosR)) * limb;
+}
+
+// Perspectiva aérea: atmosfera entre a câmera e um ponto da cena (volume 32³, até 32 km).
+vec3 applyAerialPerspective(vec3 color, vec2 uv, vec3 worldPos) {
+  float distKm = length(worldPos - frame.cameraPos.xyz) * 0.001;
+  float w = sqrt(clamp(distKm / 32.0, 0.0, 1.0));  // inverso da distribuição quadrática das fatias
+  // A fatia s guarda o acumulado até w = (s + 1) / N; antes da 1ª fatia, interpola desde "sem atmosfera".
+  vec3 size = vec3(textureSize(aerialPerspectiveLut, 0));
+  float slice = w * size.z - 1.0;
+  vec4 ap = textureLod(aerialPerspectiveLut, vec3(uv, (max(slice, 0.0) + 0.5) / size.z), 0.0);
+  float fade = clamp(slice + 1.0, 0.0, 1.0);
+  ap = mix(vec4(0.0, 0.0, 0.0, 1.0), ap, fade);
+  return color * ap.a + ap.rgb;
 }
 
 // Névoa exponencial por altura com in-scattering do sol e do céu.

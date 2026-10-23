@@ -23,6 +23,7 @@ void main() {
     GSample g = loadGBuffer(id);
     color = texelFetch(diffuseIn, id, 0).rgb * g.diffuseColor + texelFetch(specularIn, id, 0).rgb +
             texelFetch(gEmissive, id, 0).rgb;
+    color = applyAerialPerspective(color, uv, g.P);
     color = applyHeightFog(color, g.P);
   }
   imageStore(sceneOut, id, vec4(clampHalf(color), 1.0));
