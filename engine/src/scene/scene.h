@@ -15,23 +15,31 @@ namespace scene {
 enum MaterialFlags : uint32_t {
   kMaterialAlphaMask = 1u << 0,  // recorte por alfa (folhas, grades)
   kMaterialTerrain = 1u << 1,    // terreno procedural (material.glsl)
+  kMaterialSpecularGlossiness = 1u << 2,  // KHR_materials_pbrSpecularGlossiness
 };
 
-// Material PBR metálico/rugosidade no modelo do glTF 2.0. Espelhado em shaders/scene.glsl.
+// Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
+// ou especular/glossiness (kMaterialSpecularGlossiness). Espelhado em shaders/scene.glsl.
 struct Material {
-  glm::vec4 baseColor{1.0f};
-  glm::vec3 emissive{0.0f};  // luminância emitida em nits (cd/m²)
+  glm::vec4 baseColor{1.0f};   // especular/glossiness: cor difusa
+  glm::vec3 emissive{0.0f};    // luminância emitida em nits (cd/m²)
   float alphaCutoff = 0.5f;
   float metallic = 0.0f;
-  float roughness = 0.5f;
+  float roughness = 0.5f;      // especular/glossiness: 1 - glossiness
   float normalScale = 1.0f;
   uint32_t flags = 0;
   int32_t baseColorTex = -1;
-  int32_t metalRoughTex = -1;  // glTF: G = rugosidade, B = metalicidade
+  int32_t metalRoughTex = -1;  // glTF: G = rugosidade, B = metalicidade | especular/glossiness: RGB + A
   int32_t normalTex = -1;
   int32_t emissiveTex = -1;
+  glm::vec3 specularColor{1.0f};  // KHR_materials_specular | especular/glossiness: cor especular
+  float specular = 1.0f;          // KHR_materials_specular: peso
+  float ior = 1.5f;               // KHR_materials_ior (1,5 => f0 = 4%)
+  int32_t specularTex = -1;
+  int32_t specularColorTex = -1;
+  float pad = 0.0f;
 };
-static_assert(sizeof(Material) == 64);
+static_assert(sizeof(Material) == 96);
 
 // Luz pontual esférica em unidades fotométricas: intensidade luminosa em candela (cd) por canal;
 // iluminância a uma distância d = intensity / d² (lux).
@@ -161,6 +169,8 @@ class Scene {
   // em interiores ela é iluminada pelo sol mesmo na sombra, então cenas fechadas usam valor baixo.
   float fogDensity = 0.0015f;
   float fogFalloff = 0.035f;  // queda exponencial com a altura
+  // > 0: céu substituído por radiância uniforme (nits) — usado no teste da fornalha branca.
+  float uniformSkyLuminance = 0.0f;
 
  private:
   void animateModel(Model& m, float dt);

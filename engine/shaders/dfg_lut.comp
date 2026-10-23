@@ -1,0 +1,42 @@
+#version 460
+// Pré-computa a LUT DFG (Karis 2013, "split sum"): para cada (NoV, rugosidade), a integral do GGX com
+// Fresnel separada em escala A e viés B. Roda uma vez na inicialização, com amostragem VNDF.
+#extension GL_GOOGLE_include_directive : require
+#include "brdf.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D lutOut;
+
+const uint SAMPLES = 4096u;
+
+float smithLambda(float NoX, float a) {
+  float c2 = NoX * NoX;
+  return 0.5 * (-1.0 + sqrt(1.0 + a * a * (1.0 - c2) / max(c2, 1e-8)));
+}
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 size = imageSize(lutOut);
+  if (any(greaterThanEqual(id, size))) return;
+  float NoV = (float(id.x) + 0.5) / float(size.x);
+  float roughness = (float(id.y) + 0.5) / float(size.y);
+  float a = alphaFromRoughness(roughness);
+  vec3 V = vec3(sqrt(1.0 - NoV * NoV), 0.0, NoV);  // espaço tangente, N = +Z
+  float A = 0.0, B = 0.0;
+  for (uint i = 0u; i < SAMPLES; ++i) {
+    // Hammersley: estratificação determinística.
+    vec2 u = vec2((float(i) + 0.5) / float(SAMPLES), float(bitfieldReverse(i)) * 2.3283064365386963e-10);
+    vec3 H = sampleGGXVNDF(V, a, u);
+    vec3 L = reflect(-V, H);
+    float NoL = L.z;
+    if (NoL <= 0.0) continue;
+    // Com amostragem VNDF o peso exato é G2(V,L)/G1(V) — mesmo Smith "height-correlated" usado no BRDF.
+    float VoH = max(dot(V, H), 0.0);
+    float lambdaV = smithLambda(NoV, a), lambdaL = smithLambda(NoL, a);
+    float g = (1.0 + lambdaV) / (1.0 + lambdaV + lambdaL);
+    float fc = pow(1.0 - VoH, 5.0);
+    A += (1.0 - fc) * g;
+    B += fc * g;
+  }
+  imageStore(lutOut, id, vec4(A / float(SAMPLES), B / float(SAMPLES), 0.0, 1.0));
+}

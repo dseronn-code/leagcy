@@ -263,6 +263,28 @@ bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Teste da fornalha branca: esferas brancas sob céu uniforme. Um BRDF que conserva energia
+// as deixa com o mesmo brilho do fundo (metais f0 = 1 em cima, dielétricos brancos embaixo,
+// rugosidade de 0 a 1 da esquerda para a direita).
+bool buildFurnace(Scene& s, Camera& camera) {
+  uint32_t sphere = s.addMesh(makeSphere(128, 64));
+  for (int row = 0; row < 2; ++row) {
+    for (int i = 0; i < 6; ++i) {
+      Material m;
+      m.baseColor = glm::vec4(1.0f);
+      m.metallic = row == 0 ? 1.0f : 0.0f;
+      m.roughness = float(i) / 5.0f;
+      s.addObject(sphere, trs({-6.25f + 2.5f * i, row == 0 ? 1.3f : -1.3f, 0.0f}, glm::vec3(1.0f)), s.addMaterial(m));
+    }
+  }
+  s.sunIlluminance = 0.0f;
+  s.fogDensity = 0.0f;
+  s.uniformSkyLuminance = 1.0f;
+  camera.position = {0.0f, 0.0f, 13.0f};
+  camera.lookAt({0.0f, 0.0f, 0.0f});
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
@@ -270,6 +292,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   };
   if (endsWith(".gltf") || endsWith(".glb")) return buildFromFile(scene, camera, opt);
   if (opt.name == "outdoor") return buildOutdoor(scene, camera, opt);
+  if (opt.name == "furnace") return buildFurnace(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 

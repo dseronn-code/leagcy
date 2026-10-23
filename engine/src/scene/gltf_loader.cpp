@@ -82,7 +82,16 @@ struct Loader {
     for (size_t i = 0; i < data->materials_count; ++i) {
       const cgltf_material& src = data->materials[i];
       Material m;
-      if (src.has_pbr_metallic_roughness) {
+      if (src.has_pbr_specular_glossiness) {
+        // Fluxo especular/glossiness: usado nativamente (sem conversão com perda).
+        const auto& sg = src.pbr_specular_glossiness;
+        m.flags |= kMaterialSpecularGlossiness;
+        m.baseColor = glm::make_vec4(sg.diffuse_factor);
+        m.baseColorTex = texture(sg.diffuse_texture, true);
+        m.specularColor = glm::make_vec3(sg.specular_factor);
+        m.roughness = 1.0f - sg.glossiness_factor;
+        m.metalRoughTex = texture(sg.specular_glossiness_texture, true);  // RGB em sRGB, A linear
+      } else if (src.has_pbr_metallic_roughness) {
         const auto& pbr = src.pbr_metallic_roughness;
         m.baseColor = glm::make_vec4(pbr.base_color_factor);
         m.metallic = pbr.metallic_factor;
@@ -90,6 +99,13 @@ struct Loader {
         m.baseColorTex = texture(pbr.base_color_texture, true);
         m.metalRoughTex = texture(pbr.metallic_roughness_texture, false);
       }
+      if (src.has_specular) {
+        m.specular = src.specular.specular_factor;
+        m.specularColor = glm::make_vec3(src.specular.specular_color_factor);
+        m.specularTex = texture(src.specular.specular_texture, false);
+        m.specularColorTex = texture(src.specular.specular_color_texture, true);
+      }
+      if (src.has_ior) m.ior = src.ior.ior;
       // glTF não define unidade para emissão; 1,0 = 1.000 nits (tela/letreiro típico).
       m.emissive = glm::make_vec3(src.emissive_factor) * kGltfEmissiveNits;
       if (src.has_emissive_strength) m.emissive *= src.emissive_strength.emissive_strength;

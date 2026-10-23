@@ -1,4 +1,5 @@
-// Leitura do G-buffer nos passes de compute (set 1, bindings 0-2 por convenção).
+// Leitura do G-buffer nos passes de compute (set 1, bindings 0-3 por convenção).
+// Quem inclui este arquivo começa os próprios bindings do set 1 em 4.
 #ifndef GBUFFER_GLSL
 #define GBUFFER_GLSL
 
@@ -6,7 +7,8 @@
 
 layout(set = 1, binding = 0) uniform sampler2D gDepth;
 layout(set = 1, binding = 1) uniform sampler2D gNormal;  // xyz = normal, w = rugosidade
-layout(set = 1, binding = 2) uniform sampler2D gAlbedo;  // rgb = albedo, a = metalicidade
+layout(set = 1, binding = 2) uniform sampler2D gDiffuse;   // rgb = cor difusa
+layout(set = 1, binding = 3) uniform sampler2D gSpecular;  // rgb = f0, a = f90
 
 // Normal geométrica (faceta real do triângulo) reconstruída da profundidade, escolhendo o vizinho
 // mais próximo em cada eixo para não atravessar silhuetas (Turánszki). É ela que decide para que lado
@@ -40,6 +42,7 @@ struct GSample {
   float roughness;
   vec3 diffuseColor;
   vec3 f0;
+  float f90;
 };
 
 GSample loadGBuffer(ivec2 id) {
@@ -50,9 +53,10 @@ GSample loadGBuffer(ivec2 id) {
   vec4 n = texelFetch(gNormal, id, 0);
   g.N = normalize(n.xyz);
   g.roughness = n.w;
-  vec4 a = texelFetch(gAlbedo, id, 0);
-  g.diffuseColor = a.rgb * (1.0 - a.a);
-  g.f0 = mix(vec3(0.04), a.rgb, a.a);
+  g.diffuseColor = texelFetch(gDiffuse, id, 0).rgb;
+  vec4 spec = texelFetch(gSpecular, id, 0);
+  g.f0 = spec.rgb;
+  g.f90 = spec.a;
   g.V = normalize(frame.cameraPos.xyz - g.P);
   g.Ng = geometricNormal(id, g.P);
   if (dot(g.Ng, g.Ng) == 0.0) g.Ng = dot(g.N, g.V) > 0.0 ? g.N : -g.N;

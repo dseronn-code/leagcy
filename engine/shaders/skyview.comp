@@ -10,8 +10,9 @@ void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (any(greaterThanEqual(id, size))) return;
   vec3 dir = lutDirection((vec2(id) + 0.5) / vec2(size));
-  vec3 L = frame.sunDir.w > 0.0 ? integrateSky(planetPos(frame.cameraPos.xyz), dir, frame.sunDir.xyz, frame.sunDir.w) : vec3(0.0);
+  vec3 L = frame.environment.x > 0.0 ? vec3(frame.environment.x)
+         : frame.sunDir.w > 0.0 ? integrateSky(planetPos(frame.cameraPos.xyz), dir, frame.sunDir.xyz, frame.sunDir.w) : vec3(0.0);
   // Céu noturno sem lua: ~0,001 nit (luz das estrelas e airglow), levemente azulado.
-  L += vec3(0.0008, 0.0010, 0.0016) * max(dir.y, 0.0);
+  if (frame.environment.x <= 0.0) L += vec3(0.0008, 0.0010, 0.0016) * max(dir.y, 0.0);
   imageStore(skyViewOut, id, vec4(clampHalf(L * preExposure()), 1.0));
 }
