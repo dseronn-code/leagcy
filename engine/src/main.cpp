@@ -34,6 +34,7 @@ struct Options {
   std::string out = "frame.png";
   uint32_t saveEvery = 0;  // > 0: salva também a cada N frames (frame_0007.png...)
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
+  uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
   float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
@@ -58,6 +59,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--out") o.out = next();
     else if (a == "--save-every") o.saveEvery = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--move") o.move = float(std::atof(next()));
+    else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
     else if (a == "--sun-azimuth") o.sunAzimuth = float(std::atof(next()));
@@ -116,7 +118,7 @@ Options parseArgs(int argc, char** argv) {
           "  --restir-no-reuse temporal|spatial|all   desliga reusos do ReSTIR (depuração)\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
-          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s] [--pause]\n");
+          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause]\n");
       std::exit(0);
     }
   }
@@ -195,7 +197,7 @@ int runHeadless(const Options& opt) {
   for (uint32_t f = 0; f < opt.frames; ++f) {
     bool last = f + 1 == opt.frames;
     bool save = last || (opt.saveEvery && (f + 1) % opt.saveEvery == 0);
-    if (opt.move != 0.0f) camera.position += moveDir * (opt.move * dt);
+    if (opt.move != 0.0f && (opt.moveStop == 0 || f < opt.moveStop)) camera.position += moveDir * (opt.move * dt);
     scene.update(opt.pause ? 0.0f : dt);
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
       r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view, dt);
