@@ -12,11 +12,33 @@
 
 namespace renderer {
 
+// Orçamentos de qualidade. Nada aqui é limitado por hardware: os presets só escolhem quanto
+// trabalho gastar por pixel. Ultra é o padrão; Cinema não economiza em nada (fotos e vídeos).
+struct Quality {
+  float renderScale = 1.0f;         // resolução interna / saída
+  uint32_t samplesPerPixel = 2;     // amostras de sombra, GI e reflexo por pixel por frame
+  uint32_t restirCandidates = 16;   // luzes candidatas por pixel (RIS)
+  uint32_t restirNeighbors = 8;     // vizinhos no reuso espacial
+  uint32_t denoiseDiffuseIterations = 5;   // passadas à-trous (raio 1, 2, 4, 8, 16...)
+  uint32_t denoiseSpecularIterations = 4;
+  float rayTextureLod = 0.0f;       // mip das texturas vistas em reflexos e GI (0 = máxima nitidez)
+  float fireflyLimit = 32.0f;       // luminância pré-exposta máxima de uma amostra indireta
+  uint32_t skyLutWidth = 512, skyLutHeight = 256;
+  uint32_t bloomMips = 7;
+  uint32_t dofSamples = 64;
+  uint32_t motionBlurSamples = 16;
+  float anisotropy = 16.0f;
+};
+
+enum class QualityPreset { Low, Medium, High, Ultra, Cinema };
+Quality qualityPreset(QualityPreset preset);
+bool parseQualityPreset(const char* name, QualityPreset& out);  // baixo, medio, alto, ultra, cinema
+
 struct Settings {
-  float renderScale = 0.67f;        // resolução interna / saída (0.67 ~ "Quality" do FSR/DLSS)
+  Quality quality;
   float exposureCompensation = 0.0f;  // EV somado à auto-exposição (+1 = imagem 2x mais clara)
   float manualEV100 = std::numeric_limits<float>::quiet_NaN();  // definido = exposição manual (EV100)
-  float sunAngularRadius = 0.012f;  // rad (o sol real tem ~0.0047; maior = penumbra mais suave)
+  float sunAngularRadius = 0.00465f;  // rad: tamanho real do disco solar (penumbras físicas)
   bool denoiser = true;
   bool depthOfField = false;
   float dofFocusDistance = 0.0f;    // 0 = autofoco no centro da tela
@@ -78,6 +100,7 @@ class Renderer {
   Targets t_;
 
   rhi::Image skyLut_;
+  VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_;
   rhi::Buffer histogram_, exposureState_;

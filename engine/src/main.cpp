@@ -27,7 +27,9 @@ struct Options {
   bool validation = false;
   bool rayTracing = true;
   bool vsync = true;
-  uint32_t width = 1600, height = 900;
+  uint32_t width = 1920, height = 1080;
+  bool fullscreen = false;
+  float scaleOverride = 0.0f;  // > 0: substitui a resolução interna do preset
   uint32_t frames = 32;  // frames renderizados no modo headless (o último é salvo)
   std::string out = "frame.png";
   uint32_t saveEvery = 0;  // > 0: salva também a cada N frames (frame_0007.png...)
@@ -64,7 +66,14 @@ Options parseArgs(int argc, char** argv) {
     }
     else if (a == "--night") o.scene.night = true;
     else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
-    else if (a == "--scale") o.render.renderScale = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
+    else if (a == "--scale") o.scaleOverride = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
+    else if (a == "--fullscreen") o.fullscreen = true;
+    else if (a == "--quality") {
+      renderer::QualityPreset p;
+      const char* name = next();
+      if (!renderer::parseQualityPreset(name, p)) FATAL("--quality: use baixo, medio, alto, ultra ou cinema (recebido '%s')", name);
+      o.render.quality = renderer::qualityPreset(p);
+    }
     else if (a == "--exposure") o.render.manualEV100 = float(std::atof(next()));
     else if (a == "--ev") o.render.exposureCompensation = float(std::atof(next()));
     else if (a == "--dof") o.render.depthOfField = true;
@@ -77,7 +86,9 @@ Options parseArgs(int argc, char** argv) {
           "  --scene sponza|outdoor   cena de demonstração (padrão: sponza)\n"
           "  --night                  noite: só luzes locais (ReSTIR)\n"
           "  --lights N               número de luzes pontuais\n"
-          "  --scale S                resolução interna (0.25-1.0, padrão 0.67) — upscaling pelo TAA\n"
+          "  --quality P              baixo | medio | alto | ultra (padrão) | cinema (sem economia)\n"
+          "  --scale S                resolução interna (0.25-1.0; o preset define; menor = upscaling pelo TAA)\n"
+          "  --fullscreen             tela cheia na resolução nativa do monitor\n"
           "  --dof [--focus M]        profundidade de campo (autofoco se --focus omitido)\n"
           "  --ev X | --exposure EV   compensação da auto-exposição (EV) | exposição manual (EV100)\n"
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
@@ -87,6 +98,7 @@ Options parseArgs(int argc, char** argv) {
       std::exit(0);
     }
   }
+  if (o.scaleOverride > 0.0f) o.render.quality.renderScale = o.scaleOverride;
   return o;
 }
 
@@ -179,7 +191,16 @@ struct FrameSync {
 int runWindowed(const Options& opt) {
   if (!glfwInit()) FATAL("Falha ao iniciar GLFW");
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  GLFWwindow* window = glfwCreateWindow(int(opt.width), int(opt.height), "Legacy Engine", nullptr, nullptr);
+  GLFWmonitor* monitor = nullptr;
+  int winW = int(opt.width), winH = int(opt.height);
+  if (opt.fullscreen) {
+    monitor = glfwGetPrimaryMonitor();
+    const GLFWvidmode* mode = glfwGetVideoMode(monitor);
+    winW = mode->width;
+    winH = mode->height;
+    glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+  }
+  GLFWwindow* window = glfwCreateWindow(winW, winH, "Legacy Engine", monitor, nullptr);
   if (!window) FATAL("Falha ao criar janela");
 
   uint32_t extCount = 0;

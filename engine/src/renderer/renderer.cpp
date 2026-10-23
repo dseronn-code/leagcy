@@ -11,9 +11,7 @@ namespace renderer {
 
 namespace {
 
-constexpr VkExtent2D kSkyLutExtent{256, 128};
 constexpr uint32_t kMaxTextures = 4096;
-constexpr uint32_t kMaxBloomMips = 6;
 constexpr uint32_t kHistogramBins = 256;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -29,8 +27,10 @@ struct FrameUniforms {
   glm::mat4 view, proj, viewProj, invViewProj, viewProjNoJitter, prevViewProjNoJitter;
   glm::vec4 cameraPos, prevCameraPos, sunDir, params, jitter, renderSize, outputSize;
   glm::uvec4 frameInfo;
+  glm::uvec4 quality0;  // spp, candidatos ReSTIR, vizinhos ReSTIR, amostras DOF
+  glm::vec4 quality1;   // mip nos raios, limite de vagalumes, amostras de motion blur
 };
-static_assert(sizeof(FrameUniforms) == 512);
+static_assert(sizeof(FrameUniforms) == 544);
 
 struct GBufferPush {
   uint32_t object;
@@ -116,6 +116,36 @@ VkRenderingAttachmentInfo attachment(VkImageView view, VkImageLayout layout, VkA
 
 }  // namespace
 
+Quality qualityPreset(QualityPreset preset) {
+  Quality q;  // Ultra
+  switch (preset) {
+    case QualityPreset::Low:
+      q = {0.5f, 1, 4, 3, 3, 1, 3.0f, 8.0f, 256, 128, 5, 24, 8, 4.0f};
+      break;
+    case QualityPreset::Medium:
+      q = {0.6f, 1, 8, 4, 4, 2, 2.0f, 12.0f, 256, 128, 6, 32, 12, 8.0f};
+      break;
+    case QualityPreset::High:
+      q = {0.75f, 1, 12, 6, 5, 3, 1.0f, 16.0f, 384, 192, 6, 48, 12, 16.0f};
+      break;
+    case QualityPreset::Ultra:
+      break;
+    case QualityPreset::Cinema:
+      q = {1.0f, 4, 32, 12, 5, 5, 0.0f, 64.0f, 1024, 512, 8, 128, 32, 16.0f};
+      break;
+  }
+  return q;
+}
+
+bool parseQualityPreset(const char* name, QualityPreset& out) {
+  const std::pair<const char*, QualityPreset> names[] = {{"baixo", QualityPreset::Low},   {"medio", QualityPreset::Medium},
+                                                         {"alto", QualityPreset::High},   {"ultra", QualityPreset::Ultra},
+                                                         {"cinema", QualityPreset::Cinema}};
+  for (auto& [n, p] : names)
+    if (std::strcmp(name, n) == 0) { out = p; return true; }
+  return false;
+}
+
 void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExtent, VkFormat outputFormat,
                     const Settings& initialSettings) {
   ctx_ = &ctx;
@@ -129,8 +159,11 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   nearest_ = makeSampler(ctx, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
   linear_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
   skySampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
-  textureSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, true, 8.0f);
-  skyLut_ = rhi::createImage2D(ctx, kSkyLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  const Quality& q = settings.quality;
+  float anisotropy = std::min(q.anisotropy, ctx.properties.limits.maxSamplerAnisotropy);
+  textureSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, true, anisotropy);
+  skyLutExtent_ = {q.skyLutWidth, q.skyLutHeight};
+  skyLut_ = rhi::createImage2D(ctx, skyLutExtent_, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
     frameUbo_[i] = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     objectBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.objects.size()) * sizeof(ObjectGpu),
@@ -290,8 +323,9 @@ void Renderer::writeGlobalDescriptors() {
 
 void Renderer::createTargets() {
   rhi::Context& ctx = *ctx_;
-  renderExtent_ = {std::max(1u, uint32_t(float(outputExtent_.width) * settings.renderScale + 0.5f)),
-                   std::max(1u, uint32_t(float(outputExtent_.height) * settings.renderScale + 0.5f))};
+  float scale = glm::clamp(settings.quality.renderScale, 0.25f, 1.0f);
+  renderExtent_ = {std::max(1u, uint32_t(float(outputExtent_.width) * scale + 0.5f)),
+                   std::max(1u, uint32_t(float(outputExtent_.height) * scale + 0.5f))};
   const VkImageUsageFlags attach = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   VkExtent2D R = renderExtent_, O = outputExtent_;
@@ -316,7 +350,7 @@ void Renderer::createTargets() {
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
-  t_.bloom = rhi::createImage2D(ctx, bloomExtent, kHdrFormat, storage, std::min(kMaxBloomMips, rhi::mipCount(bloomExtent)));
+  t_.bloom = rhi::createImage2D(ctx, bloomExtent, kHdrFormat, storage, std::min(std::max(settings.quality.bloomMips, 1u), rhi::mipCount(bloomExtent)));
   for (uint32_t m = 0; m < t_.bloom.mipLevels; ++m) t_.bloomMips.push_back(rhi::createMipView(ctx, t_.bloom, m));
 
   // Tudo vive em GENERAL: o mesmo alvo é attachment, textura e storage em passes diferentes.
@@ -394,6 +428,10 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.outputSize = glm::vec4(O.width, O.height, 1.0f / O.width, 1.0f / O.height);
   u.frameInfo = glm::uvec4(uint32_t(frameIndex_), ctx_->rayTracing ? 1u : 0u, uint32_t(scene_->lights.size()),
                            historyValid_ ? 1u : 0u);
+  const Quality& q = settings.quality;
+  u.quality0 = glm::uvec4(std::max(q.samplesPerPixel, 1u), std::max(q.restirCandidates, 1u), q.restirNeighbors,
+                          std::max(q.dofSamples, 1u));
+  u.quality1 = glm::vec4(q.rayTextureLod, q.fireflyLimit, float(std::max(q.motionBlurSamples, 1u)), 0.0f);
   std::memcpy(frameUbo_[slot].mapped, &u, sizeof(u));
   vmaFlushAllocation(ctx_->allocator, frameUbo_[slot].allocation, 0, VK_WHOLE_SIZE);
 
@@ -406,7 +444,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   profiler_.mark(cmd, "cena");
 
   // ---- 1. Atmosfera ----
-  skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view)}, kSkyLutExtent);
+  skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view)}, skyLutExtent_);
   barrier();
   profiler_.mark(cmd, "ceu");
 
@@ -480,14 +518,26 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       svgfAtrousPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, tex(in), storage(out)}, R, &p);
       barrier();
     };
+    // Difuso: integrado -> histórico -> A/B alternando, passo dobrando a cada iteração.
+    uint32_t nd = std::max(settings.quality.denoiseDiffuseIterations, 1u);
     atrous(t_.diffuseIntegrated, t_.diffuseHistory[cur], 1, 4.0f);
-    atrous(t_.diffuseHistory[cur], t_.tmpA, 2, 4.0f);
-    atrous(t_.tmpA, t_.tmpB, 4, 4.0f);
-    atrous(t_.tmpB, t_.tmpA, 8, 4.0f);
+    const rhi::Image* src = &t_.diffuseHistory[cur];
+    for (uint32_t i = 1; i < nd; ++i) {
+      const rhi::Image* dst = (i % 2 == 1) ? &t_.tmpA : &t_.tmpB;
+      atrous(*src, *dst, 1 << i, 4.0f);
+      src = dst;
+    }
+    diffuseFinal = src;
+    // Especular: integrado -> histórico -> C/B alternando (A pode estar com o difuso final).
+    uint32_t ns = std::max(settings.quality.denoiseSpecularIterations, 1u);
     atrous(t_.specularIntegrated, t_.specularHistory[cur], 1, 2.0f);
-    atrous(t_.specularHistory[cur], t_.tmpC, 2, 2.0f);
-    diffuseFinal = &t_.tmpA;
-    specularFinal = &t_.tmpC;
+    src = &t_.specularHistory[cur];
+    for (uint32_t i = 1; i < ns; ++i) {
+      const rhi::Image* dst = (i % 2 == 1) ? &t_.tmpC : (diffuseFinal == &t_.tmpB ? &t_.tmpA : &t_.tmpB);
+      atrous(*src, *dst, 1 << i, 2.0f);
+      src = dst;
+    }
+    specularFinal = src;
     profiler_.mark(cmd, "denoiser");
   }
 

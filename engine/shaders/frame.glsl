@@ -20,6 +20,8 @@ layout(set = 0, binding = 0) uniform FrameData {
   vec4 renderSize;            // xy = resolução interna, zw = 1/xy
   vec4 outputSize;            // xy = resolução de saída, zw = 1/xy
   uvec4 frameInfo;            // x = índice do frame, y = ray tracing, z = nº de luzes, w = histórico válido
+  uvec4 quality0;             // x = amostras por pixel, y = candidatos ReSTIR, z = vizinhos ReSTIR, w = amostras do DOF
+  vec4 quality1;              // x = mip das texturas nos raios, y = limite de vagalumes, z = amostras do motion blur
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2D skyViewLut;
