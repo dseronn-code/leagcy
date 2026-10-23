@@ -4,8 +4,8 @@
 #include "restir.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 1, binding = 3, std430) readonly buffer InReservoirs { Reservoir inReservoirs[]; };
-layout(set = 1, binding = 4, std430) writeonly buffer OutReservoirs { Reservoir outReservoirs[]; };
+layout(set = 1, binding = 4, std430) readonly buffer InReservoirs { Reservoir inReservoirs[]; };
+layout(set = 1, binding = 5, std430) writeonly buffer OutReservoirs { Reservoir outReservoirs[]; };
 
 const float RADIUS = 24.0;  // pixels
 
@@ -19,8 +19,9 @@ void main() {
   if (g.depth <= 0.0 || frame.frameInfo.z == 0u) { outReservoirs[idx] = center; return; }
 
   uint rng = seedFor(uvec2(id), frame.frameInfo.x, 2u);
+  BrdfContext bc = brdfContextFor(g);
   Reservoir s = emptyReservoir();
-  updateReservoir(s, center.light, targetPdf(center.light, g) * center.W * center.M, center.M, rand(rng));
+  updateReservoir(s, center.light, targetPdf(center.light, g, bc) * center.W * center.M, center.M, rand(rng));
   float zCur = linearDepth(g.depth);
   for (uint k = 0u; k < frame.quality0.z; ++k) {
     vec2 u = rand2(rng);
@@ -31,8 +32,8 @@ void main() {
     vec3 nq = texelFetch(gNormal, q, 0).xyz;
     if (abs(zq - zCur) > 0.1 * zCur || dot(nq, g.N) < 0.9) continue;
     Reservoir n = inReservoirs[uint(q.y) * width + uint(q.x)];
-    updateReservoir(s, n.light, targetPdf(n.light, g) * n.W * n.M, n.M, rand(rng));
+    updateReservoir(s, n.light, targetPdf(n.light, g, bc) * n.W * n.M, n.M, rand(rng));
   }
-  finalizeReservoir(s, g);
+  finalizeReservoir(s, g, bc);
   outReservoirs[idx] = s;
 }

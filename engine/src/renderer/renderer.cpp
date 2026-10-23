@@ -15,7 +15,8 @@ constexpr uint32_t kMaxTextures = 4096;
 constexpr uint32_t kHistogramBins = 256;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
-constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;
+constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;  // cor difusa e f0 (sRGB: precisão nos tons baixos)
+constexpr VkExtent2D kDfgLutExtent{128, 128};
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
 
 constexpr VkDescriptorType CIS = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -28,9 +29,10 @@ struct FrameUniforms {
   glm::vec4 cameraPos, prevCameraPos, sunDir, params, jitter, renderSize, outputSize;
   glm::uvec4 frameInfo;
   glm::uvec4 quality0;  // spp, candidatos ReSTIR, vizinhos ReSTIR, amostras DOF
-  glm::vec4 quality1;   // mip nos raios, limite de vagalumes, amostras de motion blur
+  glm::vec4 quality1;   // mip nos raios, limite de vagalumes, amostras de motion blur, compensação de energia
+  glm::vec4 environment;  // x = céu uniforme (nits)
 };
-static_assert(sizeof(FrameUniforms) == 544);
+static_assert(sizeof(FrameUniforms) == 560);
 
 struct GBufferPush {
   uint32_t object;
@@ -164,6 +166,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   textureSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT, true, anisotropy);
   skyLutExtent_ = {q.skyLutWidth, q.skyLutHeight};
   skyLut_ = rhi::createImage2D(ctx, skyLutExtent_, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  dfgLut_ = rhi::createImage2D(ctx, kDfgLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
     frameUbo_[i] = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     objectBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.objects.size()) * sizeof(ObjectGpu),
@@ -191,6 +194,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {5, CIS, kMaxTextures, VK_SHADER_STAGE_ALL, nullptr},
       {7, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {8, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {9, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -206,7 +210,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {CIS, kFramesInFlight * (1 + kMaxTextures)},
+      {CIS, kFramesInFlight * (2 + kMaxTextures)},
       {SB, kFramesInFlight * 5},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
@@ -229,12 +233,12 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   const bool rt = ctx.rayTracing;
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
-  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SB, SB});
-  restirSpatialPass_.init(ctx, "restir_spatial.comp", g, {CIS, CIS, CIS, SB, SB});
-  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, SB, SI, SI});
-  svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
-  svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
-  compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SI});
+  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB});
+  restirSpatialPass_.init(ctx, "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB});
+  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI});
+  svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
+  svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
+  compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI});
   taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI});
   histogramPass_.init(ctx, "exposure_histogram.comp", g, {CIS, SB});
   exposurePass_.init(ctx, "exposure_average.comp", g, {SB, SB}, sizeof(ExposurePush));
@@ -258,7 +262,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(scene::Vertex, tangent)},
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(scene::Vertex, position)},
   };
-  gb.colorFormats = {kAlbedoFormat, kHdrFormat, kMotionFormat, kHdrFormat};
+  gb.colorFormats = {kAlbedoFormat, kHdrFormat, kMotionFormat, kHdrFormat, kAlbedoFormat};
   gb.depthFormat = kDepthFormat;
   gb.depthTest = gb.depthWrite = true;
   gb.cullMode = VK_CULL_MODE_NONE;  // materiais de dois lados (folhagem, tecidos)
@@ -272,11 +276,18 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   tm.colorFormats = {outputFormat};
   tonemapPipeline_ = rhi::createGraphicsPipeline(ctx, tm);
 
+  // LUT DFG: calculada uma vez (a integral do BRDF não depende da cena).
+  rhi::ComputePass dfgPass;
+  dfgPass.init(ctx, "dfg_lut.comp", g, {SI});
   ctx.immediateSubmit([&](VkCommandBuffer cmd) {
-    rhi::imageBarrier(cmd, skyLut_.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
-                      VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
-                      VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+    for (rhi::Image* img : {&skyLut_, &dfgLut_})
+      rhi::imageBarrier(cmd, img->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                        VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+    dfgPass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(dfgLut_.view)}, kDfgLutExtent);
+    rhi::memoryBarrier(cmd);
   });
+  dfgPass.destroy(ctx);
   profiler_.init(ctx, kFramesInFlight);
   createTargets();
 }
@@ -310,6 +321,8 @@ void Renderer::writeGlobalDescriptors() {
     for (uint32_t b = 0; b < 3; ++b) add(2 + b, SB, 1).pBufferInfo = &bufs[b];
     add(7, SB, 1).pBufferInfo = &objs;
     add(8, SB, 1).pBufferInfo = &exposure;
+    VkDescriptorImageInfo dfg{linear_, dfgLut_.view, VK_IMAGE_LAYOUT_GENERAL};
+    add(9, CIS, 1).pImageInfo = &dfg;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -341,7 +354,8 @@ void Renderer::createTargets() {
     t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                          rhi::MemoryUsage::GpuOnly);
   }
-  t_.albedo = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
+  t_.diffuse = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
+  t_.specular = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
   t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach);
   t_.emissive = rhi::createImage2D(ctx, R, kHdrFormat, attach);
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
@@ -365,7 +379,7 @@ void Renderer::createTargets() {
                               &t_.historyLength[i], &t_.taa[i]})
         toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-    for (rhi::Image* img : {&t_.albedo, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
+    for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
                             &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA, &t_.postB,
                             &t_.bloom})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
@@ -381,7 +395,7 @@ void Renderer::destroyTargets() {
       rhi::destroyImage(ctx, *img);
     rhi::destroyBuffer(ctx, t_.reservoirs[i]);
   }
-  for (rhi::Image* img : {&t_.albedo, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
+  for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
                           &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA, &t_.postB,
                           &t_.bloom})
     rhi::destroyImage(ctx, *img);
@@ -431,7 +445,9 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const Quality& q = settings.quality;
   u.quality0 = glm::uvec4(std::max(q.samplesPerPixel, 1u), std::max(q.restirCandidates, 1u), q.restirNeighbors,
                           std::max(q.dofSamples, 1u));
-  u.quality1 = glm::vec4(q.rayTextureLod, q.fireflyLimit, float(std::max(q.motionBlurSamples, 1u)), 0.0f);
+  u.quality1 = glm::vec4(q.rayTextureLod, q.fireflyLimit, float(std::max(q.motionBlurSamples, 1u)),
+                         settings.energyCompensation ? 1.0f : 0.0f);
+  u.environment = glm::vec4(scene_->uniformSkyLuminance, 0.0f, 0.0f, 0.0f);
   std::memcpy(frameUbo_[slot].mapped, &u, sizeof(u));
   vmaFlushAllocation(ctx_->allocator, frameUbo_[slot].allocation, 0, VK_WHOLE_SIZE);
 
@@ -450,18 +466,19 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- 2. G-buffer ----
   {
-    VkRenderingAttachmentInfo colors[4] = {
-        attachment(t_.albedo.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
+    VkRenderingAttachmentInfo colors[5] = {
+        attachment(t_.diffuse.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.normal[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.motion.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.emissive.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
+        attachment(t_.specular.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
     };
     VkRenderingAttachmentInfo depth = attachment(t_.depth[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR);
     depth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = infinito
     VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea = {{0, 0}, R};
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 4;
+    ri.colorAttachmentCount = 5;
     ri.pColorAttachments = colors;
     ri.pDepthAttachment = &depth;
     vkCmdBeginRendering(cmd, &ri);
@@ -484,20 +501,21 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   barrier();
   profiler_.mark(cmd, "gbuffer");
 
-  const Binding gDepth = tex(t_.depth[cur]), gNormal = tex(t_.normal[cur]), gAlbedo = tex(t_.albedo);
+  const Binding gDepth = tex(t_.depth[cur]), gNormal = tex(t_.normal[cur]), gDiffuse = tex(t_.diffuse),
+                gSpecular = tex(t_.specular);
   const Binding gDepthPrev = tex(t_.depth[prev]), gNormalPrev = tex(t_.normal[prev]), gMotion = tex(t_.motion);
 
   // ---- 3. ReSTIR DI ----
-  restirTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, gDepthPrev, gNormalPrev, gMotion,
+  restirTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion,
                                          Binding::storageBuffer(t_.reservoirs[1]), Binding::storageBuffer(t_.reservoirs[0])}, R);
   barrier();
-  restirSpatialPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, Binding::storageBuffer(t_.reservoirs[0]),
+  restirSpatialPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[0]),
                                         Binding::storageBuffer(t_.reservoirs[1])}, R);
   barrier();
   profiler_.mark(cmd, "restir");
 
   // ---- 4. Iluminação (ray tracing) ----
-  lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, Binding::storageBuffer(t_.reservoirs[1]),
+  lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[1]),
                                    storage(t_.diffuseRaw), storage(t_.specularRaw)}, R);
   barrier();
   profiler_.mark(cmd, "iluminacao_rt");
@@ -506,7 +524,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const rhi::Image* diffuseFinal = &t_.diffuseRaw;
   const rhi::Image* specularFinal = &t_.specularRaw;
   if (settings.denoiser) {
-    svgfTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, gDepthPrev, gNormalPrev, gMotion, tex(t_.diffuseRaw),
+    svgfTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion, tex(t_.diffuseRaw),
                                          tex(t_.specularRaw), tex(t_.diffuseHistory[prev]), tex(t_.specularHistory[prev]),
                                          tex(t_.moments[prev]), tex(t_.historyLength[prev]), storage(t_.diffuseIntegrated),
                                          storage(t_.specularIntegrated), storage(t_.moments[cur]),
@@ -515,7 +533,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     // A 1ª iteração do à-trous vira o histórico do próximo frame (como no SVGF original).
     auto atrous = [&](const rhi::Image& in, const rhi::Image& out, int step, float phiColor) {
       AtrousPush p{step, phiColor, 64.0f, 0.02f};
-      svgfAtrousPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, tex(in), storage(out)}, R, &p);
+      svgfAtrousPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(in), storage(out)}, R, &p);
       barrier();
     };
     // Difuso: integrado -> histórico -> A/B alternando, passo dobrando a cada iteração.
@@ -542,7 +560,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
 
   // ---- 6. Composição ----
-  compositePass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, tex(t_.emissive), tex(*diffuseFinal), tex(*specularFinal),
+  compositePass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.emissive), tex(*diffuseFinal), tex(*specularFinal),
                                     storage(t_.sceneColor)}, R);
   barrier();
   profiler_.mark(cmd, "composicao");
@@ -696,6 +714,7 @@ void Renderer::destroy() {
   destroyTargets();
   profiler_.destroy();
   rhi::destroyImage(ctx, skyLut_);
+  rhi::destroyImage(ctx, dfgLut_);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
   for (auto* arr : {&frameUbo_, &objectBuffers_, &jointBuffers_, &lightBuffers_})
     for (auto& b : *arr) rhi::destroyBuffer(ctx, b);

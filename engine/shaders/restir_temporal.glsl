@@ -6,11 +6,11 @@
 #endif
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 1, binding = 3) uniform sampler2D gDepthPrev;
-layout(set = 1, binding = 4) uniform sampler2D gNormalPrev;
-layout(set = 1, binding = 5) uniform sampler2D gMotion;
-layout(set = 1, binding = 6, std430) readonly buffer PrevReservoirs { Reservoir prevReservoirs[]; };
-layout(set = 1, binding = 7, std430) writeonly buffer OutReservoirs { Reservoir outReservoirs[]; };
+layout(set = 1, binding = 4) uniform sampler2D gDepthPrev;
+layout(set = 1, binding = 5) uniform sampler2D gNormalPrev;
+layout(set = 1, binding = 6) uniform sampler2D gMotion;
+layout(set = 1, binding = 7, std430) readonly buffer PrevReservoirs { Reservoir prevReservoirs[]; };
+layout(set = 1, binding = 8, std430) writeonly buffer OutReservoirs { Reservoir outReservoirs[]; };
 
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
@@ -21,14 +21,15 @@ void main() {
   if (g.depth <= 0.0 || lightCount == 0u) { outReservoirs[idx] = emptyReservoir(); return; }
 
   uint rng = seedFor(uvec2(id), frame.frameInfo.x, 1u);
+  BrdfContext bc = brdfContextFor(g);
 
   // 1) RIS: escolhe entre candidatos uniformes proporcionalmente a p̂.
   Reservoir r = emptyReservoir();
   for (uint i = 0u; i < restirCandidates(); ++i) {
     uint li = min(uint(rand(rng) * float(lightCount)), lightCount - 1u);
-    updateReservoir(r, li, targetPdf(li, g) * float(lightCount), 1.0, rand(rng));
+    updateReservoir(r, li, targetPdf(li, g, bc) * float(lightCount), 1.0, rand(rng));
   }
-  finalizeReservoir(r, g);
+  finalizeReservoir(r, g, bc);
 
 #ifdef RAY_TRACING
   // 2) Visibilidade: amostra ocluída não deve se espalhar para os vizinhos.
@@ -54,9 +55,9 @@ void main() {
         Reservoir p = prevReservoirs[uint(pid.y) * uint(frame.renderSize.x) + uint(pid.x)];
         p.M = min(p.M, RESTIR_MAX_HISTORY * float(restirCandidates()));
         Reservoir s = emptyReservoir();
-        updateReservoir(s, r.light, targetPdf(r.light, g) * r.W * r.M, r.M, rand(rng));
-        updateReservoir(s, p.light, targetPdf(p.light, g) * p.W * p.M, p.M, rand(rng));
-        finalizeReservoir(s, g);
+        updateReservoir(s, r.light, targetPdf(r.light, g, bc) * r.W * r.M, r.M, rand(rng));
+        updateReservoir(s, p.light, targetPdf(p.light, g, bc) * p.W * p.M, p.M, rand(rng));
+        finalizeReservoir(s, g, bc);
         r = s;
       }
     }

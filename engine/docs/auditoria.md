@@ -164,3 +164,31 @@ tamanho angular real (0,00465 rad).
 Medição (Sponza noite, cena congelada; antes = padrão anterior com cintilação 0,0471 e 0,63% de brilhinhos):
 Alto 0,0393 / 0,45% · **Ultra 0,0307 / 0,27% (−57% de brilhinhos)** · Cinema 0,0272 / 0,16% (−75%).
 Validação com sincronização limpa nos 5 presets × 4 configurações (20 casos). Desempenho a medir na RTX 3070 Ti.
+
+### Item 1 recuperado — PBR de ponta ✅
+
+O que mudou:
+- **Compensação de múltiplo espalhamento** (Turquin 2019, como Filament/UE5) com LUT DFG pré-computada na GPU
+  (amostragem VNDF, peso exato G2/G1 do Smith "height-correlated" — o mesmo termo do BRDF).
+- **Difuso com conservação de energia** ("albedo scaling" do OpenPBR): a fração refletida pelo especular sai do
+  difuso, no lugar de (1 − Fresnel).
+- **G-buffer com cor difusa + f0/f90**: suporte nativo a especular/glossiness (Bistro), `KHR_materials_specular` e
+  `KHR_materials_ior`, sem conversão com perda.
+- **Anti-aliasing especular**: Tokuyoshi & Kaplanyan 2019 (variação da normal no pixel) + Toksvig (variância do
+  normal map nos mips).
+- **BRDF completo nos pontos atingidos por raios** (difuso + especular + reflexo do céu): metais deixam de ficar
+  pretos em reflexos e na GI.
+
+Validação — **teste da fornalha branca** (`--scene furnace`, `tools/furnace.py`): esferas brancas sob céu uniforme
+devem ter o brilho do fundo (1,00). Valores no espaço da tela, rugosidade 0 → 1:
+
+| Material | Sem compensação | Com compensação |
+|---|---|---|
+| Metal f0 = 1 | 0,98 · 1,00 · 0,93 · 0,74 · 0,41 · **0,16** | 0,98 · 1,00 · 0,98 · 0,98 · 0,99 · **0,94** |
+| Dielétrico branco | 0,96 · 0,98 · 0,96 · 0,96 · 0,95 · 0,90 | 0,96 · 0,98 · 0,96 · 0,96 · 0,98 · 0,95 |
+
+Perda residual de 2–6%: raios que atingem esferas vizinhas usam a aproximação de céu do 2º rebote (auditoria 3.1,
+a ser resolvida com o cache de radiância). Cintilação (Sponza noite, congelada): 0,27% → 0,24% de brilhinhos;
+dia 0,02%. Validação com sincronização limpa (fornalha, Sponza dia/noite, externa com DOF, sem RT, Bistro).
+Fora deste item: difuso EON/rugosidade difusa (o glTF não tem o parâmetro), clearcoat, sheen e transmissão
+(itens "pintura de carro" e "vidro").

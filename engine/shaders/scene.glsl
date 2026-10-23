@@ -11,19 +11,26 @@
 
 const uint MATERIAL_ALPHA_MASK = 1u;
 const uint MATERIAL_TERRAIN = 2u;
+const uint MATERIAL_SPECULAR_GLOSSINESS = 4u;  // KHR_materials_pbrSpecularGlossiness
 
-struct Material {  // == scene::Material
-  vec4 baseColor;
+struct Material {  // == scene::Material (96 bytes)
+  vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
   vec3 emissive;
   float alphaCutoff;
   float metallic;
-  float roughness;
+  float roughness;     // especular/glossiness: 1 - glossiness
   float normalScale;
   uint flags;
   int baseColorTex;
-  int metalRoughTex;
+  int metalRoughTex;   // especular/glossiness: textura RGB especular + A glossiness
   int normalTex;
   int emissiveTex;
+  vec3 specularColor;  // KHR_materials_specular | especular/glossiness: cor especular
+  float specular;      // KHR_materials_specular: peso
+  float ior;           // KHR_materials_ior
+  int specularTex;     // A = peso especular
+  int specularColorTex;
+  float pad;
 };
 
 struct InstanceData {  // == InstanceGpu em scene.cpp

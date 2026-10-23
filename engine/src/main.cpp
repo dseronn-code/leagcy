@@ -80,10 +80,11 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--focus") o.render.dofFocusDistance = float(std::atof(next()));
     else if (a == "--no-denoiser") o.render.denoiser = false;
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
+    else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
     else if (a == "--help" || a == "-h") {
       std::printf(
           "uso: legacy [opções]\n"
-          "  --scene sponza|outdoor   cena de demonstração (padrão: sponza)\n"
+          "  --scene sponza|outdoor|furnace|arquivo.gltf   cena (furnace = teste da fornalha branca)\n"
           "  --night                  noite: só luzes locais (ReSTIR)\n"
           "  --lights N               número de luzes pontuais\n"
           "  --quality P              baixo | medio | alto | ultra (padrão) | cinema (sem economia)\n"

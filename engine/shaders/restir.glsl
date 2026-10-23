@@ -30,8 +30,12 @@ bool updateReservoir(inout Reservoir r, uint light, float weight, float M, float
   return false;
 }
 
+BrdfContext brdfContextFor(GSample g) {
+  return makeBrdfContext(g.N, g.V, g.f0, g.f90, g.roughness, energyCompensationEnabled());
+}
+
 // Função alvo p̂: luminância da contribuição sem sombra, avaliada no ponto do pixel.
-float targetPdf(uint li, GSample g) {
+float targetPdf(uint li, GSample g, BrdfContext bc) {
   if (li == NO_LIGHT) return 0.0;
   PointLight l = lights[li];
   vec3 Lv = l.position - g.P;
@@ -39,12 +43,12 @@ float targetPdf(uint li, GSample g) {
   if (dist >= l.range) return 0.0;
   vec3 L = Lv / dist;
   vec3 kd, ks;
-  evalBRDFSplit(g.N, g.V, L, g.f0, g.roughness, kd, ks);
+  evalBRDF(bc, L, -1.0, kd, ks);
   return luminance((kd * g.diffuseColor + ks) * lightIlluminanceApprox(l, dist));
 }
 
-void finalizeReservoir(inout Reservoir r, GSample g) {
-  float p = targetPdf(r.light, g);
+void finalizeReservoir(inout Reservoir r, GSample g, BrdfContext bc) {
+  float p = targetPdf(r.light, g, bc);
   r.W = p > 0.0 ? r.wSum / (r.M * p) : 0.0;
 }
 

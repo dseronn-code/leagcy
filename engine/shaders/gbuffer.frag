@@ -12,12 +12,26 @@ layout(location = 3) in vec4 vTangent;
 layout(location = 4) in vec4 vCurClip;
 layout(location = 5) in vec4 vPrevClip;
 
-layout(location = 0) out vec4 outAlbedo;    // rgb = albedo, a = metalicidade
-layout(location = 1) out vec4 outNormal;    // xyz = normal (mundo), w = rugosidade
+layout(location = 0) out vec4 outDiffuse;   // rgb = cor difusa
+layout(location = 1) out vec4 outNormal;    // xyz = normal (mundo), w = rugosidade (com AA especular)
 layout(location = 2) out vec2 outMotion;    // deslocamento em UV desde o frame anterior
 layout(location = 3) out vec4 outEmissive;
+layout(location = 4) out vec4 outSpecular;  // rgb = f0, a = f90
 
 layout(push_constant) uniform Push { uint object; uint material; } pc;
+
+// Anti-aliasing especular geométrico (Tokuyoshi & Kaplanyan, "Improved Geometric Specular
+// Antialiasing", I3D 2019): a variação da normal dentro do pixel alarga o lóbulo GGX, então
+// superfícies curvas e normal maps finos não cintilam sob luz forte.
+float filterRoughness(vec3 normal, float roughness, float normalVariance) {
+  const float SIGMA2 = 0.15915494;  // variância do filtro de pixel (1 / 2π)
+  const float KAPPA = 0.18;         // limite do alargamento
+  vec3 dndu = dFdx(normal), dndv = dFdy(normal);
+  float kernel = min(2.0 * SIGMA2 * (dot(dndu, dndu) + dot(dndv, dndv)), KAPPA);
+  float a = roughness * roughness;
+  float a2 = clamp(a * a + kernel + normalVariance, 0.0, 1.0);
+  return sqrt(sqrt(a2));  // de volta para rugosidade perceptual
+}
 
 void main() {
   Material m = materials[pc.material];
@@ -28,7 +42,8 @@ void main() {
 
   // Movimento da câmera + do objeto + da deformação do esqueleto.
   outMotion = (vCurClip.xy / vCurClip.w - vPrevClip.xy / vPrevClip.w) * 0.5;
-  outAlbedo = vec4(s.albedo, s.metallic);
-  outNormal = vec4(s.normal, s.roughness);
+  outDiffuse = vec4(s.diffuseColor, 1.0);
+  outNormal = vec4(s.normal, filterRoughness(s.normal, s.roughness, s.normalVariance));
   outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
+  outSpecular = vec4(s.f0, s.f90);
 }

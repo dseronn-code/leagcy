@@ -41,7 +41,7 @@ Vídeos (Dia 3): [Sponza à noite com personagens](docs/videos/dia03_sponza_noit
 | Denoiser | **SVGF**: acumulação temporal com reprojeção + à-trous guiado por variância | `shaders/svgf_*.comp` |
 | Anti-aliasing / upscaling | **TAAU** próprio: jitter Halton, Catmull-Rom, clipping YCoCg; renderiza a 67% | `shaders/taa.comp` |
 | Pós-processamento | Auto-exposição por histograma, bloom físico (COD:AW), DOF com autofoco, motion blur, ACES | `shaders/` |
-| Materiais | PBR metálico/rugosidade (glTF), GGX + Smith correlacionado + Fresnel-Schlick | `shaders/brdf.glsl` |
+| Materiais | PBR glTF (metálico/rugosidade, especular/glossiness, KHR specular/ior); GGX com compensação de energia (Turquin), difuso com conservação de energia, AA especular | `shaders/brdf.glsl` |
 | Céu | Atmosfera física Rayleigh/Mie/ozônio + sky-view LUT (Hillaire 2020) | `shaders/atmosphere.glsl` |
 | Câmera | Reverse-Z com plano distante infinito; exposição física em EV100 | `src/scene/camera.h` |
 | Unidades físicas | Sol em lux, luzes em candela, emissão em nits, pré-exposição dos alvos HDR | `shaders/frame.glsl` |

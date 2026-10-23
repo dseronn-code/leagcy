@@ -4,10 +4,10 @@
 #include "gbuffer.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 1, binding = 3) uniform sampler2D gEmissive;
-layout(set = 1, binding = 4) uniform sampler2D diffuseIn;
-layout(set = 1, binding = 5) uniform sampler2D specularIn;
-layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D sceneOut;
+layout(set = 1, binding = 4) uniform sampler2D gEmissive;
+layout(set = 1, binding = 5) uniform sampler2D diffuseIn;
+layout(set = 1, binding = 6) uniform sampler2D specularIn;
+layout(set = 1, binding = 7, rgba16f) uniform writeonly image2D sceneOut;
 
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);

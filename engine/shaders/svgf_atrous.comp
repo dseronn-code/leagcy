@@ -7,8 +7,8 @@
 #include "brdf.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 1, binding = 3) uniform sampler2D signalIn;  // rgb + variância
-layout(set = 1, binding = 4, rgba16f) uniform writeonly image2D signalOut;
+layout(set = 1, binding = 4) uniform sampler2D signalIn;  // rgb + variância
+layout(set = 1, binding = 5, rgba16f) uniform writeonly image2D signalOut;
 layout(push_constant) uniform Push { int stepSize; float phiColor; float phiNormal; float phiPlane; } pc;
 
 const float KERNEL[3] = float[](3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0);

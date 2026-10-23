@@ -44,7 +44,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| PBR | 🟡 | Sem unidades físicas, sem compensação de energia, sem especular/glossiness (auditoria 2.3, 2.5, 3.4) |
+| PBR | ✅ | Unidades físicas, compensação de energia (teste da fornalha), especular/glossiness, KHR specular/ior, AA especular |
 | Texturas, normal maps, mipmaps, compressão BC7 | 🟡 | Tudo menos BC7 (Dia 2) |
 | Pintura de carro (clearcoat, flocos metálicos) | ❌ | |
 | Vidro e transparência | ❌ | |

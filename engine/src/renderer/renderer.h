@@ -47,6 +47,7 @@ struct Settings {
   bool motionBlur = true;
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
+  bool energyCompensation = true;   // compensação de múltiplo espalhamento do BRDF (Turquin 2019)
 };
 
 // Frame (deferred, todos os alvos em VK_IMAGE_LAYOUT_GENERAL):
@@ -77,7 +78,7 @@ class Renderer {
  private:
   struct Targets {
     std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
-    rhi::Image albedo, motion, emissive;
+    rhi::Image diffuse, specular, motion, emissive;
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
@@ -99,7 +100,7 @@ class Renderer {
   VkFormat outputFormat_ = VK_FORMAT_UNDEFINED;
   Targets t_;
 
-  rhi::Image skyLut_;
+  rhi::Image skyLut_, dfgLut_;
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_;
