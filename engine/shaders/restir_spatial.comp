@@ -19,7 +19,7 @@ void main() {
   Reservoir center = inReservoirs[idx];
   if (g.depth <= 0.0 || frame.frameInfo.z == 0u) { outReservoirs[idx] = center; return; }
 
-  uint rng = (uint(id.x) * 7919u + uint(id.y) * 104729u + frame.frameInfo.x * 15731u) | 1u;
+  uint rng = seedFor(uvec2(id), frame.frameInfo.x, 2u);
   Reservoir s = emptyReservoir();
   updateReservoir(s, center.light, targetPdf(center.light, g) * center.W * center.M, center.M, rand(rng));
   float zCur = linearDepth(g.depth);

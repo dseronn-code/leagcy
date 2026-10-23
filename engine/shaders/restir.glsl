@@ -40,7 +40,7 @@ float targetPdf(uint li, GSample g) {
   vec3 L = Lv / dist;
   vec3 kd, ks;
   evalBRDFSplit(g.N, g.V, L, g.f0, g.roughness, kd, ks);
-  return luminance((kd * g.diffuseColor + ks) * lightRadiance(l, dist));
+  return luminance((kd * g.diffuseColor + ks) * lightIlluminanceApprox(l, dist));
 }
 
 void finalizeReservoir(inout Reservoir r, GSample g) {

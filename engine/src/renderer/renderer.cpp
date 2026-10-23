@@ -386,7 +386,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.cameraPos = glm::vec4(cam.position, cam.nearPlane);
   u.prevCameraPos = glm::vec4(historyValid_ ? prevCameraPos_ : cam.position, 0.0f);
   u.sunDir = glm::vec4(glm::normalize(scene_->sunDirection), scene_->sunIlluminance);
-  u.params = glm::vec4(settings.sunAngularRadius, dt, settings.fogDensity, settings.fogFalloff);
+  u.params = glm::vec4(settings.sunAngularRadius, dt, scene_->fogDensity, scene_->fogFalloff);
   u.jitter = glm::vec4(jitterUv, prevJitter_);
   u.renderSize = glm::vec4(R.width, R.height, 1.0f / R.width, 1.0f / R.height);
   u.outputSize = glm::vec4(O.width, O.height, 1.0f / O.width, 1.0f / O.height);

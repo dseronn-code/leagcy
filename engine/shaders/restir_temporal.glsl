@@ -20,7 +20,7 @@ void main() {
   uint lightCount = frame.frameInfo.z;
   if (g.depth <= 0.0 || lightCount == 0u) { outReservoirs[idx] = emptyReservoir(); return; }
 
-  uint rng = (uint(id.x) * 1973u + uint(id.y) * 9277u + frame.frameInfo.x * 26699u) | 1u;
+  uint rng = seedFor(uvec2(id), frame.frameInfo.x, 1u);
 
   // 1) RIS: escolhe entre candidatos uniformes proporcionalmente a p̂.
   Reservoir r = emptyReservoir();
@@ -33,9 +33,11 @@ void main() {
 #ifdef RAY_TRACING
   // 2) Visibilidade: amostra ocluída não deve se espalhar para os vizinhos.
   if (r.W > 0.0) {
-    vec3 Lv = lights[r.light].position - g.P;
+    PointLight l = lights[r.light];
+    vec3 Lv = l.position - g.P;
     float dist = length(Lv);
-    if (traceVisibility(g.P + g.N * RAY_EPS, Lv / dist, dist - lights[r.light].radius) == 0.0) r.W = 0.0;
+    vec3 origin = offsetRayOrigin(g.P, g.Ng, length(frame.cameraPos.xyz - g.P));
+    if (dist > l.radius && traceVisibility(origin, Lv / dist, dist - l.radius) == 0.0) r.W = 0.0;
   }
 #endif
 

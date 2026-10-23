@@ -157,6 +157,10 @@ class Scene {
   glm::vec3 sunDirection = glm::normalize(glm::vec3(0.4f, 0.35f, -0.6f));  // direção PARA o sol
   // Iluminância solar no topo da atmosfera (lux); a atmosfera atenua até ~100.000 lux ao meio-dia.
   float sunIlluminance = 120000.0f;  // 0 = noite
+  // Névoa de altura (por metro ao nível do chão). Ainda sem sombra volumétrica (auditoria 3.7):
+  // em interiores ela é iluminada pelo sol mesmo na sombra, então cenas fechadas usam valor baixo.
+  float fogDensity = 0.0015f;
+  float fogFalloff = 0.035f;  // queda exponencial com a altura
 
  private:
   void animateModel(Model& m, float dt);

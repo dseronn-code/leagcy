@@ -16,8 +16,6 @@ struct Settings {
   float exposureCompensation = 0.0f;  // EV somado à auto-exposição (+1 = imagem 2x mais clara)
   float manualEV100 = std::numeric_limits<float>::quiet_NaN();  // definido = exposição manual (EV100)
   float sunAngularRadius = 0.012f;  // rad (o sol real tem ~0.0047; maior = penumbra mais suave)
-  float fogDensity = 0.0015f;       // por metro, ao nível do chão
-  float fogFalloff = 0.035f;        // queda exponencial com a altura
   bool denoiser = true;
   bool depthOfField = false;
   float dofFocusDistance = 0.0f;    // 0 = autofoco no centro da tela

@@ -79,7 +79,7 @@ Gravidade: **🔴 bug** (resultado errado) · **🟠 qualidade** (funciona, mas 
 ## Plano de correção (um item por vez, cada um com análise completa antes de contar como feito)
 
 1. ✅ **Base numérica e física**: unidades fotométricas + pré-exposição + float32 onde precisa (1.1, 1.2, 2.5) — ver resultado abaixo
-2. **Ruído e amostragem**: STBN, amostragem correta da esfera, offset robusto com normal geométrica (1.5, 1.6, 1.11)
+2. ✅ **Ruído e amostragem**: Sobol-Owen, amostragem correta da esfera, offset robusto com normal geométrica (1.5, 1.6, 1.11)
 3. **Luzes reais**: luzes como geometria emissiva + `KHR_lights_punctual` (1.3, 1.4, 2.2)
 4. **Assets profissionais**: DDS/BC7, especular/glossiness, MikkTSpace, samplers, doubleSided, alfa (2.1, 2.3, 2.6–2.10)
 5. **ReSTIR de produção**: ReGIR, pairwise MIS, visibilidade, filtro de boiling (1.7–1.9)
@@ -117,3 +117,31 @@ Medição A/B (mesma cena, câmera parada, 16 frames, brilho igualado; métrica 
 Interferências verificadas: validação Vulkan com sincronização limpa em 7 configurações (com e sem ray tracing,
 DOF, sem denoiser, exposição manual); de dia as luzes decorativas (36–150 cd) deixam de dominar a cena, como na
 realidade. A cena externa melhora pouco porque sua causa principal é a 1.3 (lâmpada bloqueando a própria luz).
+
+### Correção 2 — ruído, amostragem e robustez dos raios
+
+O que mudou:
+- Gerador: hash PCG3D (Jarzynski & Olano 2020) no lugar de combinações lineares; amostras de integração com
+  **Sobol + embaralhamento de Owen por hash** (Burley 2020, usado no RenderMan): sequência de baixa discrepância
+  por pixel ao longo dos frames. *O STBN da NVIDIA foi descartado por ter licença não comercial; as texturas FAST
+  da EA (BSD) ficam como melhoria quando puderem ser geradas no Windows.*
+- Luzes esféricas amostradas por ângulo sólido com pdf correta (antes: pontos numa diagonal); removida a
+  distância mínima artificial de 25 cm.
+- Origem dos raios com a **normal geométrica** (reconstruída da profundidade; nos hits, da faceta do triângulo)
+  e deslocamento de Wächter & Binder; direções abaixo da faceta são descartadas (sem vazamento de luz).
+- Normal de shading corrigida para o lado visível antes de qualquer cálculo de luz (antes só depois do sol).
+- Névoa por cena: sem sombra volumétrica, a névoa era iluminada pelo sol dentro das áreas de sombra e cobria
+  interiores com um véu branco (achado durante esta análise; ver 3.7). Sponza agora usa densidade baixa.
+
+Medição honesta (cena congelada com `--pause`, 16 frames):
+
+| Cena | Correção 1 | Correção 2 |
+|---|---|---|
+| Sponza noite (com denoiser) | 0,0458 / 0,64% | 0,0471 / 0,63% |
+| Sponza noite (sem denoiser) | 0,1037 / 1,89% | 0,1077 / 1,95% |
+| Externa (com denoiser) | 0,0045 / 0,00% | 0,0044 / 0,01% |
+
+Conclusões: (1) efeito neutro na cintilação — o valor desta correção é exatidão física e robustez, não redução de
+ruído; (2) **com a cena parada a externa praticamente não cintila**: os "brilhinhos" dela vinham de objetos em
+movimento (tarefa do denoiser, correção 6); (3) o ruído noturno restante vem da escolha de luzes do ReSTIR
+(correção 5). Validação com sincronização limpa em 7 configurações.
