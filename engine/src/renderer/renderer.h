@@ -67,6 +67,10 @@ class Renderer {
   void record(VkCommandBuffer cmd, uint32_t frameSlot, const scene::Camera& camera, VkImage output,
               VkImageView outputView, float dt);
 
+  // Validação da atmosfera: compara o céu do motor (LUTs) com um path tracer de referência e imprime
+  // a tabela de erros. Devolve o erro relativo médio de luminância (céu acima do horizonte).
+  float runAtmosphereTest(uint32_t pathsPerThread);
+
   // Descarta todo o histórico temporal (corte de câmera, mudança de cena).
   void resetHistory() { historyValid_ = false; }
   VkExtent2D renderExtent() const { return renderExtent_; }
@@ -100,7 +104,7 @@ class Renderer {
   VkFormat outputFormat_ = VK_FORMAT_UNDEFINED;
   Targets t_;
 
-  rhi::Image skyLut_, dfgLut_;
+  rhi::Image skyLut_, dfgLut_, transmittanceLut_, multiScatterLut_, aerialPerspective_;
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_;
@@ -110,7 +114,7 @@ class Renderer {
   VkDescriptorSetLayout globalLayout_ = VK_NULL_HANDLE;
   std::array<VkDescriptorSet, kFramesInFlight> globalSets_{};
 
-  rhi::ComputePass skinningPass_;
+  rhi::ComputePass skinningPass_, aerialPerspectivePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
   rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_;
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;

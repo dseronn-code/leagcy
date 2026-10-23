@@ -35,6 +35,8 @@ struct Options {
   uint32_t saveEvery = 0;  // > 0: salva também a cada N frames (frame_0007.png...)
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
   bool pause = false;      // congela animações (medições de ruído com cena estática)
+  uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
+  float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
   scene::DemoOptions scene;
   bool customCamera = false;
   glm::vec3 cameraPos{0.0f}, cameraTarget{0.0f, 0.0f, -1.0f};
@@ -57,6 +59,9 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--save-every") o.saveEvery = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--move") o.move = float(std::atof(next()));
     else if (a == "--pause") o.pause = true;
+    else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
+    else if (a == "--sun-azimuth") o.sunAzimuth = float(std::atof(next()));
+    else if (a == "--atmosphere-test") o.atmosphereTest = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--scene") o.scene.name = next();
     else if (a == "--cam" || a == "--look") {
       glm::vec3 v(0.0f);
@@ -94,6 +99,8 @@ Options parseArgs(int argc, char** argv) {
           "  --ev X | --exposure EV   compensação da auto-exposição (EV) | exposição manual (EV100)\n"
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
           "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"
+          "  --sun-elevation G --sun-azimuth G   posição do sol em graus\n"
+          "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s] [--pause]\n");
       std::exit(0);
@@ -101,6 +108,33 @@ Options parseArgs(int argc, char** argv) {
   }
   if (o.scaleOverride > 0.0f) o.render.quality.renderScale = o.scaleOverride;
   return o;
+}
+
+// Sobrescreve elevação/azimute do sol (graus) mantendo o que não foi informado.
+void applySunOverride(const Options& opt, scene::Scene& scene) {
+  if (std::isnan(opt.sunElevation) && std::isnan(opt.sunAzimuth)) return;
+  glm::vec3 d = glm::normalize(scene.sunDirection);
+  float elev = std::isnan(opt.sunElevation) ? std::asin(d.y) : glm::radians(opt.sunElevation);
+  float azim = std::isnan(opt.sunAzimuth) ? std::atan2(d.x, -d.z) : glm::radians(opt.sunAzimuth);
+  scene.sunDirection = {std::cos(elev) * std::sin(azim), std::sin(elev), -std::cos(elev) * std::cos(azim)};
+  if (scene.sunIlluminance <= 0.0f && elev > -0.2f) scene.sunIlluminance = 120000.0f;
+}
+
+int runAtmosphereTest(const Options& opt) {
+  rhi::Context ctx;
+  ctx.createInstance({opt.validation, opt.rayTracing, {}});
+  ctx.createDevice(VK_NULL_HANDLE);
+  scene::Scene scene;
+  scene::Camera camera;
+  scene::buildDemoScene(scene, camera, {"furnace", false, 0});
+  scene.upload(ctx);
+  renderer::Renderer r;
+  r.init(ctx, scene, {64, 64}, VK_FORMAT_R8G8B8A8_SRGB, opt.render);
+  float err = r.runAtmosphereTest(opt.atmosphereTest);
+  r.destroy();
+  scene.destroy(ctx);
+  ctx.destroy();
+  return err < 0.1f ? 0 : 1;
 }
 
 int runHeadless(const Options& opt) {
@@ -115,6 +149,7 @@ int runHeadless(const Options& opt) {
     camera.position = opt.cameraPos;
     camera.lookAt(opt.cameraTarget);
   }
+  applySunOverride(opt, scene);
   scene.upload(ctx);
 
   VkExtent2D extent{opt.width, opt.height};
@@ -219,6 +254,7 @@ int runWindowed(const Options& opt) {
     camera.position = opt.cameraPos;
     camera.lookAt(opt.cameraTarget);
   }
+  applySunOverride(opt, scene);
   scene.upload(ctx);
 
   int fbw, fbh;
@@ -416,5 +452,6 @@ int main(int argc, char** argv) {
   SetConsoleOutputCP(65001);
 #endif
   Options opt = parseArgs(argc, argv);
+  if (opt.atmosphereTest) return runAtmosphereTest(opt);
   return opt.headless ? runHeadless(opt) : runWindowed(opt);
 }

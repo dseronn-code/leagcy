@@ -27,7 +27,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Sombra do sol | 🟡 | Penumbra física, mas offset do raio com normal de shading causa acne (auditoria 1.11) |
 | Shadow maps em cascata (fallback e performance) | ❌ | |
 | Milhares de luzes (neon, faróis, postes) | 🟡 | ReSTIR básico: amostragem uniforme, reuso enviesado, sem ReGIR (auditoria 1.7–1.9) |
-| Céu e atmosfera física | 🟡 | Múltiplo espalhamento aproximado por constante; falta a pipeline completa de LUTs (auditoria 3.6) |
+| Céu e atmosfera física | ✅ | Pipeline completa de Hillaire (transmitância, múltiplo espalhamento, sky-view, perspectiva aérea), 4% de erro contra path tracing de referência |
 | Nuvens volumétricas, raios de luz (god rays) | ❌ | Hoje só temos névoa por altura |
 | Ciclo dia/noite | 🟡 | O sol se move; faltam lua, estrelas e luzes da cidade |
 

@@ -192,3 +192,32 @@ a ser resolvida com o cache de radiância). Cintilação (Sponza noite, congelad
 dia 0,02%. Validação com sincronização limpa (fornalha, Sponza dia/noite, externa com DOF, sem RT, Bistro).
 Fora deste item: difuso EON/rugosidade difusa (o glTF não tem o parâmetro), clearcoat, sheen e transmissão
 (itens "pintura de carro" e "vidro").
+
+### Item 2 recuperado — atmosfera de Hillaire completa ✅
+
+O que mudou (Hillaire, EGSR 2020, mesma técnica do UE4/UE5):
+- **LUT de transmitância** 256×64 (parametrização de Bruneton & Neyret), calculada uma vez na inicialização.
+- **LUT de múltiplo espalhamento** 32×32 (16×16 direções, 40 passos, chão Lambert com albedo 0,3): soma de
+  todas as ordens pela série geométrica Ψ = L₂ / (1 − f_ms). Substitui a constante "0,08" de antes.
+- **Sky-view LUT** com 96 passos e termo do chão abaixo do horizonte.
+- **Perspectiva aérea** em volume 32³ alinhado ao frustum (até 32 km, fatias quadráticas): montanhas distantes
+  ficam azuladas de dia e alaranjadas no pôr do sol. Aplicada no composite antes da névoa por altura.
+- Sombra da Terra com transição suave no crepúsculo; `--sun-elevation`/`--sun-azimuth` para testar qualquer hora.
+
+Validação — **`--atmosphere-test N`**: path tracer de referência na GPU (todas as ordens de espalhamento, fases
+Rayleigh/Mie exatas, chão Lambert) contra o céu do motor em 30 casos (sol a 60°, 20°, 5°, 1° e −2°; seis
+direções de visão cada). Erro médio de luminância **4,05%** (só espalhamento simples: 15–51% abaixo). O resíduo
+é a hipótese de espalhamento isotrópico das ordens ≥ 2 do próprio método (~0,06 EV).
+
+### Segunda análise completa (pós-itens 1 e 2)
+
+- **Suíte de regressão** `tools/testes.py` (antes eram comandos soltos): validação Vulkan com sincronização em
+  5 presets × 6 cenas (30 combinações, inclusive Bistro), fornalha branca, atmosfera vs referência, cintilação e
+  pixels inválidos. Resultado: **tudo passou** — fornalha 0,94–1,00; atmosfera 4,05%; brilhinhos 0,24%;
+  nenhum pixel inválido.
+- Erro encontrado e corrigido no próprio teste de pixels: `np.roll` dava a volta na imagem e comparava o céu
+  noturno do topo com o chão da base (falso positivo de 52 pixels). Agora usa borda replicada.
+- Revisão do código novo: amostrador do volume 3D com CLAMP nos três eixos (sem vazamento nas bordas da tela),
+  barreiras entre escrita e leitura das LUTs confirmadas pela validação de sincronização, sem NaN para pontos
+  abaixo do chão. Comentário trocado de lugar em `main.cpp` corrigido; `--atmosphere-test` incluído no `--help`.
+- Modo janela (Xvfb) com validação: 60 s sem erros. Renders do pôr do sol (sol a 35°, 8° e 2°) conferidos.

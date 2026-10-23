@@ -1,0 +1,60 @@
+#version 460
+// LUT de múltiplo espalhamento (32x32, Hillaire 2020 seção 5.5): para cada altitude e ângulo do sol,
+// integra o espalhamento de 2ª ordem em 64 direções (fase isotrópica) e a "transferência" f_ms;
+// a soma de todas as ordens é a série geométrica Ψ = L₂ / (1 − f_ms).
+#extension GL_GOOGLE_include_directive : require
+#include "frame.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D lutOut;
+
+const int DIRECTIONS_SQRT = 16;
+const int STEPS = 40;
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 size = imageSize(lutOut);
+  if (any(greaterThanEqual(id, size))) return;
+  vec2 uv = (vec2(id) + 0.5) / vec2(size);
+  float cosSun = uv.x * 2.0 - 1.0;
+  float h = uv.y * (R_TOP - R_GROUND);
+  vec3 p = vec3(0.0, R_GROUND + max(h, 0.01), 0.0);
+  vec3 sunDir = vec3(sqrt(max(1.0 - cosSun * cosSun, 0.0)), cosSun, 0.0);
+
+  vec3 L2 = vec3(0.0), fms = vec3(0.0);
+  for (int a = 0; a < DIRECTIONS_SQRT; ++a) {
+    for (int b = 0; b < DIRECTIONS_SQRT; ++b) {
+      // Direções uniformes na esfera (grade estratificada em cos θ e φ).
+      float u = (float(a) + 0.5) / float(DIRECTIONS_SQRT), v = (float(b) + 0.5) / float(DIRECTIONS_SQRT);
+      float cosT = 1.0 - 2.0 * u, sinT = sqrt(max(1.0 - cosT * cosT, 0.0)), phi = TWO_PI * v;
+      vec3 rd = vec3(sinT * cos(phi), cosT, sinT * sin(phi));
+      float tTop = raySphere(p, rd, R_TOP);
+      float tGround = raySphere(p, rd, R_GROUND);
+      float tMax = tGround > 0.0 ? tGround : max(tTop, 0.0);
+      vec3 T = vec3(1.0), Ldir = vec3(0.0), fdir = vec3(0.0);
+      float dt = tMax / float(STEPS);
+      for (int i = 0; i < STEPS; ++i) {
+        vec3 q = p + rd * ((float(i) + 0.5) * dt);
+        vec3 sR, ext; float sM;
+        sampleMedium(length(q) - R_GROUND, sR, sM, ext);
+        vec3 sigmaS = sR + vec3(sM);
+        vec3 sampleT = exp(-ext * dt);
+        vec3 integ = (vec3(1.0) - sampleT) / max(ext, vec3(1e-7));  // ∫ T dentro do segmento
+        Ldir += T * sigmaS * transmittanceToSun(q, sunDir) * ISOTROPIC_PHASE * integ;
+        fdir += T * sigmaS * integ;
+        T *= sampleT;
+      }
+      if (tGround > 0.0) {  // luz refletida pelo chão (Lambert)
+        vec3 pg = p + rd * tGround;
+        Ldir += T * transmittanceToSun(pg, sunDir) * max(dot(normalize(pg), sunDir), 0.0) * GROUND_ALBEDO / PI;
+      }
+      L2 += Ldir;
+      fms += fdir;
+    }
+  }
+  float n = float(DIRECTIONS_SQRT * DIRECTIONS_SQRT);
+  // Integral na esfera com fase isotrópica: (4π / N) Σ g · 1/(4π) = média.
+  L2 /= n;
+  fms = fms / n * (4.0 * PI) * ISOTROPIC_PHASE;
+  imageStore(lutOut, id, vec4(L2 / max(vec3(1.0) - fms, vec3(1e-3)), 1.0));
+}

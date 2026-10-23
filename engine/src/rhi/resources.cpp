@@ -70,6 +70,31 @@ VkImageView makeView(Context& ctx, const Image& img, uint32_t baseMip, uint32_t 
 }
 }  // namespace
 
+Image createImage3D(Context& ctx, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage) {
+  Image img;
+  img.format = format;
+  img.extent = {extent.width, extent.height};
+  VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  ii.imageType = VK_IMAGE_TYPE_3D;
+  ii.format = format;
+  ii.extent = extent;
+  ii.mipLevels = 1;
+  ii.arrayLayers = 1;
+  ii.samples = VK_SAMPLE_COUNT_1_BIT;
+  ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ii.usage = usage;
+  VmaAllocationCreateInfo ai{};
+  ai.usage = VMA_MEMORY_USAGE_AUTO;
+  VK_CHECK(vmaCreateImage(ctx.allocator, &ii, &ai, &img.handle, &img.allocation, nullptr));
+  VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  vi.image = img.handle;
+  vi.viewType = VK_IMAGE_VIEW_TYPE_3D;
+  vi.format = format;
+  vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+  VK_CHECK(vkCreateImageView(ctx.device, &vi, nullptr, &img.view));
+  return img;
+}
+
 VkImageView createMipView(Context& ctx, const Image& img, uint32_t mip) { return makeView(ctx, img, mip, 1); }
 
 Image createImage2D(Context& ctx, VkExtent2D extent, VkFormat format, VkImageUsageFlags usage, uint32_t mipLevels) {

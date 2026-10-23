@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cmath>
 #include <cstring>
+#include <tuple>
+#include <cstdio>
 
 #include "rhi/pipeline.h"
 
@@ -17,6 +19,9 @@ constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;  // cor difusa e f0 (sRGB: precisão nos tons baixos)
 constexpr VkExtent2D kDfgLutExtent{128, 128};
+constexpr VkExtent2D kTransmittanceLutExtent{256, 64};
+constexpr VkExtent2D kMultiScatterLutExtent{32, 32};
+constexpr VkExtent3D kAerialPerspectiveExtent{32, 32, 32};
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
 
 constexpr VkDescriptorType CIS = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -167,6 +172,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   skyLutExtent_ = {q.skyLutWidth, q.skyLutHeight};
   skyLut_ = rhi::createImage2D(ctx, skyLutExtent_, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   dfgLut_ = rhi::createImage2D(ctx, kDfgLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  transmittanceLut_ = rhi::createImage2D(ctx, kTransmittanceLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  multiScatterLut_ = rhi::createImage2D(ctx, kMultiScatterLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  aerialPerspective_ = rhi::createImage3D(ctx, kAerialPerspectiveExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
     frameUbo_[i] = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     objectBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.objects.size()) * sizeof(ObjectGpu),
@@ -195,6 +203,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {7, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {8, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {9, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {10, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {11, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {12, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -210,7 +221,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {CIS, kFramesInFlight * (2 + kMaxTextures)},
+      {CIS, kFramesInFlight * (5 + kMaxTextures)},
       {SB, kFramesInFlight * 5},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
@@ -233,6 +244,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   const bool rt = ctx.rayTracing;
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
+  aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB});
   restirSpatialPass_.init(ctx, "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB});
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI});
@@ -276,18 +288,24 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   tm.colorFormats = {outputFormat};
   tonemapPipeline_ = rhi::createGraphicsPipeline(ctx, tm);
 
-  // LUT DFG: calculada uma vez (a integral do BRDF não depende da cena).
-  rhi::ComputePass dfgPass;
+  // LUTs constantes, calculadas uma vez: DFG (integral do BRDF), transmitância e múltiplo
+  // espalhamento da atmosfera (esta depende da de transmitância).
+  rhi::ComputePass dfgPass, transmittancePass, multiScatterPass;
   dfgPass.init(ctx, "dfg_lut.comp", g, {SI});
+  transmittancePass.init(ctx, "atmosphere_transmittance.comp", g, {SI});
+  multiScatterPass.init(ctx, "atmosphere_multiscatter.comp", g, {SI});
   ctx.immediateSubmit([&](VkCommandBuffer cmd) {
-    for (rhi::Image* img : {&skyLut_, &dfgLut_})
+    for (rhi::Image* img : {&skyLut_, &dfgLut_, &transmittanceLut_, &multiScatterLut_, &aerialPerspective_})
       rhi::imageBarrier(cmd, img->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                         VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     dfgPass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(dfgLut_.view)}, kDfgLutExtent);
+    transmittancePass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(transmittanceLut_.view)}, kTransmittanceLutExtent);
+    rhi::memoryBarrier(cmd);
+    multiScatterPass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(multiScatterLut_.view)}, kMultiScatterLutExtent);
     rhi::memoryBarrier(cmd);
   });
-  dfgPass.destroy(ctx);
+  for (rhi::ComputePass* p : {&dfgPass, &transmittancePass, &multiScatterPass}) p->destroy(ctx);
   profiler_.init(ctx, kFramesInFlight);
   createTargets();
 }
@@ -323,6 +341,10 @@ void Renderer::writeGlobalDescriptors() {
     add(8, SB, 1).pBufferInfo = &exposure;
     VkDescriptorImageInfo dfg{linear_, dfgLut_.view, VK_IMAGE_LAYOUT_GENERAL};
     add(9, CIS, 1).pImageInfo = &dfg;
+    VkDescriptorImageInfo atmo[3] = {{linear_, transmittanceLut_.view, VK_IMAGE_LAYOUT_GENERAL},
+                                     {linear_, multiScatterLut_.view, VK_IMAGE_LAYOUT_GENERAL},
+                                     {linear_, aerialPerspective_.view, VK_IMAGE_LAYOUT_GENERAL}};
+    for (uint32_t b = 0; b < 3; ++b) add(10 + b, CIS, 1).pImageInfo = &atmo[b];
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -461,6 +483,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- 1. Atmosfera ----
   skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view)}, skyLutExtent_);
+  aerialPerspectivePass_.dispatch(cmd, gs, {Binding::storageImage(aerialPerspective_.view)},
+                                  {kAerialPerspectiveExtent.width, kAerialPerspectiveExtent.height});
   barrier();
   profiler_.mark(cmd, "ceu");
 
@@ -707,6 +731,56 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   if (ctx.rayTracing) s.tlas.record(cmd, slot, s.tlasInstances());
 }
 
+float Renderer::runAtmosphereTest(uint32_t pathsPerThread) {
+  rhi::Context& ctx = *ctx_;
+  struct Case { glm::vec4 sun, view; };
+  struct Named { float sunElev, viewElev, viewAz; const char* name; };
+  std::vector<Named> named;
+  for (float sunElev : {60.0f, 20.0f, 5.0f, 1.0f, -2.0f})
+    for (auto [ve, va, n] : {std::tuple<float, float, const char*>{90.0f, 0.0f, "zênite"},
+                             {30.0f, 0.0f, "30° p/ o sol"}, {30.0f, 180.0f, "30° oposto"},
+                             {2.0f, 0.0f, "horizonte p/ sol"}, {2.0f, 180.0f, "horizonte oposto"},
+                             {10.0f, 90.0f, "10° lateral"}})
+      named.push_back({sunElev, ve, va, n});
+  auto dirFrom = [](float elevDeg, float azDeg) {
+    float e = glm::radians(elevDeg), a = glm::radians(azDeg);
+    return glm::vec4(std::cos(e) * std::cos(a), std::sin(e), std::cos(e) * std::sin(a), 0.0f);
+  };
+  std::vector<Case> cases;
+  for (auto& n : named) cases.push_back({dirFrom(n.sunElev, 0.0f), dirFrom(n.viewElev, n.viewAz)});
+  rhi::Buffer caseBuf = rhi::createBufferWithData(ctx, cases.data(), cases.size() * sizeof(Case), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  rhi::Buffer results = rhi::createBuffer(ctx, cases.size() * 4 * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                          rhi::MemoryUsage::GpuToCpu);
+  rhi::ComputePass pass;
+  pass.init(ctx, "atmosphere_reference.comp", globalLayout_, {SB, SB}, 8);
+  uint32_t push[2] = {pathsPerThread, uint32_t(cases.size())};
+  ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+    pass.dispatchGroups(cmd, globalSets_[0], {rhi::Binding::storageBuffer(caseBuf), rhi::Binding::storageBuffer(results)},
+                        uint32_t(cases.size()) * 3, 1, push);
+  });
+  vmaInvalidateAllocation(ctx.allocator, results.allocation, 0, VK_WHOLE_SIZE);
+  auto* r = static_cast<const glm::vec4*>(results.mapped);
+  auto lum = [](glm::vec4 v) { return 0.2126f * v.x + 0.7152f * v.y + 0.0722f * v.z; };
+  std::printf("\n%-6s %-18s %12s %12s %12s %8s %8s %9s\n", "sol", "visão", "referência", "motor", "só simples", "erro", "simples", "± ref");
+  double sumErr = 0.0;
+  int n = 0;
+  for (size_t i = 0; i < cases.size(); ++i) {
+    float ref = lum(r[i * 4 + 2]), eng = lum(r[i * 4 + 0]), ss = lum(r[i * 4 + 1]), se = lum(r[i * 4 + 3]);
+    float err = ref > 0.0f ? (eng - ref) / ref : 0.0f;
+    float errSS = ref > 0.0f ? (ss - ref) / ref : 0.0f;
+    std::printf("%5.0f° %-18s %12.4e %12.4e %12.4e %+7.1f%% %+7.1f%% %8.1f%%\n", named[i].sunElev, named[i].name, ref, eng, ss,
+                100.0f * err, 100.0f * errSS, ref > 0.0f ? 100.0f * se / ref : 0.0f);
+    sumErr += std::abs(err);
+    ++n;
+  }
+  float mean = float(sumErr / n);
+  std::printf("Erro relativo médio de luminância (motor vs referência): %.2f%%\n", 100.0f * mean);
+  pass.destroy(ctx);
+  rhi::destroyBuffer(ctx, caseBuf);
+  rhi::destroyBuffer(ctx, results);
+  return mean;
+}
+
 void Renderer::destroy() {
   if (!ctx_) return;
   rhi::Context& ctx = *ctx_;
@@ -715,12 +789,13 @@ void Renderer::destroy() {
   profiler_.destroy();
   rhi::destroyImage(ctx, skyLut_);
   rhi::destroyImage(ctx, dfgLut_);
+  for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
   for (auto* arr : {&frameUbo_, &objectBuffers_, &jointBuffers_, &lightBuffers_})
     for (auto& b : *arr) rhi::destroyBuffer(ctx, b);
   rhi::destroyBuffer(ctx, histogram_);
   rhi::destroyBuffer(ctx, exposureState_);
-  for (rhi::ComputePass* p : {&skinningPass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&skinningPass_, &aerialPerspectivePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

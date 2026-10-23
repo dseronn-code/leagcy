@@ -100,8 +100,13 @@ O console mostra, a cada 3 segundos, o tempo de GPU de cada passe (ms).
 ./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
 ./build/legacy --validation                # camadas de validação do Vulkan (debug)
 ./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png
+./build/legacy --scene outdoor --sun-elevation 3   # pôr do sol (atmosfera física)
 ./build/legacy --help                      # todas as opções
 ```
+
+Testes de regressão (precisa de `pip install numpy pillow`): `python tools/testes.py` roda validação Vulkan em
+todos os presets e cenas, fornalha branca, atmosfera contra path tracing, cintilação e pixels inválidos, e diz o
+que passou ou falhou (`--rapido` para uma versão curta).
 
 Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sobe · **Shift** rápido ·
 **setas** movem o sol · **+/-** compensação de exposição · **F** liga/desliga DOF · **M** motion blur · **Esc** sai.
