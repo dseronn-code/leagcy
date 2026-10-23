@@ -4,7 +4,7 @@ layout(set = 1, binding = 0) uniform sampler2D colorIn;
 layout(set = 1, binding = 1) uniform sampler2D bloomIn;
 // x = exposição deste frame, w = pré-exposição com que a imagem foi gravada.
 layout(set = 1, binding = 2, std430) readonly buffer ExposureState { vec4 state; };
-layout(push_constant) uniform Push { float bloomStrength; float bloomNorm; uint manualSrgb; float pad; } pc;
+layout(push_constant) uniform Push { float bloomStrength; float bloomNorm; uint manualSrgb; uint debugView; } pc;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
 
@@ -21,6 +21,11 @@ vec3 linearToSrgb(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)
 
 void main() {
   vec3 hdr = textureLod(colorIn, vUV, 0.0).rgb;
+  if (pc.debugView != 0u) {  // depuração: valor cru, sem exposição nem curva
+    vec3 c = clamp(hdr, 0.0, 1.0);
+    outColor = vec4(pc.manualSrgb != 0u ? linearToSrgb(c) : c, 1.0);
+    return;
+  }
   vec3 bloom = textureLod(bloomIn, vUV, 0.0).rgb * pc.bloomNorm;
   hdr = mix(hdr, bloom, pc.bloomStrength);  // mistura que conserva energia
   vec3 c = acesFitted(hdr * (state.x / max(state.w, 1e-20)));

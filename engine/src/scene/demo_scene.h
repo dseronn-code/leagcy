@@ -7,7 +7,7 @@
 namespace scene {
 
 struct DemoOptions {
-  std::string name = "sponza";  // "sponza" ou "outdoor"
+  std::string name = "sponza";  // sponza, outdoor, furnace, shadows, shadows-far ou arquivo .gltf/.glb
   bool night = false;           // noite: sem sol, só luzes locais (vitrine do ReSTIR)
   uint32_t lightCount = 0;      // 0 = padrão da cena
 };

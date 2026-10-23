@@ -115,7 +115,19 @@ def teste_pixels(binario, tmp, rapido):
     return not falhas, 'ok' if not falhas else '; '.join(falhas)
 
 
-TESTES = [teste_validacao, teste_fornalha, teste_atmosfera, teste_cintilacao, teste_pixels]
+def teste_sombras(binario, tmp, rapido):
+    """Sombra do sol: sem degraus no terminator (luz perdida ≤ 1% na origem, ≤ 5% a 4 km) e sem acne."""
+    import sombras
+    linhas, ok = [], True
+    for cena, limite in (('shadows', 1.0), ('shadows-far', 5.0)):
+        for elev in ('20',) if rapido else ('20', '3'):
+            falsas, acne = sombras.medir(binario, cena, elev, tmp)
+            ok &= max(falsas) <= limite and acne < 0.01
+            linhas.append(f'{cena} {elev}°: luz perdida máx. {max(falsas):.1f}%, acne {acne:.3f}%')
+    return ok, '; '.join(linhas)
+
+
+TESTES = [teste_validacao, teste_fornalha, teste_atmosfera, teste_cintilacao, teste_pixels, teste_sombras]
 
 
 def main():

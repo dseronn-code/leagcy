@@ -4,15 +4,15 @@
 
 #extension GL_EXT_ray_query : require
 #include "scene.glsl"
+#include "terminator.glsl"
 
 layout(set = 0, binding = 6) uniform accelerationStructureEXT tlas;
 
 // Origem do raio afastada da superfície pela normal GEOMÉTRICA (Wächter & Binder, "A Fast and Robust
 // Method for Avoiding Self-Intersection", Ray Tracing Gems cap. 6): deslocamento em ULPs do float,
-// que escala com a magnitude da coordenada, mais uma margem proporcional à distância da câmera para
-// cobrir o erro da reconstrução da posição a partir da profundidade.
-vec3 offsetRayOrigin(vec3 p, vec3 ng, float viewDistance) {
-  p += ng * (1e-4 * viewDistance);
+// que escala com a magnitude da coordenada, mais `bias` metros (erro de posição conhecido do chamador).
+vec3 offsetRayOrigin(vec3 p, vec3 ng, float bias) {
+  p += ng * bias;
   const float originThreshold = 1.0 / 32.0, floatScale = 1.0 / 65536.0, intScale = 256.0;
   ivec3 o = ivec3(intScale * ng);
   vec3 pi = vec3(intBitsToFloat(floatBitsToInt(p.x) + (p.x < 0.0 ? -o.x : o.x)),
@@ -57,6 +57,7 @@ float traceVisibility(vec3 origin, vec3 dir, float tMax) {
 
 struct HitInfo {
   vec3 P;
+  vec3 Pshadow;  // origem dos raios de sombra corrigida para o terminator (Hanika 2021)
   vec3 N;   // normal de shading, virada contra o raio
   vec3 Ng;  // normal geométrica do triângulo, virada contra o raio
   vec2 uv;
@@ -83,13 +84,19 @@ bool traceHit(vec3 origin, vec3 dir, float tMax, out HitInfo hit) {
   vec3 n = fetchVertexNormal(vb, i0) * b0 + fetchVertexNormal(vb, i1) * bary.x + fetchVertexNormal(vb, i2) * bary.y;
   vec3 p0 = fetchVertexPosition(vb, i0), p1 = fetchVertexPosition(vb, i1), p2 = fetchVertexPosition(vb, i2);
   hit.Ng = normalize(normalMatrix * cross(p1 - p0, p2 - p0));
-  if (dot(hit.Ng, dir) > 0.0) hit.Ng = -hit.Ng;
+  float side = dot(hit.Ng, dir) > 0.0 ? -1.0 : 1.0;
+  hit.Ng *= side;
   hit.N = normalize(normalMatrix * n);
   if (dot(hit.N, hit.Ng) < 0.0) hit.N = -hit.N;  // mesmo lado da faceta
   hit.uv = fetchVertexUV(vb, i0) * b0 + fetchVertexUV(vb, i1) * bary.x + fetchVertexUV(vb, i2) * bary.y;
   hit.t = rayQueryGetIntersectionTEXT(rq, true);
   hit.P = origin + dir * hit.t;
   hit.material = d.material;
+  vec3 n0 = normalize(normalMatrix * fetchVertexNormal(vb, i0)) * side;
+  vec3 n1 = normalize(normalMatrix * fetchVertexNormal(vb, i1)) * side;
+  vec3 n2 = normalize(normalMatrix * fetchVertexNormal(vb, i2)) * side;
+  hit.Pshadow = shadowTerminatorPoint(hit.P, o2w * vec4(p0, 1.0), o2w * vec4(p1, 1.0), o2w * vec4(p2, 1.0), n0, n1, n2,
+                                      vec3(b0, bary.x, bary.y));
   return true;
 }
 

@@ -1,6 +1,8 @@
 // ReSTIR passo 1: candidatos iniciais (RIS) + teste de visibilidade + reuso temporal.
 #extension GL_GOOGLE_include_directive : require
 #include "restir.glsl"
+#define SURFACE_VISIBILITY_BINDING 9
+#include "surface.glsl"
 #ifdef RAY_TRACING
 #include "raytracing.glsl"
 #endif
@@ -16,7 +18,8 @@ void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (!insideRender(id)) return;
   uint idx = uint(id.y) * uint(frame.renderSize.x) + uint(id.x);
-  GSample g = loadGBuffer(id);
+  PixelSurface sf = loadSurface(id);
+  GSample g = sf.g;
   uint lightCount = frame.frameInfo.z;
   if (g.depth <= 0.0 || lightCount == 0u) { outReservoirs[idx] = emptyReservoir(); return; }
 
@@ -37,8 +40,8 @@ void main() {
     PointLight l = lights[r.light];
     vec3 Lv = l.position - g.P;
     float dist = length(Lv);
-    vec3 origin = offsetRayOrigin(g.P, g.Ng, length(frame.cameraPos.xyz - g.P));
-    if (dist > l.radius && traceVisibility(origin, Lv / dist, dist - l.radius) == 0.0) r.W = 0.0;
+    vec3 origin = offsetRayOrigin(sf.Pshadow, g.Ng, sf.rayBias);
+    if (dist > l.radius && (dot(sf.Nb, Lv) <= 0.0 || traceVisibility(origin, Lv / dist, dist - l.radius) == 0.0)) r.W = 0.0;
   }
 #endif
 

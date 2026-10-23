@@ -24,7 +24,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 |---|---|---|
 | GI por ray tracing | 🟡 | 1 rebote com denoiser SVGF (Dia 2); falta cache de radiância multi-rebote |
 | Reflexos por ray tracing | 🟡 | Funciona, mas o especular estoura float16 e o denoiser não reprojeta reflexos (auditoria 1.2, 1.13) |
-| Sombra do sol | 🟡 | Penumbra física, mas offset do raio com normal de shading causa acne (auditoria 1.11) |
+| Sombra do sol | ✅ | Ray tracing com penumbra física do disco solar; sem acne e sem degraus no terminator (visibility buffer + Hanika 2021 + Chiang 2019, medido em `tools/sombras.py`) |
 | Shadow maps em cascata (fallback e performance) | ❌ | |
 | Milhares de luzes (neon, faróis, postes) | 🟡 | ReSTIR básico: amostragem uniforme, reuso enviesado, sem ReGIR (auditoria 1.7–1.9) |
 | Céu e atmosfera física | ✅ | Pipeline completa de Hillaire (transmitância, múltiplo espalhamento, sky-view, perspectiva aérea), 4% de erro contra path tracing de referência |

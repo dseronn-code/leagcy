@@ -23,6 +23,7 @@ constexpr VkExtent2D kTransmittanceLutExtent{256, 64};
 constexpr VkExtent2D kMultiScatterLutExtent{32, 32};
 constexpr VkExtent3D kAerialPerspectiveExtent{32, 32, 32};
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
+constexpr VkFormat kVisibilityFormat = VK_FORMAT_R32G32_UINT;
 
 constexpr VkDescriptorType CIS = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 constexpr VkDescriptorType SI = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -35,7 +36,7 @@ struct FrameUniforms {
   glm::uvec4 frameInfo;
   glm::uvec4 quality0;  // spp, candidatos ReSTIR, vizinhos ReSTIR, amostras DOF
   glm::vec4 quality1;   // mip nos raios, limite de vagalumes, amostras de motion blur, compensação de energia
-  glm::vec4 environment;  // x = céu uniforme (nits)
+  glm::vec4 environment;  // x = céu uniforme (nits), y = modo de depuração
 };
 static_assert(sizeof(FrameUniforms) == 560);
 
@@ -72,7 +73,7 @@ struct BloomPush {
 struct TonemapPush {
   float bloomStrength, bloomNorm;
   uint32_t manualSrgb;
-  float pad;
+  uint32_t debugView;  // 1 = mostra o valor cru (linear) sem exposição, bloom nem tonemap
 };
 
 bool isSrgb(VkFormat f) {
@@ -142,6 +143,14 @@ Quality qualityPreset(QualityPreset preset) {
       break;
   }
   return q;
+}
+
+bool parseDebugView(const char* name, uint32_t& out) {
+  const std::pair<const char*, uint32_t> names[] = {{"sol", kDebugSunVisibility}, {"sol-luz", kDebugSunShading},
+                                                    {"normal", kDebugGeometricNormal}, {"nl", kDebugSunCosine}};
+  for (auto& [n, v] : names)
+    if (std::strcmp(name, n) == 0) { out = v; return true; }
+  return false;
 }
 
 bool parseQualityPreset(const char* name, QualityPreset& out) {
@@ -245,9 +254,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
   aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
-  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB});
+  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS});
   restirSpatialPass_.init(ctx, "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB});
-  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI});
+  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS});
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
   compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI});
@@ -274,7 +283,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(scene::Vertex, tangent)},
       {4, 1, VK_FORMAT_R32G32B32_SFLOAT, offsetof(scene::Vertex, position)},
   };
-  gb.colorFormats = {kAlbedoFormat, kHdrFormat, kMotionFormat, kHdrFormat, kAlbedoFormat};
+  gb.colorFormats = {kAlbedoFormat, kHdrFormat, kMotionFormat, kHdrFormat, kAlbedoFormat, kVisibilityFormat};
   gb.depthFormat = kDepthFormat;
   gb.depthTest = gb.depthWrite = true;
   gb.cullMode = VK_CULL_MODE_NONE;  // materiais de dois lados (folhagem, tecidos)
@@ -380,6 +389,7 @@ void Renderer::createTargets() {
   t_.specular = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
   t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach);
   t_.emissive = rhi::createImage2D(ctx, R, kHdrFormat, attach);
+  t_.visibility = rhi::createImage2D(ctx, R, kVisibilityFormat, attach);
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
                           &t_.tmpB, &t_.tmpC, &t_.sceneColor})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
@@ -401,9 +411,9 @@ void Renderer::createTargets() {
                               &t_.historyLength[i], &t_.taa[i]})
         toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-    for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
-                            &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA, &t_.postB,
-                            &t_.bloom})
+    for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.visibility, &t_.diffuseRaw, &t_.specularRaw,
+                            &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
+                            &t_.postB, &t_.bloom})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   historyValid_ = false;
@@ -417,9 +427,9 @@ void Renderer::destroyTargets() {
       rhi::destroyImage(ctx, *img);
     rhi::destroyBuffer(ctx, t_.reservoirs[i]);
   }
-  for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated,
-                          &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA, &t_.postB,
-                          &t_.bloom})
+  for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.visibility, &t_.diffuseRaw, &t_.specularRaw,
+                          &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
+                          &t_.postB, &t_.bloom})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -469,7 +479,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                           std::max(q.dofSamples, 1u));
   u.quality1 = glm::vec4(q.rayTextureLod, q.fireflyLimit, float(std::max(q.motionBlurSamples, 1u)),
                          settings.energyCompensation ? 1.0f : 0.0f);
-  u.environment = glm::vec4(scene_->uniformSkyLuminance, 0.0f, 0.0f, 0.0f);
+  u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), 0.0f, 0.0f);
   std::memcpy(frameUbo_[slot].mapped, &u, sizeof(u));
   vmaFlushAllocation(ctx_->allocator, frameUbo_[slot].allocation, 0, VK_WHOLE_SIZE);
 
@@ -490,19 +500,20 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- 2. G-buffer ----
   {
-    VkRenderingAttachmentInfo colors[5] = {
+    VkRenderingAttachmentInfo colors[6] = {
         attachment(t_.diffuse.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.normal[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.motion.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.emissive.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
         attachment(t_.specular.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
+        attachment(t_.visibility.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),  // 0 = sem objeto
     };
     VkRenderingAttachmentInfo depth = attachment(t_.depth[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR);
     depth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = infinito
     VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea = {{0, 0}, R};
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 5;
+    ri.colorAttachmentCount = 6;
     ri.pColorAttachments = colors;
     ri.pDepthAttachment = &depth;
     vkCmdBeginRendering(cmd, &ri);
@@ -531,7 +542,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- 3. ReSTIR DI ----
   restirTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion,
-                                         Binding::storageBuffer(t_.reservoirs[1]), Binding::storageBuffer(t_.reservoirs[0])}, R);
+                                         Binding::storageBuffer(t_.reservoirs[1]), Binding::storageBuffer(t_.reservoirs[0]),
+                                         tex(t_.visibility)}, R);
   barrier();
   restirSpatialPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[0]),
                                         Binding::storageBuffer(t_.reservoirs[1])}, R);
@@ -540,10 +552,15 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- 4. Iluminação (ray tracing) ----
   lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[1]),
-                                   storage(t_.diffuseRaw), storage(t_.specularRaw)}, R);
+                                   storage(t_.diffuseRaw), storage(t_.specularRaw), tex(t_.visibility)}, R);
   barrier();
   profiler_.mark(cmd, "iluminacao_rt");
 
+  // Depuração: o valor cru da iluminação vai direto para a tela (sem denoiser, TAA, exposição nem tonemap).
+  const bool debug = settings.debugView != kDebugNone;
+  const rhi::Image* color = &t_.diffuseRaw;
+  uint32_t mips = t_.bloom.mipLevels;
+  if (!debug) {
   // ---- 5. Denoiser ----
   const rhi::Image* diffuseFinal = &t_.diffuseRaw;
   const rhi::Image* specularFinal = &t_.specularRaw;
@@ -593,7 +610,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur])}, O);
   barrier();
   profiler_.mark(cmd, "taa");
-  const rhi::Image* color = &t_.taa[cur];
+  color = &t_.taa[cur];
 
   // ---- 8. Auto-exposição ----
   histogramPass_.dispatch(cmd, gs, {tex(*color), Binding::storageBuffer(histogram_)}, O);
@@ -620,7 +637,6 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   profiler_.mark(cmd, "dof_motionblur");
   // ---- 10. Bloom ----
-  uint32_t mips = t_.bloom.mipLevels;
   auto mipExtent = [&](uint32_t m) {
     return VkExtent2D{std::max(1u, t_.bloom.extent.width >> m), std::max(1u, t_.bloom.extent.height >> m)};
   };
@@ -640,6 +656,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
 
   profiler_.mark(cmd, "bloom");
+  }  // !debug
   // ---- 11. Tonemap -> saída ----
   rhi::imageBarrier(cmd, output, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -653,7 +670,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   vkCmdBeginRendering(cmd, &ri);
   setViewport(cmd, O);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemapPipeline_);
-  TonemapPush tp{settings.bloomStrength, 1.0f / float(mips), isSrgb(outputFormat_) ? 0u : 1u, 0};
+  TonemapPush tp{settings.bloomStrength, 1.0f / float(mips), isSrgb(outputFormat_) ? 0u : 1u, debug ? 1u : 0u};
   tonemapLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs,
                       {tex(*color), Binding::sampled(t_.bloomMips[0], linear_), Binding::storageBuffer(exposureState_)}, &tp);
   vkCmdDraw(cmd, 3, 1, 0, 0);

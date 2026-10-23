@@ -86,6 +86,13 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-denoiser") o.render.denoiser = false;
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
+    else if (a == "--debug-view") {
+      const char* v = next();
+      if (!renderer::parseDebugView(v, o.render.debugView)) {
+        std::fprintf(stderr, "Visualização desconhecida: %s (use sol, sol-luz, normal ou nl)\n", v);
+        std::exit(1);
+      }
+    }
     else if (a == "--help" || a == "-h") {
       std::printf(
           "uso: legacy [opções]\n"
@@ -100,6 +107,7 @@ Options parseArgs(int argc, char** argv) {
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
           "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"
           "  --sun-elevation G --sun-azimuth G   posição do sol em graus\n"
+          "  --debug-view sol|sol-luz|normal|nl  valor cru da iluminação (depuração de sombras)\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s] [--pause]\n");

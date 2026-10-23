@@ -48,7 +48,19 @@ struct Settings {
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
   bool energyCompensation = true;   // compensação de múltiplo espalhamento do BRDF (Turquin 2019)
+  // Visualização de depuração (valor cru da iluminação, sem denoiser/TAA/tonemap): ver DebugView.
+  uint32_t debugView = 0;
 };
+
+// Modos de --debug-view. Os valores ficam em [0, 1] e saem direto na tela (linear).
+enum DebugView : uint32_t {
+  kDebugNone = 0,
+  kDebugSunVisibility = 1,  // "sol": visibilidade do sol (1 = iluminado) — mostra acne e terminator
+  kDebugSunShading = 2,     // "sol-luz": só o difuso do sol (N·L × visibilidade × sombreamento do relevo)
+  kDebugGeometricNormal = 3,  // "normal": normal geométrica (0,5 + 0,5 n)
+  kDebugSunCosine = 4,      // "nl": N·L do sol sem sombra (referência para medir sombra falsa)
+};
+bool parseDebugView(const char* name, uint32_t& out);
 
 // Frame (deferred, todos os alvos em VK_IMAGE_LAYOUT_GENERAL):
 //   Sky LUT → G-buffer → ReSTIR (temporal, espacial) → Iluminação RT (difuso / especular)
@@ -83,6 +95,7 @@ class Renderer {
   struct Targets {
     std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
     rhi::Image diffuse, specular, motion, emissive;
+    rhi::Image visibility;  // visibility buffer: x = objeto + 1 (0 = céu), y = triângulo
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;

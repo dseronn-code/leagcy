@@ -221,3 +221,36 @@ direções de visão cada). Erro médio de luminância **4,05%** (só espalhamen
   barreiras entre escrita e leitura das LUTs confirmadas pela validação de sincronização, sem NaN para pontos
   abaixo do chão. Comentário trocado de lugar em `main.cpp` corrigido; `--atmosphere-test` incluído no `--help`.
 - Modo janela (Xvfb) com validação: 60 s sem erros. Renders do pôr do sol (sol a 35°, 8° e 2°) conferidos.
+
+### Item 3 recuperado — sombra do sol sem acne e sem degraus no terminator ✅
+
+Medição antes de mexer (nova visualização `--debug-view sol|sol-luz|nl|normal`: valor cru, sem denoiser/TAA,
+e cenas de teste `shadows` e `shadows-far` — a mesma cena a 4 km da origem). Métrica do `tools/sombras.py`:
+**luz perdida** = Σ N·L × (1 − visibilidade) / Σ N·L nas esferas de 6 a 24 segmentos com normais suavizadas,
+onde nada faz sombra (o ideal é 0%).
+
+| | Sol a 20° | Sol a 3° | 4 km, sol a 20° | 4 km, sol a 3° | Acne no chão |
+|---|---|---|---|---|---|
+| Antes | até **44,7%** (degraus) | até 25,8% | até 42,5% | até 27,0% | 0% |
+| Depois | **0,0%** | **0,0%** | 0,6% | 2,4% | 0% |
+
+O que mudou (a mesma combinação do Blender Cycles):
+- **Visibility buffer** no G-buffer (`R32G32_UINT`: objeto + triângulo). Os passes de RT recalculam a posição
+  exata (raio da câmera ∩ plano do triângulo), a normal da faceta e a normal suave dos vértices — em vez de
+  reconstruir pela profundidade (que errava ~1e-4 × distância e nas quinas).
+- **Hanika 2021** ("Hacking the Shadow Terminator", Ray Tracing Gems II cap. 4): os raios de sombra saem do
+  ponto projetado nos planos tangentes dos vértices, isto é, da superfície curva que o sombreamento descreve,
+  e não da faceta plana que fica abaixo dela. Aplicado no pixel e nos pontos atingidos por raios (GI/reflexo).
+- **Chiang 2019** ("Taming the Shadow Terminator"): termo de sombreamento do relevo para normal maps — a luz
+  vai a zero de forma suave onde a superfície real já está de costas.
+- Teste de "frente para a luz" com a normal suave (antes: faceta, que cortava a luz em degraus).
+- Margem da origem dos raios: 1e-6 × distância com posição exata (era 1e-4: 1 cm a 100 m de folga = frestas de
+  luz em sombras de contato); continua 1e-4 só onde o triângulo não é conhecido.
+
+Verificado: nenhum vazamento de luz novo (comparação pixel a pixel fora das esferas: só bordas e ruído de
+penumbra mudaram); Bistro (rua, com sol) e Sponza sem acne — as listras das cortinas do Sponza já existem no
+N·L puro (moiré do normal map do tecido), não são sombra. Suíte completa passando, com o novo `teste_sombras`.
+
+Limite conhecido: o resíduo de 2,4% a 4 km com sol rasante é a precisão do float32 nessa distância (0,5 mm por
+passo). A solução definitiva é **renderização relativa à câmera** (origem flutuante, como UE5/Frostbite), que
+entra no item de mundo aberto/streaming porque mexe em todos os shaders.
