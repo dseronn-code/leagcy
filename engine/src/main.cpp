@@ -59,7 +59,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--night") o.scene.night = true;
     else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--scale") o.render.renderScale = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
-    else if (a == "--exposure") o.render.manualExposure = float(std::atof(next()));
+    else if (a == "--exposure") o.render.manualEV100 = float(std::atof(next()));
     else if (a == "--ev") o.render.exposureCompensation = float(std::atof(next()));
     else if (a == "--dof") o.render.depthOfField = true;
     else if (a == "--focus") o.render.dofFocusDistance = float(std::atof(next()));
@@ -73,7 +73,7 @@ Options parseArgs(int argc, char** argv) {
           "  --lights N               número de luzes pontuais\n"
           "  --scale S                resolução interna (0.25-1.0, padrão 0.67) — upscaling pelo TAA\n"
           "  --dof [--focus M]        profundidade de campo (autofoco se --focus omitido)\n"
-          "  --ev X | --exposure X    compensação da auto-exposição | exposição manual\n"
+          "  --ev X | --exposure EV   compensação da auto-exposição (EV) | exposição manual (EV100)\n"
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
           "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"
           "  --width W --height H\n"

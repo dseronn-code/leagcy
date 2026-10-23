@@ -14,7 +14,7 @@ layout(set = 0, binding = 0) uniform FrameData {
   mat4 prevViewProjNoJitter;
   vec4 cameraPos;             // xyz = posição (m), w = near plane
   vec4 prevCameraPos;
-  vec4 sunDir;                // xyz = direção PARA o sol, w = irradiância
+  vec4 sunDir;                // xyz = direção PARA o sol, w = iluminância solar no topo da atmosfera (lux)
   vec4 params;                // x = raio angular do sol, y = dt (s), z = densidade da névoa, w = queda da névoa
   vec4 jitter;                // xy = deslocamento do jitter em UV, zw = do frame anterior
   vec4 renderSize;            // xy = resolução interna, zw = 1/xy
@@ -23,6 +23,17 @@ layout(set = 0, binding = 0) uniform FrameData {
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2D skyViewLut;
+
+// Exposição (Frostbite/UE): toda radiância é guardada já multiplicada pela exposição do frame
+// anterior ("pré-exposição"), mantendo valores de 120.000 lux a 0,001 nit dentro do float16.
+// x = exposição mais recente (= pré-exposição deste frame), w = pré-exposição do frame anterior.
+layout(set = 0, binding = 8, std430) readonly buffer GlobalExposure { vec4 exposureState; };
+float preExposure() { return exposureState.x; }
+// Fator para trazer históricos (denoiser, TAA) gravados no frame anterior para a escala atual.
+float historyExposureScale() { return exposureState.w > 0.0 ? exposureState.x / exposureState.w : 1.0; }
+// Maior valor seguro num alvo float16 (65504), com folga para filtros que somam vizinhos.
+const float HALF_SAFE_MAX = 60000.0;
+vec3 clampHalf(vec3 c) { return min(c, vec3(HALF_SAFE_MAX)); }
 
 bool historyValid() { return frame.frameInfo.w != 0u; }
 
@@ -56,11 +67,13 @@ vec3 lutDirection(vec2 uv) {
   return vec3(cos(lat) * cos(az), sin(lat), cos(lat) * sin(az));
 }
 
+// Radiância do céu (nits), já pré-exposta: a LUT é escrita com a pré-exposição do frame.
 vec3 sampleSky(vec3 dir) { return textureLod(skyViewLut, skyLutUv(dir), 0.0).rgb; }
 
+// Iluminância do sol (lux) chegando ao ponto, já pré-exposta.
 vec3 sunIrradianceAt(vec3 worldPos) {
   if (frame.sunDir.w <= 0.0) return vec3(0.0);
-  return frame.sunDir.w * transmittanceToSun(planetPos(worldPos), frame.sunDir.xyz);
+  return frame.sunDir.w * preExposure() * transmittanceToSun(planetPos(worldPos), frame.sunDir.xyz);
 }
 
 vec3 sunDisk(vec3 dir) {

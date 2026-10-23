@@ -31,6 +31,8 @@ namespace scene {
 
 namespace {
 
+constexpr float kGltfEmissiveNits = 1000.0f;
+
 struct Loader {
   Scene& scene;
   cgltf_data* data;
@@ -88,7 +90,8 @@ struct Loader {
         m.baseColorTex = texture(pbr.base_color_texture, true);
         m.metalRoughTex = texture(pbr.metallic_roughness_texture, false);
       }
-      m.emissive = glm::make_vec3(src.emissive_factor);
+      // glTF não define unidade para emissão; 1,0 = 1.000 nits (tela/letreiro típico).
+      m.emissive = glm::make_vec3(src.emissive_factor) * kGltfEmissiveNits;
       if (src.has_emissive_strength) m.emissive *= src.emissive_strength.emissive_strength;
       m.emissiveTex = texture(src.emissive_texture, true);
       m.normalTex = texture(src.normal_texture, false);

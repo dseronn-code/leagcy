@@ -2,6 +2,7 @@
 // Final: mistura do bloom, exposição (automática), ACES filmic e vinheta.
 layout(set = 1, binding = 0) uniform sampler2D colorIn;
 layout(set = 1, binding = 1) uniform sampler2D bloomIn;
+// x = exposição deste frame, w = pré-exposição com que a imagem foi gravada.
 layout(set = 1, binding = 2, std430) readonly buffer ExposureState { vec4 state; };
 layout(push_constant) uniform Push { float bloomStrength; float bloomNorm; uint manualSrgb; float pad; } pc;
 layout(location = 0) in vec2 vUV;
@@ -22,7 +23,7 @@ void main() {
   vec3 hdr = textureLod(colorIn, vUV, 0.0).rgb;
   vec3 bloom = textureLod(bloomIn, vUV, 0.0).rgb * pc.bloomNorm;
   hdr = mix(hdr, bloom, pc.bloomStrength);  // mistura que conserva energia
-  vec3 c = acesFitted(hdr * state.x);
+  vec3 c = acesFitted(hdr * (state.x / max(state.w, 1e-20)));
   vec2 d = vUV - 0.5;
   c *= 1.0 - 0.35 * dot(d, d);
   if (pc.manualSrgb != 0u) c = linearToSrgb(c);

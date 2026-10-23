@@ -80,9 +80,9 @@ void addOrbitingLights(Scene& s, uint32_t sphereMesh, glm::vec3 center, float ra
     glm::vec3 color = hue(float(i) / float(count));
     Material m;
     m.baseColor = glm::vec4(color, 1.0f);
-    m.emissive = color * 30.0f;
+    m.emissive = color * 9000.0f;  // nits
     uint32_t object = s.addObject(sphereMesh, glm::mat4(1.0f), s.addMaterial(m));
-    uint32_t light = s.addLight({center, 0.08f, color * intensity, 12.0f});
+    uint32_t light = s.addLight({center, 0.08f, color * intensity, 12.0f});  // cd
     float phase = glm::two_pi<float>() * float(i) / float(count);
     s.addAnimator([=](Scene& sc, float t, float) {
       float a = phase + 0.8f * t;
@@ -144,19 +144,19 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
 
   // Postes de luz ao longo de uma "rua" + luzes coloridas espalhadas.
   uint32_t pole = mat({0.05f, 0.05f, 0.05f}, 0.4f, 1.0f);
-  uint32_t bulb = mat({1, 1, 1}, 0.5f, 0.0f, {40.0f, 26.0f, 12.0f});
+  uint32_t bulb = mat({1, 1, 1}, 0.5f, 0.0f, {40000.0f, 26000.0f, 12000.0f});  // globo de vapor de sódio (nits)
   for (int i = 0; i < 8; ++i) {
     float x = -21.0f + i * 6.0f, z = 9.0f, y = terrainHeight(x, z);
     s.addObject(cube, trs({x, y + 2.5f, z}, {0.06f, 2.5f, 0.06f}), pole);
     s.addObject(sphere, trs({x, y + 5.1f, z}, glm::vec3(0.15f)), bulb);
-    s.addLight({{x, y + 5.1f, z}, 0.15f, glm::vec3(30.0f, 19.0f, 8.0f), 25.0f});
+    s.addLight({{x, y + 5.1f, z}, 0.15f, glm::vec3(1800.0f, 1140.0f, 480.0f), 25.0f});  // poste de rua (cd)
   }
   std::mt19937 rng(7);
   std::uniform_real_distribution<float> u(0.0f, 1.0f);
   uint32_t n = opt.lightCount ? opt.lightCount : 128;
   for (uint32_t i = 0; i < n; ++i) {
     float x = glm::mix(-24.0f, 24.0f, u(rng)), z = glm::mix(-16.0f, 12.0f, u(rng));
-    glm::vec3 c = hue(u(rng)) * glm::mix(4.0f, 10.0f, u(rng));
+    glm::vec3 c = hue(u(rng)) * glm::mix(60.0f, 150.0f, u(rng));  // luzes decorativas (cd)
     s.addLight({{x, terrainHeight(x, z) + glm::mix(0.3f, 2.0f, u(rng)), z}, 0.05f, c, 8.0f});
   }
 
@@ -166,13 +166,13 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   walkEllipse(s, fox, {0.0f, 0.0f, 4.0f}, {7.0f, 3.0f}, 5.0f, 0.012f, foxFoot, 0.0f, 0.0f, terrainHeight);
   int man = loadCharacter(s, "CesiumMan/CesiumMan.gltf", 1.0f, "", manFoot);
   walkEllipse(s, man, {-5.0f, 0.0f, 6.0f}, {2.5f, 2.5f}, 1.2f, 1.0f, manFoot, kCesiumManFacing, 1.0f, terrainHeight);
-  addOrbitingLights(s, sphere, {hx, hy + 2.0f, hz}, 1.4f, 3, 6.0f);
+  addOrbitingLights(s, sphere, {hx, hy + 2.0f, hz}, 1.4f, 3, 240.0f);
 
   // Carro: carroceria, cabine, rodas e faróis (luzes que se movem com ele).
   uint32_t paint = mat({0.02f, 0.05f, 0.25f}, 0.25f, 1.0f);
   uint32_t glass = mat({0.02f, 0.02f, 0.02f}, 0.05f, 0.0f);
   uint32_t tire = mat({0.03f, 0.03f, 0.03f}, 0.9f, 0.0f);
-  uint32_t lamp = mat({1, 1, 1}, 0.3f, 0.0f, {60.0f, 55.0f, 45.0f});
+  uint32_t lamp = mat({1, 1, 1}, 0.3f, 0.0f, {60000.0f, 55000.0f, 45000.0f});  // farol (nits)
   struct Part { uint32_t object; glm::mat4 local; };
   std::vector<Part> car;
   auto part = [&](uint32_t mesh, uint32_t material, glm::vec3 t, glm::vec3 sc) {
@@ -187,7 +187,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   for (float x : {-0.6f, 0.6f}) {
     glm::vec3 local(x, 0.6f, 2.25f);
     part(sphere, lamp, local, glm::vec3(0.1f));
-    headlights.push_back({s.addLight({glm::vec3(0.0f), 0.1f, glm::vec3(40.0f, 36.0f, 30.0f), 30.0f}), local});
+    headlights.push_back({s.addLight({glm::vec3(0.0f), 0.1f, glm::vec3(3000.0f, 2700.0f, 2250.0f), 30.0f}), local});  // cd
   }
   s.addAnimator([=](Scene& sc, float t, float) {
     const float radius = 20.0f, speed = 12.0f;  // ~43 km/h
@@ -201,7 +201,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   });
 
   s.sunDirection = sunFrom(16.0f, 55.0f);
-  s.sunIntensity = opt.night ? 0.0f : 20.0f;
+  s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   camera.position = {2.0f, terrainHeight(2, 16) + 3.2f, 16.0f};
   camera.lookAt({0.0f, 1.0f, -6.0f});
   return true;
@@ -225,7 +225,7 @@ bool buildSponza(Scene& s, Camera& camera, const DemoOptions& opt) {
   for (uint32_t i = 0; i < n; ++i) {
     glm::vec3 p(glm::mix(inner.x, outer.x, u(rng)), glm::mix(lo.y + 0.3f, lo.y + 0.75f * (hi.y - lo.y), u(rng)),
                 glm::mix(inner.z, outer.z, u(rng)));
-    glm::vec3 c = hue(u(rng)) * glm::mix(0.6f, 2.0f, u(rng));
+    glm::vec3 c = hue(u(rng)) * glm::mix(36.0f, 120.0f, u(rng));  // cd
     s.addLight({p, 0.04f, c, 5.0f});
   }
 
@@ -235,10 +235,10 @@ bool buildSponza(Scene& s, Camera& camera, const DemoOptions& opt) {
   walkEllipse(s, fox, {0.0f, lo.y, 0.0f}, {7.0f, 1.6f}, 1.6f, 0.01f, foxFoot, 0.0f, 0.0f, nullptr);
   int man = loadCharacter(s, "CesiumMan/CesiumMan.gltf", 1.0f, "", manFoot);
   walkEllipse(s, man, {0.0f, lo.y, 0.0f}, {5.0f, 1.2f}, 1.2f, 1.0f, manFoot, kCesiumManFacing, 3.0f, nullptr);
-  addOrbitingLights(s, s.addMesh(makeSphere(32, 16)), {0.0f, lo.y + 1.6f, 0.0f}, 1.5f, 4, 4.0f);
+  addOrbitingLights(s, s.addMesh(makeSphere(32, 16)), {0.0f, lo.y + 1.6f, 0.0f}, 1.5f, 4, 160.0f);
 
   s.sunDirection = sunFrom(65.0f, 100.0f);
-  s.sunIntensity = opt.night ? 0.0f : 20.0f;
+  s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   // Do fundo do átrio olhando ao longo do eixo X (o comprido).
   camera.position = {-8.5f, 1.6f, -0.6f};
   camera.lookAt({5.0f, 3.4f, 0.4f});
@@ -257,7 +257,7 @@ bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
   camera.position = c + glm::vec3(0.0f, 0.1f * (hi.y - lo.y), 0.0f);
   camera.lookAt(c + glm::vec3(hi.x - lo.x, 0.0f, 0.0f));
   s.sunDirection = sunFrom(35.0f, 120.0f);
-  s.sunIntensity = opt.night ? 0.0f : 20.0f;
+  s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   return true;
 }
 
