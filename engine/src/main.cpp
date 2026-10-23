@@ -2,7 +2,11 @@
 //   legacy                      janela interativa (WASD + botão direito do mouse)
 //   legacy --headless --frames 32 --out frame.png
 //   legacy --scene outdoor --night --lights 1000
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -153,7 +157,8 @@ int runHeadless(const Options& opt) {
     }
   }
   double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-  LOG_INFO("%u frames em %.2fs (%.1f ms/frame)", opt.frames, secs, secs * 1000.0 / opt.frames);
+  LOG_INFO("%u frames em %.2fs (%.1f ms/frame, inclui espera da CPU)", opt.frames, secs, secs * 1000.0 / opt.frames);
+  if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   ok &= savePng(opt.out);
 
   rhi::destroyBuffer(ctx, readback);
@@ -353,6 +358,11 @@ int runWindowed(const Options& opt) {
       glfwSetWindowTitle(window, title);
       fpsTimer = now;
       fpsFrames = 0;
+      static double lastReport = 0.0;
+      if (now - lastReport >= 3.0) {  // detalhamento por passe no console a cada 3 s
+        if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
+        lastReport = now;
+      }
     }
   }
 
@@ -374,7 +384,15 @@ int runWindowed(const Options& opt) {
 
 }  // namespace
 
+#ifdef _WIN32
+// Console do Windows em UTF-8 (acentos das mensagens), sem incluir <windows.h>.
+extern "C" __declspec(dllimport) int __stdcall SetConsoleOutputCP(unsigned int codePage);
+#endif
+
 int main(int argc, char** argv) {
+#ifdef _WIN32
+  SetConsoleOutputCP(65001);
+#endif
   Options opt = parseArgs(argc, argv);
   return opt.headless ? runHeadless(opt) : runWindowed(opt);
 }

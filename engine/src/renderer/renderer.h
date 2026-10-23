@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include "rhi/pass.h"
+#include "rhi/profiler.h"
 #include "scene/camera.h"
 #include "scene/scene.h"
 
@@ -46,6 +47,8 @@ class Renderer {
   // Descarta todo o histórico temporal (corte de câmera, mudança de cena).
   void resetHistory() { historyValid_ = false; }
   VkExtent2D renderExtent() const { return renderExtent_; }
+  // Tempo médio de GPU por passe desde a última chamada (vazio se ainda não há medições).
+  std::string gpuTimings() { return profiler_.report(); }
 
   Settings settings;
 
@@ -90,6 +93,7 @@ class Renderer {
   rhi::PassLayout gbufferLayout_, tonemapLayout_;
   VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
 
+  rhi::GpuProfiler profiler_;
   uint64_t frameIndex_ = 0;
   bool historyValid_ = false;
   glm::mat4 prevViewProj_{1.0f};

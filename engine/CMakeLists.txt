@@ -83,7 +83,9 @@ target_compile_definitions(legacy PRIVATE
   SHADER_DIR="${SHADER_OUT_DIR}"
   ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 if(MSVC)
-  target_compile_options(legacy PRIVATE /W4 /permissive-)
+  # /utf-8: fontes e mensagens em UTF-8 (português); /MP: compilação paralela.
+  target_compile_options(legacy PRIVATE /W4 /permissive- /utf-8 /MP)
+  target_compile_definitions(legacy PRIVATE _CRT_SECURE_NO_WARNINGS NOMINMAX)
 else()
   target_compile_options(legacy PRIVATE -Wall -Wextra -Wno-missing-field-initializers -Wno-unused-parameter)
 endif()
