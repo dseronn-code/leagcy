@@ -4,7 +4,8 @@
     python3 tools/denoiser.py [--bin build/legacy] [--out pasta]
 
 Sponza à noite com a cena congelada (--pause): a câmera anda 1,5 m/s para a frente por 24 frames e o último
-frame é comparado com a referência — a mesma pose final, parada, 96 frames no preset Cinema. O erro junta
+frame é comparado com a referência — mesma trajetória, depois parada por 96 frames (média do SVGF e do NRD
+convergidos, para não favorecer nenhum). O erro junta
 tudo que um denoiser erra em movimento: ruído que sobra, rastro (ghosting) e detalhe borrado.
   - erro relativo médio por pixel (luminância linear) — quanto menor, melhor;
   - brilhinhos: % de pixels mais de 2x acima da referência (vagalumes).
@@ -18,7 +19,6 @@ import numpy as np
 from PIL import Image
 
 W, H = 640, 360
-CAM, LOOK = np.array([-8.5, 1.6, -0.6]), np.array([5.0, 3.4, 0.4])  # pose inicial do Sponza
 VEL, FRAMES = 1.5, 24
 
 
@@ -41,11 +41,17 @@ def main():
     a = ap.parse_args()
     pasta = a.out or tempfile.mkdtemp()
     os.makedirs(pasta, exist_ok=True)
-    fwd = (LOOK - CAM) / np.linalg.norm(LOOK - CAM)
-    fim = CAM + fwd * VEL * FRAMES / 30.0  # o modo headless simula 30 fps
-    pose = ['--cam', ','.join(f'{v:.5f}' for v in fim), '--look', ','.join(f'{v:.5f}' for v in fim + fwd)]
-    ref_png = os.path.join(pasta, 'referencia.png')
-    R = lum(ref_png) if os.path.exists(ref_png) else rodar(a.bin, pose + ['--quality', 'cinema', '--frames', '96'], ref_png)
+    # Referência: anda os mesmos 24 frames e para; depois converge parada (mesma pose final por construção).
+    ref_png = os.path.join(pasta, 'referencia')
+    mover = ['--move', str(VEL), '--move-stop', str(FRAMES)]
+    # Para não favorecer nenhum dos dois: média das duas imagens convergidas (96 frames parada).
+    if os.path.exists(ref_png + '.npy'):
+        R = np.load(ref_png + '.npy')
+    else:
+        conv = [rodar(a.bin, mover + ['--denoiser', d, '--frames', str(FRAMES + 96)], os.path.join(pasta, f'conv_{d}.png'))
+                for d in ('svgf', 'nrd')]
+        R = 0.5 * (conv[0] + conv[1])
+        np.save(ref_png + '.npy', R)
     valido = R > 0.002
     for d in ('svgf', 'nrd'):
         X = rodar(a.bin, ['--denoiser', d, '--move', str(VEL), '--frames', str(FRAMES)], os.path.join(pasta, f'mov_{d}.png'))
