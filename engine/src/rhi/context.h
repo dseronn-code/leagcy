@@ -43,6 +43,9 @@ class Context {
   bool rayTracing = false;  // VK_KHR_ray_query + acceleration_structure ativos
   RayTracingFns rt;
   PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR = nullptr;
+  // Extensões habilitadas (bibliotecas que embrulham o nosso dispositivo, como o NRI, precisam saber).
+  // Os nomes são literais estáticos dos headers do Vulkan/GLFW.
+  std::vector<const char*> instanceExtensions, deviceExtensions;
 
  private:
   bool wantRayTracing_ = true;

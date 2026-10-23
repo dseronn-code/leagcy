@@ -1,7 +1,8 @@
 #version 460
-// Recompõe a imagem: difuso filtrado x albedo + especular filtrado + emissão; céu e névoa.
+// Recompõe a imagem: difuso filtrado × albedo + especular filtrado × refletância especular + emissão; céu e névoa.
 #extension GL_GOOGLE_include_directive : require
 #include "gbuffer.glsl"
+#include "brdf.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 1, binding = 4) uniform sampler2D gEmissive;
@@ -21,7 +22,8 @@ void main() {
     color = applyHeightFog(color, frame.cameraPos.xyz + dir * 4000.0);  // céu atrás da névoa
   } else {
     GSample g = loadGBuffer(id);
-    color = texelFetch(diffuseIn, id, 0).rgb * g.diffuseColor + texelFetch(specularIn, id, 0).rgb +
+    BrdfContext bc = makeBrdfContext(g.N, g.V, g.f0, g.f90, g.roughness, energyCompensationEnabled());
+    color = texelFetch(diffuseIn, id, 0).rgb * g.diffuseColor + texelFetch(specularIn, id, 0).rgb * specularDemodulation(bc) +
             texelFetch(gEmissive, id, 0).rgb;
     color = applyAerialPerspective(color, uv, g.P);
     color = applyHeightFog(color, g.P);

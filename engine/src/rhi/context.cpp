@@ -60,6 +60,7 @@ void Context::createInstance(const ContextDesc& desc) {
   ci.pApplicationInfo = &app;
   ci.enabledExtensionCount = uint32_t(exts.size());
   ci.ppEnabledExtensionNames = exts.data();
+  instanceExtensions = exts;
   ci.enabledLayerCount = uint32_t(layers.size());
   ci.ppEnabledLayerNames = layers.data();
   VK_CHECK(vkCreateInstance(&ci, nullptr, &instance));
@@ -172,6 +173,7 @@ void Context::createDevice(VkSurfaceKHR surface) {
   dci.pQueueCreateInfos = &qci;
   dci.enabledExtensionCount = uint32_t(exts.size());
   dci.ppEnabledExtensionNames = exts.data();
+  deviceExtensions = exts;
   VK_CHECK(vkCreateDevice(gpu, &dci, nullptr, &device));
   vkGetDeviceQueue(device, queueFamily, 0, &queue);
   vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR");
@@ -186,7 +188,13 @@ void Context::createDevice(VkSurfaceKHR surface) {
 #undef LOAD_RT
   }
 
+  // A implementação do VMA vem compilada dentro do NRI (mesmo commit), no modo de funções dinâmicas:
+  // o VMA busca os ponteiros do Vulkan a partir destes dois.
+  VmaVulkanFunctions vmaFns{};
+  vmaFns.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+  vmaFns.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
   VmaAllocatorCreateInfo aci{};
+  aci.pVulkanFunctions = &vmaFns;
   aci.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
   aci.physicalDevice = gpu;
   aci.device = device;

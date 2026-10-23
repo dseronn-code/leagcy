@@ -262,7 +262,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS});
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS});
-  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS});
+  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI});
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
   compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI});
@@ -401,6 +401,10 @@ void Renderer::createTargets() {
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
                           &t_.tmpB, &t_.tmpC, &t_.sceneColor})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+  t_.viewZ = rhi::createImage2D(ctx, R, VK_FORMAT_R32_SFLOAT, storage);
+  t_.nrdNormalRoughness = rhi::createImage2D(ctx, R, VK_FORMAT_A2B10G10R10_UNORM_PACK32, storage);
+  t_.diffuseDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+  t_.specularDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
@@ -421,14 +425,19 @@ void Renderer::createTargets() {
     }
     for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                             &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
-                            &t_.postB, &t_.bloom})
+                            &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
+                            &t_.specularDenoised})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   historyValid_ = false;
+  // O NRD cria texturas internas do tamanho da resolução de render: recriado junto com os alvos.
+  nrdReady_ = nrd_.init(ctx, R, kFramesInFlight);
 }
 
 void Renderer::destroyTargets() {
   rhi::Context& ctx = *ctx_;
+  nrd_.destroy();
+  nrdReady_ = false;
   for (int i = 0; i < 2; ++i) {
     for (rhi::Image* img : {&t_.depth[i], &t_.normal[i], &t_.visibility[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
                             &t_.historyLength[i], &t_.taa[i]})
@@ -437,7 +446,8 @@ void Renderer::destroyTargets() {
   }
   for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                           &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
-                          &t_.postB, &t_.bloom})
+                          &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
+                          &t_.specularDenoised})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -565,7 +575,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- 4. Iluminação (ray tracing) ----
   lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[1]),
-                                   storage(t_.diffuseRaw), storage(t_.specularRaw), tex(t_.visibility[cur])}, R);
+                                   storage(t_.diffuseRaw), storage(t_.specularRaw), tex(t_.visibility[cur]),
+                                   storage(t_.viewZ), storage(t_.nrdNormalRoughness)}, R);
   barrier();
   profiler_.mark(cmd, "iluminacao_rt");
 
@@ -577,7 +588,33 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // ---- 5. Denoiser ----
   const rhi::Image* diffuseFinal = &t_.diffuseRaw;
   const rhi::Image* specularFinal = &t_.specularRaw;
-  if (settings.denoiser) {
+  if (settings.denoiser && settings.nrd && nrdReady_) {
+    // NVIDIA NRD ReLAX: entradas em GENERAL, o NRD faz as próprias barreiras e devolve tudo em GENERAL.
+    NrdDenoiser::Inputs in;
+    in.motion = {t_.motion.handle, kMotionFormat};
+    in.normalRoughness = {t_.nrdNormalRoughness.handle, VK_FORMAT_A2B10G10R10_UNORM_PACK32};
+    in.viewZ = {t_.viewZ.handle, VK_FORMAT_R32_SFLOAT};
+    in.diffuse = {t_.diffuseRaw.handle, kHdrFormat};
+    in.specular = {t_.specularRaw.handle, kHdrFormat};
+    in.outDiffuse = {t_.diffuseDenoised.handle, kHdrFormat};
+    in.outSpecular = {t_.specularDenoised.handle, kHdrFormat};
+    NrdDenoiser::Frame f;
+    f.view = u.view;
+    f.proj = cam.projection(aspect);
+    f.prevView = historyValid_ ? prevView_ : f.view;
+    f.prevProj = historyValid_ ? prevProjNoJitter_ : f.proj;
+    // Nossa projeção desloca a imagem em +jitter: o pixel amostra a cena em uv − jitter (convenção do NRD).
+    f.jitterPixels = -jitterPx;
+    f.prevJitterPixels = historyValid_ ? prevJitterPixels_ : f.jitterPixels;
+    f.frameIndex = uint32_t(frameIndex_);
+    f.frameTimeMs = dt * 1000.0f;
+    f.resetHistory = !historyValid_;
+    nrd_.denoise(cmd, in, f);
+    barrier();
+    diffuseFinal = &t_.diffuseDenoised;
+    specularFinal = &t_.specularDenoised;
+    profiler_.mark(cmd, "denoiser");
+  } else if (settings.denoiser) {
     svgfTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion, tex(t_.diffuseRaw),
                                          tex(t_.specularRaw), tex(t_.diffuseHistory[prev]), tex(t_.specularHistory[prev]),
                                          tex(t_.moments[prev]), tex(t_.historyLength[prev]), storage(t_.diffuseIntegrated),
@@ -692,6 +729,9 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   prevViewProj_ = u.viewProjNoJitter;
   prevInvViewProj_ = u.invViewProj;
+  prevView_ = u.view;
+  prevProjNoJitter_ = cam.projection(aspect);
+  prevJitterPixels_ = -jitterPx;
   prevCameraPos_ = cam.position;
   prevJitter_ = jitterUv;
   historyValid_ = true;

@@ -17,6 +17,25 @@ layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 1, binding = 4, std430) buffer Reservoirs { Reservoir reservoirs[]; };
 layout(set = 1, binding = 5, rgba16f) uniform writeonly image2D outDiffuse;
 layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D outSpecular;
+// Entradas do NRD: z em espaço de câmera e normal + rugosidade na codificação R10G10B10A2 dele.
+layout(set = 1, binding = 8, r32f) uniform writeonly image2D outViewZ;
+layout(set = 1, binding = 9, rgb10_a2) uniform writeonly image2D outNrdNormalRoughness;
+
+// Distância gravada para raios que não acertam nada (céu): "infinito" dentro do float16.
+const float HIT_DIST_MISS = 60000.0;
+
+// NRD_FrontEnd_PackNormalAndRoughness com NRD_NORMAL_ENCODING = R10G10B10A2_UNORM (octaédrico com sinal,
+// John White 2017) e rugosidade linear — mesma conta do NRD.hlsli, em GLSL.
+vec4 packNrdNormalRoughness(vec3 n, float roughness) {
+  n /= abs(n.x) + abs(n.y) + abs(n.z);
+  vec3 r;
+  r.y = n.y * 0.5 + 0.5;
+  r.x = n.x * 0.5 + r.y;
+  r.y -= n.x * 0.5;
+  roughness = max(roughness, 1.5 / 512.0);  // não pode ser 0: o sinal guarda o de n.z
+  r.z = (n.z < 0.0 ? -roughness : roughness) * 0.5 + 0.5;
+  return vec4(r, 0.0);  // material 0
+}
 
 // Dimensões da sequência de Sobol por pixel (cada uma é um par 2D independente).
 const uint DIM_SUN = 0u, DIM_LIGHT = 1u, DIM_DIFFUSE = 2u, DIM_SPECULAR = 3u;
@@ -35,9 +54,11 @@ vec3 clampFirefly(vec3 c) {
 // Radiância que sai do ponto atingido em direção à origem do raio: BRDF completo (difuso + especular,
 // com compensação de energia) para o sol e uma luz local, reflexo do céu e emissão.
 // `bounce` separa as dimensões de Sobol do raio difuso e do especular.
-vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce) {
+vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float hitDist) {
   HitInfo hit;
+  hitDist = HIT_DIST_MISS;
   if (!traceHit(origin, dir, 1e4, hit)) return sampleSky(dir);
+  hitDist = hit.t;
   Material m = materials[hit.material];
   Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
   BrdfContext bc = makeBrdfContext(hit.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
@@ -107,8 +128,12 @@ void main() {
   if (g.depth <= 0.0) {
     imageStore(outDiffuse, id, vec4(0.0));
     imageStore(outSpecular, id, vec4(0.0));
+    imageStore(outViewZ, id, vec4(1e9));  // além do alcance do NRD: céu
+    imageStore(outNrdNormalRoughness, id, vec4(0.5, 0.5, 1.0, 0.0));
     return;
   }
+  imageStore(outViewZ, id, vec4((frame.view * vec4(g.P, 1.0)).z));
+  imageStore(outNrdNormalRoughness, id, packNrdNormalRoughness(g.N, g.roughness));
   vec3 diffuse = vec3(0.0), specular = vec3(0.0), kd, ks;
 #ifdef RAY_TRACING
   // Raios de GI/reflexo saem do ponto exato; raios de sombra, do ponto corrigido para o terminator.
@@ -135,6 +160,8 @@ void main() {
   // frame, então as amostras do mesmo frame e de frames seguintes continuam estratificadas entre si.
   uint spp = max(frame.quality0.x, 1u);
   float sunVisSum = 0.0;  // só para as visualizações de depuração
+  // Distância dos raios indiretos para o NRD: média no difuso, menor acerto no especular (NRD_FrontEnd_SpecHitDistAveraging).
+  float diffHitSum = 0.0, diffHitCount = 0.0, specHitMin = HIT_DIST_MISS + 1.0;
   for (uint k = 0u; k < spp; ++k) {
     SampleGen sg = makeSampleGen(uvec2(id), frame.frameInfo.x * spp + k);
 
@@ -155,7 +182,12 @@ void main() {
     // GI difusa: amostragem por cosseno => estimador = peso difuso × Li. Direções abaixo da faceta
     // geométrica (possíveis com normal map) atravessariam a superfície: são descartadas.
     vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
-    if (dot(dirD, g.Ng) > 0.0) diffuse += bc.diffuseWeight * traceRadiance(origin, dirD, sg, 0u);
+    if (dot(dirD, g.Ng) > 0.0) {
+      float t;
+      diffuse += bc.diffuseWeight * traceRadiance(origin, dirD, sg, 0u, t);
+      diffHitSum += t;
+      diffHitCount += 1.0;
+    }
 
     // Especular: amostra VNDF => peso = F × G2/G1 (≈ G1(L)) × compensação de energia.
     float a = alphaFromRoughness(g.roughness);
@@ -165,9 +197,12 @@ void main() {
     vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + g.N * Ht.z : g.N;
     vec3 Lr = reflect(-g.V, H);
     float NoLr = dot(g.N, Lr);
-    if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0)
-      specular += traceRadiance(origin, Lr, sg, 1u) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
+    if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0) {
+      float t;
+      specular += traceRadiance(origin, Lr, sg, 1u, t) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
                   G1_Smith(NoLr, a) * bc.energyCompensation;
+      specHitMin = min(specHitMin, t);
+    }
 #endif
   }
   diffuse /= float(spp);
@@ -224,6 +259,9 @@ void main() {
   // Rede de segurança: um único NaN se espalharia pelo denoiser e pelo histórico do TAA.
   if (any(isnan(diffuse)) || any(isinf(diffuse))) diffuse = vec3(0.0);
   if (any(isnan(specular)) || any(isinf(specular))) specular = vec3(0.0);
-  imageStore(outDiffuse, id, vec4(clampHalf(diffuse), 1.0));
-  imageStore(outSpecular, id, vec4(clampHalf(specular), 1.0));
+  specular /= specularDemodulation(bc);  // remultiplicado em composite.comp
+  float diffHit = diffHitCount > 0.0 ? diffHitSum / diffHitCount : 0.0;  // 0 = nenhum raio lançado
+  float specHit = specHitMin <= HIT_DIST_MISS ? specHitMin : 0.0;
+  imageStore(outDiffuse, id, vec4(clampHalf(diffuse), diffHit));
+  imageStore(outSpecular, id, vec4(clampHalf(specular), specHit));
 }

@@ -7,6 +7,7 @@
 
 #include "rhi/pass.h"
 #include "renderer/light_bvh.h"
+#include "renderer/nrd_denoiser.h"
 #include "rhi/profiler.h"
 #include "scene/camera.h"
 #include "scene/scene.h"
@@ -42,6 +43,7 @@ struct Settings {
   float manualEV100 = std::numeric_limits<float>::quiet_NaN();  // definido = exposição manual (EV100)
   float sunAngularRadius = 0.00465f;  // rad: tamanho real do disco solar (penumbras físicas)
   bool denoiser = true;
+  bool nrd = true;                  // NVIDIA NRD ReLAX (padrão); false = SVGF próprio (comparação)
   bool depthOfField = false;
   float dofFocusDistance = 0.0f;    // 0 = autofoco no centro da tela
   float dofAperture = 8.0f;         // CoC (px) de um objeto no infinito
@@ -103,7 +105,8 @@ class Renderer {
   struct Targets {
     std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
     rhi::Image diffuse, specular, motion, emissive;
-    std::array<rhi::Image, 2> visibility;  // visibility buffer (atual / anterior): x = objeto + 1 (0 = céu), y = triângulo
+    std::array<rhi::Image, 2> visibility;
+    rhi::Image viewZ, nrdNormalRoughness, diffuseDenoised, specularDenoised;  // entradas/saídas do NRD  // visibility buffer (atual / anterior): x = objeto + 1 (0 = céu), y = triângulo
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
@@ -146,7 +149,11 @@ class Renderer {
   uint64_t frameIndex_ = 0;
   bool historyValid_ = false;
   glm::mat4 prevViewProj_{1.0f};
-  glm::mat4 prevInvViewProj_{1.0f};  // com o jitter daquele frame (reconstrói a superfície anterior)
+  glm::mat4 prevInvViewProj_{1.0f};
+  glm::mat4 prevView_{1.0f}, prevProjNoJitter_{1.0f};
+  glm::vec2 prevJitterPixels_{0.0f};
+  NrdDenoiser nrd_;
+  bool nrdReady_ = false;  // com o jitter daquele frame (reconstrói a superfície anterior)
   std::vector<LightBvhNode> lightBvhNodes_;
   glm::vec3 prevCameraPos_{0.0f};
   glm::vec2 prevJitter_{0.0f};

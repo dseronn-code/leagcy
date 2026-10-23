@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.30)  # o NRD exige 3.30
 project(LegacyEngine LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -11,10 +11,10 @@ include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
 
 # Vulkan Memory Allocator (AMD) — alocador padrão da indústria.
+# (mesmo commit que o NRI usa: uma cópia só para os dois)
 FetchContent_Declare(vma
   GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-  GIT_TAG v3.1.0
-  GIT_SHALLOW TRUE)
+  GIT_TAG 3aa921224c154a0d2c43912bc88e1c42ce1f7607)
 FetchContent_MakeAvailable(vma)
 
 # GLM — matemática compatível com GLSL.
@@ -49,6 +49,48 @@ if(NOT glfw3_FOUND)
   FetchContent_MakeAvailable(glfw)
 endif()
 
+# NVIDIA NRD (denoisers ReLAX/ReBLUR, os do Cyberpunk 2077 com path tracing) + NRI (camada que embrulha o
+# nosso VkDevice). Licença "NVIDIA RTX SDKs" (uso comercial permitido, crédito à NVIDIA obrigatório — ver
+# docs/auditoria.md). As dependências do NRD são declaradas aqui por git (têm prioridade sobre os .zip que o
+# NRD declara). O ShaderMake baixa o DXC da Microsoft para compilar os shaders HLSL do NRD em SPIR-V.
+set(NRD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+set(NRD_NRI ON CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_SPIRV_SHADERS ON CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_DXIL_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_EMBEDS_DXBC_SHADERS OFF CACHE BOOL "" FORCE)
+set(NRD_SUPPORTS_QUAD_INTRINSICS OFF CACHE BOOL "" FORCE)  # exigiria VK_KHR_compute_shader_derivatives
+set(NRD_NORMAL_ENCODING "2" CACHE STRING "" FORCE)    # R10G10B10A2 octaédrico: o recomendado e testado pela NVIDIA
+set(NRD_ROUGHNESS_ENCODING "1" CACHE STRING "" FORCE) # rugosidade linear (a nossa)
+set(NRI_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
+set(NRI_ENABLE_D3D11_SUPPORT OFF CACHE BOOL "" FORCE)
+set(NRI_ENABLE_D3D12_SUPPORT OFF CACHE BOOL "" FORCE)
+set(NRI_ENABLE_NONE_SUPPORT OFF CACHE BOOL "" FORCE)
+set(NRI_ENABLE_NVTX_SUPPORT OFF CACHE BOOL "" FORCE)
+set(NRI_ENABLE_XLIB_SUPPORT OFF CACHE BOOL "" FORCE)
+set(NRI_ENABLE_WAYLAND_SUPPORT OFF CACHE BOOL "" FORCE)
+set(SHADERMAKE_TOOL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(shadermake
+  GIT_REPOSITORY https://github.com/NVIDIA-RTX/ShaderMake.git
+  GIT_TAG 3f01623a76b092ac127d2debd79a672f55d77665)
+FetchContent_Declare(mathlib
+  GIT_REPOSITORY https://github.com/NVIDIA-RTX/MathLib.git
+  GIT_TAG v11
+  GIT_SHALLOW TRUE)
+FetchContent_Declare(vulkan_headers  # usados só dentro do NRI
+  GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+  GIT_TAG v1.4.365
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_Declare(nri
+  GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRI.git
+  GIT_TAG v190
+  GIT_SHALLOW TRUE)
+FetchContent_Declare(nrd
+  GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRD.git
+  GIT_TAG v4.18.0
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(nrd)
+
 # ---- Shaders: GLSL -> SPIR-V em tempo de build ----
 file(GLOB SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert
@@ -76,7 +118,8 @@ add_executable(legacy ${ENGINE_SOURCES})
 add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
-target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw)
+target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI)
+target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 target_compile_definitions(legacy PRIVATE
   GLM_FORCE_DEPTH_ZERO_TO_ONE
   GLM_FORCE_RADIANS

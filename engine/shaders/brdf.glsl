@@ -57,6 +57,11 @@ struct BrdfContext {
   vec3 diffuseWeight;  // 1 - albedo do especular na direção de visão
 };
 
+// Refletância especular esperada na direção de visão (DFG × compensação de energia). O especular vai para
+// o denoiser dividido por ela e é multiplicado de volta na composição ("demodulação", como o NRD pede):
+// assim o filtro espacial não borra o detalhe das texturas de f0 junto com o ruído.
+vec3 specularDemodulation(BrdfContext c) { return max(specularAlbedo(c.f0, c.f90, c.dfg) * c.energyCompensation, vec3(0.01)); }
+
 BrdfContext makeBrdfContext(vec3 N, vec3 V, vec3 f0, float f90, float roughness, bool energyCompensation) {
   BrdfContext c;
   c.N = N;
