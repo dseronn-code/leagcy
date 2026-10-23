@@ -70,6 +70,24 @@ No Windows, com Visual Studio 2022 instalado, os mesmos comandos funcionam (o ex
 
 GPU recomendada para ray tracing: NVIDIA RTX 20xx+, AMD RX 6000+ ou Intel Arc.
 
+### Windows (passo a passo)
+
+1. Instale (todos gratuitos): **Visual Studio 2022 Community** com a carga "Desenvolvimento para desktop com C++",
+   **Git** (git-scm.com) e o **Vulkan SDK** (vulkan.lunarg.com/sdk/home — marque os componentes padrão).
+   Driver da GPU atualizado (NVIDIA: 550 ou mais novo).
+2. No "Developer PowerShell for VS 2022":
+
+```powershell
+git clone -b ccr-5423dd89-y3br6e https://github.com/dseronn-code/leagcy.git
+cd leagcy\engine
+cmake -P tools/fetch_assets.cmake          # ~2,5 GB (Bistro incluído), uma vez só
+cmake -S . -B build
+cmake --build build --config Release
+.\build\Release\legacy.exe
+```
+
+O console mostra, a cada 3 segundos, o tempo de GPU de cada passe (ms).
+
 ## Rodar
 
 ```bash

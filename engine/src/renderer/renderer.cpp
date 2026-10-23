@@ -1,6 +1,7 @@
 #include "renderer/renderer.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <cstring>
 
@@ -243,6 +244,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
                       VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                       VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
   });
+  profiler_.init(ctx, kFramesInFlight);
   createTargets();
 }
 
@@ -397,13 +399,16 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   barrier();  // ordena contra o frame anterior (mesmos alvos)
 
+  profiler_.beginFrame(cmd, slot);
   // ---- 0. Cena dinâmica ----
   updateDynamicScene(cmd, slot);
   barrier();
+  profiler_.mark(cmd, "cena");
 
   // ---- 1. Atmosfera ----
   skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view)}, kSkyLutExtent);
   barrier();
+  profiler_.mark(cmd, "ceu");
 
   // ---- 2. G-buffer ----
   {
@@ -439,6 +444,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     vkCmdEndRendering(cmd);
   }
   barrier();
+  profiler_.mark(cmd, "gbuffer");
 
   const Binding gDepth = tex(t_.depth[cur]), gNormal = tex(t_.normal[cur]), gAlbedo = tex(t_.albedo);
   const Binding gDepthPrev = tex(t_.depth[prev]), gNormalPrev = tex(t_.normal[prev]), gMotion = tex(t_.motion);
@@ -450,11 +456,13 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   restirSpatialPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, Binding::storageBuffer(t_.reservoirs[0]),
                                         Binding::storageBuffer(t_.reservoirs[1])}, R);
   barrier();
+  profiler_.mark(cmd, "restir");
 
   // ---- 4. Iluminação (ray tracing) ----
   lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, Binding::storageBuffer(t_.reservoirs[1]),
                                    storage(t_.diffuseRaw), storage(t_.specularRaw)}, R);
   barrier();
+  profiler_.mark(cmd, "iluminacao_rt");
 
   // ---- 5. Denoiser ----
   const rhi::Image* diffuseFinal = &t_.diffuseRaw;
@@ -480,16 +488,19 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     atrous(t_.specularHistory[cur], t_.tmpC, 2, 2.0f);
     diffuseFinal = &t_.tmpA;
     specularFinal = &t_.tmpC;
+    profiler_.mark(cmd, "denoiser");
   }
 
   // ---- 6. Composição ----
   compositePass_.dispatch(cmd, gs, {gDepth, gNormal, gAlbedo, tex(t_.emissive), tex(*diffuseFinal), tex(*specularFinal),
                                     storage(t_.sceneColor)}, R);
   barrier();
+  profiler_.mark(cmd, "composicao");
 
   // ---- 7. TAA + upscaling ----
   taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur])}, O);
   barrier();
+  profiler_.mark(cmd, "taa");
   const rhi::Image* color = &t_.taa[cur];
 
   // ---- 8. Auto-exposição ----
@@ -498,6 +509,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   ExposurePush ep{settings.exposureCompensation, settings.manualEV100, 3.0f, 1.5f};
   exposurePass_.dispatch(cmd, gs, {Binding::storageBuffer(histogram_), Binding::storageBuffer(exposureState_)}, {1, 1}, &ep);
   barrier();
+  profiler_.mark(cmd, "exposicao");
 
   // ---- 9. Profundidade de campo / motion blur ----
   if (settings.depthOfField) {
@@ -514,6 +526,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     color = &t_.postB;
   }
 
+  profiler_.mark(cmd, "dof_motionblur");
   // ---- 10. Bloom ----
   uint32_t mips = t_.bloom.mipLevels;
   auto mipExtent = [&](uint32_t m) {
@@ -534,6 +547,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     barrier();
   }
 
+  profiler_.mark(cmd, "bloom");
   // ---- 11. Tonemap -> saída ----
   rhi::imageBarrier(cmd, output, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                     VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -552,6 +566,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                       {tex(*color), Binding::sampled(t_.bloomMips[0], linear_), Binding::storageBuffer(exposureState_)}, &tp);
   vkCmdDraw(cmd, 3, 1, 0, 0);
   vkCmdEndRendering(cmd);
+  profiler_.mark(cmd, "tonemap");
 
   prevViewProj_ = u.viewProjNoJitter;
   prevCameraPos_ = cam.position;
@@ -629,6 +644,7 @@ void Renderer::destroy() {
   rhi::Context& ctx = *ctx_;
   vkDeviceWaitIdle(ctx.device);
   destroyTargets();
+  profiler_.destroy();
   rhi::destroyImage(ctx, skyLut_);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
   for (auto* arr : {&frameUbo_, &objectBuffers_, &jointBuffers_, &lightBuffers_})
