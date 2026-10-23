@@ -35,4 +35,17 @@ foreach(model ${MODELS})
     download("${BASE}/${model}/glTF/${uri}" "${dir}/${uri}")
   endforeach()
 endforeach()
+
+# Bistro (Amazon Lumberyard / NVIDIA, licença MIT, ~2,4 GB): cena de teste de nível profissional.
+# Versão de github.com/zeux/niagara_bistro (git comum, sem LFS; texturas BC7 em DDS).
+set(BISTRO "${ROOT}/Bistro")
+if(NOT EXISTS "${BISTRO}/bistro.gltf")
+  message(STATUS "Bistro (2,4 GB, pode demorar)")
+  find_package(Git REQUIRED)
+  execute_process(COMMAND "${GIT_EXECUTABLE}" clone --depth 1 https://github.com/zeux/niagara_bistro.git "${BISTRO}"
+                  RESULT_VARIABLE rc)
+  if(NOT rc EQUAL 0)
+    message(FATAL_ERROR "Falha ao clonar o Bistro")
+  endif()
+endif()
 message(STATUS "Assets prontos em ${ROOT}")

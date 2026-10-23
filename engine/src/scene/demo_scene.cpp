@@ -1,6 +1,7 @@
 #include "scene/demo_scene.h"
 
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <random>
 
@@ -246,7 +247,26 @@ bool buildSponza(Scene& s, Camera& camera, const DemoOptions& opt) {
 
 }  // namespace
 
+// Qualquer arquivo glTF/GLB: câmera posicionada pela caixa envolvente.
+bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
+  if (!loadGltf(s, opt.name, glm::mat4(1.0f))) return false;
+  glm::vec3 lo, hi;
+  s.bounds(lo, hi);
+  LOG_INFO("Arquivo: limites (%.1f %.1f %.1f) .. (%.1f %.1f %.1f)", lo.x, lo.y, lo.z, hi.x, hi.y, hi.z);
+  glm::vec3 c = 0.5f * (lo + hi);
+  camera.position = c + glm::vec3(0.0f, 0.1f * (hi.y - lo.y), 0.0f);
+  camera.lookAt(c + glm::vec3(hi.x - lo.x, 0.0f, 0.0f));
+  s.sunDirection = sunFrom(35.0f, 120.0f);
+  s.sunIntensity = opt.night ? 0.0f : 20.0f;
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
+  auto endsWith = [&](const char* ext) {
+    size_t n = std::strlen(ext);
+    return opt.name.size() > n && opt.name.compare(opt.name.size() - n, n, ext) == 0;
+  };
+  if (endsWith(".gltf") || endsWith(".glb")) return buildFromFile(scene, camera, opt);
   if (opt.name == "outdoor") return buildOutdoor(scene, camera, opt);
   return buildSponza(scene, camera, opt);
 }

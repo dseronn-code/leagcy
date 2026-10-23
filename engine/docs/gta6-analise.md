@@ -1,6 +1,6 @@
 # O que tem no motor do GTA 6 e o que falta no Legacy Engine
 
-Pesquisa de 22/10/2026, status atualizado no Dia 3. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Series).
+Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.md](auditoria.md)): um item só é ✅ se passar no teste de qualidade. O GTA 6 está previsto para 19/11/2026 (PS5 e Xbox Series).
 
 **Sobre as fontes:** a Rockstar quase não publica detalhes técnicos do RAGE. O nome "RAGE 9" aparece só em blogs de fãs. O que existe de mais confiável é a análise da Digital Foundry sobre o Trailer 2 (capturado em um PS5 comum). O resto da lista vem do que já se sabe do GTA V e do RDR2, de patentes da Take-Two e do que todo mundo aberto AAA precisa.
 
@@ -23,11 +23,11 @@ Pesquisa de 22/10/2026, status atualizado no Dia 3. O GTA 6 está previsto para 
 | Recurso | Legacy | Observação |
 |---|---|---|
 | GI por ray tracing | 🟡 | 1 rebote com denoiser SVGF (Dia 2); falta cache de radiância multi-rebote |
-| Reflexos por ray tracing | ✅ | VNDF + denoiser (Dia 2); SSR híbrido não necessário por enquanto |
-| Sombra do sol | ✅ | Ray tracing, com penumbra física |
+| Reflexos por ray tracing | 🟡 | Funciona, mas o especular estoura float16 e o denoiser não reprojeta reflexos (auditoria 1.2, 1.13) |
+| Sombra do sol | 🟡 | Penumbra física, mas offset do raio com normal de shading causa acne (auditoria 1.11) |
 | Shadow maps em cascata (fallback e performance) | ❌ | |
-| Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR DI com sombras (Dia 2) |
-| Céu e atmosfera física | ✅ | |
+| Milhares de luzes (neon, faróis, postes) | 🟡 | ReSTIR básico: amostragem uniforme, reuso enviesado, sem ReGIR (auditoria 1.7–1.9) |
+| Céu e atmosfera física | 🟡 | Múltiplo espalhamento aproximado por constante; falta a pipeline completa de LUTs (auditoria 3.6) |
 | Nuvens volumétricas, raios de luz (god rays) | ❌ | Hoje só temos névoa por altura |
 | Ciclo dia/noite | 🟡 | O sol se move; faltam lua, estrelas e luzes da cidade |
 
@@ -35,8 +35,8 @@ Pesquisa de 22/10/2026, status atualizado no Dia 3. O GTA 6 está previsto para 
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| Denoiser | ✅ | SVGF (Dia 2); evolução: ReLAX/ReBLUR (NVIDIA NRD) |
-| TAA | ✅ | TAAU com clipping YCoCg (Dia 2) |
+| Denoiser | 🟡 | SVGF com estouro de float16 e sem anti-firefly — causa dos brilhinhos (auditoria 1.1, 1.13) |
+| TAA | 🟡 | Funciona, mas a reconstrução bilinear deixa a imagem mole (auditoria 4.1) |
 | Upscaling (FSR, DLSS, XeSS) | 🟡 | TAAU próprio (Dia 2); faltam DLSS/FSR 3/XeSS |
 | Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | 🟡 | Tudo menos lens flare (Dia 2) |
 
@@ -44,7 +44,7 @@ Pesquisa de 22/10/2026, status atualizado no Dia 3. O GTA 6 está previsto para 
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| PBR | ✅ | Com texturas glTF (Dia 2) |
+| PBR | 🟡 | Sem unidades físicas, sem compensação de energia, sem especular/glossiness (auditoria 2.3, 2.5, 3.4) |
 | Texturas, normal maps, mipmaps, compressão BC7 | 🟡 | Tudo menos BC7 (Dia 2) |
 | Pintura de carro (clearcoat, flocos metálicos) | ❌ | |
 | Vidro e transparência | ❌ | |
