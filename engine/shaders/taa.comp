@@ -52,7 +52,7 @@ void main() {
   ivec2 maxP = ivec2(frame.renderSize.xy) - 1;
 
   // Reconstrução da amostra atual por kernel (Karis, "High Quality Temporal Supersampling", 2014): os 3x3
-  // pixels internos vizinhos pesados por Blackman-Harris (aprox. gaussiana) da distância até o centro do pixel
+  // pixels internos vizinhos pesados por uma gaussiana da distância até o centro do pixel
   // de saída — no lugar da leitura bilinear, que borrava a imagem a cada frame. Peso extra 1/(1+L) para um
   // ponto muito brilhante não dominar (vagalumes). A mesma vizinhança dá os limites do histórico e o pixel mais
   // próximo (vetor de movimento dilatado).
@@ -68,7 +68,9 @@ void main() {
       m1 += c;
       m2 += c * c;
       vec2 dq = vec2(rp + ivec2(x, y)) - renderPos;  // em pixels internos
-      float w = exp(-2.29 * dot(dq, dq));           // Blackman-Harris de raio ~1,5 px
+      // Gaussiana estreita (σ = 0,25 px interno): medido em tools/taa.py, a largura do Blackman-Harris clássico
+      // (exp(-2,29 d²)) amolecia a imagem; k = 8 dá a maior nitidez com o menor erro contra a referência 4x.
+      float w = exp(-8.0 * dot(dq, dq));
       wmax = max(wmax, w);
       w /= 1.0 + luminance(rgb);
       sum += rgb * w;

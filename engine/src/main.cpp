@@ -92,6 +92,7 @@ Options parseArgs(int argc, char** argv) {
       o.render.nrdReblur = v == "reblur";
     }
     else if (a == "--nrd-validation") o.render.nrdValidation = true;
+    else if (a == "--sharpness") o.render.sharpness = glm::clamp(float(std::atof(next())), 0.0f, 1.0f);
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
     else if (a == "--restir-no-reuse") {
@@ -121,6 +122,7 @@ Options parseArgs(int argc, char** argv) {
           "  --sun-elevation G --sun-azimuth G   posição do sol em graus\n"
           "  --debug-view sol|sol-luz|normal|nl|luzes|luzes-ref  valor cru (depuração)\n"
           "  --restir-no-reuse temporal|spatial|all   desliga reusos do ReSTIR (depuração)\n"
+          "  --sharpness X              nitidez RCAS na saída (0 a 1, padrão 0,5)\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause]\n");
