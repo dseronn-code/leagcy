@@ -5,7 +5,11 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | Biblioteca | Uso | Licença | Obrigações |
 |---|---|---|---|
 | [NVIDIA NRD](https://github.com/NVIDIA-RTX/NRD) v4.18.0 | Denoiser ReLAX | NVIDIA RTX SDKs License | Ver abaixo |
-| [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI) v190 | Camada que liga o NRD ao nosso Vulkan | MIT | Manter o aviso de copyright |
+| [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI) v190 | Camada que liga o NRD e os upscalers ao nosso Vulkan | MIT | Manter o aviso de copyright |
+| [NVIDIA DLSS](https://github.com/NVIDIA/DLSS) v310.9.1 (opção `LEGACY_DLSS`) | Upscaling DLSS (`--upscaler dlss`) | NVIDIA RTX SDKs License | Ver abaixo |
+| [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) v1.1.4 (opção `LEGACY_FSR`, Windows) | FSR 3 (`--upscaler fsr`) | MIT | Manter o aviso |
+| AMD FidelityFX RCAS (FSR 1) | Nitidez da saída (`shaders/tonemap.frag`) | MIT | Manter o aviso (no shader) |
+| [NVIDIA Image Scaling](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling) (dentro do NRI) | Só teste da integração (`--upscaler nis`) | MIT | Manter o aviso |
 | [NVIDIA ShaderMake](https://github.com/NVIDIA-RTX/ShaderMake), [MathLib](https://github.com/NVIDIA-RTX/MathLib) | Ferramentas de build do NRD | MIT / NVIDIA | Só usadas na compilação |
 | [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler) | Compila os shaders do NRD (só na compilação) | Licença LLVM (University of Illinois/NCSA) | Não é distribuído com o motor |
 | [Vulkan Memory Allocator](https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator) | Memória de GPU | MIT | Manter o aviso |
@@ -28,3 +32,16 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
   quanto a licença da NVIDIA — na prática, os clientes também aceitam a licença do NRD. O SVGF próprio
   (`--denoiser svgf`) continua no motor como alternativa sem licença de terceiros.
 - Não usar em sistemas críticos de segurança (aviação, medicina, uso militar).
+
+## NVIDIA DLSS — o que a licença exige (texto completo em `build/_deps/ngx-src/LICENSE.txt`)
+
+Mesma licença do NRD ("NVIDIA RTX SDKs"), com duas obrigações a mais, específicas do DLSS:
+
+- **Logo/marca da NVIDIA na tela de abertura (splash screen)**, na janela "Sobre" (se existir) e nos créditos
+  de jogos, informando que o produto usa o DLSS.
+- **Avisar a NVIDIA antes do lançamento comercial** de qualquer produto com DLSS, pelo formulário
+  https://developer.nvidia.com/sw-notification (empresa, desenvolvedora, SDK usado, nome do produto, plataforma,
+  data prevista e link). Material de marketing com as marcas "NVIDIA RTX" precisa de aprovação prévia da NVIDIA
+  (enviar amostra 2 semanas antes).
+- As bibliotecas do DLSS (`nvngx_dlss.dll` / `libnvidia-ngx-dlss.so`) podem ser distribuídas junto com o jogo.
+- Para um build sem DLSS (sem essas obrigações): `cmake -DLEGACY_DLSS=OFF` — o motor usa o TAAU próprio ou o FSR.

@@ -92,6 +92,13 @@ Options parseArgs(int argc, char** argv) {
       o.render.nrdReblur = v == "reblur";
     }
     else if (a == "--nrd-validation") o.render.nrdValidation = true;
+    else if (a == "--upscaler") {  // taau | dlss | fsr
+      std::string v = next();
+      o.render.upscaler = v == "dlss" ? renderer::Upscaler::Kind::Dlss
+                        : v == "fsr"  ? renderer::Upscaler::Kind::Fsr
+                        : v == "nis"  ? renderer::Upscaler::Kind::Nis  // só teste da integração
+                                      : renderer::Upscaler::Kind::None;
+    }
     else if (a == "--sharpness") o.render.sharpness = glm::clamp(float(std::atof(next())), 0.0f, 1.0f);
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
@@ -123,6 +130,8 @@ Options parseArgs(int argc, char** argv) {
           "  --debug-view sol|sol-luz|normal|nl|luzes|luzes-ref  valor cru (depuração)\n"
           "  --restir-no-reuse temporal|spatial|all   desliga reusos do ReSTIR (depuração)\n"
           "  --sharpness X              nitidez RCAS na saída (0 a 1, padrão 0,5)\n"
+          "  --upscaler taau|dlss|fsr   TAA/TAAU do motor (padrão), NVIDIA DLSS (RTX) ou AMD FSR 3; com --scale:\n"
+          "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause]\n");

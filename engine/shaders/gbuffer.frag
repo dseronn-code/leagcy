@@ -2,7 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "frame.glsl"
 #include "scene.glsl"
-#define MATERIAL_SAMPLE(i, uv) texture(textures[nonuniformEXT(i)], uv)
+#define MATERIAL_SAMPLE(i, uv) texture(textures[nonuniformEXT(i)], uv, textureMipBias())
 #include "material.glsl"
 
 layout(location = 0) in vec3 vWorldPos;
