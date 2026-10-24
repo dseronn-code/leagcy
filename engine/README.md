@@ -39,7 +39,7 @@ Vídeos (Dia 3): [Sponza à noite com personagens](docs/videos/dia03_sponza_noit
 | Milhares de luzes | **ReSTIR DI**: RIS + reuso temporal e espacial + visibilidade | `shaders/restir*.glsl` |
 | Iluminação global | 1 rebote difuso traçado + reflexões VNDF (GGX) | `shaders/lighting.glsl` |
 | Denoiser | **SVGF**: acumulação temporal com reprojeção + à-trous guiado por variância | `shaders/svgf_*.comp` |
-| Anti-aliasing / upscaling | **TAAU** próprio: jitter Halton, Catmull-Rom, clipping YCoCg; renderiza a 67% | `shaders/taa.comp` |
+| Anti-aliasing / upscaling | **TAAU** próprio (reconstrução gaussiana, Catmull-Rom, clipping YCoCg, nitidez RCAS) ou **NVIDIA DLSS 4** / **AMD FSR 3** (`--upscaler`), com volta automática ao TAAU | `shaders/taa.comp`, `src/renderer/upscaler.cpp` |
 | Pós-processamento | Auto-exposição por histograma, bloom físico (COD:AW), DOF com autofoco, motion blur, ACES | `shaders/` |
 | Materiais | PBR glTF (metálico/rugosidade, especular/glossiness, KHR specular/ior); GGX com compensação de energia (Turquin), difuso com conservação de energia, AA especular | `shaders/brdf.glsl` |
 | Céu | Atmosfera física Rayleigh/Mie/ozônio + sky-view LUT (Hillaire 2020) | `shaders/atmosphere.glsl` |
@@ -58,8 +58,10 @@ Cena dinâmica (skinning, refit BLAS, TLAS) → Sky LUT → G-buffer → ReSTIR 
 
 Requisitos: **CMake 3.30+**, compilador C++20, [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) (traz o `glslangValidator`) e Git.
 VMA, GLM, GLFW, cgltf, stb e o **NVIDIA NRD** (denoiser, com NRI, ShaderMake e o compilador DXC) são baixados
-automaticamente na primeira configuração (~60 MB). Licenças e obrigações em [docs/licencas.md](docs/licencas.md)
-— o NRD exige crédito à NVIDIA na tela de créditos de quem distribuir um jogo feito com o motor.
+automaticamente na primeira configuração (~60 MB), além do **SDK do DLSS** (~1,6 GB, com bibliotecas de todas as
+plataformas; `-DLEGACY_DLSS=OFF` pula) e, no Windows, do **AMD FidelityFX SDK** para o FSR 3 (~470 MB; `-DLEGACY_FSR=OFF`
+pula). Licenças e obrigações em [docs/licencas.md](docs/licencas.md) — o NRD exige crédito à NVIDIA nos créditos,
+e o DLSS exige o logo da NVIDIA na tela de abertura e avisar a NVIDIA antes de um lançamento comercial.
 
 ```bash
 cd engine
@@ -101,6 +103,7 @@ O console mostra, a cada 3 segundos, o tempo de GPU de cada passe (ms).
 ./build/legacy --quality cinema            # presets: baixo | medio | alto | ultra (padrão) | cinema
 ./build/legacy --fullscreen                # tela cheia na resolução nativa do monitor
 ./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
+./build/legacy --upscaler dlss --scale 0.67 # DLSS qualidade (RTX); --scale 1 = DLAA; --upscaler fsr = AMD FSR 3
 ./build/legacy --validation                # camadas de validação do Vulkan (debug)
 ./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png
 ./build/legacy --scene outdoor --sun-elevation 3   # pôr do sol (atmosfera física)
@@ -117,7 +120,8 @@ Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sob
 
 ## Limitações conhecidas
 
-- Upscaling é o TAAU próprio; DLSS / FSR 3 / XeSS ainda não estão integrados.
+- DLSS e FSR 3 estão integrados mas ainda não foram vistos rodando numa RTX/Radeon (aqui só há GPU de software);
+  FSR 3 só no build do Windows; XeSS não existe para Vulkan.
 - Texturas sobem para a GPU sem compressão (BC7 pendente), então cenas grandes usam bastante VRAM.
 - Materiais com transparência (`BLEND`) são tratados como recorte por alfa.
 - Sem ray tracing (`--no-rt`) não há sombras; shadow maps em cascata entram depois.
@@ -148,4 +152,5 @@ Comparação detalhada com o motor do GTA 6: [docs/gta6-analise.md](docs/gta6-an
 - [ ] Atmosfera viva: nuvens volumétricas, clima, chuva e superfícies molhadas
 - [ ] Água: oceano FFT, rios, espuma, cena subaquática
 - [ ] Personagens AAA: pele com SSS, cabelo por fios, tecido
-- [ ] DLSS / FSR 3, texturas BC7, shadow maps em cascata (fallback sem RT)
+- [x] DLSS 4 / FSR 3
+- [ ] Texturas BC7, shadow maps em cascata (fallback sem RT)

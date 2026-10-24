@@ -124,21 +124,38 @@ void Context::createDevice(VkSurfaceKHR surface) {
     exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
     exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
   }
+  // Exigidas pelo DLSS (NVIDIA NGX) no Vulkan; só existem em GPUs NVIDIA. Sem elas o motor usa o TAA próprio.
+  for (const char* e : {VK_NVX_BINARY_IMPORT_EXTENSION_NAME, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME})
+    if (hasDeviceExtension(gpu, e)) exts.push_back(e);
 
-  // Cadeia de features: Vulkan 1.2/1.3 core + ray tracing.
+  // Cadeia de features: Vulkan 1.1/1.2/1.3 core + ray tracing. Liga TUDO o que a GPU suporta nas estruturas
+  // core (menos robustez, que custa desempenho), como o NRI faz no device que ele mesmo cria: o NRI, o DLSS (NGX),
+  // o FSR (FidelityFX) e o NIS consultam o que a GPU suporta e assumem que está ligado (timeline semaphores,
+  // float16, descritores "update after bind"...). As exigidas pelo motor são forçadas abaixo.
+  VkPhysicalDeviceVulkan13Features s13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+  VkPhysicalDeviceVulkan12Features s12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+  VkPhysicalDeviceVulkan11Features s11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+  VkPhysicalDeviceFeatures2 s2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+  s12.pNext = &s13;
+  s11.pNext = &s12;
+  s2.pNext = &s11;
+  vkGetPhysicalDeviceFeatures2(gpu, &s2);
+  s2.features.robustBufferAccess = VK_FALSE;
+  s13.robustImageAccess = VK_FALSE;
+
   VkPhysicalDeviceRayQueryFeaturesKHR rq{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
   rq.rayQuery = VK_TRUE;
   VkPhysicalDeviceAccelerationStructureFeaturesKHR as{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
   as.accelerationStructure = VK_TRUE;
   as.pNext = &rq;
 
-  VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+  VkPhysicalDeviceVulkan13Features f13 = s13;
   f13.dynamicRendering = VK_TRUE;
   f13.synchronization2 = VK_TRUE;
   f13.maintenance4 = VK_TRUE;
   f13.pNext = rayTracing ? &as : nullptr;
 
-  VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+  VkPhysicalDeviceVulkan12Features f12 = s12;
   f12.bufferDeviceAddress = VK_TRUE;
   f12.descriptorIndexing = VK_TRUE;
   f12.runtimeDescriptorArray = VK_TRUE;
@@ -147,6 +164,8 @@ void Context::createDevice(VkSurfaceKHR surface) {
   f12.scalarBlockLayout = VK_TRUE;
   f12.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
   f12.pNext = &f13;
+  VkPhysicalDeviceVulkan11Features f11 = s11;
+  f11.pNext = &f12;
 
   VkPhysicalDeviceFeatures supported{};
   vkGetPhysicalDeviceFeatures(gpu, &supported);
@@ -156,13 +175,14 @@ void Context::createDevice(VkSurfaceKHR surface) {
   if (!supported.shaderStorageImageExtendedFormats) FATAL("A GPU não suporta shaderStorageImageExtendedFormats.");
 
   VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+  f2.features = s2.features;
   f2.features.geometryShader = VK_TRUE;
   f2.features.shaderStorageImageExtendedFormats = VK_TRUE;
   f2.features.samplerAnisotropy = VK_TRUE;
   f2.features.shaderInt64 = VK_TRUE;
   f2.features.shaderStorageImageReadWithoutFormat = VK_TRUE;
   f2.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-  f2.pNext = &f12;
+  f2.pNext = &f11;
 
   float priority = 1.0f;
   VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};

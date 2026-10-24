@@ -36,7 +36,7 @@ struct FrameUniforms {
   glm::uvec4 frameInfo;
   glm::uvec4 quality0;  // spp, candidatos ReSTIR, vizinhos ReSTIR, amostras DOF
   glm::vec4 quality1;   // mip nos raios, limite de vagalumes, amostras de motion blur, compensação de energia
-  glm::uvec4 quality2;  // x = correção de viés do ReSTIR, y = sinal no formato do ReBLUR
+  glm::uvec4 quality2;  // x = correção de viés do ReSTIR, y = sinal no formato do ReBLUR, z = mip bias (bits de float)
   glm::vec4 environment;  // x = céu uniforme (nits), y = modo de depuração, z = exposição da depuração,
                           // w = reusos do ReSTIR desligados (bit 0 temporal, bit 1 espacial)
 };
@@ -379,6 +379,9 @@ void Renderer::createTargets() {
   float scale = glm::clamp(settings.quality.renderScale, 0.25f, 1.0f);
   renderExtent_ = {std::max(1u, uint32_t(float(outputExtent_.width) * scale + 0.5f)),
                    std::max(1u, uint32_t(float(outputExtent_.height) * scale + 0.5f))};
+  // DLSS/FSR: o fabricante define a resolução interna do modo mais próximo da escala pedida.
+  upscalerReady_ = settings.upscaler != Upscaler::Kind::None && upscaler_.init(ctx, settings.upscaler, outputExtent_, scale);
+  if (upscalerReady_) renderExtent_ = upscaler_.renderExtent();
   const VkImageUsageFlags attach = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   VkExtent2D R = renderExtent_, O = outputExtent_;
@@ -432,6 +435,16 @@ void Renderer::createTargets() {
                             &t_.specularDenoised, &t_.nrdValidation})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
+  if (upscalerReady_) {
+    auto img = [](const rhi::Image& i, VkImageUsageFlags usage) { return Upscaler::Image{i.handle, i.format, i.extent, usage}; };
+    Upscaler::Inputs in{};
+    in.color = img(t_.sceneColor, storage);
+    for (int i = 0; i < 2; ++i) in.depth[i] = img(t_.depth[i], VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    in.motion = img(t_.motion, attach | VK_IMAGE_USAGE_STORAGE_BIT);
+    in.output[0] = img(t_.taa[0], storage);
+    in.output[1] = img(t_.taa[1], storage);
+    upscalerReady_ = upscaler_.bind(in);
+  }
   historyValid_ = false;
   // O NRD cria texturas internas do tamanho da resolução de render: recriado junto com os alvos.
   nrdReady_ = nrd_.init(ctx, R, kFramesInFlight, settings.nrdReblur);
@@ -441,6 +454,8 @@ void Renderer::destroyTargets() {
   rhi::Context& ctx = *ctx_;
   nrd_.destroy();
   nrdReady_ = false;
+  upscaler_.destroy();
+  upscalerReady_ = false;
   for (int i = 0; i < 2; ++i) {
     for (rhi::Image* img : {&t_.depth[i], &t_.normal[i], &t_.visibility[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
                             &t_.historyLength[i], &t_.taa[i]})
@@ -474,8 +489,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   auto storage = [&](const rhi::Image& img) { return Binding::storageImage(img.view); };
   auto barrier = [&]() { rhi::memoryBarrier(cmd); };
 
-  // ---- Uniforms: jitter Halton (16 posições) em pixels internos ----
-  uint32_t hi = uint32_t(frameIndex_ % 16) + 1;
+  // ---- Uniforms: jitter Halton (16 posições, ou as que o DLSS/FSR pedem) em pixels internos ----
+  uint32_t hi = uint32_t(frameIndex_ % (upscalerReady_ ? upscaler_.jitterPhases() : 16u)) + 1;
   glm::vec2 jitterPx(halton(hi, 2) - 0.5f, halton(hi, 3) - 0.5f);
   glm::vec2 jitterUv = jitterPx / glm::vec2(R.width, R.height);
   float aspect = float(O.width) / float(O.height);
@@ -502,7 +517,9 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.quality1 = glm::vec4(q.rayTextureLod, q.fireflyLimit, float(std::max(q.motionBlurSamples, 1u)),
                          settings.energyCompensation ? 1.0f : 0.0f);
   const bool reblurSignal = settings.denoiser && settings.nrd && settings.nrdReblur && settings.debugView == kDebugNone;
-  u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, reblurSignal ? 1u : 0u, 0u, 0u);
+  // Mip bias das texturas de material: o DLSS/FSR reconstrói na resolução de saída e pede texturas mais nítidas.
+  const float mipBias = upscalerReady_ ? upscaler_.mipBias() : 0.0f;
+  u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, reblurSignal ? 1u : 0u, glm::floatBitsToUint(mipBias), 0u);
   // z: exposição das visualizações de luz (EV100 manual; EV 0 sem --exposure).
   float debugEV = std::isnan(settings.manualEV100) ? 0.0f : settings.manualEV100;
   u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), std::exp2(-debugEV) / 1.2f,
@@ -669,8 +686,19 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   barrier();
   profiler_.mark(cmd, "composicao");
 
-  // ---- 7. TAA + upscaling ----
-  taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur])}, O);
+  // ---- 7. TAA + upscaling (do motor, ou DLSS / FSR) ----
+  if (upscalerReady_) {
+    Upscaler::Frame uf{};
+    uf.jitterPixels = jitterPx;
+    uf.zNear = cam.nearPlane;
+    uf.verticalFov = cam.fovY;
+    uf.frameTimeMs = dt * 1000.0f;
+    uf.index = cur;
+    uf.resetHistory = !historyValid_;
+    upscaler_.dispatch(cmd, uf);
+  } else {
+    taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur])}, O);
+  }
   barrier();
   profiler_.mark(cmd, "taa");
   color = &t_.taa[cur];

@@ -89,6 +89,25 @@ FetchContent_Declare(nrd
   GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRD.git
   GIT_TAG v4.18.0
   GIT_SHALLOW TRUE)
+
+# Upscalers dos fabricantes pela extensão Upscaler do NRI (src/renderer/upscaler.cpp). Sem eles o motor usa o
+# próprio TAA/TAAU; com eles, --upscaler dlss|fsr escolhe em tempo de execução (volta ao TAAU se a GPU não suportar).
+#  - DLSS: SDK oficial da NVIDIA (licença NVIDIA DLSS: logo na tela de abertura e aviso à NVIDIA antes de lançar um
+#    produto comercial — ver docs/licencas.md). Download de ~1,6 GB (repositório com bibliotecas de todas as plataformas).
+#  - FSR 3: AMD FidelityFX SDK (MIT). O NRI só o compila no Windows.
+option(LEGACY_DLSS "NVIDIA DLSS Super Resolution (GPUs RTX)" ON)
+option(LEGACY_FSR "AMD FSR 3 (FidelityFX SDK; só Windows)" ${WIN32})
+set(NRI_ENABLE_NGX_SDK ${LEGACY_DLSS} CACHE BOOL "" FORCE)
+set(NRI_ENABLE_FFX_SDK ${LEGACY_FSR} CACHE BOOL "" FORCE)
+# NIS (espacial, qualquer GPU, shaders compilados pelo ShaderMake do NRD): testa o caminho do upscaler sem RTX.
+set(NRI_ENABLE_NIS_SDK ON CACHE BOOL "" FORCE)
+if(LEGACY_DLSS)
+  FetchContent_Declare(ngx  # o NRI declara um .zip do GitHub; por git funciona em mais redes
+    GIT_REPOSITORY https://github.com/NVIDIA/DLSS.git
+    GIT_TAG v310.9.1
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR _sem_cmake)
+endif()
 FetchContent_MakeAvailable(nrd)
 
 # ---- Shaders: GLSL -> SPIR-V em tempo de build ----
@@ -120,6 +139,23 @@ target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI)
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
+# As bibliotecas de execução do DLSS/FSR precisam ficar ao lado do executável (o NRI as copia para a pasta dele).
+if(LEGACY_DLSS)
+  FetchContent_GetProperties(ngx)
+  if(WIN32)
+    set(LEGACY_DLSS_RUNTIME "${ngx_SOURCE_DIR}/lib/Windows_x86_64/rel/nvngx_dlss.dll")
+  else()
+    set(LEGACY_DLSS_RUNTIME "${ngx_SOURCE_DIR}/lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.310.9.1")
+  endif()
+  add_custom_command(TARGET legacy POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LEGACY_DLSS_RUNTIME} "$<TARGET_FILE_DIR:legacy>" VERBATIM)
+endif()
+if(LEGACY_FSR AND WIN32)
+  FetchContent_GetProperties(ffx)
+  add_custom_command(TARGET legacy POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ffx_SOURCE_DIR}/PrebuiltSignedDLL/amd_fidelityfx_vk.dll"
+            "$<TARGET_FILE_DIR:legacy>" VERBATIM)
+endif()
 target_compile_definitions(legacy PRIVATE
   GLM_FORCE_DEPTH_ZERO_TO_ONE
   GLM_FORCE_RADIANS

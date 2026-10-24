@@ -326,3 +326,42 @@ ReSTIR e testar no PC com RTX 3070 Ti (lá o NRD roda nos tempos para que foi aj
 
 Achado lateral: o metal de rugosidade 1 converge mais devagar com o NRD (fornalha 0,925 em 48 frames, 0,937 em
 96); o teste de energia passou a usar 96 frames.
+
+### Item 6 — TAA/upscaling: TAA mais nítido + DLSS e FSR 3 integrados (com volta automática ao TAAU)
+
+O que entrou:
+- **TAA próprio mais nítido** (medido em `tools/taa.py`, referência renderizada com 4x os pixels): a amostra atual
+  é reconstruída por uma gaussiana estreita 3x3 (`exp(-8 d²)`, k escolhido por varredura) no lugar da leitura
+  bilinear, e a **RCAS da AMD FidelityFX** (FSR 1, MIT) é aplicada na saída já tonemapeada, fora do histórico
+  (`--sharpness`, padrão 0,5).
+- **NVIDIA DLSS Super Resolution** (SDK oficial v310.9.1, inclui o modelo "transformer" do DLSS 4) e **AMD FSR 3**
+  (FidelityFX SDK v1.1.4) pela extensão Upscaler do NVIDIA NRI (`src/renderer/upscaler.cpp`), escolhidos com
+  `--upscaler dlss|fsr`. `--scale` escolhe o modo: 1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado,
+  0,5 = desempenho. O fabricante define a resolução interna, o número de fases do jitter (Halton com 8·fator²
+  fases, ex.: 32 no desempenho) e o **mip bias** das texturas (ex.: −2 no desempenho), que agora o G-buffer aplica.
+- **Volta automática**: se a GPU não suporta (DLSS só em RTX; FSR só no build do Windows) o motor avisa e usa o
+  TAAU próprio — testado aqui: imagem idêntica bit a bit ao TAAU.
+- Dispositivo Vulkan: liga todas as features que a GPU suporta nas estruturas core 1.1/1.2/1.3 (menos robustez,
+  que custa desempenho), como o NRI faz no device que ele mesmo cria. **Achado do teste:** o NRI, o DLSS, o FSR e o
+  NIS consultam o que a GPU suporta e assumem que está ligado; sem isso a validação acusou 4 erros (timeline
+  semaphore, float16, descritores "update after bind") que apareceriam também na RTX 3070 Ti. Extensões
+  `VK_NVX_binary_import` e `VK_NVX_image_view_handle` (exigidas pelo DLSS) ligadas quando existem.
+
+Convenções passadas aos upscalers (conferidas no guia do DLSS e no código do NRI):
+- jitter = **+deslocamento da imagem em pixels de render** (nossa projeção desloca a imagem em +jitter, x para a
+  direita e y para baixo, o mesmo sistema dos vetores de movimento); o NRD recebe o sinal oposto (convenção dele);
+- vetores de movimento: guardamos (atual − anterior) em UV, sem jitter → escala `−resolução` (o DLSS quer anterior
+  − atual em pixels);
+- profundidade com Z invertido e plano distante no infinito; cor HDR já pré-exposta (textura de exposição = 1);
+- entradas passam a `SHADER_READ_ONLY_OPTIMAL` só durante o despacho (o guia do DLSS exige estado de leitura) e
+  voltam a `GENERAL`; a saída fica em `GENERAL` (storage).
+
+Verificação aqui (sem GPU NVIDIA/AMD): compila com o SDK do DLSS embutido; `--upscaler dlss|fsr` cai no TAAU sem
+erro; o **NIS** da NVIDIA (upscaler espacial que roda em qualquer GPU, `--upscaler nis`, só para teste) percorre
+o mesmo caminho do módulo — embrulhar device e imagens, command buffer, transições, saída, mip bias — e passa na
+validação Vulkan com sincronização sem nenhum erro. Imagem padrão idêntica bit a bit à do commit anterior.
+
+Falta conferir na RTX 3070 Ti (não dá para rodar DLSS aqui): imagem estável com a câmera parada (jitter com o
+sinal certo — se tremer ou ficar "mole", o sinal do jitter está invertido) e sem rastros em movimento (vetores).
+Limitação conhecida: a pré-exposição muda devagar com a auto-exposição e o upscaler recebe `preExposure = 1`; em
+mudanças bruscas de luz o histórico do DLSS/FSR leva alguns frames a acompanhar (o valor real só existe na GPU).

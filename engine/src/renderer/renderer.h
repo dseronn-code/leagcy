@@ -8,6 +8,7 @@
 #include "rhi/pass.h"
 #include "renderer/light_bvh.h"
 #include "renderer/nrd_denoiser.h"
+#include "renderer/upscaler.h"
 #include "rhi/profiler.h"
 #include "scene/camera.h"
 #include "scene/scene.h"
@@ -56,6 +57,8 @@ struct Settings {
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
   float sharpness = 0.5f;           // nitidez RCAS (AMD FidelityFX) na saída: 0 = desligada, 1 = máxima
+  // Upscaler: None = TAA/TAAU do motor; Dlss / Fsr = do fabricante (volta para o do motor se indisponível).
+  Upscaler::Kind upscaler = Upscaler::Kind::None;
   bool energyCompensation = true;   // compensação de múltiplo espalhamento do BRDF (Turquin 2019)
   // Visualização de depuração (valor cru da iluminação, sem denoiser/TAA/tonemap): ver DebugView.
   uint32_t debugView = 0;
@@ -79,7 +82,7 @@ bool parseDebugView(const char* name, uint32_t& out);
 
 // Frame (deferred, todos os alvos em VK_IMAGE_LAYOUT_GENERAL):
 //   Sky LUT → G-buffer → ReSTIR (temporal, espacial) → Iluminação RT (difuso / especular)
-//   → Denoiser SVGF (temporal + à-trous) → Composição (céu, névoa) → TAAU (upscale)
+//   → Denoiser SVGF (temporal + à-trous) → Composição (céu, névoa) → TAAU, DLSS ou FSR (upscale)
 //   → Auto-exposição → DOF → Motion blur → Bloom → Tonemap ACES
 class Renderer {
  public:
@@ -159,6 +162,8 @@ class Renderer {
   glm::mat4 prevView_{1.0f}, prevProjNoJitter_{1.0f};
   glm::vec2 prevJitterPixels_{0.0f};
   NrdDenoiser nrd_;
+  Upscaler upscaler_;
+  bool upscalerReady_ = false;
   bool nrdReady_ = false;  // com o jitter daquele frame (reconstrói a superfície anterior)
   std::vector<LightBvhNode> lightBvhNodes_;
   glm::vec3 prevCameraPos_{0.0f};

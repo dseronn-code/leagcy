@@ -25,12 +25,14 @@ layout(set = 0, binding = 0) uniform FrameData {
   vec4 quality1;              // x = mip das texturas nos raios, y = limite de vagalumes, z = amostras do motion blur,
                               // w = compensação de energia do BRDF (1 = ligada)
   uvec4 quality2;             // x = correção de viés do ReSTIR por ray tracing (1 = ligada),
-                              // y = difuso/especular no formato do NRD ReBLUR (YCoCg + distância normalizada)
+                              // y = difuso/especular no formato do NRD ReBLUR (YCoCg + distância normalizada),
+                              // z = mip bias das texturas na rasterização (bits de float; < 0 com DLSS/FSR)
   vec4 environment;           // x = céu uniforme em nits (> 0: teste da fornalha branca)
 } frame;
 
 bool energyCompensationEnabled() { return frame.quality1.w > 0.5; }
 bool reblurSignal() { return frame.quality2.y != 0u; }
+float textureMipBias() { return uintBitsToFloat(frame.quality2.z); }
 
 // Conversões YCoCg do NRD (_NRD_LinearToYCoCg / _NRD_YCoCgToLinear).
 vec3 nrdLinearToYCoCg(vec3 c) { return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25))); }
