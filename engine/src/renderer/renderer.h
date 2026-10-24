@@ -55,6 +55,7 @@ struct Settings {
   bool motionBlur = true;
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
+  float sharpness = 0.5f;           // nitidez RCAS (AMD FidelityFX) na saída: 0 = desligada, 1 = máxima
   bool energyCompensation = true;   // compensação de múltiplo espalhamento do BRDF (Turquin 2019)
   // Visualização de depuração (valor cru da iluminação, sem denoiser/TAA/tonemap): ver DebugView.
   uint32_t debugView = 0;
