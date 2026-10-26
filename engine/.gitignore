@@ -3,3 +3,4 @@ assets/
 *.png
 !docs/screenshots/*.png
 __pycache__/
+resultados_pc/

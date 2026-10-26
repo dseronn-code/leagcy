@@ -77,7 +77,8 @@ GPU recomendada para ray tracing: NVIDIA RTX 20xx+, AMD RX 6000+ ou Intel Arc.
 ### Windows (passo a passo)
 
 1. Instale (todos gratuitos): **Visual Studio 2022 Community** com a carga "Desenvolvimento para desktop com C++",
-   **Git** (git-scm.com) e o **Vulkan SDK** (vulkan.lunarg.com/sdk/home — marque os componentes padrão).
+   **Git** (git-scm.com), o **Vulkan SDK** (vulkan.lunarg.com/sdk/home — marque os componentes padrão) e o
+   **Python 3** (python.org — marque "Add python.exe to PATH"; só para os testes).
    O CMake que vem no Visual Studio 2022 17.12+ já é 3.30+; em versões mais antigas instale o CMake de cmake.org.
    Driver da GPU atualizado (NVIDIA: 550 ou mais novo).
 2. No "Developer PowerShell for VS 2022":
@@ -92,6 +93,13 @@ cmake --build build --config Release
 ```
 
 O console mostra, a cada 3 segundos, o tempo de GPU de cada passe (ms).
+
+Bateria completa de testes no seu PC (10-20 min; gera `resultados_pc/relatorio.txt` e imagens de comparação):
+
+```powershell
+pip install numpy pillow
+python tools\teste_pc.py
+```
 
 ## Rodar
 
