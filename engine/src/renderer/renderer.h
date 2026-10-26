@@ -56,9 +56,12 @@ struct Settings {
   bool motionBlur = true;
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
-  float sharpness = 0.5f;           // nitidez RCAS (AMD FidelityFX) na saída: 0 = desligada, 1 = máxima
-  // Upscaler: None = TAA/TAAU do motor; Dlss / Fsr = do fabricante (volta para o do motor se indisponível).
-  Upscaler::Kind upscaler = Upscaler::Kind::None;
+  // Nitidez RCAS (AMD FidelityFX) na saída: 0 = desligada, 1 = máxima; < 0 = automática (0,5 com o TAA do motor e o
+  // FSR; 0 com o DLSS, que já sai nítido — medido na RTX 3070 Ti: 1,10x a referência com RCAS 0,5).
+  float sharpness = -1.0f;
+  // Upscaler: Auto (padrão) = DLSS em GPUs RTX, senão o TAA/TAAU do motor (medido na RTX 3070 Ti: erro contra a
+  // referência 0,0404 com DLSS contra 0,0505 do TAAU em 67%); None = sempre o do motor; Dlss / Fsr = pedido explícito.
+  Upscaler::Kind upscaler = Upscaler::Kind::Auto;
   bool energyCompensation = true;   // compensação de múltiplo espalhamento do BRDF (Turquin 2019)
   // Visualização de depuração (valor cru da iluminação, sem denoiser/TAA/tonemap): ver DebugView.
   uint32_t debugView = 0;

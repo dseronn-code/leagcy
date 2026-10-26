@@ -16,7 +16,7 @@ namespace renderer {
 // init() falha e o renderer continua com o TAAU próprio.
 class Upscaler {
  public:
-  enum class Kind { None, Dlss, Fsr, Nis };
+  enum class Kind { None, Dlss, Fsr, Nis, Auto };  // Auto = DLSS se a GPU suportar, senão o TAAU do motor
   static const char* name(Kind k);
 
   struct Image {

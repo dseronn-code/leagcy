@@ -78,6 +78,7 @@ const char* Upscaler::name(Kind k) {
     case Kind::Dlss: return "DLSS";
     case Kind::Fsr: return "FSR";
     case Kind::Nis: return "NIS";
+    case Kind::Auto: return "automático";
     default: return "TAAU";
   }
 }
@@ -85,9 +86,21 @@ const char* Upscaler::name(Kind k) {
 Upscaler::Upscaler() = default;
 Upscaler::~Upscaler() { destroy(); }
 
+// Auto (o padrão) tenta o DLSS e, sem RTX, volta ao TAAU só com uma nota; pedido explícito que falha vira aviso.
+#define UPSCALER_FALLBACK(...)  \
+  do {                          \
+    if (quiet) {                \
+      LOG_INFO(__VA_ARGS__);    \
+    } else {                    \
+      LOG_WARN(__VA_ARGS__);    \
+    }                           \
+  } while (0)
+
 bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale) {
   destroy();
   if (kind == Kind::None) return false;
+  const bool quiet = kind == Kind::Auto;
+  if (quiet) kind = Kind::Dlss;
   ctx_ = &ctx;
   auto impl = std::make_unique<Impl>();
 
@@ -107,7 +120,7 @@ bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale
   deviceDesc.queueFamilyNum = 1;
   deviceDesc.minorVersion = 3;
   if (nri::nriCreateDeviceFromVKDevice(deviceDesc, impl->device) != nri::Result::SUCCESS) {
-    LOG_WARN("%s: falha ao embrulhar o dispositivo no NRI; usando o TAAU do motor", name(kind));
+    UPSCALER_FALLBACK("%s: falha ao embrulhar o dispositivo no NRI; usando o TAAU do motor", name(kind));
     return false;
   }
   Impl& m = *impl;
@@ -115,7 +128,7 @@ bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale
   if (nri::nriGetInterface(*m.device, NRI_INTERFACE(nri::CoreInterface), &m.core) != nri::Result::SUCCESS ||
       nri::nriGetInterface(*m.device, NRI_INTERFACE(nri::WrapperVKInterface), &m.wrapper) != nri::Result::SUCCESS ||
       nri::nriGetInterface(*m.device, NRI_INTERFACE(nri::UpscalerInterface), &m.upscaler) != nri::Result::SUCCESS) {
-    LOG_WARN("%s: NRI sem a extensão de upscaler; usando o TAAU do motor", name(kind));
+    UPSCALER_FALLBACK("%s: NRI sem a extensão de upscaler; usando o TAAU do motor", name(kind));
     destroy();
     return false;
   }
@@ -123,7 +136,7 @@ bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale
                                 : kind == Kind::Fsr ? nri::UpscalerType::FSR
                                                     : nri::UpscalerType::NIS;
   if (!m.upscaler.IsUpscalerSupported(*m.device, type)) {
-    LOG_WARN("%s indisponível (%s); usando o TAAU do motor", name(kind),
+    UPSCALER_FALLBACK("%s indisponível (%s); usando o TAAU do motor", name(kind),
              kind == Kind::Dlss  ? "exige GPU NVIDIA RTX e o build com LEGACY_DLSS"
              : kind == Kind::Fsr ? "exige o build com LEGACY_FSR, só no Windows"
                                  : "build sem NRI_ENABLE_NIS_SDK");
@@ -140,7 +153,7 @@ bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale
              nri::UpscalerBits::DEPTH_INFINITE;
   // Sem command buffer: o NRI grava a criação no próprio e espera a GPU (chamado só fora do frame).
   if (m.upscaler.CreateUpscaler(*m.device, ud, m.instance) != nri::Result::SUCCESS) {
-    LOG_WARN("%s: falha ao criar o upscaler; usando o TAAU do motor", name(kind));
+    UPSCALER_FALLBACK("%s: falha ao criar o upscaler; usando o TAAU do motor", name(kind));
     destroy();
     return false;
   }
