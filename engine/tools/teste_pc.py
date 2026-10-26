@@ -46,7 +46,7 @@ def linha(out, padrao):
 def desempenho(binario, rel):
     """1920x1080, 200 frames, preset Ultra: tempo por frame e por passe na GPU."""
     rel.append('\n== Desempenho (1920x1080, Ultra, média dos frames; "gpu" = tempo de cada passe em ms)')
-    casos = [('TAA nativo', ['--scale', '1']), ('TAAU 67%', ['--scale', '0.67']),
+    casos = [('TAA nativo', ['--upscaler', 'taau', '--scale', '1']), ('TAAU 67%', ['--upscaler', 'taau', '--scale', '0.67']),
              ('DLAA', ['--upscaler', 'dlss', '--scale', '1']), ('DLSS qualidade', ['--upscaler', 'dlss', '--scale', '0.67']),
              ('DLSS desempenho', ['--upscaler', 'dlss', '--scale', '0.5']), ('FSR qualidade', ['--upscaler', 'fsr', '--scale', '0.67']),
              ('Noite 512 luzes', ['--night']), ('Noite 4000 luzes', ['--night', '--lights', '4000']),
@@ -76,7 +76,8 @@ def lado_a_lado(caminhos, saida):
 def nitidez(binario, rel):
     """Nitidez e erro contra uma referência com 4x os pixels (tools/taa.py). DLSS com jitter errado sai mole."""
     rel.append('\n== Nitidez contra referência 4x (1,00 = igual à referência; erro: menor é melhor)')
-    for escala, extra in (('1.0', ''), ('1.0', '--upscaler dlss'), ('0.67', ''), ('0.67', '--upscaler dlss'),
+    for escala, extra in (('1.0', '--upscaler taau'), ('1.0', '--upscaler dlss'), ('1.0', '--upscaler dlss --sharpness 0.5'),
+                          ('0.67', '--upscaler taau'), ('0.67', '--upscaler dlss'),
                           ('0.67', '--upscaler fsr'), ('0.5', '--upscaler dlss')):
         p = subprocess.run([sys.executable, os.path.join(AQUI, 'taa.py'), '--bin', binario, '--out', PASTA,
                             '--scale', escala, '--extra', extra], capture_output=True, text=True, encoding='utf-8',
@@ -91,9 +92,9 @@ def movimento(binario, rel):
     base = ['--headless', '--width', '1280', '--height', '720', '--frames', '48', '--move', '3']
     grupos = {
         'denoiser_noite_andando': [('svgf', ['--night', '--denoiser', 'svgf']), ('relax', ['--night', '--denoiser', 'relax'])],
-        'upscaler_andando': [('taau', ['--scale', '0.67']), ('dlss', ['--scale', '0.67', '--upscaler', 'dlss']),
+        'upscaler_andando': [('taau', ['--scale', '0.67', '--upscaler', 'taau']), ('dlss', ['--scale', '0.67', '--upscaler', 'dlss']),
                              ('fsr', ['--scale', '0.67', '--upscaler', 'fsr'])],
-        'upscaler_parado': [('taau', ['--scale', '0.67', '--pause', '--move', '0']),
+        'upscaler_parado': [('taau', ['--scale', '0.67', '--upscaler', 'taau', '--pause', '--move', '0']),
                             ('dlss', ['--scale', '0.67', '--upscaler', 'dlss', '--pause', '--move', '0'])],
     }
     for grupo, casos in grupos.items():
@@ -108,6 +109,8 @@ def movimento(binario, rel):
 
 
 def main():
+    for f in (sys.stdout, sys.stderr):
+        f.reconfigure(encoding='utf-8', errors='replace')
     binario = achar_binario()
     os.makedirs(PASTA, exist_ok=True)
     rel = [f'Legacy Engine — teste no PC ({time.strftime("%Y-%m-%d %H:%M")}, {platform.system()} {platform.release()})']
@@ -118,9 +121,18 @@ def main():
 
     print('1/4 suíte de testes...', flush=True)
     p = subprocess.run([sys.executable, os.path.join(AQUI, 'testes.py'), '--bin', binario], capture_output=True, text=True,
-                       encoding='utf-8', errors='replace')
+                       encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
     rel.append('\n== Suíte de testes')
-    rel += [l for l in p.stdout.splitlines() if 'PASSOU' in l or 'FALHOU' in l or l.startswith('Resumo')]
+    detalhe = False  # depois de um FALHOU, as linhas recuadas trazem o motivo
+    for l in p.stdout.splitlines():
+        if 'PASSOU' in l or 'FALHOU' in l or l.startswith('Resumo'):
+            rel.append(l)
+            detalhe = 1 if 'FALHOU' in l else 0
+        elif detalhe and l.startswith('    ') and detalhe < 9:  # até 8 linhas de motivo por teste
+            rel.append(l[:400])
+            detalhe += 1
+    if p.returncode not in (0, 1):
+        rel.append('suíte interrompida: ' + ' | '.join(p.stderr.strip().splitlines()[-3:]))
     print('2/4 desempenho...', flush=True)
     desempenho(binario, rel)
     print('3/4 nitidez...', flush=True)

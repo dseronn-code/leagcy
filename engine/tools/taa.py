@@ -48,7 +48,7 @@ def main():
     pasta = a.out or tempfile.mkdtemp()
     os.makedirs(pasta, exist_ok=True)
     ref_png = os.path.join(pasta, 'ref_2x.png')
-    ref = Image.open(ref_png) if os.path.exists(ref_png) else render(a.bin, 2 * W, 2 * H, ['--sharpness', '0'], ref_png)
+    ref = Image.open(ref_png) if os.path.exists(ref_png) else render(a.bin, 2 * W, 2 * H, ['--sharpness', '0', '--upscaler', 'taau'], ref_png)
     R = lum(ref).reshape(H, 2, W, 2).mean(axis=(1, 3))  # caixa 2x2 em luminância linear
     nome = f"teste_{a.scale}_{a.extra.replace(' ', '_').replace('-', '')}.png"
     X = lum(render(a.bin, W, H, ['--scale', a.scale] + a.extra.split(), os.path.join(pasta, nome)))

@@ -25,7 +25,9 @@ def rodar(binario, args, env_extra=None, timeout=3600):
     env = dict(os.environ)
     if env_extra:
         env.update(env_extra)
-    p = subprocess.run([binario] + args, capture_output=True, text=True, env=env, timeout=timeout)
+    # O motor escreve em UTF-8; no Windows o padrão do Python seria cp1252 (acentos viram lixo e as buscas falham).
+    p = subprocess.run([binario] + args, capture_output=True, text=True, encoding='utf-8', errors='replace', env=env,
+                       timeout=timeout)
     return p.returncode, p.stdout + p.stderr
 
 
@@ -144,6 +146,8 @@ TESTES = [teste_validacao, teste_fornalha, teste_atmosfera, teste_cintilacao, te
 
 
 def main():
+    for s in (sys.stdout, sys.stderr):  # "≤", "°", "✓" num pipe do Windows (cp1252) derrubariam o print
+        s.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser()
     ap.add_argument('--bin', default=os.path.join('build', 'legacy'))
     ap.add_argument('--rapido', action='store_true')

@@ -92,9 +92,10 @@ Options parseArgs(int argc, char** argv) {
       o.render.nrdReblur = v == "reblur";
     }
     else if (a == "--nrd-validation") o.render.nrdValidation = true;
-    else if (a == "--upscaler") {  // taau | dlss | fsr
+    else if (a == "--upscaler") {  // auto | taau | dlss | fsr
       std::string v = next();
-      o.render.upscaler = v == "dlss" ? renderer::Upscaler::Kind::Dlss
+      o.render.upscaler = v == "auto" ? renderer::Upscaler::Kind::Auto
+                        : v == "dlss" ? renderer::Upscaler::Kind::Dlss
                         : v == "fsr"  ? renderer::Upscaler::Kind::Fsr
                         : v == "nis"  ? renderer::Upscaler::Kind::Nis  // só teste da integração
                                       : renderer::Upscaler::Kind::None;
@@ -129,8 +130,8 @@ Options parseArgs(int argc, char** argv) {
           "  --sun-elevation G --sun-azimuth G   posição do sol em graus\n"
           "  --debug-view sol|sol-luz|normal|nl|luzes|luzes-ref  valor cru (depuração)\n"
           "  --restir-no-reuse temporal|spatial|all   desliga reusos do ReSTIR (depuração)\n"
-          "  --sharpness X              nitidez RCAS na saída (0 a 1, padrão 0,5)\n"
-          "  --upscaler taau|dlss|fsr   TAA/TAAU do motor (padrão), NVIDIA DLSS (RTX) ou AMD FSR 3; com --scale:\n"
+          "  --sharpness X              nitidez RCAS na saída (0 a 1; padrão 0,5, ou 0 com DLSS)\n"
+          "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
           "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"

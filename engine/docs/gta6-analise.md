@@ -37,7 +37,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 |---|---|---|
 | Denoiser | 🟡 | SVGF (padrão) + NVIDIA NRD ReLAX/ReBLUR integrados e medidos: NRD melhor parado, SVGF melhor andando; falta o NRD superar em movimento (confiança do histórico) |
 | TAA | ✅ | Reconstrução gaussiana medida contra referência 4x (nitidez 0,83 → 0,95) + nitidez RCAS da AMD |
-| Upscaling (FSR, DLSS, XeSS) | ✅* | DLSS 4 (NVIDIA) e FSR 3 (AMD) integrados pelo NRI, com volta automática ao TAAU próprio; XeSS no Vulkan não existe (só D3D12). *Falta conferir a imagem na RTX 3070 Ti |
+| Upscaling (FSR, DLSS, XeSS) | ✅ | DLSS 4 (padrão em RTX) e FSR 3 integrados, com volta automática ao TAAU próprio. Medido na RTX 3070 Ti: DLSS em 67% erra 20% menos que o TAAU contra a referência; XeSS no Vulkan não existe (só D3D12) |
 | Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | 🟡 | Tudo menos lens flare (Dia 2) |
 
 ### Materiais e superfícies

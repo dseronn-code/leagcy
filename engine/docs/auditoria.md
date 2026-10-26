@@ -365,3 +365,20 @@ Falta conferir na RTX 3070 Ti (não dá para rodar DLSS aqui): imagem estável c
 sinal certo — se tremer ou ficar "mole", o sinal do jitter está invertido) e sem rastros em movimento (vetores).
 Limitação conhecida: a pré-exposição muda devagar com a auto-exposição e o upscaler recebe `preExposure = 1`; em
 mudanças bruscas de luz o histórico do DLSS/FSR leva alguns frames a acompanhar (o valor real só existe na GPU).
+
+**Medido na RTX 3070 Ti** (`tools/teste_pc.py`, 1920x1080 Ultra; nitidez e erro contra referência 4x a 640x360):
+
+| | Nitidez | Erro | Tempo do passe |
+|---|---|---|---|
+| TAA do motor, nativo | 0,894 | 0,0297 | 0,16 ms |
+| DLAA (DLSS nativo) + RCAS 0,5 | 1,098 | **0,0257** | 1,17 ms |
+| TAAU 67% | 0,722 | 0,0505 | 0,14 ms |
+| DLSS qualidade (67%) + RCAS 0,5 | 1,049 | **0,0404** | 1,16 ms |
+| FSR 3 qualidade (67%) + RCAS 0,5 | 0,979 | 0,0597 | 0,60 ms |
+| DLSS desempenho (50%) + RCAS 0,5 | 1,037 | 0,0586 | 2,09 ms |
+
+O jitter e os vetores de movimento estão certos (o DLSS erra menos que tudo; com sinal trocado ele sairia mole).
+Decisões: **DLSS virou o padrão** em GPUs RTX (`--upscaler auto`; sem RTX, TAAU sem aviso); com DLSS a RCAS fica
+desligada por padrão (1,05–1,10 = nítido demais com ela). O FSR 3 erra mais que o nosso TAAU nesta cena; fica
+como opção para placas AMD. Frame inteiro em 1080p nativo: 68 ms, dominado por ReSTIR (31 ms) e iluminação RT
+(29 ms) — otimização fica para o fim, depois da qualidade (decisão do usuário).

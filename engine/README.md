@@ -111,7 +111,8 @@ python tools\teste_pc.py
 ./build/legacy --quality cinema            # presets: baixo | medio | alto | ultra (padrão) | cinema
 ./build/legacy --fullscreen                # tela cheia na resolução nativa do monitor
 ./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
-./build/legacy --upscaler dlss --scale 0.67 # DLSS qualidade (RTX); --scale 1 = DLAA; --upscaler fsr = AMD FSR 3
+./build/legacy --scale 0.67               # DLSS qualidade em RTX (padrão automático); --scale 1 = DLAA
+./build/legacy --upscaler fsr --scale 0.67 # AMD FSR 3; --upscaler taau = sempre o TAA do motor
 ./build/legacy --validation                # camadas de validação do Vulkan (debug)
 ./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png
 ./build/legacy --scene outdoor --sun-elevation 3   # pôr do sol (atmosfera física)
@@ -128,8 +129,7 @@ Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sob
 
 ## Limitações conhecidas
 
-- DLSS e FSR 3 estão integrados mas ainda não foram vistos rodando numa RTX/Radeon (aqui só há GPU de software);
-  FSR 3 só no build do Windows; XeSS não existe para Vulkan.
+- FSR 3 só no build do Windows; XeSS não existe para Vulkan.
 - Texturas sobem para a GPU sem compressão (BC7 pendente), então cenas grandes usam bastante VRAM.
 - Materiais com transparência (`BLEND`) são tratados como recorte por alfa.
 - Sem ray tracing (`--no-rt`) não há sombras; shadow maps em cascata entram depois.
