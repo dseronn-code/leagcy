@@ -119,7 +119,8 @@ def reflexos(binario, rel):
 def movimento(binario, rel):
     """Câmera andando: imagens para comparar rastros e ruído (denoiser e upscaler)."""
     rel.append('\n== Movimento (imagens lado a lado em resultados_pc/)')
-    base = ['--headless', '--width', '1280', '--height', '720', '--frames', '48', '--move', '3']
+    # Sem motion blur: o desfoque cinematográfico borraria tudo igual e esconderia rastros do denoiser/upscaler.
+    base = ['--headless', '--no-motion-blur', '--width', '1280', '--height', '720', '--frames', '48', '--move', '3']
     grupos = {
         'denoiser_noite_andando': [('svgf', ['--night', '--denoiser', 'svgf']), ('relax', ['--night', '--denoiser', 'relax']),
                                    ('dlss-rr', ['--night', '--denoiser', 'dlss-rr'])],

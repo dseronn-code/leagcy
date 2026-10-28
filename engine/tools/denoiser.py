@@ -12,6 +12,9 @@ iluminação ruidosa com a câmera parada na mesma pose — converge para a imag
       brilhinhos: % de pixels mais de 2x acima da referência (vagalumes).
   - PARADO: 40 frames com a câmera parada; erro do último frame contra a referência da pose inicial (detalhe
     borrado e viés), e nos 16 últimos a cintilação (desvio/média por pixel) e os brilhinhos (pixels que piscam).
+  - Cena animada (--cena sponza-noite-animada): os personagens e luzes se movem durante a medição; a referência
+    congela a animação no instante do frame medido (--pause-at) — mede rastros e desoclusões de objetos.
+    (A cintilação dela mistura movimento de verdade; vale o erro.)
 dlss-rr (DLSS Ray Reconstruction) só roda em GPU RTX; sem ela o motor volta ao SVGF (o resultado sai igual ao dele).
 """
 import argparse
@@ -25,8 +28,12 @@ from PIL import Image
 
 W, H = 640, 360
 VEL, FRAMES = 1.5, 24
-BASE = ['--headless', '--pause', '--no-motion-blur', '--width', str(W), '--height', str(H)]
-CENAS = {'sponza-noite': ['--night', '--exposure', '2'], 'reflections': ['--scene', 'reflections', '--exposure', '12']}
+BASE = ['--headless', '--no-motion-blur', '--width', str(W), '--height', str(H)]
+CENAS = {'sponza-noite': ['--pause', '--night', '--exposure', '2'],
+         'reflections': ['--pause', '--scene', 'reflections', '--exposure', '12'],
+         # Câmera andando E personagens animados (raposa, CesiumMan, luzes que se movem): desoclusões e rastros.
+         'sponza-noite-animada': ['--night', '--exposure', '2']}
+ANIMADA = {'sponza-noite-animada'}
 
 
 def lum(f):
@@ -67,8 +74,10 @@ def main():
             np.save(npy, rodar(a.bin, args + ['--reference', '--frames', str(frames)], os.path.join(pasta, f'ref_{nome}.png')))
         return np.load(npy)
 
-    R = referencia('andando', mover, FRAMES + a.ref_frames)
-    R0 = referencia('parado', [], a.ref_frames)
+    # Cena animada: a referência congela a animação no mesmo instante do frame medido (--pause-at) e só então acumula.
+    anim = a.cena in ANIMADA
+    R = referencia('andando', mover + (['--pause-at', str(FRAMES)] if anim else []), FRAMES + a.ref_frames)
+    R0 = referencia('parado', ['--pause-at', '40'] if anim else [], (40 if anim else 0) + a.ref_frames)
     valido, valido0 = R > 0.002, R0 > 0.002
 
     for d in candidatos:
