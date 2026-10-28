@@ -36,6 +36,7 @@ struct Options {
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
+  uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
   uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
   float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
   scene::DemoOptions scene;
@@ -61,6 +62,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--move") o.move = float(std::atof(next()));
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
+    else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
     else if (a == "--sun-azimuth") o.sunAzimuth = float(std::atof(next()));
     else if (a == "--atmosphere-test") o.atmosphereTest = uint32_t(std::max(1, std::atoi(next())));
@@ -155,7 +157,7 @@ Options parseArgs(int argc, char** argv) {
           "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
-          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause]\n");
+          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n");
       std::exit(0);
     }
   }
@@ -235,7 +237,9 @@ int runHeadless(const Options& opt) {
     bool last = f + 1 == opt.frames;
     bool save = last || (opt.saveEvery && (f + 1) % opt.saveEvery == 0);
     if (opt.move != 0.0f && (opt.moveStop == 0 || f < opt.moveStop)) camera.position += moveDir * (opt.move * dt);
-    scene.update(opt.pause ? 0.0f : dt);
+    const bool frozen = opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
+    scene.update(frozen ? 0.0f : dt);
+    if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
       r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view, dt);
       if (!save) return;
