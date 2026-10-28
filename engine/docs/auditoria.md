@@ -414,3 +414,31 @@ Integrado pelo mesmo caminho do DLSS (`--denoiser dlss-rr`, tipo DLRR do NRI), s
 
 `tools/denoiser.py` agora mede cada denoiser andando (erro contra referência convergida) e parado (cintilação e
 brilhinhos); o `tools/teste_pc.py` compara SVGF, NRD ReLAX e DLSS-RR na RTX. O padrão só muda com a medição.
+
+### Item 7 — reflexos e luz indireta: cache de radiância, reflexo do reflexo, movimento virtual (medido contra path tracing)
+
+O que entrou:
+- **Referência por path tracing** (`--reference-pt`): sem denoiser, rebotes por path tracing (até 8, roleta russa)
+  acumulados com a câmera parada — a verdade para GI e reflexos. Usa o mesmo limite de vagalumes do motor por
+  amostra, para medir reflexos e luz indireta e não cáusticas (sol refletido por espelho), que motor de jogo nenhum
+  calcula. Cena de teste `reflections`: sala com piso de cromo, paredes coloridas, esferas de ouro de rugosidade
+  0–0,6, sol só na parede do fundo. `tools/reflexos.py` compara.
+- **Cache de radiância no espaço do mundo** (`shaders/radiance_cache.glsl`, no espírito do SHaRC da NVIDIA): tabela
+  hash de células (posição quantizada, tamanho dobrando com a distância à câmera, + direção da normal), guardando a
+  radiância incidente média sem sol nem luzes locais. Alimentado por 1/4 dos pixels na superfície visível e um rebote
+  além; resolvido por frame (média de 32 frames, em nits). Substitui o "céu sem oclusão" nos pontos atingidos por
+  raios (auditoria 3.1): infinitos rebotes nos reflexos e na GI. `--no-radiance-cache` desliga.
+- Pontos atingidos espelhados (rugosidade < 0,3) refletem por mais um raio: o espelho mostra o reflexo do reflexo.
+- **Movimento virtual do reflexo no SVGF** (auditoria 1.13): o especular é reprojetado pelo ponto virtual atrás do
+  espelho (distância do reflexo suavizada em 3x3), misturado ao da superfície pela rugosidade, como no NRD.
+  `--no-virtual-motion` desliga (medição).
+
+Medido (sala de reflexos, 480x270, referência 256 frames, motor 64 frames):
+
+| | Erro | Viés | Erro no espelho | Erro nas esferas |
+|---|---|---|---|---|
+| Sem cache (antes) | 0,664 | −64,2% | 0,645 | 0,478 |
+| Com cache | **0,068** | **−4,3%** | **0,156** | **0,086** |
+
+(Sem cache medido contra a referência anterior, com cáusticas; com elas, o cache dava 0,117 / −10%: o resto do viés
+eram as cáusticas.) Validação Vulkan com sincronização limpa no cache e na referência.

@@ -22,8 +22,8 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| GI por ray tracing | 🟡 | 1 rebote com denoiser SVGF (Dia 2); falta cache de radiância multi-rebote |
-| Reflexos por ray tracing | 🟡 | Funciona, mas o especular estoura float16 e o denoiser não reprojeta reflexos (auditoria 1.2, 1.13) |
+| GI por ray tracing | ✅ | 1 rebote traçado + cache de radiância no espaço do mundo (infinitos rebotes); sala de teste contra path tracing: viés −64% → −4% |
+| Reflexos por ray tracing | ✅ | 100% ray tracing (inclui fora da tela), reflexo do reflexo em espelhos, luz indireta pelo cache, movimento virtual no denoiser; erro 0,068 contra path tracing |
 | Sombra do sol | ✅ | Ray tracing com penumbra física do disco solar; sem acne e sem degraus no terminator (visibility buffer + Hanika 2021 + Chiang 2019, medido em `tools/sombras.py`) |
 | Shadow maps em cascata (fallback e performance) | ❌ | |
 | Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR de produção: BVH de luzes, GRIS/MIS em pares, correção de viés por ray tracing, filtro de boiling; viés < 1,5% contra força bruta (`tools/restir.py`) |
