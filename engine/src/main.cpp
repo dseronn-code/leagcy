@@ -107,6 +107,17 @@ Options parseArgs(int argc, char** argv) {
     }
     else if (a == "--sharpness") o.render.sharpness = glm::clamp(float(std::atof(next())), 0.0f, 1.0f);
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
+    else if (a == "--no-radiance-cache") o.render.radianceCache = false;
+    else if (a == "--no-virtual-motion") o.render.virtualMotion = false;  // medição do SVGF
+    else if (a == "--reference" || a == "--reference-pt") {  // verdade por acumulação: sem denoiser, TAA, upscaling nem blur
+      o.render.referenceAccumulation = true;
+      o.render.referencePathTrace = a == "--reference-pt";  // + rebotes por path tracing (verdade de GI e reflexos)
+      o.render.denoiser = false;
+      o.render.upscaler = renderer::Upscaler::Kind::None;
+      o.render.motionBlur = false;
+      o.render.sharpness = 0.0f;
+      o.scaleOverride = 1.0f;
+    }
     else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
     else if (a == "--restir-no-reuse") {
       std::string v = next();
@@ -136,6 +147,9 @@ Options parseArgs(int argc, char** argv) {
           "  --sun-elevation G --sun-azimuth G   posição do sol em graus\n"
           "  --debug-view sol|sol-luz|normal|nl|luzes|luzes-ref  valor cru (depuração)\n"
           "  --restir-no-reuse temporal|spatial|all   desliga reusos do ReSTIR (depuração)\n"
+          "  --reference                referência por acumulação (sem denoiser; use muitos --frames com a câmera parada)\n"
+          "  --reference-pt             idem, com os rebotes por path tracing (verdade de GI e reflexos)\n"
+          "  --no-radiance-cache        desliga o cache de radiância (rebotes além do 1º pelo céu aproximado)\n"
           "  --sharpness X              nitidez RCAS na saída (0 a 1; padrão 0,5, ou 0 com DLSS)\n"
           "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
           "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"

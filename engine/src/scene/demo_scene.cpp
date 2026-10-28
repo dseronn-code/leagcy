@@ -313,6 +313,41 @@ bool buildShadowTest(Scene& s, Camera& camera, glm::vec3 origin) {
   return true;
 }
 
+// Cena de teste dos reflexos (tools/reflexos.py): sala aberta na frente, com piso de espelho (cromo, rugosidade
+// 0,02), paredes coloridas e quatro esferas de ouro de rugosidade 0 / 0,15 / 0,35 / 0,6. O sol entra baixo pela
+// abertura e bate só na parte de cima da parede do fundo (não no espelho: sol refletido por espelho é cáustica, que
+// motor de jogo nenhum calcula e o limite de vagalumes corta); o resto da sala só recebe luz rebatida — é onde um
+// reflexo que ilumina o ponto atingido com "céu sem oclusão" erra, e o espelho mostra os reflexos dos reflexos.
+bool buildReflectionTest(Scene& s, Camera& camera) {
+  uint32_t cube = s.addMesh(makeCube());
+  uint32_t sphere = s.addMesh(makeSphere(64, 32));
+  auto mat = [&](glm::vec3 albedo, float rough, float metal) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    m.metallic = metal;
+    return s.addMaterial(m);
+  };
+  const uint32_t ground = mat(glm::vec3(0.4f), 0.9f, 0.0f), white = mat(glm::vec3(0.75f), 0.8f, 0.0f);
+  const uint32_t red = mat(glm::vec3(0.7f, 0.08f, 0.06f), 0.7f, 0.0f), green = mat(glm::vec3(0.08f, 0.55f, 0.12f), 0.7f, 0.0f);
+  const uint32_t chrome = mat(glm::vec3(0.95f), 0.02f, 1.0f);
+  s.addObject(cube, trs({0.0f, -0.5f, 10.0f}, {40.0f, 0.5f, 30.0f}), ground);  // chão de fora, topo em y = 0
+  s.addObject(cube, trs({0.0f, 0.01f, -4.0f}, {4.0f, 0.01f, 4.0f}), chrome);   // piso da sala: espelho
+  s.addObject(cube, trs({0.0f, 2.0f, -8.1f}, {4.2f, 2.0f, 0.1f}), red);        // fundo
+  s.addObject(cube, trs({-4.1f, 2.0f, -4.0f}, {0.1f, 2.0f, 4.2f}), green);     // esquerda
+  s.addObject(cube, trs({4.1f, 2.0f, -4.0f}, {0.1f, 2.0f, 4.2f}), white);      // direita
+  s.addObject(cube, trs({0.0f, 4.1f, -4.0f}, {4.2f, 0.1f, 4.2f}), white);      // teto
+  const float rough[] = {0.0f, 0.15f, 0.35f, 0.6f};
+  for (int i = 0; i < 4; ++i)
+    s.addObject(sphere, trs({-2.4f + 1.6f * float(i), 0.62f, -4.5f}, glm::vec3(0.6f)), mat({1.0f, 0.78f, 0.34f}, rough[i], 1.0f));
+  s.sunDirection = sunFrom(18.0f, 168.0f);  // pela abertura da frente: mancha de sol no alto da parede do fundo
+  s.sunIlluminance = 100000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 2.2f, 4.0f);
+  camera.lookAt(glm::vec3(0.0f, 1.0f, -5.0f));
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
@@ -323,6 +358,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (opt.name == "furnace") return buildFurnace(scene, camera);
   if (opt.name == "shadows") return buildShadowTest(scene, camera, glm::vec3(0.0f));
   if (opt.name == "shadows-far") return buildShadowTest(scene, camera, glm::vec3(4000.0f, 0.0f, -3000.0f));
+  if (opt.name == "reflections") return buildReflectionTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 

@@ -1,0 +1,29 @@
+#version 460
+// Fecha o frame do cache de radiância (radiance_cache.glsl): média das amostras do frame misturada no histórico
+// (média móvel de até 32 frames — responde a luz que muda, como o sol andando) e convertida para nits; zera as somas.
+// Células sem amostras por 256 frames são liberadas.
+#extension GL_GOOGLE_include_directive : require
+#include "radiance_cache.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+const float RC_HISTORY_FRAMES = 32.0;
+const uint RC_EVICT_FRAMES = 256u;
+
+void main() {
+  uint i = gl_GlobalInvocationID.y * 1024u + gl_GlobalInvocationID.x;
+  if (i >= RC_SIZE) return;
+  CacheEntry e = rcEntries[i];
+  if (e.key == 0u) return;
+  uint frameIndex = frame.frameInfo.x;
+  if (e.accum.a > 0u) {
+    vec3 mean = vec3(e.accum.rgb) / (RC_FIXED * float(e.accum.a)) / preExposure();
+    float n = min(e.resolved.a + 1.0, RC_HISTORY_FRAMES);
+    rcEntries[i].resolved = vec4(mix(e.resolved.rgb, mean, 1.0 / n), n);
+    rcEntries[i].accum = uvec4(0u);
+    rcEntries[i].lastFrame = frameIndex;
+  } else if (frameIndex - e.lastFrame > RC_EVICT_FRAMES) {
+    rcEntries[i].key = 0u;
+    rcEntries[i].resolved = vec4(0.0);
+  }
+}

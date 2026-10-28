@@ -1,0 +1,21 @@
+#version 460
+// Referência "verdade" (--reference): média da cor composta SEM denoiser, frame a frame, com a câmera parada.
+// Monte Carlo puro (com o jitter fazendo o anti-aliasing): converge para a imagem correta, sem favorecer nenhum
+// denoiser. Acumulado em float32 e em radiância linear (antes de exposição e tonemap).
+#extension GL_GOOGLE_include_directive : require
+#include "gbuffer.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 4) uniform sampler2D sceneIn;
+layout(set = 1, binding = 5, rgba32f) uniform image2D accum;
+layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D outColor;
+layout(push_constant) uniform Push { uint count; } pc;  // 1 = primeiro frame (zera)
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (!insideRender(id)) return;
+  vec4 a = pc.count <= 1u ? vec4(0.0) : imageLoad(accum, id);
+  a += vec4(texelFetch(sceneIn, id, 0).rgb, 1.0);
+  imageStore(accum, id, a);
+  imageStore(outColor, id, vec4(a.rgb / a.w, 1.0));
+}
