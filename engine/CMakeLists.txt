@@ -142,10 +142,13 @@ target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd
 # As bibliotecas de execução do DLSS/FSR precisam ficar ao lado do executável (o NRI as copia para a pasta dele).
 if(LEGACY_DLSS)
   FetchContent_GetProperties(ngx)
+  # nvngx_dlss = Super Resolution; nvngx_dlssd = Ray Reconstruction (o "d" é de denoiser).
   if(WIN32)
-    set(LEGACY_DLSS_RUNTIME "${ngx_SOURCE_DIR}/lib/Windows_x86_64/rel/nvngx_dlss.dll")
+    set(LEGACY_DLSS_RUNTIME "${ngx_SOURCE_DIR}/lib/Windows_x86_64/rel/nvngx_dlss.dll"
+                            "${ngx_SOURCE_DIR}/lib/Windows_x86_64/rel/nvngx_dlssd.dll")
   else()
-    set(LEGACY_DLSS_RUNTIME "${ngx_SOURCE_DIR}/lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.310.9.1")
+    set(LEGACY_DLSS_RUNTIME "${ngx_SOURCE_DIR}/lib/Linux_x86_64/rel/libnvidia-ngx-dlss.so.310.9.1"
+                            "${ngx_SOURCE_DIR}/lib/Linux_x86_64/rel/libnvidia-ngx-dlssd.so.310.9.1")
   endif()
   add_custom_command(TARGET legacy POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${LEGACY_DLSS_RUNTIME} "$<TARGET_FILE_DIR:legacy>" VERBATIM)

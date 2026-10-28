@@ -120,10 +120,11 @@ def teste_pixels(binario, tmp, rapido):
 
 
 def teste_sombras(binario, tmp, rapido):
-    """Sombra do sol: sem degraus no terminator (luz perdida ≤ 1% na origem, ≤ 5% a 4 km) e sem acne."""
+    """Sombra do sol: sem degraus no terminator (luz perdida ≤ 1%, na origem e a 4 km) e sem acne."""
     import sombras
     linhas, ok = [], True
-    for cena, limite in (('shadows', 1.0), ('shadows-far', 5.0)):
+    # A 4 km o limite é o mesmo da origem desde a renderização relativa à câmera (antes: 2,4% / 9,4% na RTX).
+    for cena, limite in (('shadows', 1.0), ('shadows-far', 1.0)):
         for elev in ('20',) if rapido else ('20', '3'):
             falsas, acne = sombras.medir(binario, cena, elev, tmp)
             ok &= max(falsas) <= limite and acne < 0.01

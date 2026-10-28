@@ -268,6 +268,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
   compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI});
   taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI});
+  rrGuidesPass_.init(ctx, "rr_guides.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   histogramPass_.init(ctx, "exposure_histogram.comp", g, {CIS, SB});
   exposurePass_.init(ctx, "exposure_average.comp", g, {SB, SB}, sizeof(ExposurePush));
   dofPass_.init(ctx, "dof.comp", g, {CIS, CIS, SI}, sizeof(DofPush));
@@ -385,32 +386,39 @@ void Renderer::createTargets() {
   const VkImageUsageFlags attach = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   VkExtent2D R = renderExtent_, O = outputExtent_;
+  // Imagens entregues ao DLSS/FSR: o NGX limpa algumas com vkCmdClearColorImage (validação na RTX 3070 Ti).
+  const VkImageUsageFlags upscalerIo = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
   for (int i = 0; i < 2; ++i) {
-    t_.depth[i] = rhi::createImage2D(ctx, R, kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    t_.depth[i] = rhi::createImage2D(ctx, R, kDepthFormat,
+                                     VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | upscalerIo);
     t_.normal[i] = rhi::createImage2D(ctx, R, kHdrFormat, attach);
     t_.visibility[i] = rhi::createImage2D(ctx, R, kVisibilityFormat, attach);
     t_.diffuseHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.specularHistory[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.moments[i] = rhi::createImage2D(ctx, R, VK_FORMAT_R32G32B32A32_SFLOAT, storage);  // luminância² precisa de float32
     t_.historyLength[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
-    t_.taa[i] = rhi::createImage2D(ctx, O, kHdrFormat, storage);
+    t_.taa[i] = rhi::createImage2D(ctx, O, kHdrFormat, storage | upscalerIo);
     t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                          rhi::MemoryUsage::GpuOnly);
   }
   t_.diffuse = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
   t_.specular = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
   // STORAGE: o NRD cria views de storage de todas as entradas (exige shaderStorageImageExtendedFormats).
-  t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach | VK_IMAGE_USAGE_STORAGE_BIT);
+  t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach | VK_IMAGE_USAGE_STORAGE_BIT | upscalerIo);
   t_.emissive = rhi::createImage2D(ctx, R, kHdrFormat, attach);
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
-                          &t_.tmpB, &t_.tmpC, &t_.sceneColor})
+                          &t_.tmpB, &t_.tmpC})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+  t_.sceneColor = rhi::createImage2D(ctx, R, kHdrFormat, storage | upscalerIo);
   t_.viewZ = rhi::createImage2D(ctx, R, VK_FORMAT_R32_SFLOAT, storage);
   t_.nrdNormalRoughness = rhi::createImage2D(ctx, R, VK_FORMAT_A2B10G10R10_UNORM_PACK32, storage);
   t_.diffuseDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.specularDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.nrdValidation = rhi::createImage2D(ctx, R, VK_FORMAT_R8G8B8A8_UNORM, storage);
+  for (rhi::Image* img : {&t_.rrDiffuseAlbedo, &t_.rrSpecularAlbedo, &t_.rrNormalRoughness})
+    *img = rhi::createImage2D(ctx, R, kHdrFormat, storage | upscalerIo);
+  t_.rrHitDistance = rhi::createImage2D(ctx, R, VK_FORMAT_R16_SFLOAT, storage | upscalerIo);
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
@@ -432,17 +440,23 @@ void Renderer::createTargets() {
     for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                             &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
-                            &t_.specularDenoised, &t_.nrdValidation})
+                            &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
+                            &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   if (upscalerReady_) {
     auto img = [](const rhi::Image& i, VkImageUsageFlags usage) { return Upscaler::Image{i.handle, i.format, i.extent, usage}; };
     Upscaler::Inputs in{};
-    in.color = img(t_.sceneColor, storage);
-    for (int i = 0; i < 2; ++i) in.depth[i] = img(t_.depth[i], VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
-    in.motion = img(t_.motion, attach | VK_IMAGE_USAGE_STORAGE_BIT);
-    in.output[0] = img(t_.taa[0], storage);
-    in.output[1] = img(t_.taa[1], storage);
+    in.color = img(t_.sceneColor, storage | upscalerIo);
+    for (int i = 0; i < 2; ++i)
+      in.depth[i] = img(t_.depth[i], VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | upscalerIo);
+    in.motion = img(t_.motion, attach | VK_IMAGE_USAGE_STORAGE_BIT | upscalerIo);
+    in.output[0] = img(t_.taa[0], storage | upscalerIo);
+    in.output[1] = img(t_.taa[1], storage | upscalerIo);
+    in.normalRoughness = img(t_.rrNormalRoughness, storage | upscalerIo);
+    in.diffuseAlbedo = img(t_.rrDiffuseAlbedo, storage | upscalerIo);
+    in.specularAlbedo = img(t_.rrSpecularAlbedo, storage | upscalerIo);
+    in.specularHitDistance = img(t_.rrHitDistance, storage | upscalerIo);
     upscalerReady_ = upscaler_.bind(in);
   }
   historyValid_ = false;
@@ -465,7 +479,8 @@ void Renderer::destroyTargets() {
   for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
                           &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
-                          &t_.specularDenoised, &t_.nrdValidation})
+                          &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
+                            &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -498,7 +513,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.view = cam.view();
   u.proj = cam.projection(aspect, jitterUv * 2.0f);
   u.viewProj = u.proj * u.view;
-  u.invViewProj = glm::inverse(u.viewProj);
+  // Inversa relativa à câmera (sem translação): ver worldPosFromDepth em frame.glsl.
+  u.invViewProj = glm::inverse(u.proj * glm::mat4(glm::mat3(u.view)));
   u.viewProjNoJitter = cam.projection(aspect) * u.view;
   u.prevViewProjNoJitter = historyValid_ ? prevViewProj_ : u.viewProjNoJitter;
   u.prevInvViewProj = historyValid_ ? prevInvViewProj_ : u.invViewProj;
@@ -612,7 +628,13 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const rhi::Image* specularFinal = &t_.specularRaw;
   if (settings.denoiser && settings.nrd && nrdReady_ && nrd_.reblur() != settings.nrdReblur)
     nrdReady_ = nrd_.init(*ctx_, R, kFramesInFlight, settings.nrdReblur);  // trocou de denoiser
-  if (settings.denoiser && settings.nrd && nrdReady_) {
+  if (upscalerReady_ && upscaler_.denoises()) {
+    // DLSS Ray Reconstruction: a iluminação vai ruidosa para a composição; aqui só as imagens-guia.
+    rrGuidesPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.specularRaw), storage(t_.rrDiffuseAlbedo),
+                                     storage(t_.rrSpecularAlbedo), storage(t_.rrHitDistance), storage(t_.rrNormalRoughness)}, R);
+    barrier();
+    profiler_.mark(cmd, "denoiser");
+  } else if (settings.denoiser && settings.nrd && nrdReady_) {
     // NVIDIA NRD ReLAX: entradas em GENERAL, o NRD faz as próprias barreiras e devolve tudo em GENERAL.
     NrdDenoiser::Inputs in;
     in.motion = {t_.motion.handle, kMotionFormat};
@@ -695,6 +717,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     uf.frameTimeMs = dt * 1000.0f;
     uf.index = cur;
     uf.resetHistory = !historyValid_;
+    uf.view = u.view;
+    uf.projNoJitter = cam.projection(aspect);
     upscaler_.dispatch(cmd, uf);
   } else {
     taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur])}, O);
@@ -762,7 +786,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   vkCmdBeginRendering(cmd, &ri);
   setViewport(cmd, O);
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, tonemapPipeline_);
-  const bool dlss = upscalerReady_ && upscaler_.kind() == Upscaler::Kind::Dlss;
+  const bool dlss = upscalerReady_ && (upscaler_.kind() == Upscaler::Kind::Dlss || upscaler_.kind() == Upscaler::Kind::DlssRR);
   const float sharpness = settings.sharpness >= 0.0f ? settings.sharpness : (dlss ? 0.0f : 0.5f);
   TonemapPush tp{settings.bloomStrength, 1.0f / float(mips), isSrgb(outputFormat_) ? 0u : 1u, (debug || showValidation) ? 1u : 0u,
                  sharpness};
@@ -915,7 +939,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, histogram_);
   rhi::destroyBuffer(ctx, exposureState_);
   for (rhi::ComputePass* p : {&skinningPass_, &aerialPerspectivePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
-                              &svgfAtrousPass_, &compositePass_, &taaPass_, &histogramPass_, &exposurePass_, &dofPass_,
+                              &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
   vkDestroyPipeline(ctx.device, gbufferPipeline_, nullptr);

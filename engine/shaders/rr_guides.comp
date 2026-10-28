@@ -1,0 +1,34 @@
+#version 460
+// Imagens-guia do DLSS Ray Reconstruction (guia de integração do DLSS-RR, seção 3.4), na resolução de render.
+// Consistentes com composite.comp: a cor ruidosa entregue ao DLSS-RR é difuso × albedo + especular × refletância.
+#extension GL_GOOGLE_include_directive : require
+#include "gbuffer.glsl"
+#include "brdf.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 4) uniform sampler2D specularRaw;  // .a = distância do raio especular (0 = sem raio)
+layout(set = 1, binding = 5, rgba16f) uniform writeonly image2D outDiffuseAlbedo;
+layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D outSpecularAlbedo;
+layout(set = 1, binding = 7, r16f) uniform writeonly image2D outHitDistance;
+layout(set = 1, binding = 8, rgba16f) uniform writeonly image2D outNormalRoughness;
+
+const float FP16_MAX = 65504.0;  // "céu" para a distância do reflexo
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (!insideRender(id)) return;
+  if (texelFetch(gDepth, id, 0).r <= 0.0) {  // céu: valores padrão recomendados pela NVIDIA
+    imageStore(outDiffuseAlbedo, id, vec4(0.5, 0.5, 0.5, 1.0));
+    imageStore(outSpecularAlbedo, id, vec4(0.0));
+    imageStore(outHitDistance, id, vec4(FP16_MAX));
+    imageStore(outNormalRoughness, id, vec4(0.0));
+    return;
+  }
+  GSample g = loadGBuffer(id);
+  BrdfContext bc = makeBrdfContext(g.N, g.V, g.f0, g.f90, g.roughness, energyCompensationEnabled());
+  float hit = texelFetch(specularRaw, id, 0).a;
+  imageStore(outDiffuseAlbedo, id, vec4(g.diffuseColor, 1.0));
+  imageStore(outSpecularAlbedo, id, vec4(specularDemodulation(bc), 1.0));  // DFG × compensação de energia
+  imageStore(outHitDistance, id, vec4(hit > 0.0 ? min(hit, FP16_MAX) : FP16_MAX));
+  imageStore(outNormalRoughness, id, vec4(g.N, g.roughness));  // normal de shading no mundo + rugosidade linear
+}

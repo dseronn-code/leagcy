@@ -86,6 +86,7 @@ bool parseDebugView(const char* name, uint32_t& out);
 // Frame (deferred, todos os alvos em VK_IMAGE_LAYOUT_GENERAL):
 //   Sky LUT → G-buffer → ReSTIR (temporal, espacial) → Iluminação RT (difuso / especular)
 //   → Denoiser SVGF (temporal + à-trous) → Composição (céu, névoa) → TAAU, DLSS ou FSR (upscale)
+//   (com DLSS Ray Reconstruction: sem SVGF/NRD; a composição recebe a iluminação ruidosa e o DLSS-RR faz os dois)
 //   → Auto-exposição → DOF → Motion blur → Bloom → Tonemap ACES
 class Renderer {
  public:
@@ -118,7 +119,9 @@ class Renderer {
     rhi::Image diffuse, specular, motion, emissive;
     std::array<rhi::Image, 2> visibility;
     rhi::Image viewZ, nrdNormalRoughness, diffuseDenoised, specularDenoised;  // entradas/saídas do NRD
-    rhi::Image nrdValidation;  // camada de depuração do NRD (RGBA8)  // visibility buffer (atual / anterior): x = objeto + 1 (0 = céu), y = triângulo
+    rhi::Image nrdValidation;  // camada de depuração do NRD (RGBA8)
+    // Guias do DLSS Ray Reconstruction (rr_guides.comp).
+    rhi::Image rrDiffuseAlbedo, rrSpecularAlbedo, rrHitDistance, rrNormalRoughness;
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
@@ -152,7 +155,7 @@ class Renderer {
 
   rhi::ComputePass skinningPass_, aerialPerspectivePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
-  rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_;
+  rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_, rrGuidesPass_;
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;
   rhi::PassLayout gbufferLayout_, tonemapLayout_;
   VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
