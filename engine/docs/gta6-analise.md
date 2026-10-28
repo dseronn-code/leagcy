@@ -45,7 +45,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Recurso | Legacy | Observação |
 |---|---|---|
 | PBR | ✅ | Unidades físicas, compensação de energia (teste da fornalha), especular/glossiness, KHR specular/ior, AA especular |
-| Texturas, normal maps, mipmaps, compressão BC7 | 🟡 | Tudo menos BC7 (Dia 2) |
+| Texturas, normal maps, mipmaps, compressão BC7 | ✅ | BC7 na cor, BC5 nos normal maps (padrão da indústria), mips na CPU, cache: 4x menos memória de vídeo, PSNR médio 46,8 dB, imagem final a 1,6% do RGBA8 |
 | Pintura de carro (clearcoat, flocos metálicos) | ❌ | |
 | Vidro e transparência | ❌ | |
 | Decals (sujeira, marcas, pichação) | ❌ | |
