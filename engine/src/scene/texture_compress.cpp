@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +12,7 @@
 
 #include <bc7decomp.h>
 #include <bc7enc.h>
+#include <rgbcx.h>
 
 #include "core/log.h"
 
@@ -20,7 +22,7 @@ namespace {
 
 constexpr uint32_t kCacheMagic = 0x37434C4C;  // "LLC7"
 // Sobe quando o formato do cache ou a compressão mudam (invalida os arquivos antigos).
-constexpr uint32_t kCacheVersion = 1;
+constexpr uint32_t kCacheVersion = 2;
 
 // Tabelas sRGB <-> linear (a média de cores precisa ser feita na luz, não nos valores gama).
 struct SrgbTables {
@@ -40,6 +42,29 @@ struct SrgbTables {
 const SrgbTables& srgbTables() {
   static const SrgbTables t;
   return t;
+}
+
+// Próximo mip de um normal map: média dos vetores (em [-1, 1]) renormalizada — o BC5 guarda só x e y de uma normal
+// unitária, e o z é reconstruído no shader.
+std::vector<uint8_t> downsampleNormals(const std::vector<uint8_t>& src, uint32_t w, uint32_t h) {
+  const uint32_t nw = std::max(1u, w / 2), nh = std::max(1u, h / 2);
+  std::vector<uint8_t> dst(size_t(nw) * nh * 4);
+  auto unpack = [](uint8_t v) { return float(v) / 127.5f - 1.0f; };
+  auto pack = [](float v) { return uint8_t(std::clamp(v * 127.5f + 127.5f, 0.0f, 255.0f) + 0.5f); };
+  for (uint32_t y = 0; y < nh; ++y)
+    for (uint32_t x = 0; x < nw; ++x) {
+      const uint32_t xs[2] = {std::min(2 * x, w - 1), std::min(2 * x + 1, w - 1)};
+      const uint32_t ys[2] = {std::min(2 * y, h - 1), std::min(2 * y + 1, h - 1)};
+      float n[3] = {0.0f, 0.0f, 0.0f};
+      for (uint32_t sy : ys)
+        for (uint32_t sx : xs)
+          for (int c = 0; c < 3; ++c) n[c] += unpack(src[(size_t(sy) * w + sx) * 4 + c]);
+      const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      uint8_t* d = &dst[(size_t(y) * nw + x) * 4];
+      for (int c = 0; c < 3; ++c) d[c] = pack(len > 1e-6f ? n[c] / len : (c == 2 ? 1.0f : 0.0f));
+      d[3] = 255;
+    }
+  return dst;
 }
 
 // Próximo mip por caixa 2x2 (bordas ímpares repetem o último texel).
@@ -65,8 +90,8 @@ std::vector<uint8_t> downsample(const std::vector<uint8_t>& src, uint32_t w, uin
   return dst;
 }
 
-// Um nível em BC7, blocos divididos entre as threads.
-std::vector<uint8_t> encodeLevel(const std::vector<uint8_t>& px, uint32_t w, uint32_t h, bool srgb) {
+// Um nível em BC7 (ou BC5 nos normal maps), blocos divididos entre as threads.
+std::vector<uint8_t> encodeLevel(const std::vector<uint8_t>& px, uint32_t w, uint32_t h, bool srgb, bool normalMap) {
   const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4, blocks = bw * bh;
   std::vector<uint8_t> out(size_t(blocks) * 16);
   bc7enc_compress_block_params params;
@@ -83,7 +108,10 @@ std::vector<uint8_t> encodeLevel(const std::vector<uint8_t>& px, uint32_t w, uin
             const uint32_t sx = std::min(bx * 4 + x, w - 1), sy = std::min(by * 4 + y, h - 1);
             std::memcpy(block + (y * 4 + x) * 4, &px[(size_t(sy) * w + sx) * 4], 4);
           }
-        bc7enc_compress_block(&out[size_t(i) * 16], block, &params);
+        if (normalMap)
+          rgbcx::encode_bc5_hq(&out[size_t(i) * 16], block, 0, 1, 4);  // x, y; busca completa nos dois canais
+        else
+          bc7enc_compress_block(&out[size_t(i) * 16], block, &params);
       }
   };
   const uint32_t threads = std::max(1u, std::min(std::thread::hardware_concurrency(), (blocks + 63) / 64));
@@ -137,11 +165,15 @@ void saveCache(const std::filesystem::path& file, const CompressedTexture& t) {
 
 }  // namespace
 
-CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t height, bool srgb, const std::string& cacheDir) {
+CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t height, bool srgb, bool normalMap,
+                                  const std::string& cacheDir) {
   static std::once_flag init;
-  std::call_once(init, [] { bc7enc_compress_block_init(); });
+  std::call_once(init, [] {
+    bc7enc_compress_block_init();
+    rgbcx::init();
+  });
 
-  const uint32_t key[4] = {kCacheVersion, width, height, srgb ? 1u : 0u};
+  const uint32_t key[4] = {kCacheVersion, width, height, (srgb ? 1u : 0u) | (normalMap ? 2u : 0u)};
   uint64_t hash = fnv1a(reinterpret_cast<const uint8_t*>(key), sizeof(key));
   hash = fnv1a(rgba, size_t(width) * height * 4, hash);
   char name[32];
@@ -151,15 +183,15 @@ CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t 
   CompressedTexture t;
   if (loadCache(file, t)) return t;
 
-  t.format = srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
+  t.format = normalMap ? VK_FORMAT_BC5_UNORM_BLOCK : srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
   t.width = width;
   t.height = height;
   std::vector<uint8_t> level(rgba, rgba + size_t(width) * height * 4);
   uint32_t w = width, h = height;
   for (;;) {
-    t.mips.push_back(encodeLevel(level, w, h, srgb));
+    t.mips.push_back(encodeLevel(level, w, h, srgb, normalMap));
     if (w == 1 && h == 1) break;
-    level = downsample(level, w, h, srgb);
+    level = normalMap ? downsampleNormals(level, w, h) : downsample(level, w, h, srgb);
     w = std::max(1u, w / 2);
     h = std::max(1u, h / 2);
   }
@@ -171,19 +203,25 @@ double compressionPsnr(const CompressedTexture& t, const uint8_t* rgba) {
   const uint32_t bw = (t.width + 3) / 4, bh = (t.height + 3) / 4;
   double se = 0.0;
   size_t n = 0;
+  const bool bc5 = t.format == VK_FORMAT_BC5_UNORM_BLOCK;
+  const int channels = bc5 ? 2 : 4;  // BC5: só x e y (o z é reconstruído)
   bc7decomp::color_rgba px[16];
   for (uint32_t by = 0; by < bh; ++by)
     for (uint32_t bx = 0; bx < bw; ++bx) {
-      bc7decomp::unpack_bc7(&t.mips[0][(size_t(by) * bw + bx) * 16], px);
+      const uint8_t* block = &t.mips[0][(size_t(by) * bw + bx) * 16];
+      if (bc5)
+        rgbcx::unpack_bc5(block, px, 0, 1, 4);
+      else
+        bc7decomp::unpack_bc7(block, px);
       for (uint32_t y = 0; y < 4; ++y)
         for (uint32_t x = 0; x < 4; ++x) {
           const uint32_t sx = bx * 4 + x, sy = by * 4 + y;
           if (sx >= t.width || sy >= t.height) continue;
-          for (int c = 0; c < 4; ++c) {
+          for (int c = 0; c < channels; ++c) {
             const double d = double(px[y * 4 + x].m_comps[c]) - double(rgba[(size_t(sy) * t.width + sx) * 4 + c]);
             se += d * d;
           }
-          n += 4;
+          n += size_t(channels);
         }
     }
   const double mse = se / double(std::max<size_t>(n, 1));

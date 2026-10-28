@@ -48,7 +48,7 @@ struct Loader {
   uint32_t defaultMaterial = 0;
   int model = -1;  // índice do Model criado (arquivos com animação ou esqueleto)
 
-  int32_t texture(const cgltf_texture_view& view, bool srgb) {
+  int32_t texture(const cgltf_texture_view& view, bool srgb, bool normalMap = false) {
     if (!view.texture || !view.texture->image) return -1;
     const cgltf_image* img = view.texture->image;
     auto key = std::make_pair(img, srgb);
@@ -73,6 +73,8 @@ struct Loader {
     t.width = uint32_t(w);
     t.height = uint32_t(h);
     t.srgb = srgb;
+    t.normalMap = normalMap;
+    t.name = img->uri ? img->uri : (img->name ? img->name : "(embutida)");
     t.rgba.assign(pixels, pixels + size_t(w) * h * 4);
     stbi_image_free(pixels);
     return textureCache[key] = int32_t(scene.addTexture(std::move(t)));
@@ -110,7 +112,7 @@ struct Loader {
       m.emissive = glm::make_vec3(src.emissive_factor) * kGltfEmissiveNits;
       if (src.has_emissive_strength) m.emissive *= src.emissive_strength.emissive_strength;
       m.emissiveTex = texture(src.emissive_texture, true);
-      m.normalTex = texture(src.normal_texture, false);
+      m.normalTex = texture(src.normal_texture, false, true);
       m.normalScale = src.normal_texture.texture ? src.normal_texture.scale : 1.0f;
       if (src.alpha_mode == cgltf_alpha_mode_mask) {
         m.flags |= kMaterialAlphaMask;

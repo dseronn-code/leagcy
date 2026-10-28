@@ -442,3 +442,26 @@ Medido (sala de reflexos, 480x270, referência 256 frames, motor 64 frames):
 
 (Sem cache medido contra a referência anterior, com cáusticas; com elas, o cache dava 0,117 / −10%: o resto do viés
 eram as cáusticas.) Validação Vulkan com sincronização limpa no cache e na referência.
+
+### Fase 2, item 1 — texturas comprimidas (BC7/BC5)
+
+- `src/scene/texture_compress.cpp` com o bc7enc_rdo (Rich Geldreich, MIT/domínio público, via git): mipmaps na CPU
+  (cor em espaço linear; dados por média direta; normais renormalizadas), **BC7** com pesos perceptuais na cor e
+  **BC5** nos normal maps (x e y; z reconstruído no shader), várias threads, cache em disco (`texcache/`: a Sponza
+  comprime em ~20 s na primeira carga e carrega em ~1 s depois). `--no-texture-compression` volta ao RGBA8.
+- Por que BC5 nos normais (medido): em BC7 o pior normal map da Sponza ficava com 26,4 dB (mais qualidade no
+  codificador não mudou: o BC7 divide os bits entre três canais); em BC5, 34,9 dB.
+
+Medido (Sponza):
+
+| | RGBA8 | BC7/BC5 |
+|---|---|---|
+| Memória de vídeo das texturas (com mips) | 459 MB | **115 MB (4,0x menos)** |
+| Qualidade das texturas (PSNR médio / pior) | — | 46,8 dB / 34,9 dB |
+| Imagem final contra RGBA8 (diferença / viés) | — | 0,016 / +0,4% |
+| Cintilação parado (suíte) | 0,0245 | 0,0252 |
+
+Troca conhecida: o BC5 guarda a normal unitária, então o Toksvig (variância das normais dentro do pixel, lida no
+encurtamento da normal média dos mips) deixa de existir nos normal maps; o termo por derivadas de tela do AA
+especular continua. Efeito medido: cintilação +3% (0,0245 → 0,0252), brilhinhos iguais (0,04%). Melhoria possível
+depois: guardar a variância das normais na rugosidade dos mips (como o Unreal faz).
