@@ -46,6 +46,10 @@ struct PointLight {  // == scene::PointLight
   float radius;
   vec3 intensity;
   float range;
+  vec3 direction;  // eixo do spot
+  float spotScale;  // pontual: escala 0, deslocamento 1
+  float spotOffset;
+  float pad0, pad1, pad2;
 };
 
 layout(set = 0, binding = 2, std430) readonly buffer Materials { Material materials[]; };
@@ -67,17 +71,24 @@ vec3 fetchVertexPosition(VertexData vb, uint i) { return vec3(vb.v[i * 12u], vb.
 vec3 fetchVertexNormal(VertexData vb, uint i) { return vec3(vb.v[i * 12u + 3u], vb.v[i * 12u + 4u], vb.v[i * 12u + 5u]); }
 vec2 fetchVertexUV(VertexData vb, uint i) { return vec2(vb.v[i * 12u + 6u], vb.v[i * 12u + 7u]); }
 
-// Janela suave que leva a influência da luz a zero no alcance (evita corte seco).
-float lightWindow(PointLight l, float dist) {
+// Janela suave que leva a influência da luz a zero no alcance (evita corte seco), vezes o cone do spot
+// (KHR_lights_punctual), avaliado na direção do centro da luz até P.
+float lightWindow(PointLight l, vec3 P, float dist) {
   float x = dist / l.range;
   float w = clamp(1.0 - x * x * x * x, 0.0, 1.0);
-  return w * w;
+  float spot = 1.0;
+  if (l.spotScale > 0.0) {
+    float cd = dist > 0.0 ? dot(l.direction, (P - l.position) / dist) : 1.0;
+    spot = clamp(cd * l.spotScale + l.spotOffset, 0.0, 1.0);
+    spot *= spot;
+  }
+  return w * w * spot;
 }
 
 // Iluminância aproximada (lux) a partir do centro da luz: usada só como função-alvo do ReSTIR.
-vec3 lightIlluminanceApprox(PointLight l, float dist) {
+vec3 lightIlluminanceApprox(PointLight l, vec3 P, float dist) {
   float d = max(dist, l.radius);
-  return l.intensity * lightWindow(l, dist) / (d * d);
+  return l.intensity * lightWindow(l, P, dist) / (d * d);
 }
 
 // Amostra uma direção uniforme no cone subtendido por uma luz esférica (pdf = 1/ângulo sólido).
@@ -91,7 +102,7 @@ bool sampleSphereLight(PointLight l, vec3 P, vec2 u, out vec3 L, out float tSurf
   if (d <= r) {  // ponto dentro da esfera: ilumina por igual, sem sombra
     L = d > 0.0 ? toC / d : vec3(0, 1, 0);
     tSurface = 0.0;
-    E = l.intensity * lightWindow(l, d) / (r * r);
+    E = l.intensity * lightWindow(l, P, d) / (r * r);
     return true;
   }
   float sinMax2 = r * r / d2;
@@ -101,7 +112,7 @@ bool sampleSphereLight(PointLight l, vec3 P, vec2 u, out vec3 L, out float tSurf
   float b = dot(toC, L);
   tSurface = b - sqrt(max(b * b - (d2 - r * r), 0.0));
   float luminanceOfSurface = 1.0 / (PI * r * r);  // × intensidade: L = I / (π r²)
-  E = l.intensity * lightWindow(l, d) * luminanceOfSurface * (TWO_PI * oneMinusCos);
+  E = l.intensity * lightWindow(l, P, d) * luminanceOfSurface * (TWO_PI * oneMinusCos);
   return true;
 }
 

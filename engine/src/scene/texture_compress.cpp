@@ -199,6 +199,47 @@ CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t 
   return t;
 }
 
+bool loadDds(const std::string& path, CompressedTexture& out) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return false;
+  uint32_t h[37] = {};  // "DDS " + DDS_HEADER (124 bytes) + DDS_HEADER_DXT10 (20 bytes)
+  in.read(reinterpret_cast<char*>(h), sizeof(h));
+  if (!in || h[0] != 0x20534444u || h[21] != 0x30315844u) return false;  // "DDS ", fourCC "DX10"
+  const uint32_t dxgi = h[32];
+  if (dxgi != 98 && dxgi != 99) return false;  // DXGI_FORMAT_BC7_UNORM / BC7_UNORM_SRGB
+  const uint32_t height = h[3], width = h[4], mips = std::max(1u, h[7]);
+  if (width == 0 || height == 0) return false;
+  out.format = dxgi == 99 ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK;
+  out.width = width;
+  out.height = height;
+  out.mips.resize(mips);
+  uint32_t w = width, hh = height;
+  for (auto& m : out.mips) {
+    m.resize(size_t((w + 3) / 4) * ((hh + 3) / 4) * 16);
+    in.read(reinterpret_cast<char*>(m.data()), std::streamsize(m.size()));
+    w = std::max(1u, w / 2);
+    hh = std::max(1u, hh / 2);
+  }
+  return bool(in);
+}
+
+std::vector<uint8_t> decodeBc7(const CompressedTexture& t, uint32_t level) {
+  const uint32_t w = std::max(1u, t.width >> level), h = std::max(1u, t.height >> level);
+  const uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+  std::vector<uint8_t> rgba(size_t(w) * h * 4);
+  bc7decomp::color_rgba px[16];
+  for (uint32_t by = 0; by < bh; ++by)
+    for (uint32_t bx = 0; bx < bw; ++bx) {
+      bc7decomp::unpack_bc7(&t.mips[level][(size_t(by) * bw + bx) * 16], px);
+      for (uint32_t y = 0; y < 4; ++y)
+        for (uint32_t x = 0; x < 4; ++x) {
+          const uint32_t sx = bx * 4 + x, sy = by * 4 + y;
+          if (sx < w && sy < h) std::memcpy(&rgba[(size_t(sy) * w + sx) * 4], px[y * 4 + x].m_comps, 4);
+        }
+    }
+  return rgba;
+}
+
 double compressionPsnr(const CompressedTexture& t, const uint8_t* rgba) {
   const uint32_t bw = (t.width + 3) / 4, bh = (t.height + 3) / 4;
   double se = 0.0;

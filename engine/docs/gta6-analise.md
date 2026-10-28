@@ -35,7 +35,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 
 | Recurso | Legacy | Observação |
 |---|---|---|
-| Denoiser | 🟡 | SVGF (padrão) + NVIDIA NRD ReLAX/ReBLUR integrados e medidos: NRD melhor parado, SVGF melhor andando; falta o NRD superar em movimento (confiança do histórico) |
+| Denoiser | ✅ | DLSS Ray Reconstruction (padrão na RTX; o mesmo do Cyberpunk 2077 path traced): medido na RTX 3070 Ti contra a referência verdadeira, erro 0,108 andando (SVGF 0,163, ReLAX 0,211), cintilação 2,3x menor; SVGF/NRD do motor sem RTX |
 | TAA | ✅ | Reconstrução gaussiana medida contra referência 4x (nitidez 0,83 → 0,95) + nitidez RCAS da AMD |
 | Upscaling (FSR, DLSS, XeSS) | ✅ | DLSS 4 (padrão em RTX) e FSR 3 integrados, com volta automática ao TAAU próprio. Medido na RTX 3070 Ti: DLSS em 67% erra 20% menos que o TAAU contra a referência; XeSS no Vulkan não existe (só D3D12) |
 | Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | 🟡 | Tudo menos lens flare (Dia 2) |
@@ -46,6 +46,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 |---|---|---|
 | PBR | ✅ | Unidades físicas, compensação de energia (teste da fornalha), especular/glossiness, KHR specular/ior, AA especular |
 | Texturas, normal maps, mipmaps, compressão BC7 | ✅ | BC7 na cor, BC5 nos normal maps (padrão da indústria), mips na CPU, cache: 4x menos memória de vídeo, PSNR médio 46,8 dB, imagem final a 1,6% do RGBA8 |
+| Importar assets profissionais (glTF completo) | 🟡 | Especular/glossiness, BC7 e DDS (28/10) ok; faltam luzes do glTF (o Bistro tem 97), luzes como geometria emissiva, doubleSided, MikkTSpace exato, samplers/texture_transform/oclusão, cobertura alfa nos mips (auditoria, itens 3 e 4) |
 | Pintura de carro (clearcoat, flocos metálicos) | ❌ | |
 | Vidro e transparência | ❌ | |
 | Decals (sujeira, marcas, pichação) | ❌ | |

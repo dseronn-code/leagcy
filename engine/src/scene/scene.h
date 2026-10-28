@@ -9,6 +9,7 @@
 
 #include "rhi/accel.h"
 #include "scene/mesh.h"
+#include "scene/texture_compress.h"
 
 namespace scene {
 
@@ -48,8 +49,14 @@ struct PointLight {
   float radius = 0.05f;  // tamanho físico em metros (penumbra)
   glm::vec3 intensity{100.0f};  // cd (lâmpada incandescente de 100 W ≈ 130 cd)
   float range = 10.0f;   // corte suave da influência (m)
+  // Spot (KHR_lights_punctual): atenuação angular clamp(cos θ × spotScale + spotOffset, 0, 1)², com θ medido a partir
+  // de `direction`; pontual = escala 0 e deslocamento 1 (sem atenuação).
+  glm::vec3 direction{0.0f, -1.0f, 0.0f};
+  float spotScale = 0.0f;
+  float spotOffset = 1.0f;
+  float pad[3] = {};
 };
-static_assert(sizeof(PointLight) == 32);
+static_assert(sizeof(PointLight) == 64);
 
 struct TextureData {
   uint32_t width = 0, height = 0;
@@ -57,6 +64,7 @@ struct TextureData {
   bool srgb = true;
   bool normalMap = false;  // normal map de espaço tangente: comprimido em BC5 (xy), z reconstruído no shader
   std::string name;  // arquivo de origem (diagnóstico)
+  CompressedTexture precompressed;  // já em BC7 no disco (DDS): enviado como está; `rgba` fica vazio
 };
 
 struct Object {
@@ -177,6 +185,7 @@ class Scene {
   glm::vec3 sunDirection = glm::normalize(glm::vec3(0.4f, 0.35f, -0.6f));  // direção PARA o sol
   // Iluminância solar no topo da atmosfera (lux); a atmosfera atenua até ~100.000 lux ao meio-dia.
   float sunIlluminance = 120000.0f;  // 0 = noite
+  bool sunFromAsset = false;  // direção do sol veio de uma luz direcional do glTF
   // Névoa de altura (por metro ao nível do chão). Ainda sem sombra volumétrica (auditoria 3.7):
   // em interiores ela é iluminada pelo sol mesmo na sombra, então cenas fechadas usam valor baixo.
   float fogDensity = 0.0015f;

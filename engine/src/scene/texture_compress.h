@@ -22,6 +22,13 @@ struct CompressedTexture {
 CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t height, bool srgb, bool normalMap,
                                   const std::string& cacheDir);
 
+// Textura já comprimida em DDS (BC7, cabeçalho DX10; usada por assets como o Bistro via MSFT_texture_dds): blocos e
+// mips lidos como estão, sem recompressão. Falso se o arquivo não existe ou o formato não é BC7.
+bool loadDds(const std::string& path, CompressedTexture& out);
+
+// Nível `level` de uma textura BC7 decodificado para RGBA8 (para GPUs sem BC7 e --no-texture-compression).
+std::vector<uint8_t> decodeBc7(const CompressedTexture& t, uint32_t level);
+
 // PSNR (dB) do nível 0 decodificado contra o original (RGBA; xy nos normal maps) — medição de qualidade.
 double compressionPsnr(const CompressedTexture& t, const uint8_t* rgba);
 

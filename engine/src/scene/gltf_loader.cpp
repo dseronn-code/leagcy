@@ -15,9 +15,11 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <string>
 
@@ -48,6 +50,18 @@ struct Loader {
   uint32_t defaultMaterial = 0;
   int model = -1;  // índice do Model criado (arquivos com animação ou esqueleto)
 
+  // Imagem alternativa em DDS declarada por MSFT_texture_dds ({"source": índice}), ou nulo.
+  const cgltf_image* ddsImage(const cgltf_texture& tex) const {
+    for (size_t i = 0; i < tex.extensions_count; ++i) {
+      if (std::strcmp(tex.extensions[i].name, "MSFT_texture_dds") != 0 || !tex.extensions[i].data) continue;
+      const char* p = std::strstr(tex.extensions[i].data, "\"source\"");
+      if (!p || !(p = std::strchr(p, ':'))) return nullptr;
+      const long index = std::strtol(p + 1, nullptr, 10);
+      return index >= 0 && size_t(index) < data->images_count ? &data->images[index] : nullptr;
+    }
+    return nullptr;
+  }
+
   int32_t texture(const cgltf_texture_view& view, bool srgb, bool normalMap = false) {
     if (!view.texture || !view.texture->image) return -1;
     const cgltf_image* img = view.texture->image;
@@ -66,6 +80,22 @@ struct Loader {
       pixels = stbi_load((dir / uri).string().c_str(), &w, &h, &comp, 4);
     }
     if (!pixels) {
+      // Imagem original ausente: usa a versão DDS (MSFT_texture_dds), se houver — o Bistro só traz as DDS em BC7.
+      TextureData t;
+      const cgltf_image* dds = ddsImage(*view.texture);
+      if (dds && dds->uri) {
+        std::string uri = dds->uri;
+        cgltf_decode_uri(uri.data());
+        uri.resize(std::strlen(uri.c_str()));
+        if (loadDds((dir / uri).string(), t.precompressed)) {
+          t.width = t.precompressed.width;
+          t.height = t.precompressed.height;
+          t.srgb = srgb;
+          t.normalMap = normalMap;
+          t.name = dds->uri;
+          return textureCache[key] = int32_t(scene.addTexture(std::move(t)));
+        }
+      }
       LOG_WARN("Textura não carregada: %s", img->uri ? img->uri : "(embutida)");
       return textureCache[key] = -1;
     }
@@ -254,6 +284,42 @@ struct Loader {
     model = int(scene.models.size() - 1);
   }
 
+  // KHR_lights_punctual: pontuais e spots viram luzes do ReSTIR (intensidade em candela, como no motor); a direcional
+  // dá a direção do sol (a iluminância continua a da atmosfera física). A luz aponta para -Z do nó.
+  uint32_t loadLights(const glm::mat4& root) {
+    uint32_t count = 0;
+    for (size_t i = 0; i < data->nodes_count; ++i) {
+      const cgltf_node& node = data->nodes[i];
+      if (!node.light) continue;
+      float world[16];
+      cgltf_node_transform_world(&node, world);
+      const glm::mat4 m = root * glm::make_mat4(world);
+      const cgltf_light& src = *node.light;
+      const glm::vec3 axis = glm::normalize(glm::vec3(m * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
+      if (src.type == cgltf_light_type_directional) {
+        scene.sunDirection = -axis;
+        scene.sunFromAsset = true;
+        continue;
+      }
+      PointLight l;
+      l.position = glm::vec3(m * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+      l.intensity = glm::make_vec3(src.color) * src.intensity;
+      // Sem alcance no arquivo (= infinito): corta onde a iluminância cai a 0,01 lux.
+      const float peak = std::max({l.intensity.r, l.intensity.g, l.intensity.b});
+      l.range = src.range > 0.0f ? src.range : std::max(1.0f, std::sqrt(peak / 0.01f));
+      if (src.type == cgltf_light_type_spot) {
+        const float cosOuter = std::cos(src.spot_outer_cone_angle);
+        const float cosInner = std::cos(src.spot_inner_cone_angle);
+        l.direction = axis;
+        l.spotScale = 1.0f / std::max(1e-3f, cosInner - cosOuter);
+        l.spotOffset = -cosOuter * l.spotScale;
+      }
+      scene.addLight(l);
+      ++count;
+    }
+    return count;
+  }
+
   void loadNodes(const glm::mat4& root) {
     for (size_t i = 0; i < data->nodes_count; ++i) {
       const cgltf_node& node = data->nodes[i];
@@ -309,9 +375,10 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
   l.loadMeshes();
   l.loadModel(rootTransform);
   l.loadNodes(rootTransform);
+  const uint32_t lights = l.loadLights(rootTransform);
   if (modelOut) *modelOut = l.model;
-  LOG_INFO("glTF: %s (%zu nós, %zu materiais, %zu esqueletos, %zu animações)", path.c_str(), data->nodes_count,
-           data->materials_count, data->skins_count, data->animations_count);
+  LOG_INFO("glTF: %s (%zu nós, %zu materiais, %zu esqueletos, %zu animações, %u luzes)", path.c_str(), data->nodes_count,
+           data->materials_count, data->skins_count, data->animations_count, lights);
   cgltf_free(data);
   return true;
 }

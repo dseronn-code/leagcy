@@ -47,7 +47,8 @@ class Upscaler {
   Upscaler();
   ~Upscaler();
   // scale = resolução interna pedida (1,0 = DLAA/nativo; 0,67 = Qualidade; 0,5 = Desempenho...).
-  bool init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale);
+  // autoDenoise: no modo Auto, prefere o DLSS Ray Reconstruction (denoiser + upscaler) ao DLSS comum.
+  bool init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale, bool autoDenoise = false);
   void destroy();
   bool ready() const { return impl_ != nullptr; }
   Kind kind() const { return kind_; }

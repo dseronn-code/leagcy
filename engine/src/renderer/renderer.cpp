@@ -409,7 +409,12 @@ void Renderer::createTargets() {
   renderExtent_ = {std::max(1u, uint32_t(float(outputExtent_.width) * scale + 0.5f)),
                    std::max(1u, uint32_t(float(outputExtent_.height) * scale + 0.5f))};
   // DLSS/FSR: o fabricante define a resolução interna do modo mais próximo da escala pedida.
-  upscalerReady_ = settings.upscaler != Upscaler::Kind::None && upscaler_.init(ctx, settings.upscaler, outputExtent_, scale);
+  // Padrão (Auto) numa RTX com o denoiser do motor ligado: DLSS Ray Reconstruction — medido na RTX 3070 Ti contra a
+  // referência verdadeira, melhor que SVGF e ReLAX em erro, brilhinhos e cintilação (docs/auditoria.md, item 5).
+  const bool autoDenoise = settings.autoRayReconstruction && ctx.rayTracing && settings.denoiser && !settings.nrd &&
+                           !settings.referenceAccumulation && settings.debugView == 0;
+  upscalerReady_ = settings.upscaler != Upscaler::Kind::None &&
+                   upscaler_.init(ctx, settings.upscaler, outputExtent_, scale, autoDenoise);
   if (upscalerReady_) renderExtent_ = upscaler_.renderExtent();
   const VkImageUsageFlags attach = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;

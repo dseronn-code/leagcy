@@ -107,7 +107,9 @@ def texturas(binario, rel):
     for cena in ([], ['--scene', 'assets/Bistro/bistro.gltf']):
         nome = 'Bistro' if cena else 'Sponza'
         imgs = []
-        for extra in ([], ['--no-texture-compression']):
+        # O Bistro já vem em BC7 no disco (DDS): não há original sem compressão para comparar, e em RGBA8 as
+        # texturas dele (~9 GB) nem cabem numa placa de 8 GB — só o log de memória.
+        for extra in ([], ['--no-texture-compression']) if not cena else ([],):
             arq = os.path.join(PASTA, f'texturas_{nome}_{"rgba" if extra else "bc"}.png')
             code, out = rodar(binario, ['--headless', '--pause', '--exposure', '12', '--no-motion-blur', '--width', '1280',
                                         '--height', '720', '--frames', '32', '--out', arq] + cena + extra)

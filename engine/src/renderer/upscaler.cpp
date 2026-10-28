@@ -102,11 +102,11 @@ Upscaler::~Upscaler() { destroy(); }
     }                           \
   } while (0)
 
-bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale) {
+bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale, bool autoDenoise) {
   destroy();
   if (kind == Kind::None) return false;
   const bool quiet = kind == Kind::Auto;
-  if (quiet) kind = Kind::Dlss;
+  if (quiet) kind = autoDenoise ? Kind::DlssRR : Kind::Dlss;
   ctx_ = &ctx;
   auto impl = std::make_unique<Impl>();
 

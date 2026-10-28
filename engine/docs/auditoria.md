@@ -80,8 +80,11 @@ Gravidade: **🔴 bug** (resultado errado) · **🟠 qualidade** (funciona, mas 
 
 1. ✅ **Base numérica e física**: unidades fotométricas + pré-exposição + float32 onde precisa (1.1, 1.2, 2.5) — ver resultado abaixo
 2. ✅ **Ruído e amostragem**: Sobol-Owen, amostragem correta da esfera, offset robusto com normal geométrica (1.5, 1.6, 1.11)
-3. **Luzes reais**: luzes como geometria emissiva + `KHR_lights_punctual` (1.3, 1.4, 2.2)
-4. **Assets profissionais**: DDS/BC7, especular/glossiness, MikkTSpace, samplers, doubleSided, alfa (2.1, 2.3, 2.6–2.10)
+3. ❌ **Luzes reais**: luzes como geometria emissiva + `KHR_lights_punctual` (1.3, 1.4, 2.2) — **ainda não feito**
+   (achado na revisão de 28/10: a numeração "item 1–7" seguiu a lista da comparação com o GTA 6 e pulou este)
+4. 🟡 **Assets profissionais**: especular/glossiness ✅ (2.3), BC7/BC5 ✅ (2.10), DDS ✅ (2.1, 28/10); faltam
+   vidro (2.4), doubleSided (2.6), MikkTSpace exato (2.7), samplers/cores/texture_transform/oclusão/câmeras (2.8),
+   cobertura alfa nos mips (2.9)
 5. **ReSTIR de produção**: ReGIR, pairwise MIS, visibilidade, filtro de boiling (1.7–1.9)
 6. **Denoiser de ponta**: NRD (ReBLUR/ReLAX/SIGMA) + specular AA (1.10, 1.13)
 7. Itens 3–5 restantes
@@ -465,3 +468,32 @@ Troca conhecida: o BC5 guarda a normal unitária, então o Toksvig (variância d
 encurtamento da normal média dos mips) deixa de existir nos normal maps; o termo por derivadas de tela do AA
 especular continua. Efeito medido: cintilação +3% (0,0245 → 0,0252), brilhinhos iguais (0,04%). Melhoria possível
 depois: guardar a variância das normais na rugosidade dos mips (como o Unreal faz).
+
+### Terceira bateria na RTX 3070 Ti (28/10) — item 5 fechado, e um achado no Bistro
+
+Suíte 7/7 na RTX. Denoisers contra a **referência verdadeira** (acumulação sem denoiser, `tools/denoiser.py`),
+Sponza à noite:
+
+| | erro andando | brilhinhos andando | erro parado | cintilação parado |
+|---|---|---|---|---|
+| SVGF (cena congelada) | 0,163 | 1,17% | 0,129 | 0,0131 |
+| NRD ReLAX | 0,211 | 0,75% | 0,203 | 0,0135 |
+| **DLSS-RR** | **0,108** | **0,12%** | **0,105** | **0,0058** |
+| SVGF (personagens e luzes animados) | 0,170 | 1,19% | 0,137 | 0,0182 |
+| NRD ReLAX | 0,213 | 0,75% | 0,211 | 0,0184 |
+| **DLSS-RR** | **0,112** | **0,14%** | **0,115** | **0,0120** |
+
+Sala de espelhos andando: DLSS-RR erro 0,105 e 0 % de brilhinhos (SVGF 0,149 / 0,29 %, ReLAX 0,111 / 0,40 %); parado
+o ReLAX cintila um pouco menos (0,0072 contra 0,0087), com erro maior (0,075 contra 0,071). Custo: +2 ms sobre o
+DLSS comum (47,8 contra 45,6 ms/frame no Ultra a 1080p; o SVGF que ele substitui custa 2,7 ms).
+
+**Decisão (item 5 ✅):** numa RTX o padrão (`--upscaler auto`) passa a ser o **DLSS Ray Reconstruction**, o mesmo
+denoiser neural do Cyberpunk 2077 com path tracing; `--denoiser svgf|relax|reblur` continua escolhendo o do motor.
+Sem RTX o padrão continua SVGF + TAAU.
+
+**Achado — o Bistro não tinha texturas.** O pacote só traz as imagens em DDS/BC7 (`MSFT_texture_dds`) e o leitor só
+abria PNG/JPG: todas as medições anteriores no Bistro foram sem textura (o problema 2.1 desta auditoria nunca tinha
+sido corrigido). Corrigido: `loadDds` lê os blocos BC7 e os mips como estão e envia sem recompressão (338 texturas,
+2,2 GB de memória de vídeo; em RGBA8 seriam ~9 GB). Sem BC7 na GPU, o nível 0 é decodificado e vai em RGBA8.
+Revisando o plano acima também apareceu que os itens 3 (luzes reais) e 4 (assets) do plano original nunca foram
+feitos — agora estão marcados e entram na fila antes da otimização.

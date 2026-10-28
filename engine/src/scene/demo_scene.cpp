@@ -257,7 +257,7 @@ bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
   glm::vec3 c = 0.5f * (lo + hi);
   camera.position = c + glm::vec3(0.0f, 0.1f * (hi.y - lo.y), 0.0f);
   camera.lookAt(c + glm::vec3(hi.x - lo.x, 0.0f, 0.0f));
-  s.sunDirection = sunFrom(35.0f, 120.0f);
+  if (!s.sunFromAsset) s.sunDirection = sunFrom(35.0f, 120.0f);
   s.fogDensity = 0.0003f;
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   return true;

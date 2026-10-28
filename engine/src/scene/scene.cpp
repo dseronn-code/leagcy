@@ -206,11 +206,25 @@ void Scene::upload(rhi::Context& ctx) {
                         (bc7.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
   if (compressTextures && !compress && !cpuTextures_.empty()) LOG_INFO("Texturas: GPU sem BC7, usando RGBA8");
   double bytesRaw = 0.0, bytesGpu = 0.0, psnrSum = 0.0, psnrMin = 99.0;
+  uint32_t encoded = 0, precompressed = 0;
   auto t0 = std::chrono::steady_clock::now();
   for (auto& t : cpuTextures_) {
     const double raw = double(t.width) * t.height * 4.0 * 4.0 / 3.0;  // RGBA8 com a cadeia de mips
     bytesRaw += raw;
-    if (compress) {
+    if (t.precompressed.format != VK_FORMAT_UNDEFINED) {
+      if (compress) {
+        // Já em BC7 no disco: enviado sem recompressão (o formato segue o uso — cor sRGB ou dado linear).
+        CompressedTexture& ct = t.precompressed;
+        for (const auto& m : ct.mips) bytesGpu += double(m.size());
+        ++precompressed;
+        textures.push_back(rhi::createCompressedTexture(
+            ctx, t.srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK, ct.width, ct.height, ct.mips));
+      } else {
+        bytesGpu += raw;
+        textures.push_back(rhi::createTexture(ctx, decodeBc7(t.precompressed, 0).data(), t.width, t.height, t.srgb));
+      }
+    } else if (compress) {
+      ++encoded;
       CompressedTexture ct = compressTexture(t.rgba.data(), t.width, t.height, t.srgb, t.normalMap, textureCacheDir);
       for (const auto& m : ct.mips) bytesGpu += double(m.size());
       const double p = compressionPsnr(ct, t.rgba.data());
@@ -226,9 +240,10 @@ void Scene::upload(rhi::Context& ctx) {
     texels += size_t(t.width) * t.height;
   }
   if (compress)
-    LOG_INFO("Texturas BC7/BC5: %.0f MB -> %.0f MB de memória de vídeo (%.1fx menos), PSNR médio %.1f dB (pior %.1f dB), %.1f s",
-             bytesRaw / 1048576.0, bytesGpu / 1048576.0, bytesRaw / std::max(bytesGpu, 1.0),
-             psnrSum / double(cpuTextures_.size()), psnrMin,
+    LOG_INFO("Texturas BC7/BC5: %.0f MB -> %.0f MB de memória de vídeo (%.1fx menos), %u comprimidas aqui (PSNR médio "
+             "%.1f dB, pior %.1f dB), %u já em BC7 no disco, %.1f s",
+             bytesRaw / 1048576.0, bytesGpu / 1048576.0, bytesRaw / std::max(bytesGpu, 1.0), encoded,
+             encoded ? psnrSum / double(encoded) : 0.0, encoded ? psnrMin : 0.0, precompressed,
              std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
   cpuTextures_.clear();
 
