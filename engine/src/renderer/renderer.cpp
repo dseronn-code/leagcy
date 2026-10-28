@@ -46,8 +46,7 @@ struct FrameUniforms {
 static_assert(sizeof(FrameUniforms) == 640);
 
 struct GBufferPush {
-  uint32_t object;
-  uint32_t material;
+  VkDeviceAddress drawList;  // lista de objetos ordenada por malha (shaders/gbuffer.vert)
 };
 // Espelha ObjectData em shaders/scene.glsl.
 struct ObjectGpu {
@@ -202,6 +201,20 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     jointBuffers_[i] = rhi::createBuffer(ctx, std::max<VkDeviceSize>(1, scene.totalJoints) * sizeof(glm::mat4),
                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                          rhi::MemoryUsage::CpuToGpu);
+  }
+  {
+    std::vector<uint32_t> order(scene.objects.size());
+    for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&](uint32_t a, uint32_t b) { return scene.objects[a].mesh < scene.objects[b].mesh; });
+    for (uint32_t k = 0; k < order.size(); ++k) {
+      const uint32_t mesh = scene.objects[order[k]].mesh;
+      if (drawBatches_.empty() || drawBatches_.back().mesh != mesh) drawBatches_.push_back({mesh, k, 0});
+      ++drawBatches_.back().count;
+    }
+    if (order.empty()) order.push_back(0);
+    drawList_ = rhi::createBufferWithData(ctx, order.data(), order.size() * sizeof(uint32_t),
+                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
   }
   std::vector<uint32_t> zeros(kHistogramBins, 0);
   histogram_ = rhi::createBufferWithData(ctx, zeros.data(), zeros.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -565,6 +578,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   profiler_.beginFrame(cmd, slot);
   // ---- 0. Cena dinâmica ----
+  cpuLast_ = std::chrono::steady_clock::now();
+  ++cpuFrames_;
   updateDynamicScene(cmd, slot);
   barrier();
   profiler_.mark(cmd, "cena");
@@ -598,19 +613,21 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     setViewport(cmd, R);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferPipeline_);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
-    for (uint32_t i = 0; i < scene_->objects.size(); ++i) {
-      const auto& o = scene_->objects[i];
-      const auto& m = scene_->meshes[o.mesh];
-      GBufferPush p{i, o.material};
-      vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
+    // Uma chamada por malha com todas as suas instâncias (medido na cidade: 98 mil chamadas, uma por objeto, custavam
+    // ~25 ms de CPU por frame).
+    GBufferPush p{drawList_.address};
+    vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
+    for (const DrawBatch& b : drawBatches_) {
+      const auto& m = scene_->meshes[b.mesh];
       VkBuffer vbs[2] = {m.vertices.handle, m.skinned ? m.prevVertices.handle : m.vertices.handle};
       VkDeviceSize offsets[2] = {0, 0};
       vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
       vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(cmd, m.indexCount, 1, 0, 0, 0);
+      vkCmdDrawIndexed(cmd, m.indexCount, b.count, 0, 0, b.first);
     }
     vkCmdEndRendering(cmd);
   }
+  cpuMark("desenho");
   barrier();
   profiler_.mark(cmd, "gbuffer");
 
@@ -824,6 +841,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   vkCmdEndRendering(cmd);
   profiler_.mark(cmd, "tonemap");
 
+  cpuMark("passes");
   prevViewProj_ = u.viewProjNoJitter;
   prevInvViewProj_ = u.invViewProj;
   prevView_ = u.view;
@@ -835,24 +853,77 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   ++frameIndex_;
 }
 
+void Renderer::cpuMark(const char* name) {
+  auto now = std::chrono::steady_clock::now();
+  double ms = std::chrono::duration<double, std::milli>(now - cpuLast_).count();
+  cpuLast_ = now;
+  for (auto& [n, t] : cpuTotals_)
+    if (n == name) { t += ms; return; }
+  cpuTotals_.emplace_back(name, ms);
+}
+
+std::string Renderer::cpuTimings() {
+  if (cpuFrames_ == 0) return {};
+  double sum = 0.0;
+  for (auto& [n, t] : cpuTotals_) sum += t;
+  char buf[96];
+  std::snprintf(buf, sizeof(buf), "CPU %.2f ms (%u frames):", sum / cpuFrames_, cpuFrames_);
+  std::string out = buf;
+  for (auto& [n, t] : cpuTotals_) {
+    std::snprintf(buf, sizeof(buf), " %s %.2f |", n, t / cpuFrames_);
+    out += buf;
+  }
+  while (!out.empty() && (out.back() == '|' || out.back() == ' ')) out.pop_back();
+  cpuTotals_.clear();
+  cpuFrames_ = 0;
+  return out;
+}
+
 void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   scene::Scene& s = *scene_;
   rhi::Context& ctx = *ctx_;
 
-  // Transformações atual e anterior de cada objeto (vetores de movimento por objeto).
+  // Transformações atual e anterior de cada objeto (vetores de movimento por objeto) e as instâncias do TLAS: só as
+  // que mudaram (medido na cidade de 98 mil objetos: ~35 ms de CPU por frame reescrevendo tudo).
+  const auto& changed = s.changedObjects();
+  for (uint32_t k = 0; k < kFramesInFlight; ++k)
+    pendingObjects_[k].insert(pendingObjects_[k].end(), changed.begin(), changed.end());
+  if (!historyValid_) objectsFull_.fill(true);  // reinício: anterior = atual em todos os buffers
   auto* objs = static_cast<ObjectGpu*>(objectBuffers_[slot].mapped);
-  for (size_t i = 0; i < s.objects.size(); ++i)
+  auto writeObject = [&](uint32_t i) {
     objs[i] = {s.objects[i].transform, historyValid_ ? s.objects[i].prevTransform : s.objects[i].transform};
-  vmaFlushAllocation(ctx.allocator, objectBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
-
-  // Luzes (podem se mover: faróis, tochas carregadas, etc.) e a BVH de luzes reconstruída para elas.
-  if (!s.lights.empty()) {
-    std::memcpy(lightBuffers_[slot].mapped, s.lights.data(), s.lights.size() * sizeof(scene::PointLight));
-    vmaFlushAllocation(ctx.allocator, lightBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
-    buildLightBvh(s.lights, lightBvhNodes_);
-    std::memcpy(lightBvhBuffers_[slot].mapped, lightBvhNodes_.data(), lightBvhNodes_.size() * sizeof(LightBvhNode));
-    vmaFlushAllocation(ctx.allocator, lightBvhBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+    if (ctx.rayTracing) s.tlas.writeInstance(slot, i, s.tlasInstance(i));
+  };
+  const bool full = objectsFull_[slot];
+  if (full) {
+    for (uint32_t i = 0; i < s.objects.size(); ++i) writeObject(i);
+    objectsFull_[slot] = false;
+  } else {
+    for (uint32_t i : pendingObjects_[slot]) writeObject(i);
   }
+  const bool objectsMoved = full || !pendingObjects_[slot].empty();
+  pendingObjects_[slot].clear();
+  vmaFlushAllocation(ctx.allocator, objectBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+  cpuMark("objetos");
+
+  // Luzes (podem se mover: faróis, tochas carregadas, etc.) e a BVH de luzes reconstruída para elas — só quando
+  // alguma mudou (medido: 35 ms de CPU por frame com 25 mil luzes fixas refeitas à toa).
+  if (!s.lights.empty()) {
+    const size_t bytes = s.lights.size() * sizeof(scene::PointLight);
+    if (lightsSnapshot_.size() != s.lights.size() || std::memcmp(lightsSnapshot_.data(), s.lights.data(), bytes) != 0) {
+      lightsSnapshot_ = s.lights;
+      buildLightBvh(s.lights, lightBvhNodes_);
+      ++lightsVersion_;
+    }
+    if (slotLightsVersion_[slot] != lightsVersion_) {
+      std::memcpy(lightBuffers_[slot].mapped, s.lights.data(), bytes);
+      vmaFlushAllocation(ctx.allocator, lightBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+      std::memcpy(lightBvhBuffers_[slot].mapped, lightBvhNodes_.data(), lightBvhNodes_.size() * sizeof(LightBvhNode));
+      vmaFlushAllocation(ctx.allocator, lightBvhBuffers_[slot].allocation, 0, VK_WHOLE_SIZE);
+      slotLightsVersion_[slot] = lightsVersion_;
+    }
+  }
+  cpuMark("luzes");
 
   // Matrizes das juntas de todos os esqueletos.
   auto* joints = static_cast<glm::mat4*>(jointBuffers_[slot].mapped);
@@ -899,7 +970,13 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
       rhi::memoryBarrier(cmd);
     }
   }
-  if (ctx.rayTracing) s.tlas.record(cmd, slot, s.tlasInstances());
+  cpuMark("esqueletos");
+  // TLAS reconstruído só quando algo mudou (objeto movido ou malha com esqueleto refeita); parado, o da GPU vale.
+  if (ctx.rayTracing && (objectsMoved || anySkinned || !tlasBuilt_)) {
+    s.tlas.build(cmd, slot, uint32_t(s.objects.size()));
+    tlasBuilt_ = true;
+  }
+  cpuMark("tlas");
 }
 
 float Renderer::runAtmosphereTest(uint32_t pathsPerThread) {
@@ -967,6 +1044,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, histogram_);
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
+  rhi::destroyBuffer(ctx, drawList_);
   for (rhi::ComputePass* p : {&skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})

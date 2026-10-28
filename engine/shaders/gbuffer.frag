@@ -19,7 +19,8 @@ layout(location = 3) out vec4 outEmissive;
 layout(location = 4) out vec4 outSpecular;  // rgb = f0, a = f90
 layout(location = 5) out uvec2 outVisibility;  // objeto + 1, triângulo (superfície exata nos passes de RT)
 
-layout(push_constant) uniform Push { uint object; uint material; } pc;
+layout(location = 6) flat in uint vObject;
+layout(location = 7) flat in uint vMaterial;
 
 // Anti-aliasing especular geométrico (Tokuyoshi & Kaplanyan, "Improved Geometric Specular
 // Antialiasing", I3D 2019): a variação da normal dentro do pixel alarga o lóbulo GGX, então
@@ -35,7 +36,7 @@ float filterRoughness(vec3 normal, float roughness, float normalVariance) {
 }
 
 void main() {
-  Material m = materials[pc.material];
+  Material m = materials[vMaterial];
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;  // materiais de dois lados
   Surface s = evalMaterial(m, vWorldPos, N, vTangent, vUV);
@@ -47,5 +48,5 @@ void main() {
   outNormal = vec4(s.normal, filterRoughness(s.normal, s.roughness, s.normalVariance));
   outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
   outSpecular = vec4(s.f0, s.f90);
-  outVisibility = uvec2(pc.object + 1u, uint(gl_PrimitiveID));
+  outVisibility = uvec2(vObject + 1u, uint(gl_PrimitiveID));
 }

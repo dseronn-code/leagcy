@@ -1,5 +1,8 @@
 #pragma once
 #include <array>
+#include <chrono>
+#include <string>
+#include <utility>
 #include <limits>
 #include <vector>
 
@@ -118,6 +121,8 @@ class Renderer {
   VkExtent2D renderExtent() const { return renderExtent_; }
   // Tempo médio de GPU por passe desde a última chamada (vazio se ainda não há medições).
   std::string gpuTimings() { return profiler_.report(); }
+  // Tempo de CPU por etapa da gravação do frame (média desde o último relatório).
+  std::string cpuTimings();
   // --reference: recomeça a média (a cena mudou: objetos animados). A câmera andando já recomeça sozinha.
   void restartReference() { accumulatedFrames_ = 0; }
 
@@ -159,6 +164,12 @@ class Renderer {
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_, lightBvhBuffers_;
   rhi::Buffer histogram_, exposureState_;
+  // Desenho instanciado do G-buffer: índices de objetos ordenados por malha, um lote (draw call) por malha.
+  struct DrawBatch {
+    uint32_t mesh, first, count;
+  };
+  std::vector<DrawBatch> drawBatches_;
+  rhi::Buffer drawList_;
   rhi::Buffer radianceCache_;  // cache de radiância no espaço do mundo (shaders/radiance_cache.glsl)
 
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
@@ -182,9 +193,24 @@ class Renderer {
   NrdDenoiser nrd_;
   Upscaler upscaler_;
   uint32_t accumulatedFrames_ = 0;  // --reference
+  // Perfil de CPU: etapas da gravação do frame (cpuMark fecha a etapa iniciada no mark anterior).
+  void cpuMark(const char* name);
+  std::chrono::steady_clock::time_point cpuLast_;
+  std::vector<std::pair<const char*, double>> cpuTotals_;
+  uint32_t cpuFrames_ = 0;
   bool upscalerReady_ = false;
   bool nrdReady_ = false;  // com o jitter daquele frame (reconstrói a superfície anterior)
   std::vector<LightBvhNode> lightBvhNodes_;
+  // Luzes e BVH só são refeitas e reenviadas quando alguma luz muda (cidade: quase todas fixas). Versão por buffer
+  // de frame em voo: cada um recebe os dados novos uma vez.
+  std::vector<scene::PointLight> lightsSnapshot_;
+  // Objetos (matrizes e instâncias do TLAS): cada buffer de frame em voo acumula os índices que mudaram desde que foi
+  // escrito; "full" = reescrever tudo (primeiro uso, histórico reiniciado).
+  std::array<std::vector<uint32_t>, kFramesInFlight> pendingObjects_;
+  std::array<bool, kFramesInFlight> objectsFull_{};
+  bool tlasBuilt_ = false;
+  uint64_t lightsVersion_ = 0;
+  std::array<uint64_t, kFramesInFlight> slotLightsVersion_{};
   glm::vec3 prevCameraPos_{0.0f};
   glm::vec2 prevJitter_{0.0f};
 };

@@ -154,23 +154,23 @@ void DynamicTlas::init(Context& ctx, uint32_t maxInstances) {
   scratch_ = createScratch(ctx, sizes.buildScratchSize);
 }
 
-void DynamicTlas::record(VkCommandBuffer cmd, uint32_t slot, const std::vector<TlasInstance>& instances) {
-  if (instances.size() > maxInstances_) FATAL("TLAS: %zu instâncias (máximo %u)", instances.size(), maxInstances_);
+void DynamicTlas::writeInstance(uint32_t slot, uint32_t index, const TlasInstance& instance) {
+  if (index >= maxInstances_) FATAL("TLAS: instância %u (máximo %u)", index, maxInstances_);
+  const glm::mat4& m = instance.transform;
+  VkAccelerationStructureInstanceKHR r{};
+  // VkTransformMatrixKHR é 3x4 row-major; glm é column-major.
+  for (int row = 0; row < 3; ++row)
+    for (int col = 0; col < 4; ++col) r.transform.matrix[row][col] = m[col][row];
+  r.instanceCustomIndex = instance.customIndex;
+  r.mask = 0xFF;
+  r.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
+            (instance.opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR);
+  r.accelerationStructureReference = instance.blas->address;
+  std::memcpy(static_cast<VkAccelerationStructureInstanceKHR*>(instanceBuffers_[slot % kSlots].mapped) + index, &r, sizeof(r));
+}
+
+void DynamicTlas::build(VkCommandBuffer cmd, uint32_t slot, uint32_t count) {
   Buffer& buf = instanceBuffers_[slot % kSlots];
-  auto* raw = static_cast<VkAccelerationStructureInstanceKHR*>(buf.mapped);
-  for (size_t i = 0; i < instances.size(); ++i) {
-    const glm::mat4& m = instances[i].transform;
-    VkAccelerationStructureInstanceKHR r{};
-    // VkTransformMatrixKHR é 3x4 row-major; glm é column-major.
-    for (int row = 0; row < 3; ++row)
-      for (int col = 0; col < 4; ++col) r.transform.matrix[row][col] = m[col][row];
-    r.instanceCustomIndex = instances[i].customIndex;
-    r.mask = 0xFF;
-    r.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
-              (instances[i].opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR);
-    r.accelerationStructureReference = instances[i].blas->address;
-    std::memcpy(raw + i, &r, sizeof(r));
-  }
   vmaFlushAllocation(ctx_->allocator, buf.allocation, 0, VK_WHOLE_SIZE);
 
   VkAccelerationStructureGeometryKHR geom = instanceGeometry(buf.address);
@@ -182,7 +182,7 @@ void DynamicTlas::record(VkCommandBuffer cmd, uint32_t slot, const std::vector<T
   build.geometryCount = 1;
   build.pGeometries = &geom;
   build.scratchData.deviceAddress = alignScratch(*ctx_, scratch_.address);
-  VkAccelerationStructureBuildRangeInfoKHR range{uint32_t(instances.size()), 0, 0, 0};
+  VkAccelerationStructureBuildRangeInfoKHR range{count, 0, 0, 0};
   const VkAccelerationStructureBuildRangeInfoKHR* ranges = &range;
   ctx_->rt.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &ranges);
 }

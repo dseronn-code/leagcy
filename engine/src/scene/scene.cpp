@@ -73,8 +73,8 @@ void Scene::animateModel(Model& m, float dt) {
     }
     return global[i];
   };
-  for (auto [node, object] : m.rigidObjects) objects[object].transform = m.root * resolve(node);
-  for (uint32_t object : m.skinnedObjects) objects[object].transform = m.root;
+  for (auto [node, object] : m.rigidObjects) setTransform(object, m.root * resolve(node));
+  for (uint32_t object : m.skinnedObjects) setTransform(object, m.root);
   m.jointMatrices.resize(m.skins.size());
   for (size_t s = 0; s < m.skins.size(); ++s) {
     const Skin& skin = m.skins[s];
@@ -85,19 +85,35 @@ void Scene::animateModel(Model& m, float dt) {
 
 void Scene::update(float dt) {
   time += dt;
-  for (auto& o : objects) o.prevTransform = o.transform;
+  // Os movidos no frame anterior assentam (anterior = atual); os outros já estão assim.
+  for (uint32_t i : movedLast_) objects[i].prevTransform = objects[i].transform;
+  // Movidos fora de um update (pose inicial da animação, antes do primeiro frame): sem movimento a mostrar.
+  for (uint32_t i : movedNow_) {
+    movedMark_[i] = 0;
+    objects[i].prevTransform = objects[i].transform;
+  }
+  movedNow_.clear();
+  movedMark_.resize(objects.size(), 0);
   for (auto& a : animators_) a(*this, time, dt);
   for (auto& m : models) animateModel(m, dt);
+  changed_ = movedLast_;
+  changed_.insert(changed_.end(), movedNow_.begin(), movedNow_.end());
+  for (uint32_t i : movedNow_) movedMark_[i] = 0;
+  movedLast_.swap(movedNow_);
 }
 
-std::vector<rhi::TlasInstance> Scene::tlasInstances() const {
-  std::vector<rhi::TlasInstance> out;
-  out.reserve(objects.size());
-  for (uint32_t i = 0; i < objects.size(); ++i) {
-    bool opaque = !(materials[objects[i].material].flags & kMaterialAlphaMask);
-    out.push_back({&meshes[objects[i].mesh].blas, objects[i].transform, i, opaque});
+void Scene::setTransform(uint32_t object, const glm::mat4& transform) {
+  if (object >= movedMark_.size()) movedMark_.resize(objects.size(), 0);
+  if (!movedMark_[object]) {
+    movedMark_[object] = 1;
+    movedNow_.push_back(object);
   }
-  return out;
+  objects[object].transform = transform;
+}
+
+rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
+  bool opaque = !(materials[objects[i].material].flags & kMaterialAlphaMask);
+  return {&meshes[objects[i].mesh].blas, objects[i].transform, i, opaque};
 }
 
 void Scene::bounds(glm::vec3& lo, glm::vec3& hi) const {
@@ -225,8 +241,9 @@ void Scene::upload(rhi::Context& ctx) {
 
   if (ctx.rayTracing) {
     tlas.init(ctx, uint32_t(objects.size()));
-    auto instances = tlasInstances();
-    ctx.immediateSubmit([&](VkCommandBuffer cmd) { tlas.record(cmd, 0, instances); });
+    for (uint32_t slot = 0; slot < rhi::DynamicTlas::kSlots; ++slot)
+      for (uint32_t i = 0; i < objects.size(); ++i) tlas.writeInstance(slot, i, tlasInstance(i));
+    ctx.immediateSubmit([&](VkCommandBuffer cmd) { tlas.build(cmd, 0, uint32_t(objects.size())); });
   }
   size_t drawn = 0;
   for (auto& o : objects) drawn += meshes[o.mesh].indexCount / 3;
