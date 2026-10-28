@@ -37,6 +37,7 @@ struct Options {
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
+  bool compressTextures = true;  // texturas em BC7 (--no-texture-compression = RGBA8)
   uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
   float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
   scene::DemoOptions scene;
@@ -62,6 +63,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--move") o.move = float(std::atof(next()));
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
+    else if (a == "--no-texture-compression") o.compressTextures = false;
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
     else if (a == "--sun-azimuth") o.sunAzimuth = float(std::atof(next()));
@@ -151,6 +153,7 @@ Options parseArgs(int argc, char** argv) {
           "  --restir-no-reuse temporal|spatial|all   desliga reusos do ReSTIR (depuração)\n"
           "  --reference                referência por acumulação (sem denoiser; use muitos --frames com a câmera parada)\n"
           "  --reference-pt             idem, com os rebotes por path tracing (verdade de GI e reflexos)\n"
+          "  --no-texture-compression   texturas em RGBA8 (padrão: BC7, 4x menos memória de vídeo)\n"
           "  --no-radiance-cache        desliga o cache de radiância (rebotes além do 1º pelo céu aproximado)\n"
           "  --sharpness X              nitidez RCAS na saída (0 a 1; padrão 0,5, ou 0 com DLSS)\n"
           "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
@@ -182,6 +185,7 @@ int runAtmosphereTest(const Options& opt) {
   scene::Scene scene;
   scene::Camera camera;
   scene::buildDemoScene(scene, camera, {"furnace", false, 0});
+  scene.compressTextures = opt.compressTextures;
   scene.upload(ctx);
   renderer::Renderer r;
   r.init(ctx, scene, {64, 64}, VK_FORMAT_R8G8B8A8_SRGB, opt.render);
@@ -205,6 +209,7 @@ int runHeadless(const Options& opt) {
     camera.lookAt(opt.cameraTarget);
   }
   applySunOverride(opt, scene);
+  scene.compressTextures = opt.compressTextures;
   scene.upload(ctx);
 
   VkExtent2D extent{opt.width, opt.height};
@@ -312,6 +317,7 @@ int runWindowed(const Options& opt) {
     camera.lookAt(opt.cameraTarget);
   }
   applySunOverride(opt, scene);
+  scene.compressTextures = opt.compressTextures;
   scene.upload(ctx);
 
   int fbw, fbh;

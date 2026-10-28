@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include <cstddef>
 
 #include "rhi/context.h"
@@ -39,6 +40,9 @@ void destroyImage(Context& ctx, Image& img);
 
 // Textura RGBA8 com cadeia completa de mipmaps gerada na GPU; termina em SHADER_READ_ONLY_OPTIMAL.
 Image createTexture(Context& ctx, const uint8_t* rgba, uint32_t width, uint32_t height, bool srgb);
+// Textura já comprimida (BC7) com todos os mips prontos: `mips[i]` = blocos do nível i, sem geração na GPU.
+Image createCompressedTexture(Context& ctx, VkFormat format, uint32_t w, uint32_t h,
+                              const std::vector<std::vector<uint8_t>>& mips);
 
 // Barreira de memória global (todas as escritas -> todas as leituras). Simples e correta;
 // um render graph poderá refinar isso no futuro.

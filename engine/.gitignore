@@ -4,3 +4,4 @@ assets/
 !docs/screenshots/*.png
 __pycache__/
 resultados_pc/
+texcache/
