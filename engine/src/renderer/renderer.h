@@ -47,9 +47,10 @@ struct Settings {
   float manualEV100 = std::numeric_limits<float>::quiet_NaN();  // definido = exposição manual (EV100)
   float sunAngularRadius = 0.00465f;  // rad: tamanho real do disco solar (penumbras físicas)
   bool denoiser = true;
-  // false = SVGF próprio (padrão: medido melhor em movimento com o nosso sinal, ver docs/auditoria.md);
-  // true = NVIDIA NRD (melhor com a câmera parada).
+  // Sem RTX (ou com --denoiser): false = SVGF próprio (medido melhor em movimento que o NRD com o nosso sinal,
+  // ver docs/auditoria.md); true = NVIDIA NRD. Numa RTX o padrão é o DLSS-RR (autoRayReconstruction).
   bool nrd = false;
+  bool autoRayReconstruction = true;  // upscaler Auto numa RTX: DLSS-RR no lugar do denoiser do motor
   bool nrdReblur = false;           // NRD: ReBLUR em vez de ReLAX
   bool nrdValidation = false;       // mostra a camada de validação do NRD (histórico, desoclusão, vetores)
   bool depthOfField = false;

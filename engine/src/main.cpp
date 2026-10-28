@@ -97,6 +97,8 @@ Options parseArgs(int argc, char** argv) {
         o.render.upscaler = renderer::Upscaler::Kind::DlssRR;
         v = "svgf";  // sem RTX, volta ao SVGF + TAAU do motor
       }
+      else
+        o.render.autoRayReconstruction = false;  // denoiser do motor pedido: o Auto não troca pelo DLSS-RR
       o.render.nrd = v != "svgf";
       o.render.nrdReblur = v == "reblur";
     }
@@ -146,7 +148,7 @@ Options parseArgs(int argc, char** argv) {
           "  --fullscreen             tela cheia na resolução nativa do monitor\n"
           "  --dof [--focus M]        profundidade de campo (autofoco se --focus omitido)\n"
           "  --ev X | --exposure EV   compensação da auto-exposição (EV) | exposição manual (EV100)\n"
-          "  --denoiser svgf|relax|reblur|dlss-rr  SVGF próprio (padrão), NVIDIA NRD ReLAX / ReBLUR [--nrd-validation]\n"
+          "  --denoiser svgf|relax|reblur|dlss-rr  padrão: DLSS-RR na RTX, senão SVGF próprio; NVIDIA NRD ReLAX / ReBLUR [--nrd-validation]\n"
           "                             ou DLSS Ray Reconstruction (RTX: denoiser + upscaler numa rede só)\n"
           "  --no-denoiser --no-motion-blur --no-rt --no-vsync --validation\n"
           "  --cam x,y,z --look x,y,z  posição e alvo da câmera\n"

@@ -61,7 +61,7 @@ bool lightPoint(uint li, vec2 uv, vec3 P, out vec3 L, out float dist, out vec3 L
   L = d / dist;
   float cosY = -dot(n, L);
   if (cosY <= 0.0) return false;
-  Le = l.intensity * lightWindow(l, dc) / (PI * r * r);
+  Le = l.intensity * lightWindow(l, P, dc) / (PI * r * r);
   G = cosY / d2;
   return true;
 }
