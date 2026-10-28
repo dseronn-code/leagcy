@@ -110,6 +110,17 @@ if(LEGACY_DLSS)
 endif()
 FetchContent_MakeAvailable(nrd)
 
+# Compressão de texturas BC7 (bc7enc_rdo, Rich Geldreich — MIT ou domínio público). Só o codificador e o decodificador
+# de BC7; o CMakeLists do projeto (ferramenta de linha de comando, ISPC) não é usado.
+FetchContent_Declare(bc7enc
+  GIT_REPOSITORY https://github.com/richgel999/bc7enc_rdo.git
+  GIT_TAG b9438627eef73a1157e84201b6fa6eb2ffd6d9f0
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(bc7enc)
+add_library(bc7enc STATIC ${bc7enc_SOURCE_DIR}/bc7enc.cpp ${bc7enc_SOURCE_DIR}/bc7decomp.cpp)
+target_include_directories(bc7enc SYSTEM PUBLIC ${bc7enc_SOURCE_DIR})
+set_target_properties(bc7enc PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # ---- Shaders: GLSL -> SPIR-V em tempo de build ----
 file(GLOB SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert
@@ -137,7 +148,7 @@ add_executable(legacy ${ENGINE_SOURCES})
 add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
-target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI)
+target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc)
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 # As bibliotecas de execução do DLSS/FSR precisam ficar ao lado do executável (o NRI as copia para a pasta dele).
 if(LEGACY_DLSS)

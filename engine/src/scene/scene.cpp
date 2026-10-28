@@ -1,5 +1,9 @@
 #include "scene/scene.h"
 
+#include <chrono>
+
+#include "scene/texture_compress.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -180,10 +184,34 @@ void Scene::upload(rhi::Context& ctx) {
                                     rhi::MemoryUsage::GpuOnly);
 
   size_t texels = 0;
+  VkFormatProperties bc7{};
+  vkGetPhysicalDeviceFormatProperties(ctx.gpu, VK_FORMAT_BC7_SRGB_BLOCK, &bc7);
+  const bool compress = compressTextures && !cpuTextures_.empty() &&
+                        (bc7.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT);
+  if (compressTextures && !compress && !cpuTextures_.empty()) LOG_INFO("Texturas: GPU sem BC7, usando RGBA8");
+  double bytesRaw = 0.0, bytesGpu = 0.0, psnrSum = 0.0, psnrMin = 99.0;
+  auto t0 = std::chrono::steady_clock::now();
   for (auto& t : cpuTextures_) {
-    textures.push_back(rhi::createTexture(ctx, t.rgba.data(), t.width, t.height, t.srgb));
+    const double raw = double(t.width) * t.height * 4.0 * 4.0 / 3.0;  // RGBA8 com a cadeia de mips
+    bytesRaw += raw;
+    if (compress) {
+      CompressedTexture ct = compressTexture(t.rgba.data(), t.width, t.height, t.srgb, textureCacheDir);
+      for (const auto& m : ct.mips) bytesGpu += double(m.size());
+      const double p = compressionPsnr(ct, t.rgba.data());
+      psnrSum += p;
+      psnrMin = std::min(psnrMin, p);
+      textures.push_back(rhi::createCompressedTexture(ctx, ct.format, ct.width, ct.height, ct.mips));
+    } else {
+      bytesGpu += raw;
+      textures.push_back(rhi::createTexture(ctx, t.rgba.data(), t.width, t.height, t.srgb));
+    }
     texels += size_t(t.width) * t.height;
   }
+  if (compress)
+    LOG_INFO("Texturas BC7: %.0f MB -> %.0f MB de memória de vídeo (%.1fx menos), PSNR médio %.1f dB (pior %.1f dB), %.1f s",
+             bytesRaw / 1048576.0, bytesGpu / 1048576.0, bytesRaw / std::max(bytesGpu, 1.0),
+             psnrSum / double(cpuTextures_.size()), psnrMin,
+             std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
   cpuTextures_.clear();
 
   if (materials.empty()) addMaterial({});

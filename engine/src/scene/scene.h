@@ -126,6 +126,10 @@ class Scene {
  public:
   using Animator = std::function<void(Scene&, float time, float dt)>;
 
+  // Texturas em BC7 (4x menos memória de vídeo; ver texture_compress.h). false = RGBA8 com mips na GPU.
+  bool compressTextures = true;
+  std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
+
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }
   uint32_t addMaterial(const Material& m) { materials.push_back(m); return uint32_t(materials.size() - 1); }
   uint32_t addTexture(TextureData t) { cpuTextures_.push_back(std::move(t)); return uint32_t(cpuTextures_.size() - 1); }
