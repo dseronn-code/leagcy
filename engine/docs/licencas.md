@@ -6,7 +6,7 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 |---|---|---|---|
 | [NVIDIA NRD](https://github.com/NVIDIA-RTX/NRD) v4.18.0 | Denoiser ReLAX | NVIDIA RTX SDKs License | Ver abaixo |
 | [NVIDIA NRI](https://github.com/NVIDIA-RTX/NRI) v190 | Camada que liga o NRD e os upscalers ao nosso Vulkan | MIT | Manter o aviso de copyright |
-| [NVIDIA DLSS](https://github.com/NVIDIA/DLSS) v310.9.1 (opção `LEGACY_DLSS`) | Upscaling DLSS (`--upscaler dlss`) | NVIDIA RTX SDKs License | Ver abaixo |
+| [NVIDIA DLSS](https://github.com/NVIDIA/DLSS) v310.9.1 (opção `LEGACY_DLSS`) | DLSS e DLSS Ray Reconstruction (`--upscaler dlss`, `--denoiser dlss-rr`) | NVIDIA RTX SDKs License | Ver abaixo |
 | [AMD FidelityFX SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) v1.1.4 (opção `LEGACY_FSR`, Windows) | FSR 3 (`--upscaler fsr`) | MIT | Manter o aviso |
 | AMD FidelityFX RCAS (FSR 1) | Nitidez da saída (`shaders/tonemap.frag`) | MIT | Manter o aviso (no shader) |
 | [NVIDIA Image Scaling](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling) (dentro do NRI) | Só teste da integração (`--upscaler nis`) | MIT | Manter o aviso |

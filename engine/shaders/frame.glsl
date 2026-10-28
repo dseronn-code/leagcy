@@ -9,10 +9,10 @@ layout(set = 0, binding = 0) uniform FrameData {
   mat4 view;
   mat4 proj;                  // com jitter de subpixel (TAA)
   mat4 viewProj;              // com jitter
-  mat4 invViewProj;           // com jitter
+  mat4 invViewProj;           // com jitter, RELATIVA À CÂMERA: NDC -> (posição - câmera); ver worldPosFromDepth
   mat4 viewProjNoJitter;
   mat4 prevViewProjNoJitter;
-  mat4 prevInvViewProj;       // do frame anterior, com o jitter dele
+  mat4 prevInvViewProj;       // do frame anterior, com o jitter dele, relativa à câmera anterior
   vec4 cameraPos;             // xyz = posição (m), w = near plane
   vec4 prevCameraPos;
   vec4 sunDir;                // xyz = direção PARA o sol, w = iluminância solar no topo da atmosfera (lux)
@@ -61,13 +61,15 @@ bool historyValid() { return frame.frameInfo.w != 0u; }
 // Reverse-Z infinito: profundidade = near / distância.
 float linearDepth(float d) { return frame.cameraPos.w / max(d, 1e-7); }
 
-vec3 worldPosFromDepth(vec2 uv, float depth) {
+// Posição relativa à câmera primeiro, câmera somada no fim: com a matriz absoluta, longe da origem (mundo aberto)
+// o ponto perto da câmera saía com erro de ulp(coordenada) — a 4 km, 0,2 mm a 20 cm da câmera = direção 1e-3 rad
+// torta (3 cm de erro a 30 m). Medido: luz perdida no terminator a 4 km de 2,4% (lavapipe) / 9,4% (RTX 3070 Ti).
+vec3 cameraRelativePosFromDepth(vec2 uv, float depth) {
   vec4 p = frame.invViewProj * vec4(uv * 2.0 - 1.0, depth, 1.0);
   return p.xyz / p.w;
 }
-vec3 viewDirFromUv(vec2 uv) {
-  return normalize(worldPosFromDepth(uv, 0.5) - frame.cameraPos.xyz);
-}
+vec3 worldPosFromDepth(vec2 uv, float depth) { return frame.cameraPos.xyz + cameraRelativePosFromDepth(uv, depth); }
+vec3 viewDirFromUv(vec2 uv) { return normalize(cameraRelativePosFromDepth(uv, 0.5)); }
 
 // Posição em km relativa ao centro do planeta.
 vec3 planetPos(vec3 worldMeters) {

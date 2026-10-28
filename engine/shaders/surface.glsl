@@ -85,7 +85,7 @@ PixelSurface loadSurface(ivec2 id) {
   if (vis.x == 0u || s.g.depth <= 0.0) return s;
   // Raio do centro do pixel (mesma projeção com jitter do rasterizador).
   vec3 C = frame.cameraPos.xyz;
-  vec3 dir = normalize(worldPosFromDepth((vec2(id) + 0.5) * frame.renderSize.zw, 0.5) - C);
+  vec3 dir = viewDirFromUv((vec2(id) + 0.5) * frame.renderSize.zw);
   intersectTriangle(vis.x - 1u, vis.y, objects[vis.x - 1u].model, C, dir, s);
   return s;
 }
@@ -105,7 +105,7 @@ bool loadPreviousSurface(ivec2 pid, sampler2D normalPrev, GSample current, out P
   if (vis.x == 0u) return false;
   vec3 C = frame.prevCameraPos.xyz;
   vec4 far = frame.prevInvViewProj * vec4(((vec2(pid) + 0.5) * frame.renderSize.zw) * 2.0 - 1.0, 0.5, 1.0);
-  vec3 dir = normalize(far.xyz / far.w - C);
+  vec3 dir = normalize(far.xyz / far.w);  // relativa à câmera anterior
   if (!intersectTriangle(vis.x - 1u, vis.y, objects[vis.x - 1u].prevModel, C, dir, s)) return false;
   vec4 n = texelFetch(normalPrev, pid, 0);
   s.g.N = normalize(n.xyz);

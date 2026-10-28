@@ -49,6 +49,7 @@ def desempenho(binario, rel):
     casos = [('TAA nativo', ['--upscaler', 'taau', '--scale', '1']), ('TAAU 67%', ['--upscaler', 'taau', '--scale', '0.67']),
              ('DLAA', ['--upscaler', 'dlss', '--scale', '1']), ('DLSS qualidade', ['--upscaler', 'dlss', '--scale', '0.67']),
              ('DLSS desempenho', ['--upscaler', 'dlss', '--scale', '0.5']), ('FSR qualidade', ['--upscaler', 'fsr', '--scale', '0.67']),
+             ('DLSS-RR qualidade', ['--denoiser', 'dlss-rr', '--scale', '0.67']),
              ('Noite 512 luzes', ['--night']), ('Noite 4000 luzes', ['--night', '--lights', '4000']),
              ('Bistro', ['--scene', 'assets/Bistro/bistro.gltf']), ('Cinema', ['--quality', 'cinema'])]
     for nome, args in casos:
@@ -86,12 +87,24 @@ def nitidez(binario, rel):
         rel.append((p.stdout.strip().splitlines() or [f'escala {escala} {extra}: falhou ({erro})'])[-1])
 
 
+def denoisers(binario, rel):
+    """SVGF, NRD ReLAX e DLSS Ray Reconstruction: erro andando contra referência e cintilação parado (tools/denoiser.py)."""
+    rel.append('\n== Denoisers (Sponza à noite; erro e brilhinhos: menor é melhor)')
+    p = subprocess.run([sys.executable, os.path.join(AQUI, 'denoiser.py'), '--bin', binario, '--out',
+                        os.path.join(PASTA, 'denoiser'), '--candidatos', 'svgf,relax,dlss-rr'],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace',
+                       env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+    linhas = p.stdout.strip().splitlines()
+    rel += linhas if linhas else ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
+
+
 def movimento(binario, rel):
     """Câmera andando: imagens para comparar rastros e ruído (denoiser e upscaler)."""
     rel.append('\n== Movimento (imagens lado a lado em resultados_pc/)')
     base = ['--headless', '--width', '1280', '--height', '720', '--frames', '48', '--move', '3']
     grupos = {
-        'denoiser_noite_andando': [('svgf', ['--night', '--denoiser', 'svgf']), ('relax', ['--night', '--denoiser', 'relax'])],
+        'denoiser_noite_andando': [('svgf', ['--night', '--denoiser', 'svgf']), ('relax', ['--night', '--denoiser', 'relax']),
+                                   ('dlss-rr', ['--night', '--denoiser', 'dlss-rr'])],
         'upscaler_andando': [('taau', ['--scale', '0.67', '--upscaler', 'taau']), ('dlss', ['--scale', '0.67', '--upscaler', 'dlss']),
                              ('fsr', ['--scale', '0.67', '--upscaler', 'fsr'])],
         'upscaler_parado': [('taau', ['--scale', '0.67', '--upscaler', 'taau', '--pause', '--move', '0']),
@@ -119,7 +132,7 @@ def main():
     rel.append(linha(out, r'GPU: [^\n]*') or 'GPU: ?')
     rel.append('DLSS: ' + (linha(out, r'DLSS (ativo|indispon)[^\n]*') or '?'))
 
-    print('1/4 suíte de testes...', flush=True)
+    print('1/5 suíte de testes...', flush=True)
     p = subprocess.run([sys.executable, os.path.join(AQUI, 'testes.py'), '--bin', binario], capture_output=True, text=True,
                        encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
     rel.append('\n== Suíte de testes')
@@ -133,11 +146,13 @@ def main():
             detalhe += 1
     if p.returncode not in (0, 1):
         rel.append('suíte interrompida: ' + ' | '.join(p.stderr.strip().splitlines()[-3:]))
-    print('2/4 desempenho...', flush=True)
+    print('2/5 desempenho...', flush=True)
     desempenho(binario, rel)
-    print('3/4 nitidez...', flush=True)
+    print('3/5 nitidez...', flush=True)
     nitidez(binario, rel)
-    print('4/4 movimento...', flush=True)
+    print('4/5 denoisers...', flush=True)
+    denoisers(binario, rel)
+    print('5/5 movimento...', flush=True)
     movimento(binario, rel)
 
     with open(os.path.join(PASTA, 'relatorio.txt'), 'w', encoding='utf-8') as f:

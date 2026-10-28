@@ -28,5 +28,8 @@ void main() {
   vUV = aUV;
   vCurClip = frame.viewProjNoJitter * world;
   vPrevClip = frame.prevViewProjNoJitter * (o.prevModel * vec4(aPrevPosition, 1.0));
-  gl_Position = frame.viewProj * world;
+  // Relativo à câmera (mundo aberto): a translação do objeto menos a da câmera é exata para valores próximos
+  // (Sterbenz), então a projeção não multiplica coordenadas de 4 km. Mesma conta que viewProj * world.
+  vec3 rel = mat3(o.model) * aPosition + (o.model[3].xyz - frame.cameraPos.xyz);
+  gl_Position = frame.proj * vec4(mat3(frame.view) * rel, 1.0);
 }

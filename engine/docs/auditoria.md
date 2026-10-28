@@ -382,3 +382,35 @@ Decisões: **DLSS virou o padrão** em GPUs RTX (`--upscaler auto`; sem RTX, TAA
 desligada por padrão (1,05–1,10 = nítido demais com ela). O FSR 3 erra mais que o nosso TAAU nesta cena; fica
 como opção para placas AMD. Frame inteiro em 1080p nativo: 68 ms, dominado por ReSTIR (31 ms) e iluminação RT
 (29 ms) — otimização fica para o fim, depois da qualidade (decisão do usuário).
+
+### Achados na RTX 3070 Ti (segunda bateria do `tools/teste_pc.py`)
+
+- **Precisão longe da origem (mundo aberto) — corrigido na raiz.** O teste de sombra a 4 km acusou 3,0% (sol a 20°) e
+  9,4% (sol a 3°) de luz perdida no contorno das esferas (2,4% no lavapipe). Investigado em ordem: deslocamento da
+  origem do raio de sombra escalado pela maior coordenada (sem efeito), ponto reconstruído pelas baricêntricas
+  (sem efeito), e então a causa: a direção do raio de cada pixel vinha de `invViewProj` absoluta, aplicada a um ponto
+  a 20 cm da câmera com coordenadas de 4 km — erro de ulp(4000) ≈ 0,2 mm nesse ponto = direção torta em ~1e-3 rad
+  (3 cm a 30 m). Correção: **renderização relativa à câmera** (como os motores de mundo aberto fazem): a inversa
+  da projeção não tem mais translação (`cameraRelativePosFromDepth` + câmera somada no fim) e o vertex shader do
+  G-buffer projeta `posição - câmera` (diferença exata de valores próximos). Resultado: **0,0% a 4 km** nos dois
+  ângulos de sol, igual à origem; o limite do teste a 4 km caiu de 5% para 1%.
+- **Validação com DLSS:** o NGX limpa algumas imagens entregues a ele com `vkCmdClearColorImage`; as imagens de cor,
+  profundidade, movimento e saída agora têm `TRANSFER_DST`.
+- Com DLSS (padrão) a cintilação parada caiu para 0,0145 e brilhinhos 0,00% (TAA do motor no lavapipe: 0,0245 / 0,04%).
+
+### Item 5 (denoiser) — DLSS Ray Reconstruction integrado
+
+O denoiser de ponta hoje em placas RTX é o **DLSS Ray Reconstruction** (Cyberpunk 2077 com path tracing, Alan
+Wake 2, Indiana Jones): uma rede neural que faz o denoiser e o upscaler juntos, com o histórico em resolução de saída.
+Integrado pelo mesmo caminho do DLSS (`--denoiser dlss-rr`, tipo DLRR do NRI), seguindo o guia oficial de integração:
+- a iluminação vai **ruidosa** para a composição (sem SVGF/NRD) e a cor composta entra no DLSS-RR;
+- imagens-guia na resolução de render (`shaders/rr_guides.comp`), consistentes com a composição: albedo difuso,
+  refletância especular média (DFG × compensação de energia — a mesma que remodula o especular), normal de shading
+  no mundo + rugosidade linear (modo "packed"), distância do raio especular; céu com os valores padrão da NVIDIA
+  (albedo 0,5, normal 0, distância 65504);
+- matrizes mundo→câmera e câmera→clip sem jitter para o DLSS-RR calcular o movimento dos reflexos; 32 fases de
+  jitter (o guia pede "pelo menos 32"); nitidez RCAS desligada como no DLSS;
+- sem RTX, volta ao SVGF + TAAU do motor. Passe de guias validado aqui com a validação Vulkan (forçado).
+
+`tools/denoiser.py` agora mede cada denoiser andando (erro contra referência convergida) e parado (cintilação e
+brilhinhos); o `tools/teste_pc.py` compara SVGF, NRD ReLAX e DLSS-RR na RTX. O padrão só muda com a medição.

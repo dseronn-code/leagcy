@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 #include <NRI.h>
 #include <Extensions/NRIDeviceCreation.h>
@@ -38,8 +40,9 @@ struct Upscaler::Impl {
   nri::UpscalerInterface upscaler{};
   nri::Upscaler* instance = nullptr;
   rhi::Image exposure;  // 1x1 com 1,0: a cor de entrada já vem pré-exposta pelo motor
-  Wrapped color, depth[2], motion, exposureTex, output[2];
-  VkImage colorImage = VK_NULL_HANDLE, depthImage[2] = {}, motionImage = VK_NULL_HANDLE;
+  Wrapped color, depth[2], motion, exposureTex, output[2], normalRoughness, diffuseAlbedo, specularAlbedo, hitDistance;
+  std::vector<VkImage> readImages;  // entradas de cor (vão a SHADER_READ_ONLY_OPTIMAL durante o despacho)
+  VkImage depthImage[2] = {};
 
   void release(Wrapped& w) {
     if (w.view) core.DestroyDescriptor(w.view);
@@ -47,7 +50,9 @@ struct Upscaler::Impl {
     w = {};
   }
   void releaseAll() {
-    for (Wrapped* w : {&color, &depth[0], &depth[1], &motion, &exposureTex, &output[0], &output[1]}) release(*w);
+    for (Wrapped* w : {&color, &depth[0], &depth[1], &motion, &exposureTex, &output[0], &output[1], &normalRoughness,
+                       &diffuseAlbedo, &specularAlbedo, &hitDistance})
+      release(*w);
   }
   bool wrap(const Image& img, bool storage, Wrapped& out) {
     nri::TextureVKDesc td{};
@@ -79,6 +84,7 @@ const char* Upscaler::name(Kind k) {
     case Kind::Fsr: return "FSR";
     case Kind::Nis: return "NIS";
     case Kind::Auto: return "automático";
+    case Kind::DlssRR: return "DLSS Ray Reconstruction";
     default: return "TAAU";
   }
 }
@@ -132,12 +138,13 @@ bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale
     destroy();
     return false;
   }
-  const nri::UpscalerType type = kind == Kind::Dlss  ? nri::UpscalerType::DLSR
-                                : kind == Kind::Fsr ? nri::UpscalerType::FSR
-                                                    : nri::UpscalerType::NIS;
+  const nri::UpscalerType type = kind == Kind::Dlss     ? nri::UpscalerType::DLSR
+                                : kind == Kind::DlssRR ? nri::UpscalerType::DLRR
+                                : kind == Kind::Fsr    ? nri::UpscalerType::FSR
+                                                       : nri::UpscalerType::NIS;
   if (!m.upscaler.IsUpscalerSupported(*m.device, type)) {
     UPSCALER_FALLBACK("%s indisponível (%s); usando o TAAU do motor", name(kind),
-             kind == Kind::Dlss  ? "exige GPU NVIDIA RTX e o build com LEGACY_DLSS"
+             kind == Kind::Dlss || kind == Kind::DlssRR ? "exige GPU NVIDIA RTX e o build com LEGACY_DLSS"
              : kind == Kind::Fsr ? "exige o build com LEGACY_FSR, só no Windows"
                                  : "build sem NRI_ENABLE_NIS_SDK");
     destroy();
@@ -162,7 +169,8 @@ bool Upscaler::init(rhi::Context& ctx, Kind kind, VkExtent2D output, float scale
   kind_ = kind;
   renderExtent_ = {props.renderResolution.w, props.renderResolution.h};
   // Halton(2,3) com pelo menos as fases que o fabricante pede (8·fator², ex.: 18 no Qualidade, 32 no Desempenho).
-  jitterPhases_ = std::max<uint32_t>(16, props.jitterPhaseNum);
+  // O DLSS-RR pede "pelo menos 32" posições (guia de integração do DLSS-RR, 3.6).
+  jitterPhases_ = std::max<uint32_t>(kind == Kind::DlssRR ? 32 : 16, props.jitterPhaseNum);
   mipBias_ = props.mipBias;
 
   m.exposure = rhi::createImage2D(ctx, {1, 1}, VK_FORMAT_R32_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
@@ -199,14 +207,20 @@ bool Upscaler::bind(const Inputs& in) {
   if (!impl_) return false;
   Impl& m = *impl_;
   m.releaseAll();
-  bool ok = m.wrap(in.color, false, m.color) && m.wrap(in.depth[0], false, m.depth[0]) && m.wrap(in.depth[1], false, m.depth[1]) && m.wrap(in.motion, false, m.motion) &&
+  bool ok = m.wrap(in.color, false, m.color) && m.wrap(in.depth[0], false, m.depth[0]) &&
+            m.wrap(in.depth[1], false, m.depth[1]) && m.wrap(in.motion, false, m.motion) &&
             m.wrap(in.output[0], true, m.output[0]) && m.wrap(in.output[1], true, m.output[1]) &&
             m.wrap({m.exposure.handle, VK_FORMAT_R32_SFLOAT, {1, 1}, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT},
                    false, m.exposureTex);
-  m.colorImage = in.color.image;
+  m.readImages = {in.color.image, in.motion.image};
+  if (kind_ == Kind::DlssRR) {
+    ok = ok && m.wrap(in.normalRoughness, false, m.normalRoughness) && m.wrap(in.diffuseAlbedo, false, m.diffuseAlbedo) &&
+         m.wrap(in.specularAlbedo, false, m.specularAlbedo) && m.wrap(in.specularHitDistance, false, m.hitDistance);
+    for (const Image* g : {&in.normalRoughness, &in.diffuseAlbedo, &in.specularAlbedo, &in.specularHitDistance})
+      m.readImages.push_back(g->image);
+  }
   m.depthImage[0] = in.depth[0].image;
   m.depthImage[1] = in.depth[1].image;
-  m.motionImage = in.motion.image;
   if (!ok) LOG_WARN("%s: falha ao embrulhar as imagens", name(kind_));
   return ok;
 }
@@ -217,9 +231,9 @@ void Upscaler::dispatch(VkCommandBuffer cmd, const Frame& f) {
   const uint32_t i = f.index & 1;
 
   // DLSS e FSR leem as entradas em estado de leitura (SHADER_READ_ONLY_OPTIMAL no Vulkan) e escrevem a saída como
-  // storage (GENERAL). O motor mantém tudo em GENERAL: transição de ida e volta só das três entradas.
+  // storage (GENERAL). O motor mantém tudo em GENERAL: transição de ida e volta só das entradas.
   auto transition = [&](VkImageLayout from, VkImageLayout to) {
-    for (VkImage img : {m.colorImage, m.motionImage})
+    for (VkImage img : m.readImages)
       rhi::imageBarrier(cmd, img, VK_IMAGE_ASPECT_COLOR_BIT, from, to, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -238,9 +252,23 @@ void Upscaler::dispatch(VkCommandBuffer cmd, const Frame& f) {
     nri::DispatchUpscaleDesc d{};
     d.output = {out.texture, out.view};
     d.input = {m.color.texture, m.color.view};
-    d.guides.upscaler.mv = {m.motion.texture, m.motion.view};
-    d.guides.upscaler.depth = {m.depth[i].texture, m.depth[i].view};
-    d.guides.upscaler.exposure = {m.exposureTex.texture, m.exposureTex.view};
+    if (kind_ == Kind::DlssRR) {
+      nri::DenoiserGuides& g = d.guides.denoiser;
+      g.mv = {m.motion.texture, m.motion.view};
+      g.depth = {m.depth[i].texture, m.depth[i].view};
+      g.normalRoughness = {m.normalRoughness.texture, m.normalRoughness.view};
+      g.diffuseAlbedo = {m.diffuseAlbedo.texture, m.diffuseAlbedo.view};
+      g.specularAlbedo = {m.specularAlbedo.texture, m.specularAlbedo.view};
+      g.specularMvOrHitT = {m.hitDistance.texture, m.hitDistance.view};
+      // Mesma disposição de memória que o GLM (coluna principal = linhas do NGX com multiplicação à esquerda):
+      // {Xx, Yx, Zx, 0, ..., Tx, Ty, Tz, 1} e a projeção com (2,3) = -1, (3,3) = 0.
+      std::memcpy(d.settings.dlrr.worldToViewMatrix, &f.view[0][0], sizeof(float) * 16);
+      std::memcpy(d.settings.dlrr.viewToClipMatrix, &f.projNoJitter[0][0], sizeof(float) * 16);
+    } else {
+      d.guides.upscaler.mv = {m.motion.texture, m.motion.view};
+      d.guides.upscaler.depth = {m.depth[i].texture, m.depth[i].view};
+      d.guides.upscaler.exposure = {m.exposureTex.texture, m.exposureTex.view};
+    }
     if (kind_ == Kind::Fsr) {
       d.settings.fsr.zNear = f.zNear;
       d.settings.fsr.zFar = 1.0e6f;  // ignorado com DEPTH_INFINITE

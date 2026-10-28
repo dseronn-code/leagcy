@@ -113,6 +113,7 @@ python tools\teste_pc.py
 ./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
 ./build/legacy --scale 0.67               # DLSS qualidade em RTX (padrão automático); --scale 1 = DLAA
 ./build/legacy --upscaler fsr --scale 0.67 # AMD FSR 3; --upscaler taau = sempre o TAA do motor
+./build/legacy --night --denoiser dlss-rr  # DLSS Ray Reconstruction (RTX): denoiser + upscaler da NVIDIA
 ./build/legacy --validation                # camadas de validação do Vulkan (debug)
 ./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png
 ./build/legacy --scene outdoor --sun-elevation 3   # pôr do sol (atmosfera física)
