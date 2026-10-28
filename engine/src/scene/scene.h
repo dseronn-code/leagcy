@@ -55,6 +55,8 @@ struct TextureData {
   uint32_t width = 0, height = 0;
   std::vector<uint8_t> rgba;
   bool srgb = true;
+  bool normalMap = false;  // normal map de espaço tangente: comprimido em BC5 (xy), z reconstruído no shader
+  std::string name;  // arquivo de origem (diagnóstico)
 };
 
 struct Object {

@@ -110,14 +110,14 @@ if(LEGACY_DLSS)
 endif()
 FetchContent_MakeAvailable(nrd)
 
-# Compressão de texturas BC7 (bc7enc_rdo, Rich Geldreich — MIT ou domínio público). Só o codificador e o decodificador
-# de BC7; o CMakeLists do projeto (ferramenta de linha de comando, ISPC) não é usado.
+# Compressão de texturas BC7/BC5 (bc7enc_rdo, Rich Geldreich — MIT ou domínio público). Só os codificadores e o
+# decodificador; o CMakeLists do projeto (ferramenta de linha de comando, ISPC) não é usado.
 FetchContent_Declare(bc7enc
   GIT_REPOSITORY https://github.com/richgel999/bc7enc_rdo.git
   GIT_TAG b9438627eef73a1157e84201b6fa6eb2ffd6d9f0
   SOURCE_SUBDIR _sem_cmake)
 FetchContent_MakeAvailable(bc7enc)
-add_library(bc7enc STATIC ${bc7enc_SOURCE_DIR}/bc7enc.cpp ${bc7enc_SOURCE_DIR}/bc7decomp.cpp)
+add_library(bc7enc STATIC ${bc7enc_SOURCE_DIR}/bc7enc.cpp ${bc7enc_SOURCE_DIR}/bc7decomp.cpp ${bc7enc_SOURCE_DIR}/rgbcx.cpp)
 target_include_directories(bc7enc SYSTEM PUBLIC ${bc7enc_SOURCE_DIR})
 set_target_properties(bc7enc PROPERTIES POSITION_INDEPENDENT_CODE ON)
 

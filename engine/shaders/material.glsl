@@ -59,6 +59,10 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
     t = normalize(t);
     vec3 b = cross(N, t) * (T.w < 0.0 ? -1.0 : 1.0);
     vec3 n = MATERIAL_SAMPLE(m.normalTex, uv).xyz * 2.0 - 1.0;
+    // Normal map em BC5 (padrão; texture_compress.h): só x e y — o canal azul vem 0 (n.z = -1, impossível num normal
+    // map de espaço tangente) e o z é reconstruído da normal unitária. Em RGBA8 (--no-texture-compression) o z vem do
+    // arquivo e o Toksvig abaixo também mede a variância guardada no encurtamento dos mips.
+    if (n.z < -0.99) n.z = sqrt(max(1.0 - dot(n.xy, n.xy), 0.0));
     // Toksvig: nos mips a média de normais divergentes encurta o vetor; o encurtamento mede a
     // variância das normais dentro do pixel e vira rugosidade extra (sem cintilação a distância).
     float len = length(n);

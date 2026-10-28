@@ -89,13 +89,36 @@ def nitidez(binario, rel):
 
 def denoisers(binario, rel):
     """SVGF, NRD ReLAX e DLSS Ray Reconstruction: erro andando contra referência e cintilação parado (tools/denoiser.py)."""
-    rel.append('\n== Denoisers (Sponza à noite; erro e brilhinhos: menor é melhor)')
-    p = subprocess.run([sys.executable, os.path.join(AQUI, 'denoiser.py'), '--bin', binario, '--out',
-                        os.path.join(PASTA, 'denoiser'), '--candidatos', 'svgf,relax,dlss-rr'],
-                       capture_output=True, text=True, encoding='utf-8', errors='replace',
-                       env=dict(os.environ, PYTHONIOENCODING='utf-8'))
-    linhas = p.stdout.strip().splitlines()
-    rel += linhas if linhas else ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
+    rel.append('\n== Denoisers contra referência verdadeira (Sponza à noite; erro e brilhinhos: menor é melhor)')
+    for cena, titulo in (('sponza-noite', 'cena congelada'), ('sponza-noite-animada', 'personagens e luzes animados')):
+        p = subprocess.run([sys.executable, os.path.join(AQUI, 'denoiser.py'), '--bin', binario, '--out',
+                            os.path.join(PASTA, 'denoiser'), '--cena', cena, '--ref-frames', '2048',
+                            '--candidatos', 'svgf,relax,dlss-rr'],
+                           capture_output=True, text=True, encoding='utf-8', errors='replace',
+                           env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+        rel.append(f'-- {titulo}')
+        linhas = p.stdout.strip().splitlines()
+        rel += linhas if linhas else ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
+
+
+def texturas(binario, rel):
+    """Compressão BC7/BC5: memória de vídeo, qualidade das texturas e diferença na imagem final."""
+    rel.append('\n== Texturas comprimidas (BC7/BC5) contra RGBA8')
+    for cena in ([], ['--scene', 'assets/Bistro/bistro.gltf']):
+        nome = 'Bistro' if cena else 'Sponza'
+        imgs = []
+        for extra in ([], ['--no-texture-compression']):
+            arq = os.path.join(PASTA, f'texturas_{nome}_{"rgba" if extra else "bc"}.png')
+            code, out = rodar(binario, ['--headless', '--pause', '--exposure', '12', '--no-motion-blur', '--width', '1280',
+                                        '--height', '720', '--frames', '32', '--out', arq] + cena + extra)
+            if not extra:
+                rel.append(f'{nome}: ' + (linha(out, r'Texturas BC7/BC5:[^\n]*') or f'sem log (código {code})'))
+            imgs.append(arq)
+        if all(os.path.exists(i) for i in imgs):
+            a, b = (np.asarray(Image.open(i).convert('RGB')).astype(np.float32) / 255.0 for i in imgs)
+            a, b = (np.where(x <= 0.04045, x / 12.92, ((x + 0.055) / 1.055) ** 2.4) @ np.array([0.2126, 0.7152, 0.0722]) for x in (a, b))
+            rel.append(f'   imagem final BC x RGBA8: diferença {float((np.abs(a - b) / (b + 0.02)).mean()):.4f}, '
+                       f'viés {100 * (a.mean() / b.mean() - 1):+.2f}%')
 
 
 def reflexos(binario, rel):
@@ -169,8 +192,9 @@ def main():
     desempenho(binario, rel)
     print('3/6 nitidez...', flush=True)
     nitidez(binario, rel)
-    print('4/6 denoisers...', flush=True)
+    print('4/6 denoisers e texturas...', flush=True)
     denoisers(binario, rel)
+    texturas(binario, rel)
     print('5/6 reflexos...', flush=True)
     reflexos(binario, rel)
     print('6/6 movimento...', flush=True)
