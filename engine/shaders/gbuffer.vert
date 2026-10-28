@@ -9,7 +9,10 @@ layout(location = 2) in vec2 aUV;
 layout(location = 3) in vec4 aTangent;
 layout(location = 4) in vec3 aPrevPosition;  // posição do frame anterior (malhas deformáveis)
 
-layout(push_constant) uniform Push { uint object; uint material; } pc;
+// Desenho instanciado: uma chamada por malha; a instância (gl_InstanceIndex, já somado ao firstInstance do lote)
+// indexa a lista de objetos ordenada por malha.
+layout(buffer_reference, scalar) readonly buffer DrawList { uint objects[]; };
+layout(push_constant) uniform Push { uint64_t drawList; } pc;
 
 layout(location = 0) out vec3 vWorldPos;
 layout(location = 1) out vec3 vNormal;
@@ -17,9 +20,13 @@ layout(location = 2) out vec2 vUV;
 layout(location = 3) out vec4 vTangent;
 layout(location = 4) out vec4 vCurClip;   // sem jitter, para os vetores de movimento
 layout(location = 5) out vec4 vPrevClip;
+layout(location = 6) flat out uint vObject;
+layout(location = 7) flat out uint vMaterial;
 
 void main() {
-  ObjectData o = objects[pc.object];
+  vObject = DrawList(pc.drawList).objects[gl_InstanceIndex];
+  vMaterial = instances[vObject].material;
+  ObjectData o = objects[vObject];
   vec4 world = o.model * vec4(aPosition, 1.0);
   mat3 normalMatrix = transpose(inverse(mat3(o.model)));
   vWorldPos = world.xyz;

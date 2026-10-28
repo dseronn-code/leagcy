@@ -10,6 +10,7 @@ struct DemoOptions {
   std::string name = "sponza";  // sponza, outdoor, furnace, shadows, shadows-far ou arquivo .gltf/.glb
   bool night = false;           // noite: sem sol, só luzes locais (vitrine do ReSTIR)
   uint32_t lightCount = 0;      // 0 = padrão da cena
+  uint32_t cityBlocks = 16;     // cena "city": quarteirões por lado (16 = ~5 mil objetos; 64 = ~90 mil)
 };
 
 // Monta a cena de demonstração escolhida. Retorna false se os assets não existirem.

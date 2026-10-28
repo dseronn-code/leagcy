@@ -77,6 +77,7 @@ Options parseArgs(int argc, char** argv) {
     }
     else if (a == "--night") o.scene.night = true;
     else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
+    else if (a == "--city-blocks") o.scene.cityBlocks = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--scale") o.scaleOverride = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
     else if (a == "--fullscreen") o.fullscreen = true;
     else if (a == "--quality") {
@@ -139,6 +140,7 @@ Options parseArgs(int argc, char** argv) {
           "  --scene sponza|outdoor|furnace|arquivo.gltf   cena (furnace = teste da fornalha branca)\n"
           "  --night                  noite: só luzes locais (ReSTIR)\n"
           "  --lights N               número de luzes pontuais\n"
+          "  --scene city [--city-blocks N]  cidade procedural de NxN quarteirões (teste de escala; padrão 16)\n"
           "  --quality P              baixo | medio | alto | ultra (padrão) | cinema (sem economia)\n"
           "  --scale S                resolução interna (0.25-1.0; o preset define; menor = upscaling pelo TAA)\n"
           "  --fullscreen             tela cheia na resolução nativa do monitor\n"
@@ -237,6 +239,7 @@ int runHeadless(const Options& opt) {
   const float dt = 1.0f / 30.0f;  // tempo simulado fixo: resultado determinístico
   glm::vec3 moveDir = camera.forward();
   auto t0 = std::chrono::steady_clock::now();
+  double cpuRecordMs = 0.0;  // CPU gravando o frame (atualização da cena, BVH de luzes, chamadas de desenho), sem a GPU
   bool ok = true;
   for (uint32_t f = 0; f < opt.frames; ++f) {
     bool last = f + 1 == opt.frames;
@@ -246,7 +249,9 @@ int runHeadless(const Options& opt) {
     scene.update(frozen ? 0.0f : dt);
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+      auto c0 = std::chrono::steady_clock::now();
       r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view, dt);
+      if (f > 0) cpuRecordMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - c0).count();
       if (!save) return;
       rhi::imageBarrier(cmd, output.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -268,7 +273,9 @@ int runHeadless(const Options& opt) {
   }
   double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   LOG_INFO("%u frames em %.2fs (%.1f ms/frame, inclui espera da CPU)", opt.frames, secs, secs * 1000.0 / opt.frames);
+  if (opt.frames > 1) LOG_INFO("CPU gravando o frame: %.2f ms/frame", cpuRecordMs / double(opt.frames - 1));
   if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
+  if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   ok &= savePng(opt.out);
 
   rhi::destroyBuffer(ctx, readback);
@@ -482,6 +489,7 @@ int runWindowed(const Options& opt) {
       static double lastReport = 0.0;
       if (now - lastReport >= 3.0) {  // detalhamento por passe no console a cada 3 s
         if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
+        if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
         lastReport = now;
       }
     }

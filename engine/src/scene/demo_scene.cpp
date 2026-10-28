@@ -87,7 +87,7 @@ void addOrbitingLights(Scene& s, uint32_t sphereMesh, glm::vec3 center, float ra
     s.addAnimator([=](Scene& sc, float t, float) {
       float a = phase + 0.8f * t;
       glm::vec3 p = center + glm::vec3(radius * std::cos(a), 0.4f * std::sin(2.0f * a), radius * std::sin(a));
-      sc.objects[object].transform = glm::scale(glm::translate(glm::mat4(1.0f), p), glm::vec3(0.08f));
+      sc.setTransform(object, glm::scale(glm::translate(glm::mat4(1.0f), p), glm::vec3(0.08f)));
       sc.lights[light].position = p;
     });
   }
@@ -196,7 +196,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
     p.y = terrainHeight(p.x, p.z);
     glm::vec3 v(-std::sin(th), 0.0f, std::cos(th));
     glm::mat4 body = glm::rotate(glm::translate(glm::mat4(1.0f), p), std::atan2(v.x, v.z), glm::vec3(0, 1, 0));
-    for (const Part& pt : car) sc.objects[pt.object].transform = body * pt.local;
+    for (const Part& pt : car) sc.setTransform(pt.object, body * pt.local);
     for (auto [light, local] : headlights) sc.lights[light].position = glm::vec3(body * glm::vec4(local, 1.0f));
   });
 
@@ -313,6 +313,76 @@ bool buildShadowTest(Scene& s, Camera& camera, glm::vec3 origin) {
   return true;
 }
 
+// Cidade procedural para medir escala (Fase 2): grade de quarteirões de 60 m com prédios de altura aleatória (concreto
+// ou vidro), calçada, postes com luz de verdade a cada ~20 m e carros estacionados. Poucas malhas, muitas instâncias
+// (como uma cidade de jogo): o custo de objetos, BLAS/TLAS, culling e luzes cresce com `cityBlocks`².
+bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
+  const uint32_t cube = s.addMesh(makeCube()), sphere = s.addMesh(makeSphere(12, 8));
+  auto mat = [&](glm::vec3 albedo, float rough, float metal, glm::vec3 emissive = glm::vec3(0.0f)) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    m.metallic = metal;
+    m.emissive = emissive;
+    return s.addMaterial(m);
+  };
+  const uint32_t asphalt = mat({0.06f, 0.06f, 0.065f}, 0.85f, 0.0f), sidewalk = mat({0.42f, 0.40f, 0.37f}, 0.9f, 0.0f);
+  const uint32_t pole = mat({0.05f, 0.05f, 0.05f}, 0.4f, 1.0f);
+  const uint32_t bulb = mat({1, 1, 1}, 0.5f, 0.0f, {40000.0f, 30000.0f, 18000.0f});
+  uint32_t concrete[4], glass[3], paint[5];
+  const glm::vec3 concreteColors[4] = {{0.55f, 0.52f, 0.48f}, {0.62f, 0.58f, 0.50f}, {0.40f, 0.38f, 0.36f}, {0.70f, 0.66f, 0.60f}};
+  for (int i = 0; i < 4; ++i) concrete[i] = mat(concreteColors[i], 0.8f, 0.0f);
+  const glm::vec3 glassColors[3] = {{0.55f, 0.65f, 0.70f}, {0.70f, 0.70f, 0.72f}, {0.45f, 0.55f, 0.50f}};
+  for (int i = 0; i < 3; ++i) glass[i] = mat(glassColors[i], 0.08f, 1.0f);  // fachada de vidro espelhado
+  const glm::vec3 paintColors[5] = {{0.6f, 0.05f, 0.04f}, {0.05f, 0.12f, 0.45f}, {0.8f, 0.8f, 0.8f}, {0.02f, 0.02f, 0.02f}, {0.7f, 0.55f, 0.1f}};
+  for (int i = 0; i < 5; ++i) paint[i] = mat(paintColors[i], 0.3f, 0.0f);
+
+  const uint32_t n = std::max(1u, opt.cityBlocks);
+  const float block = 60.0f, street = 14.0f, pitch = block + street, half = 0.5f * float(n) * pitch;
+  s.addObject(cube, trs({0.0f, -0.5f, 0.0f}, {half + 50.0f, 0.5f, half + 50.0f}), asphalt);  // ruas, topo em y = 0
+  std::mt19937 rng(1234);
+  std::uniform_real_distribution<float> u(0.0f, 1.0f);
+  for (uint32_t bz = 0; bz < n; ++bz)
+    for (uint32_t bx = 0; bx < n; ++bx) {
+      const float cx = -half + pitch * (float(bx) + 0.5f), cz = -half + pitch * (float(bz) + 0.5f);
+      s.addObject(cube, trs({cx, 0.08f, cz}, {0.5f * block, 0.08f, 0.5f * block}), sidewalk);
+      // Prédios: 2x3 lotes por quarteirão, alturas de 8 a 90 m (mais altos perto do centro da cidade).
+      const float centrality = 1.0f - glm::length(glm::vec2(cx, cz)) / (half * 1.42f);
+      for (int lz = 0; lz < 3; ++lz)
+        for (int lx = 0; lx < 2; ++lx) {
+          if (u(rng) < 0.12f) continue;  // lote vazio (praça)
+          const float w = 11.0f + 7.0f * u(rng), d = 8.0f + 6.0f * u(rng);
+          const float h = 8.0f + (20.0f + 62.0f * centrality * centrality) * u(rng);
+          const float px = cx + (lx == 0 ? -1.0f : 1.0f) * 14.0f, pz = cz + (float(lz) - 1.0f) * 18.0f;
+          const uint32_t m = u(rng) < 0.3f ? glass[rng() % 3] : concrete[rng() % 4];
+          s.addObject(cube, trs({px, 0.16f + 0.5f * h, pz}, {0.5f * w, 0.5f * h, 0.5f * d}), m);
+        }
+      // Postes nas duas calçadas voltadas para as ruas (a cada 20 m), com luz de vapor de sódio.
+      for (int i = 0; i < 3; ++i)
+        for (int side = 0; side < 2; ++side) {
+          const float x = cx - 20.0f + 20.0f * float(i), z = cz + (side == 0 ? -1.0f : 1.0f) * (0.5f * block - 1.0f);
+          s.addObject(cube, trs({x, 3.0f, z}, {0.07f, 3.0f, 0.07f}), pole);
+          s.addObject(sphere, trs({x, 6.1f, z}, glm::vec3(0.18f)), bulb);
+          s.addLight({{x, 6.1f, z}, 0.18f, glm::vec3(2200.0f, 1600.0f, 900.0f), 28.0f});
+        }
+      // Carros estacionados na rua ao lado do quarteirão.
+      for (int i = 0; i < 4; ++i) {
+        if (u(rng) < 0.3f) continue;
+        const float x = cx - 24.0f + 16.0f * float(i), z = cz + 0.5f * block + 2.6f;
+        const uint32_t m = paint[rng() % 5];
+        s.addObject(cube, trs({x, 0.75f, z}, {2.2f, 0.45f, 0.95f}), m);           // carroceria
+        s.addObject(cube, trs({x - 0.3f, 1.45f, z}, {1.2f, 0.3f, 0.85f}), m);     // cabine
+      }
+    }
+  s.sunDirection = sunFrom(opt.night ? -10.0f : 35.0f, 140.0f);
+  s.sunIlluminance = opt.night ? 0.0f : 100000.0f;
+  s.fogDensity = 0.0f;
+  // Na rua, entre dois quarteirões perto do centro, olhando ao longo da avenida.
+  camera.position = glm::vec3(-0.5f * street, 1.7f, 0.25f * pitch);
+  camera.lookAt(glm::vec3(-0.5f * street, 6.0f, -half));
+  return true;
+}
+
 // Cena de teste dos reflexos (tools/reflexos.py): sala aberta na frente, com piso de espelho (cromo, rugosidade
 // 0,02), paredes coloridas e quatro esferas de ouro de rugosidade 0 / 0,15 / 0,35 / 0,6. O sol entra baixo pela
 // abertura e bate só na parte de cima da parede do fundo (não no espelho: sol refletido por espelho é cáustica, que
@@ -359,6 +429,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (opt.name == "shadows") return buildShadowTest(scene, camera, glm::vec3(0.0f));
   if (opt.name == "shadows-far") return buildShadowTest(scene, camera, glm::vec3(4000.0f, 0.0f, -3000.0f));
   if (opt.name == "reflections") return buildReflectionTest(scene, camera);
+  if (opt.name == "city") return buildCity(scene, camera, opt);
   return buildSponza(scene, camera, opt);
 }
 

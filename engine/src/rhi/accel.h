@@ -46,7 +46,12 @@ class DynamicTlas {
   static constexpr uint32_t kSlots = 2;  // frames em voo
 
   void init(Context& ctx, uint32_t maxInstances);
-  void record(VkCommandBuffer cmd, uint32_t slot, const std::vector<TlasInstance>& instances);
+  // Grava a instância `index` no buffer do `slot`. Só as que mudaram precisam ser regravadas: numa cidade parada
+  // nada é escrito (medido: preencher 98 mil instâncias por frame custava ~30 ms de CPU).
+  void writeInstance(uint32_t slot, uint32_t index, const TlasInstance& instance);
+  // Reconstrói o TLAS a partir do buffer do `slot` (as primeiras `count` instâncias).
+  void build(VkCommandBuffer cmd, uint32_t slot, uint32_t count);
+  uint32_t capacity() const { return maxInstances_; }
   void destroy();
 
   AccelStructure tlas;

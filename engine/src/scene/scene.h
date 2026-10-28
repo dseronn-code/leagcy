@@ -154,7 +154,13 @@ class Scene {
   // Avança o tempo: guarda as transformações anteriores, roda animadores e anima os modelos.
   void update(float dt);
   // Instâncias de ray tracing com as transformações atuais.
-  std::vector<rhi::TlasInstance> tlasInstances() const;
+  rhi::TlasInstance tlasInstance(uint32_t object) const;
+  // Move um objeto (animadores, animação glTF). Só os objetos movidos são reenviados à GPU e ao TLAS: numa cidade
+  // parada o custo por frame não cresce com o número de objetos. Não altere `transform` diretamente após o upload.
+  void setTransform(uint32_t object, const glm::mat4& transform);
+  // Objetos cujos dados na GPU mudaram no último update(): os movidos agora e os movidos no frame anterior (o
+  // prevTransform deles assentou). Pode ter repetições.
+  const std::vector<uint32_t>& changedObjects() const { return changed_; }
   void destroy(rhi::Context& ctx);
 
   std::vector<Object> objects;
@@ -182,6 +188,8 @@ class Scene {
   void animateModel(Model& m, float dt);
 
   std::vector<MeshData> cpuMeshes_;
+  std::vector<uint32_t> changed_, movedNow_, movedLast_;
+  std::vector<uint8_t> movedMark_;
   std::vector<TextureData> cpuTextures_;
   std::vector<Animator> animators_;
 };
