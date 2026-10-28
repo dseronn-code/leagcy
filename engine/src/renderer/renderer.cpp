@@ -23,6 +23,9 @@ constexpr VkExtent2D kTransmittanceLutExtent{256, 64};
 constexpr VkExtent2D kMultiScatterLutExtent{32, 32};
 constexpr VkExtent3D kAerialPerspectiveExtent{32, 32, 32};
 constexpr VkFormat kMotionFormat = VK_FORMAT_R16G16_SFLOAT;
+// Espelha RC_SIZE e CacheEntry em shaders/radiance_cache.glsl.
+constexpr uint32_t kRadianceCacheEntries = 1u << 20;
+constexpr VkDeviceSize kRadianceCacheBytes = VkDeviceSize(kRadianceCacheEntries) * 48;
 constexpr VkFormat kVisibilityFormat = VK_FORMAT_R32G32_UINT;
 
 constexpr VkDescriptorType CIS = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -206,6 +209,13 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   const float initialExposure = 1.0f / (1.2f * std::exp2(10.0f));
   glm::vec4 exposureInit(initialExposure, -1.0f, 10.0f, initialExposure);
   exposureState_ = rhi::createBufferWithData(ctx, &exposureInit, sizeof(exposureInit), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  // Cache de radiância: 2^20 células de 48 bytes, começa vazio (chave 0).
+  radianceCache_ = rhi::createBuffer(ctx, kRadianceCacheBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                     rhi::MemoryUsage::GpuOnly);
+  ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+    vkCmdFillBuffer(cmd, radianceCache_.handle, 0, VK_WHOLE_SIZE, 0);
+    rhi::memoryBarrier(cmd);
+  });
 
   // ---- Descritores globais (set 0) ----
   std::vector<VkDescriptorSetLayoutBinding> bindings = {
@@ -222,6 +232,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {11, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {12, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {13, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {14, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -238,7 +249,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (5 + kMaxTextures)},
-      {SB, kFramesInFlight * 6},
+      {SB, kFramesInFlight * 7},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -269,6 +280,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI});
   taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI});
   rrGuidesPass_.init(ctx, "rr_guides.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
+  accumulatePass_.init(ctx, "accumulate.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI}, sizeof(uint32_t));
+  radianceCacheResolvePass_.init(ctx, "radiance_cache_resolve.comp", g, {});
   histogramPass_.init(ctx, "exposure_histogram.comp", g, {CIS, SB});
   exposurePass_.init(ctx, "exposure_average.comp", g, {SB, SB}, sizeof(ExposurePush));
   dofPass_.init(ctx, "dof.comp", g, {CIS, CIS, SI}, sizeof(DofPush));
@@ -342,6 +355,7 @@ void Renderer::writeGlobalDescriptors() {
     VkDescriptorBufferInfo objs{objectBuffers_[i].handle, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo exposure{exposureState_.handle, 0, VK_WHOLE_SIZE};
     VkDescriptorBufferInfo lightBvh{lightBvhBuffers_[i].handle, 0, VK_WHOLE_SIZE};
+    VkDescriptorBufferInfo cache{radianceCache_.handle, 0, VK_WHOLE_SIZE};
     std::vector<VkWriteDescriptorSet> w;
     auto add = [&](uint32_t binding, VkDescriptorType type, uint32_t count) -> VkWriteDescriptorSet& {
       VkWriteDescriptorSet x{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -358,6 +372,7 @@ void Renderer::writeGlobalDescriptors() {
     add(7, SB, 1).pBufferInfo = &objs;
     add(8, SB, 1).pBufferInfo = &exposure;
     add(13, SB, 1).pBufferInfo = &lightBvh;
+    add(14, SB, 1).pBufferInfo = &cache;
     VkDescriptorImageInfo dfg{linear_, dfgLut_.view, VK_IMAGE_LAYOUT_GENERAL};
     add(9, CIS, 1).pImageInfo = &dfg;
     VkDescriptorImageInfo atmo[3] = {{linear_, transmittanceLut_.view, VK_IMAGE_LAYOUT_GENERAL},
@@ -419,6 +434,7 @@ void Renderer::createTargets() {
   for (rhi::Image* img : {&t_.rrDiffuseAlbedo, &t_.rrSpecularAlbedo, &t_.rrNormalRoughness})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage | upscalerIo);
   t_.rrHitDistance = rhi::createImage2D(ctx, R, VK_FORMAT_R16_SFLOAT, storage | upscalerIo);
+  t_.accumulation = rhi::createImage2D(ctx, R, VK_FORMAT_R32G32B32A32_SFLOAT, storage);
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
@@ -441,7 +457,7 @@ void Renderer::createTargets() {
                             &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                             &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
-                            &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness})
+                            &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   if (upscalerReady_) {
@@ -480,7 +496,7 @@ void Renderer::destroyTargets() {
                           &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                           &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
-                            &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness})
+                            &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -535,7 +551,9 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const bool reblurSignal = settings.denoiser && settings.nrd && settings.nrdReblur && settings.debugView == kDebugNone;
   // Mip bias das texturas de material: o DLSS/FSR reconstrói na resolução de saída e pede texturas mais nítidas.
   const float mipBias = upscalerReady_ ? upscaler_.mipBias() : 0.0f;
-  u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, reblurSignal ? 1u : 0u, glm::floatBitsToUint(mipBias), 0u);
+  u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, reblurSignal ? 1u : 0u, glm::floatBitsToUint(mipBias),
+                          (settings.referencePathTrace ? 1u : 0u) | (settings.radianceCache ? 0u : 2u) |
+                              (settings.virtualMotion ? 0u : 4u));
   // z: exposição das visualizações de luz (EV100 manual; EV 0 sem --exposure).
   float debugEV = std::isnan(settings.manualEV100) ? 0.0f : settings.manualEV100;
   u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), std::exp2(-debugEV) / 1.2f,
@@ -615,6 +633,10 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                                    storage(t_.diffuseRaw), storage(t_.specularRaw), tex(t_.visibility[cur]),
                                    storage(t_.viewZ), storage(t_.nrdNormalRoughness)}, R);
   barrier();
+  if (ctx_->rayTracing) {  // fecha o frame do cache de radiância (média das amostras -> histórico)
+    radianceCacheResolvePass_.dispatch(cmd, gs, {}, {1024, kRadianceCacheEntries / 1024});
+    barrier();
+  }
   profiler_.mark(cmd, "iluminacao_rt");
 
   // Depuração: o valor cru da iluminação vai direto para a tela (sem denoiser, TAA, exposição nem tonemap).
@@ -709,7 +731,13 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   profiler_.mark(cmd, "composicao");
 
   // ---- 7. TAA + upscaling (do motor, ou DLSS / FSR) ----
-  if (upscalerReady_) {
+  if (settings.referenceAccumulation) {
+    // Referência: zera quando a câmera se move; senão soma mais um frame.
+    const bool still = historyValid_ && u.view == prevView_;
+    accumulatedFrames_ = still ? accumulatedFrames_ + 1 : 1;
+    accumulatePass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.sceneColor), storage(t_.accumulation),
+                                       storage(t_.taa[cur])}, R, &accumulatedFrames_);
+  } else if (upscalerReady_) {
     Upscaler::Frame uf{};
     uf.jitterPixels = jitterPx;
     uf.zNear = cam.nearPlane;
@@ -938,8 +966,9 @@ void Renderer::destroy() {
     for (auto& b : *arr) rhi::destroyBuffer(ctx, b);
   rhi::destroyBuffer(ctx, histogram_);
   rhi::destroyBuffer(ctx, exposureState_);
-  for (rhi::ComputePass* p : {&skinningPass_, &aerialPerspectivePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
-                              &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &histogramPass_, &exposurePass_, &dofPass_,
+  rhi::destroyBuffer(ctx, radianceCache_);
+  for (rhi::ComputePass* p : {&skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+                              &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
   vkDestroyPipeline(ctx.device, gbufferPipeline_, nullptr);

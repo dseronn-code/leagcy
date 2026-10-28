@@ -10,6 +10,7 @@
 #include "material.glsl"
 #ifdef RAY_TRACING
 #include "raytracing.glsl"
+#include "radiance_cache.glsl"
 #endif
 
 layout(local_size_x = 8, local_size_y = 8) in;
@@ -51,8 +52,112 @@ vec3 clampFirefly(vec3 c) {
 }
 
 #ifdef RAY_TRACING
-// Radiância que sai do ponto atingido em direção à origem do raio: BRDF completo (difuso + especular,
-// com compensação de energia) para o sol e uma luz local, reflexo do céu e emissão.
+// Luz direta num ponto atingido por um raio, para a direção -dir: emissão + sol (disco, com sombra) + uma luz local
+// escolhida pela BVH de luzes (pdf exata, com sombra). BRDF completo (difuso + especular, compensação de energia).
+vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 uLight, uint rngLight) {
+  vec3 radiance = s.emissive * preExposure();
+  vec3 kd, ks;
+  // Ponto do raio: erro da ordem do epsilon do float × distância percorrida.
+  vec3 shadowOrigin2 = offsetRayOrigin(hit.Pshadow, hit.Ng, RAY_BIAS_EXACT * hit.t);
+  vec3 sunE = sunIrradianceAt(hit.P);
+  if (dot(sunE, sunE) > 0.0) {
+    vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), uSun);
+    if (dot(hit.N, Ls) > 0.0) {
+      evalBRDF(bc, Ls, sqrt(min(s.roughness * s.roughness + 0.5 * frame.params.x, 1.0)), kd, ks);
+      if (dot(kd + ks, vec3(1.0)) > 0.0) radiance += (kd * s.diffuseColor + ks) * sunE * traceVisibility(shadowOrigin2, Ls, 1e4);
+    }
+  }
+  uint li;
+  float pmf;
+  if (sampleLightBvh(hit.P, hit.N, rngLight, li, pmf)) {
+    vec3 L, E;
+    float tSurface;
+    if (sampleSphereLight(lights[li], hit.P, uLight, L, tSurface, E) && dot(hit.N, L) > 0.0) {
+      evalBRDF(bc, L, -1.0, kd, ks);
+      if (dot(kd + ks, vec3(1.0)) > 0.0 && dot(E, E) > 0.0)
+        radiance += (kd * s.diffuseColor + ks) * E * (preExposure() / pmf) * traceVisibility(shadowOrigin2, L, tSurface * 0.99999);
+    }
+  }
+  return radiance;
+}
+
+// REFERÊNCIA (--reference-pt): luz indireta que sai de `hit` para -dir, por path tracing de verdade — escolhe o lobo
+// (difuso por cosseno ou especular por VNDF, na proporção das refletâncias), luz direta em cada vértice, céu ao
+// escapar, até 8 rebotes com roleta russa. Ruído branco (PCG). Lento de propósito; mede o que o motor aproxima.
+vec3 pathContinue(HitInfo hit, Surface s, BrdfContext bc, uint seed) {
+  vec3 L = vec3(0.0), T = vec3(1.0);
+  uint st = seed;
+  for (int b = 0; b < 8; ++b) {
+    vec3 specA = specularAlbedo(s.f0, s.f90, bc.dfg) * bc.energyCompensation;
+    vec3 diffA = bc.diffuseWeight * s.diffuseColor;
+    float ls = luminance(specA), ld = luminance(diffA);
+    float pSpec = ld <= 0.0 ? 1.0 : clamp(ls / max(ls + ld, 1e-6), 0.05, 0.95);
+    vec3 dir, w;
+    if (rand(st) < pSpec) {
+      float a = alphaFromRoughness(s.roughness);
+      vec3 Tg, Bg;
+      orthonormalBasis(bc.N, Tg, Bg);
+      vec3 Ht = sampleGGXVNDF(vec3(dot(bc.V, Tg), dot(bc.V, Bg), dot(bc.V, bc.N)), a, rand2(st));
+      vec3 H = dot(Ht, Ht) > 0.0 ? Tg * Ht.x + Bg * Ht.y + bc.N * Ht.z : bc.N;
+      dir = reflect(-bc.V, H);
+      float NoL = dot(bc.N, dir);
+      if (NoL <= 0.0) break;
+      w = F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) * G1_Smith(NoL, a) * bc.energyCompensation / pSpec;
+    } else {
+      dir = cosineSampleHemisphere(bc.N, rand2(st));
+      w = diffA / (1.0 - pSpec);
+    }
+    if (dot(dir, hit.Ng) <= 0.0) break;
+    T *= w;
+    HitInfo next;
+    if (!traceHit(offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t), dir, 1e4, next)) {
+      L += T * sampleSky(dir);
+      break;
+    }
+    s = evalMaterial(materials[next.material], next.P, next.N, vec4(0.0), next.uv);
+    bc = makeBrdfContext(next.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
+    vec2 uSun = rand2(st), uLight = rand2(st);
+    L += T * hitDirectLighting(next, s, bc, uSun, uLight, pcg(st));
+    hit = next;
+    if (b >= 2) {  // roleta russa
+      float q = clamp(max(T.r, max(T.g, T.b)), 0.05, 1.0);
+      if (rand(st) > q) break;
+      T /= q;
+    }
+  }
+  return L;
+}
+
+// Rugosidade abaixo da qual o ponto atingido por um raio reflete por um raio de verdade (o espelho mostra o reflexo do
+// reflexo); acima, o especular indireto usa o cache (lobo largo ≈ irradiância).
+const float GLOSSY_HIT_ROUGHNESS = 0.3;
+// 1 em cada 4 pixels (rodando a cada frame) alimenta o cache de radiância.
+bool cacheUpdatePixel() {
+  uvec2 id = gl_GlobalInvocationID.xy;
+  return ((id.x + 2u * id.y + frame.frameInfo.x) & 3u) == 0u;
+}
+
+// Luz indireta que um ponto atingido por raio manda de volta: M do cache (ou, sem dados ainda, o céu aproximado).
+vec3 cachedIndirect(vec3 P, vec3 Ng, vec3 N) {
+  vec3 M;
+  return rcQuery(P, Ng, M) ? M : sampleSky(normalize(N + vec3(0, 1, 0))) * 0.5;
+}
+
+// Radiância que chega por um raio de 2º rebote: luz direta no ponto atingido + indireta pelo cache (difusa e,
+// aproximada pelo mesmo M, especular). Ruído branco.
+vec3 secondaryRadiance(vec3 origin, vec3 dir, inout uint st) {
+  HitInfo h;
+  if (!traceHit(origin, dir, 1e4, h)) return sampleSky(dir);
+  Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv);
+  BrdfContext c = makeBrdfContext(h.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
+  vec2 uSun = rand2(st), uLight = rand2(st);
+  vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st));
+  L += (s.diffuseColor * c.diffuseWeight + specularAlbedo(s.f0, s.f90, c.dfg) * c.energyCompensation) * cachedIndirect(h.P, h.Ng, h.N);
+  return clampFirefly(L);
+}
+
+// Radiância que sai do ponto atingido em direção à origem do raio: luz direta + o que vem depois dela — no motor,
+// indireta pelo cache de radiância (com um raio a mais em superfícies espelhadas); na referência, path tracing.
 // `bounce` separa as dimensões de Sobol do raio difuso e do especular.
 vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float hitDist) {
   HitInfo hit;
@@ -62,38 +167,39 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float h
   Material m = materials[hit.material];
   Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
   BrdfContext bc = makeBrdfContext(hit.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
-  vec3 radiance = s.emissive * preExposure();
   uint dimBase = bounce * 3u;
-  vec3 kd, ks;
-
-  // Ponto do raio: erro da ordem do epsilon do float × distância percorrida.
-  vec3 shadowOrigin2 = offsetRayOrigin(hit.Pshadow, hit.Ng, RAY_BIAS_EXACT * hit.t);
-  vec3 sunE = sunIrradianceAt(hit.P);
-  if (dot(sunE, sunE) > 0.0) {
-    vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), sample2D(sg, DIM_HIT_SUN + dimBase));
-    if (dot(hit.N, Ls) > 0.0) {
-      evalBRDF(bc, Ls, sqrt(min(s.roughness * s.roughness + 0.5 * frame.params.x, 1.0)), kd, ks);
-      if (dot(kd + ks, vec3(1.0)) > 0.0) radiance += (kd * s.diffuseColor + ks) * sunE * traceVisibility(shadowOrigin2, Ls, 1e4);
-    }
-  }
-
-  // Uma luz local escolhida pela BVH de luzes no ponto atingido (pdf exata).
   uint rngLight = pcg3d(uvec3(floatBitsToUint(sample2D(sg, DIM_HIT_LIGHT_PICK + dimBase).x), bounce, frame.frameInfo.x)).x;
-  uint li;
-  float pmf;
-  if (sampleLightBvh(hit.P, hit.N, rngLight, li, pmf)) {
-    vec3 L, E;
-    float tSurface;
-    if (sampleSphereLight(lights[li], hit.P, sample2D(sg, DIM_HIT_LIGHT + dimBase), L, tSurface, E) && dot(hit.N, L) > 0.0) {
-      evalBRDF(bc, L, -1.0, kd, ks);
-      if (dot(kd + ks, vec3(1.0)) > 0.0 && dot(E, E) > 0.0)
-        radiance += (kd * s.diffuseColor + ks) * E * (preExposure() / pmf) * traceVisibility(shadowOrigin2, L, tSurface * 0.99999);
-    }
+  vec3 radiance = hitDirectLighting(hit, s, bc, sample2D(sg, DIM_HIT_SUN + dimBase), sample2D(sg, DIM_HIT_LIGHT + dimBase), rngLight);
+  uint st = pcg3d(uvec3(gl_GlobalInvocationID.xy, frame.frameInfo.x * 8u + bounce)).x | 1u;
+  if (pathReference()) return radiance + pathContinue(hit, s, bc, st);
+
+  // Indireta difusa: cache de radiância (infinitos rebotes acumulados entre frames; auditoria 3.1).
+  vec3 M;
+  bool cached = rcQuery(hit.P, hit.Ng, M);
+  if (!cached) M = sampleSky(normalize(hit.N + vec3(0, 1, 0))) * 0.5;  // célula nova: céu aproximado
+  radiance += s.diffuseColor * bc.diffuseWeight * M;
+  vec3 hitOrigin = offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t);
+  // Indireta especular: superfícies espelhadas refletem por um raio (amostra VNDF); as outras, pelo cache.
+  if (s.roughness < GLOSSY_HIT_ROUGHNESS) {
+    float a = alphaFromRoughness(s.roughness);
+    vec3 T, B;
+    orthonormalBasis(bc.N, T, B);
+    vec3 Ht = sampleGGXVNDF(vec3(dot(bc.V, T), dot(bc.V, B), dot(bc.V, bc.N)), a, rand2(st));
+    vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + bc.N * Ht.z : bc.N;
+    vec3 Lr = reflect(-bc.V, H);
+    float NoL = dot(bc.N, Lr);
+    if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0)
+      radiance += secondaryRadiance(hitOrigin, Lr, st) * F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) *
+                  G1_Smith(NoL, a) * bc.energyCompensation;
+  } else {
+    radiance += specularAlbedo(s.f0, s.f90, bc.dfg) * bc.energyCompensation *
+                (cached ? M : sampleSky(reflect(dir, hit.N)));
   }
-  // Ambiente nos rebotes seguintes (sem oclusão — auditoria 3.1): difuso pelo céu acima da normal e
-  // especular pelo céu na direção de reflexo (metais deixam de ficar pretos nos reflexos).
-  radiance += s.diffuseColor * bc.diffuseWeight * sampleSky(normalize(hit.N + vec3(0, 1, 0))) * 0.5;
-  radiance += specularAlbedo(s.f0, s.f90, bc.dfg) * bc.energyCompensation * sampleSky(reflect(dir, hit.N));
+  // Alimenta o cache no ponto atingido (fora da tela também): um raio difuso a partir dele.
+  if (bounce == 0u && cacheUpdatePixel()) {
+    vec3 d2 = cosineSampleHemisphere(hit.N, rand2(st));
+    if (dot(d2, hit.Ng) > 0.0) rcAdd(hit.P, hit.Ng, secondaryRadiance(hitOrigin, d2, st));
+  }
   return clampFirefly(radiance);
 }
 
@@ -184,7 +290,9 @@ void main() {
     vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
     if (dot(dirD, g.Ng) > 0.0) {
       float t;
-      diffuse += bc.diffuseWeight * traceRadiance(origin, dirD, sg, 0u, t);
+      vec3 Li = traceRadiance(origin, dirD, sg, 0u, t);
+      diffuse += bc.diffuseWeight * Li;
+      if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
       diffHitSum += t;
       diffHitCount += 1.0;
     }

@@ -26,13 +26,18 @@ layout(set = 0, binding = 0) uniform FrameData {
                               // w = compensação de energia do BRDF (1 = ligada)
   uvec4 quality2;             // x = correção de viés do ReSTIR por ray tracing (1 = ligada),
                               // y = difuso/especular no formato do NRD ReBLUR (YCoCg + distância normalizada),
-                              // z = mip bias das texturas na rasterização (bits de float; < 0 com DLSS/FSR)
+                              // z = mip bias das texturas na rasterização (bits de float; < 0 com DLSS/FSR),
+                              // w = bit 0: referência por path tracing (rebotes de verdade); bit 1: cache de radiância desligado;
+                              //     bit 2: movimento virtual do reflexo desligado no SVGF (medição)
   vec4 environment;           // x = céu uniforme em nits (> 0: teste da fornalha branca)
 } frame;
 
 bool energyCompensationEnabled() { return frame.quality1.w > 0.5; }
 bool reblurSignal() { return frame.quality2.y != 0u; }
 float textureMipBias() { return uintBitsToFloat(frame.quality2.z); }
+bool pathReference() { return (frame.quality2.w & 1u) != 0u; }
+bool radianceCacheEnabled() { return (frame.quality2.w & 2u) == 0u; }
+bool virtualMotionEnabled() { return (frame.quality2.w & 4u) == 0u; }
 
 // Conversões YCoCg do NRD (_NRD_LinearToYCoCg / _NRD_YCoCgToLinear).
 vec3 nrdLinearToYCoCg(vec3 c) { return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25))); }

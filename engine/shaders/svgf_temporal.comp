@@ -22,6 +22,49 @@ layout(set = 1, binding = 15, rgba32f) uniform writeonly image2D momentsOut;  //
 layout(set = 1, binding = 16, rgba16f) uniform writeonly image2D lengthOut;
 
 const float MAX_HISTORY = 48.0;
+const float HIT_DIST_MISS = 60000.0;  // lighting.glsl: raio especular que foi para o céu
+
+// Histórico bilinear em `p` (pixels do frame anterior): só os texels que são a mesma superfície (profundidade e
+// normal). Devolve o peso total (0 = sem histórico).
+float fetchHistory(vec2 p, float z, vec3 N, out vec3 hd, out vec3 hs, out vec4 hm, out float hl) {
+  hd = hs = vec3(0.0);
+  hm = vec4(0.0);
+  hl = 0.0;
+  float wsum = 0.0;
+  ivec2 base = ivec2(floor(p));
+  vec2 f = fract(p);
+  for (int i = 0; i < 4; ++i) {
+    ivec2 o = ivec2(i & 1, i >> 1);
+    ivec2 q = base + o;
+    if (!insideRender(q)) continue;
+    float zq = linearDepth(texelFetch(gDepthPrev, q, 0).r);
+    vec3 nq = texelFetch(gNormalPrev, q, 0).xyz;
+    if (abs(zq - z) > 0.05 * z || dot(nq, N) < 0.85) continue;
+    float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+    hd += texelFetch(diffuseHistory, q, 0).rgb * w;
+    hs += texelFetch(specularHistory, q, 0).rgb * w;
+    hm += texelFetch(momentsHistory, q, 0) * w;
+    hl += texelFetch(lengthHistory, q, 0).x * w;
+    wsum += w;
+  }
+  if (wsum > 0.01) {
+    hd /= wsum; hs /= wsum; hm /= wsum; hl /= wsum;
+  }
+  return wsum;
+}
+
+// Distância do reflexo suavizada (3x3, só acertos): a de um pixel vem de 1-2 raios e faria o histórico tremer.
+float smoothHitDistance(ivec2 id) {
+  float sum = 0.0, n = 0.0;
+  for (int y = -1; y <= 1; ++y)
+    for (int x = -1; x <= 1; ++x) {
+      ivec2 q = id + ivec2(x, y);
+      if (!insideRender(q)) continue;
+      float t = texelFetch(specularIn, q, 0).a;
+      if (t > 0.0) { sum += min(t, HIT_DIST_MISS); n += 1.0; }
+    }
+  return n > 0.0 ? sum / n : 0.0;
+}
 
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
@@ -36,7 +79,8 @@ void main() {
     imageStore(lengthOut, id, vec4(0.0));
     return;
   }
-  vec3 N = texelFetch(gNormal, id, 0).xyz;
+  vec4 nr = texelFetch(gNormal, id, 0);
+  vec3 N = nr.xyz;
   float z = linearDepth(depth);
 
   // Reprojeção bilinear: cada um dos 4 texels só conta se for a mesma superfície.
@@ -46,26 +90,36 @@ void main() {
   if (historyValid()) {
     vec2 uv = (vec2(id) + 0.5) * frame.renderSize.zw;
     vec2 p = (uv - texelFetch(gMotion, id, 0).xy) * frame.renderSize.xy - 0.5;
-    ivec2 base = ivec2(floor(p));
-    vec2 f = fract(p);
-    for (int i = 0; i < 4; ++i) {
-      ivec2 o = ivec2(i & 1, i >> 1);
-      ivec2 q = base + o;
-      if (!insideRender(q)) continue;
-      float zq = linearDepth(texelFetch(gDepthPrev, q, 0).r);
-      vec3 nq = texelFetch(gNormalPrev, q, 0).xyz;
-      if (abs(zq - z) > 0.05 * z || dot(nq, N) < 0.85) continue;
-      float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
-      hd += texelFetch(diffuseHistory, q, 0).rgb * w;
-      hs += texelFetch(specularHistory, q, 0).rgb * w;
-      hm += texelFetch(momentsHistory, q, 0) * w;
-      hl += texelFetch(lengthHistory, q, 0).x * w;
-      wsum += w;
+    wsum = fetchHistory(p, z, N, hd, hs, hm, hl);
+
+    // Movimento VIRTUAL do reflexo (como no NRD): num espelho a imagem refletida está atrás da superfície, à
+    // distância (câmera→ponto + distância do reflexo) na direção de visão, e se move como esse ponto virtual — não
+    // como o espelho. Superfícies lisas usam o ponto virtual; rugosas, o da superfície (o reflexo é borrado e segue
+    // a superfície). O histórico continua validado pela superfície no ponto reprojetado.
+    float virtualWeight = virtualMotionEnabled() ? 1.0 - smoothstep(0.15, 0.5, nr.w) : 0.0;
+    float hitT = virtualWeight > 0.0 ? smoothHitDistance(id) : 0.0;
+    if (hitT > 0.0) {
+      vec3 P = worldPosFromDepth(uv, depth);
+      vec3 view = P - frame.cameraPos.xyz;
+      float dist = length(view);
+      vec3 Pv = frame.cameraPos.xyz + view * ((dist + min(hitT, 1.0e4)) / dist);
+      // Como os vetores de movimento: diferença entre as projeções atual e anterior SEM jitter (câmera parada = 0).
+      vec4 cPrev = frame.prevViewProjNoJitter * vec4(Pv, 1.0), cCur = frame.viewProjNoJitter * vec4(Pv, 1.0);
+      if (cPrev.w > 0.0 && cCur.w > 0.0) {
+        vec2 motionV = (cCur.xy / cCur.w - cPrev.xy / cPrev.w) * 0.5;
+        vec2 pv = mix(p, (uv - motionV) * frame.renderSize.xy - 0.5, virtualWeight);
+        vec3 vd, vs;
+        vec4 vm;
+        float vl;
+        if (fetchHistory(pv, z, N, vd, vs, vm, vl) > 0.01) {
+          hs = vs;
+          hm.zw = vm.zw;
+        }
+      }
     }
   }
   bool valid = wsum > 0.01;
   if (valid) {
-    hd /= wsum; hs /= wsum; hm /= wsum; hl /= wsum;
     // Histórico foi gravado com a pré-exposição do frame anterior: traz para a escala atual.
     float k = historyExposureScale();
     hd *= k;

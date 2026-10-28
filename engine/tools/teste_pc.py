@@ -98,6 +98,24 @@ def denoisers(binario, rel):
     rel += linhas if linhas else ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
 
 
+def reflexos(binario, rel):
+    """Reflexos e luz indireta contra a verdade por path tracing (tools/reflexos.py) e reflexos em movimento."""
+    rel.append('\n== Reflexos e luz indireta contra path tracing (erro: menor é melhor; viés: luz a mais/menos)')
+    for nome, extra in (('com cache de radiância', []), ('sem cache (antes)', ['--extra=--no-radiance-cache'])):
+        p = subprocess.run([sys.executable, os.path.join(AQUI, 'reflexos.py'), '--bin', binario, '--out',
+                            os.path.join(PASTA, 'reflexos')] + extra, capture_output=True, text=True, encoding='utf-8',
+                           errors='replace', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+        rel.append(f'-- {nome}')
+        rel += p.stdout.strip().splitlines() or ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
+    rel.append('-- reflexos andando (sala de espelho)')
+    for nome, args in (('', ['--candidatos', 'svgf,relax,dlss-rr']),
+                       (' (SVGF sem movimento virtual)', ['--candidatos', 'svgf', '--extra=--no-virtual-motion'])):
+        p = subprocess.run([sys.executable, os.path.join(AQUI, 'denoiser.py'), '--bin', binario, '--cena', 'reflections',
+                            '--out', os.path.join(PASTA, 'reflexos_mov')] + args, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+        rel += [l + nome for l in p.stdout.strip().splitlines()] or ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
+
+
 def movimento(binario, rel):
     """Câmera andando: imagens para comparar rastros e ruído (denoiser e upscaler)."""
     rel.append('\n== Movimento (imagens lado a lado em resultados_pc/)')
@@ -132,7 +150,7 @@ def main():
     rel.append(linha(out, r'GPU: [^\n]*') or 'GPU: ?')
     rel.append('DLSS: ' + (linha(out, r'DLSS (ativo|indispon)[^\n]*') or '?'))
 
-    print('1/5 suíte de testes...', flush=True)
+    print('1/6 suíte de testes...', flush=True)
     p = subprocess.run([sys.executable, os.path.join(AQUI, 'testes.py'), '--bin', binario], capture_output=True, text=True,
                        encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
     rel.append('\n== Suíte de testes')
@@ -146,13 +164,15 @@ def main():
             detalhe += 1
     if p.returncode not in (0, 1):
         rel.append('suíte interrompida: ' + ' | '.join(p.stderr.strip().splitlines()[-3:]))
-    print('2/5 desempenho...', flush=True)
+    print('2/6 desempenho...', flush=True)
     desempenho(binario, rel)
-    print('3/5 nitidez...', flush=True)
+    print('3/6 nitidez...', flush=True)
     nitidez(binario, rel)
-    print('4/5 denoisers...', flush=True)
+    print('4/6 denoisers...', flush=True)
     denoisers(binario, rel)
-    print('5/5 movimento...', flush=True)
+    print('5/6 reflexos...', flush=True)
+    reflexos(binario, rel)
+    print('6/6 movimento...', flush=True)
     movimento(binario, rel)
 
     with open(os.path.join(PASTA, 'relatorio.txt'), 'w', encoding='utf-8') as f:

@@ -65,6 +65,14 @@ struct Settings {
   bool energyCompensation = true;   // compensação de múltiplo espalhamento do BRDF (Turquin 2019)
   // Visualização de depuração (valor cru da iluminação, sem denoiser/TAA/tonemap): ver DebugView.
   uint32_t debugView = 0;
+  // Referência "verdade" para medir denoisers (--reference): sem denoiser nem TAA, média da cor composta enquanto
+  // a câmera está parada (zera quando ela se move). Lento para convergir de propósito.
+  bool referenceAccumulation = false;
+  bool referencePathTrace = false;
+  // Cache de radiância (luz indireta com infinitos rebotes nos pontos atingidos por raios: reflexos e GI).
+  bool radianceCache = true;
+  // SVGF: reflexos reprojetados pelo ponto virtual atrás do espelho (como o NRD), não pela superfície.
+  bool virtualMotion = true;  // na referência, rebotes por path tracing (--reference-pt): a verdade de GI e reflexos
   // Depuração do ReSTIR: bit 0 desliga o reuso temporal, bit 1 o espacial (medir cada etapa isolada).
   uint32_t restirDisableMask = 0;
 };
@@ -122,6 +130,7 @@ class Renderer {
     rhi::Image nrdValidation;  // camada de depuração do NRD (RGBA8)
     // Guias do DLSS Ray Reconstruction (rr_guides.comp).
     rhi::Image rrDiffuseAlbedo, rrSpecularAlbedo, rrHitDistance, rrNormalRoughness;
+    rhi::Image accumulation;  // RGBA32F: soma da referência (--reference)
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
@@ -148,14 +157,15 @@ class Renderer {
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_, lightBvhBuffers_;
   rhi::Buffer histogram_, exposureState_;
+  rhi::Buffer radianceCache_;  // cache de radiância no espaço do mundo (shaders/radiance_cache.glsl)
 
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
   VkDescriptorSetLayout globalLayout_ = VK_NULL_HANDLE;
   std::array<VkDescriptorSet, kFramesInFlight> globalSets_{};
 
-  rhi::ComputePass skinningPass_, aerialPerspectivePass_;
+  rhi::ComputePass skinningPass_, aerialPerspectivePass_, radianceCacheResolvePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
-  rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_, rrGuidesPass_;
+  rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_, rrGuidesPass_, accumulatePass_;
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;
   rhi::PassLayout gbufferLayout_, tonemapLayout_;
   VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
@@ -169,6 +179,7 @@ class Renderer {
   glm::vec2 prevJitterPixels_{0.0f};
   NrdDenoiser nrd_;
   Upscaler upscaler_;
+  uint32_t accumulatedFrames_ = 0;  // --reference
   bool upscalerReady_ = false;
   bool nrdReady_ = false;  // com o jitter daquele frame (reconstrói a superfície anterior)
   std::vector<LightBvhNode> lightBvhNodes_;
