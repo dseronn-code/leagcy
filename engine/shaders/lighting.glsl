@@ -171,7 +171,9 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float h
   uint rngLight = pcg3d(uvec3(floatBitsToUint(sample2D(sg, DIM_HIT_LIGHT_PICK + dimBase).x), bounce, frame.frameInfo.x)).x;
   vec3 radiance = hitDirectLighting(hit, s, bc, sample2D(sg, DIM_HIT_SUN + dimBase), sample2D(sg, DIM_HIT_LIGHT + dimBase), rngLight);
   uint st = pcg3d(uvec3(gl_GlobalInvocationID.xy, frame.frameInfo.x * 8u + bounce)).x | 1u;
-  if (pathReference()) return radiance + pathContinue(hit, s, bc, st);
+  // Mesmo limite de vagalumes do motor por amostra: a referência mede reflexos e luz indireta, não cáusticas (sol
+  // refletido por espelho, que motor de jogo nenhum calcula e o limite corta — medido: era o resto do viés).
+  if (pathReference()) return clampFirefly(radiance + pathContinue(hit, s, bc, st));
 
   // Indireta difusa: cache de radiância (infinitos rebotes acumulados entre frames; auditoria 3.1).
   vec3 M;
