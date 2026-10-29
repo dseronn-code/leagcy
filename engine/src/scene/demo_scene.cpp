@@ -604,6 +604,13 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (!buildDemoSceneDefaults(scene, camera, opt)) return false;
   if (opt.clouds >= 0.0f) scene.cloudCoverage = std::min(opt.clouds, 1.0f);
   if (opt.fog >= 0.0f) scene.fogDensity = opt.fog;
+  if (opt.rain > 0.0f) {
+    scene.wetness = std::min(opt.rain * 1.5f, 1.0f);  // molha antes de empoçar
+    scene.puddles = std::min(opt.rain, 1.0f);
+    scene.rain = std::min(opt.rain, 1.0f);
+    if (opt.clouds < 0.0f && scene.sunIlluminance > 0.0f)  // chuva vem com céu fechado
+      scene.cloudCoverage = std::max(scene.cloudCoverage, 0.5f + 0.4f * scene.rain);
+  }
   return true;
 }
 

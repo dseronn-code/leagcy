@@ -6,6 +6,7 @@
 
 #include "common.glsl"
 #include "scene.glsl"
+#include "frame.glsl"
 
 struct Surface {
   vec3 diffuseColor;
@@ -22,6 +23,50 @@ struct Surface {
   float clearcoat;       // KHR_materials_clearcoat: intensidade do verniz
   float clearcoatRoughness;
 };
+
+// Chuva (Lagarde 2012, "Water drop" 2–4, usado em Remember Me): a água entra nos poros e escurece o difuso
+// (materiais porosos e ásperos escurecem mais), forma uma película que deixa a superfície lisa, e nas superfícies
+// planas viradas para cima junta em poças — água por cima (f0 2%, quase espelho, normal plana) com os anéis dos
+// pingos. As poças ficam onde um ruído de baixa frequência é alto (bordas suaves).
+vec3 rainRipples(vec2 p, float t) {
+  vec2 cell = floor(p), f = fract(p);
+  vec3 n = vec3(0.0);
+  for (int j = -1; j <= 1; ++j)
+    for (int i = -1; i <= 1; ++i) {
+      vec2 c = cell + vec2(i, j);
+      uvec3 h = pcg3d(uvec3(ivec2(c) + ivec2(4096), 0x2c1b3c6du));
+      vec3 r = vec3(h) * (1.0 / 4294967296.0);
+      float phase = fract(t * (0.8 + 0.4 * r.z) + r.z);  // cada pingo num instante
+      vec2 d = vec2(i, j) + r.xy - f;
+      float dist = length(d);
+      float radius = phase * 0.9;
+      float ring = sin(clamp((dist - radius) * 18.0, -PI, PI)) * (1.0 - phase) * (1.0 - phase);
+      ring *= smoothstep(0.12, 0.0, abs(dist - radius));
+      n.xz += ring * (dist > 1e-4 ? d / dist : vec2(0.0));
+    }
+  return n * 0.6;
+}
+
+void applyWetness(inout Surface s, vec3 P, vec3 N) {
+  float wet = frame.weather.x;
+  float porosity = clamp((1.0 - dot(s.f0, vec3(0.333)) * 4.0) * (0.3 + 0.7 * s.roughness), 0.0, 1.0);
+  s.diffuseColor *= mix(1.0, 0.35, wet * porosity);  // água nos poros: menos luz espalhada de volta
+  s.roughness = mix(s.roughness, min(s.roughness, 0.25), wet * 0.8);
+  // Poças: só em superfícies quase horizontais viradas para cima.
+  float up = smoothstep(0.92, 0.98, N.y);
+  if (up <= 0.0 || frame.weather.y <= 0.0) return;
+  float n = fbm(P.xz * 0.35, 3) * 0.75 + fbm(P.xz * 2.1, 2) * 0.25;
+  float puddle = up * smoothstep(1.0 - frame.weather.y * 0.6, 1.08 - frame.weather.y * 0.6, n + 0.15);
+  if (puddle <= 0.0) return;
+  s.diffuseColor *= mix(1.0, 0.25, puddle);  // a água por cima absorve e espelha
+  s.f0 = mix(s.f0, vec3(0.02), puddle);
+  s.f90 = mix(s.f90, 1.0, puddle);
+  s.roughness = mix(s.roughness, 0.02, puddle);
+  vec3 flatN = vec3(0.0, 1.0, 0.0);
+  if (frame.weather.z > 0.0) flatN = normalize(flatN + rainRipples(P.xz * 3.0, frame.weather.w) * frame.weather.z);
+  s.normal = normalize(mix(s.normal, flatN, puddle));
+  s.normalVariance *= 1.0 - puddle;
+}
 
 // N: normal geométrica interpolada; T: tangente (w = sinal da bitangente); T = 0 desliga o normal map.
 Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
@@ -124,6 +169,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
     s.roughness = mix(mix(0.9, 0.95, dirtMask), 0.7, rockMask);
   }
   s.roughness = clamp(s.roughness, 0.0, 1.0);
+  if (frame.weather.x > 0.0 && s.transmission <= 0.0) applyWetness(s, P, N);
   s.diffuseColor *= 1.0 - s.transmission;  // o que atravessa não espalha (glTF: mix(difuso, transmissão))
   return s;
 }
