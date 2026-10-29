@@ -603,6 +603,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (!buildDemoSceneDefaults(scene, camera, opt)) return false;
   if (opt.clouds >= 0.0f) scene.cloudCoverage = std::min(opt.clouds, 1.0f);
+  if (opt.fog >= 0.0f) scene.fogDensity = opt.fog;
   return true;
 }
 

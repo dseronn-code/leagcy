@@ -82,6 +82,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--night") o.scene.night = true;
     else if (a == "--no-moon") o.scene.moon = false;
     else if (a == "--clouds") o.scene.clouds = float(std::atof(next()));
+    else if (a == "--fog") o.scene.fog = float(std::atof(next()));
     else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--city-blocks") o.scene.cityBlocks = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--scale") o.scaleOverride = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
@@ -148,6 +149,7 @@ Options parseArgs(int argc, char** argv) {
           "  --scene sponza|outdoor|furnace|arquivo.gltf   cena (furnace = teste da fornalha branca)\n"
           "  --night [--no-moon]      noite: luzes locais (ReSTIR), lua cheia e estrelas\n"
           "  --clouds X               cobertura de nuvens volumétricas 0..1 (0 = céu limpo)\n"
+          "  --fog X                  névoa volumétrica: densidade no chão (1/m; 0,02 = neblina com raios de luz)\n"
           "  --lights N               número de luzes pontuais\n"
           "  --scene city [--city-blocks N]  cidade procedural de NxN quarteirões (teste de escala; padrão 16)\n"
           "  --quality P              baixo | medio | alto | ultra (padrão) | cinema (sem economia)\n"

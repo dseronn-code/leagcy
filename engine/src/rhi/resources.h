@@ -27,6 +27,7 @@ struct Image {
   VmaAllocation allocation = VK_NULL_HANDLE;
   VkFormat format = VK_FORMAT_UNDEFINED;
   VkExtent2D extent{};
+  uint32_t depth = 1;  // volumes 3D
   uint32_t mipLevels = 1;
 };
 
