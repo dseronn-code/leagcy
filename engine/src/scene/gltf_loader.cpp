@@ -138,6 +138,8 @@ struct Loader {
         m.specularColorTex = texture(src.specular.specular_color_texture, true);
       }
       if (src.has_ior) m.ior = src.ior.ior;
+      if (src.double_sided) m.flags |= kMaterialDoubleSided;
+      if (src.has_transmission && src.transmission.transmission_factor > 0.0f) m.flags |= kMaterialTransmissive;
       // glTF não define unidade para emissão; 1,0 = 1.000 nits (tela/letreiro típico).
       m.emissive = glm::make_vec3(src.emissive_factor) * kGltfEmissiveNits;
       if (src.has_emissive_strength) m.emissive *= src.emissive_strength.emissive_strength;
@@ -320,6 +322,22 @@ struct Loader {
     return count;
   }
 
+  void loadCamera(const glm::mat4& root) {
+    for (size_t i = 0; i < data->nodes_count && !scene.assetCamera.valid; ++i) {
+      const cgltf_node& node = data->nodes[i];
+      if (!node.camera || node.camera->type != cgltf_camera_type_perspective) continue;
+      float world[16];
+      cgltf_node_transform_world(&node, world);
+      const glm::mat4 m = root * glm::make_mat4(world);
+      auto& c = scene.assetCamera;
+      c.valid = true;
+      c.position = glm::vec3(m * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+      c.forward = glm::normalize(glm::vec3(m * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));  // a câmera olha para -Z
+      c.fovY = node.camera->data.perspective.yfov;
+      c.nearPlane = std::max(node.camera->data.perspective.znear, 1e-3f);
+    }
+  }
+
   void loadNodes(const glm::mat4& root) {
     for (size_t i = 0; i < data->nodes_count; ++i) {
       const cgltf_node& node = data->nodes[i];
@@ -376,6 +394,7 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
   l.loadModel(rootTransform);
   l.loadNodes(rootTransform);
   const uint32_t lights = l.loadLights(rootTransform);
+  l.loadCamera(rootTransform);
   if (modelOut) *modelOut = l.model;
   LOG_INFO("glTF: %s (%zu nós, %zu materiais, %zu esqueletos, %zu animações, %u luzes)", path.c_str(), data->nodes_count,
            data->materials_count, data->skins_count, data->animations_count, lights);

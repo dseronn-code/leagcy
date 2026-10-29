@@ -55,7 +55,10 @@ vec3 clampFirefly(vec3 c) {
 // Luz direta num ponto atingido por um raio, para a direção -dir: emissão + sol (disco, com sombra) + uma luz local
 // escolhida pela BVH de luzes (pdf exata, com sombra). BRDF completo (difuso + especular, compensação de energia).
 vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 uLight, uint rngLight) {
-  vec3 radiance = s.emissive * preExposure();
+  // Emissão já amostrada como luz (luzes de malha, globo de lâmpada) entra pela luz direta abaixo; somá-la aqui também
+  // dobraria a energia (auditoria 1.4).
+  bool emissionSampled = (materials[hit.material].flags & MATERIAL_EMISSION_SAMPLED) != 0u;
+  vec3 radiance = emissionSampled ? vec3(0.0) : s.emissive * preExposure();
   vec3 kd, ks;
   // Ponto do raio: erro da ordem do epsilon do float × distância percorrida.
   vec3 shadowOrigin2 = offsetRayOrigin(hit.Pshadow, hit.Ng, RAY_BIAS_EXACT * hit.t);
@@ -72,7 +75,7 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
   if (sampleLightBvh(hit.P, hit.N, rngLight, li, pmf)) {
     vec3 L, E;
     float tSurface;
-    if (sampleSphereLight(lights[li], hit.P, uLight, L, tSurface, E) && dot(hit.N, L) > 0.0) {
+    if (sampleLightForShading(li, hit.P, uLight, L, tSurface, E) && dot(hit.N, L) > 0.0) {
       evalBRDF(bc, L, -1.0, kd, ks);
       if (dot(kd + ks, vec3(1.0)) > 0.0 && dot(E, E) > 0.0)
         radiance += (kd * s.diffuseColor + ks) * E * (preExposure() / pmf) * traceVisibility(shadowOrigin2, L, tSurface * 0.99999);
@@ -218,7 +221,7 @@ vec3 localLightsReference(PixelSurface sf, BrdfContext bc) {
       vec2 u = (vec2(s % 4u, s / 4u) + vec2(0.5)) / 4.0;
       vec3 L, E;
       float tSurface;
-      if (!sampleSphereLight(l, g.P, u, L, tSurface, E) || dot(sf.Nb, L) <= 0.0) continue;
+      if (!sampleLightForShading(li, g.P, u, L, tSurface, E) || dot(sf.Nb, L) <= 0.0) continue;
       evalBRDF(bc, L, -1.0, kd, ks);
       if (dot(kd + ks, vec3(1.0)) <= 0.0) continue;
       sum += (kd * g.diffuseColor + ks) * E * bumpShadowing(sf.Nb, g.N, L) * traceVisibility(origin, L, tSurface * 0.99999) / 16.0;
