@@ -86,6 +86,28 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
     if (dot(mapped, mapped) > 1e-8) s.normal = normalize(mapped);
   }
 
+  if (m.flakes > 0.0) {
+    // Flocos metálicos: cada célula da grade de UV sorteia se tem floco e a inclinação dele (até ~20°). Visíveis um a
+    // um quando a célula cobre ~1 pixel ou mais; menores que o pixel, a média deles é um lobo mais largo (variância
+    // da normal, que o AA especular soma na rugosidade) — sem cintilar à distância.
+    vec2 cellUv = uv * m.flakeScale;
+    uvec3 h = pcg3d(uvec3(uvec2(ivec2(floor(cellUv)) + ivec2(1 << 20)), 0x9e3779b9u));
+    vec3 r = vec3(h) * (1.0 / 4294967296.0);
+    float tilt = 0.35 * sqrt(r.x), phi = TWO_PI * r.y;
+    vec3 ft, fb;
+    orthonormalBasis(s.normal, ft, fb);
+    vec3 flakeN = normalize(s.normal + tilt * (cos(phi) * ft + sin(phi) * fb));
+#ifdef MATERIAL_DERIVATIVES
+    float footprint = max(length(dFdx(cellUv)), length(dFdy(cellUv)));
+    float resolved = clamp(1.5 - footprint, 0.0, 1.0);
+#else
+    float resolved = 0.0;
+#endif
+    float isFlake = r.z < m.flakes ? 1.0 : 0.0;
+    s.normal = normalize(mix(s.normal, flakeN, isFlake * resolved));
+    s.normalVariance += m.flakes * 0.03 * (1.0 - resolved);  // ≈ variância da inclinação dos flocos
+  }
+
   if ((m.flags & MATERIAL_TERRAIN) != 0u) {
     // Terreno procedural: grama, terra e rocha por inclinação e ruído.
     float slope = 1.0 - N.y;

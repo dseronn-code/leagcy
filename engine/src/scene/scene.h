@@ -61,7 +61,10 @@ struct Material {
   float clearcoatRoughness = 0.0f;
   int32_t clearcoatTex = -1;           // R
   int32_t clearcoatRoughnessTex = -1;  // G
-  float pad1 = 0.0f, pad2 = 0.0f;
+  // Flocos metálicos (pintura de carro): fração das células com um floco inclinado e células por unidade de UV. De
+  // perto cada floco brilha sozinho; de longe viram rugosidade a mais (a média dos flocos num pixel).
+  float flakes = 0.0f;
+  float flakeScale = 2000.0f;
 };
 static_assert(sizeof(Material) == 128);
 

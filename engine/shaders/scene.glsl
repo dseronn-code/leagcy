@@ -42,7 +42,8 @@ struct Material {  // == scene::Material (128 bytes)
   float clearcoatRoughness;
   int clearcoatTex;
   int clearcoatRoughnessTex;
-  float pad1, pad2;
+  float flakes;      // flocos metálicos (pintura de carro)
+  float flakeScale;  // células por unidade de UV
 };
 
 struct InstanceData {  // == InstanceGpu em scene.cpp

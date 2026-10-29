@@ -541,6 +541,8 @@ bool buildPaintTest(Scene& s, Camera& camera) {
                            paint({0.55f, 0.02f, 0.02f}, 0.3f, 0.45f, 1.0f, 0.03f),  // vermelho com verniz
                            paint({0.02f, 0.02f, 0.02f}, 0.0f, 0.5f, 1.0f, 0.02f),   // preto com verniz
                            paint({0.1f, 0.25f, 0.7f}, 0.8f, 0.35f, 1.0f, 0.15f)};   // azul metálico, verniz acetinado
+  s.materials[mats[3]].flakes = 0.6f;  // flocos metálicos no azul
+  s.materials[mats[3]].flakeScale = 800.0f;
   for (int i = 0; i < 4; ++i) s.addObject(sphere, trs({-2.4f + 1.6f * float(i), 0.6f, 0.0f}, glm::vec3(0.6f)), mats[i]);
   s.sunDirection = sunFrom(35.0f, 150.0f);
   s.sunIlluminance = 100000.0f;
