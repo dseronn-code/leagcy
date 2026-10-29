@@ -134,7 +134,9 @@ vec3 sunDisk(vec3 dir) {
     vec2 p = vec2(dot(dir, t), dot(dir, b)) / sin(frame.params.x);
     limb = 1.15 - 0.45 * smoothstep(0.35, 0.75, fbm(p * 2.2 + 3.7, 4));
   }
-  return sunIrradianceAt(frame.cameraPos.xyz) / (TWO_PI * (1.0 - cosR)) * limb;
+  // Sem a sombra das nuvens: quem desenha o disco aplica a transmitância das nuvens na direção do pixel.
+  vec3 E = frame.sunDir.w * preExposure() * transmittanceToSun(planetPos(frame.cameraPos.xyz), frame.sunDir.xyz);
+  return E / (TWO_PI * (1.0 - cosR)) * limb;
 }
 
 // Estrelas (só à noite): uma por célula de uma grade em volta da câmera, com magnitude sorteada (muitas fracas, poucas

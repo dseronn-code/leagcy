@@ -1,0 +1,34 @@
+#version 460
+// Nuvens da vista principal em meia resolução (o panorama do céu é baixo demais para o fundo da imagem): marcha por
+// pixel com deslocamento aleatório por frame e média temporal reprojetada pela direção (nuvens estão "no infinito"
+// para a câmera: só a rotação importa). Saída: rgb = luz espalhada (pré-exposta), a = transmitância.
+#extension GL_GOOGLE_include_directive : require
+#include "clouds.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D cloudsOut;
+layout(set = 1, binding = 1) uniform sampler2D cloudsPrev;
+layout(set = 1, binding = 2) uniform sampler2D clearSky;
+
+void main() {
+  ivec2 size = imageSize(cloudsOut);
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, size))) return;
+  vec2 uv = (vec2(id) + 0.5) / vec2(size);
+  vec3 dir = viewDirFromUv(uv);
+  vec3 ambient = 0.5 * (textureLod(clearSky, skyLutUv(vec3(0.0, 1.0, 0.0)), 0.0).rgb +
+                        textureLod(clearSky, skyLutUv(normalize(vec3(dir.x, 0.05, dir.z))), 0.0).rgb);
+  float jitter = fract(hash12(vec2(id)) + float(frame.frameInfo.x) * 0.618034);
+  vec3 S;
+  float T;
+  cloudMarch(cloudPlanetPos(frame.cameraPos.xyz), dir, jitter, ambient, S, T);
+  vec4 cur = vec4(S, T);
+  // Histórico: onde esta direção estava na tela do frame anterior.
+  vec4 prevClip = frame.prevViewProjNoJitter * vec4(dir, 0.0);
+  if (frame.frameInfo.w != 0u && prevClip.w > 0.0) {
+    vec2 prevUv = prevClip.xy / prevClip.w * 0.5 + 0.5;
+    if (all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0))))
+      cur = mix(textureLod(cloudsPrev, prevUv, 0.0), cur, 0.2);
+  }
+  imageStore(cloudsOut, id, vec4(clampHalf(cur.rgb), clamp(cur.a, 0.0, 1.0)));
+}

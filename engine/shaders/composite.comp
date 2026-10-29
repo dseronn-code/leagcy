@@ -9,6 +9,8 @@ layout(set = 1, binding = 4) uniform sampler2D gEmissive;
 layout(set = 1, binding = 5) uniform sampler2D diffuseIn;
 layout(set = 1, binding = 6) uniform sampler2D specularIn;
 layout(set = 1, binding = 7, rgba16f) uniform writeonly image2D sceneOut;
+layout(set = 1, binding = 8) uniform sampler2D cloudsScreen;  // nuvens na tela (rgb = luz, a = transmitância)
+layout(set = 1, binding = 9) uniform sampler2D clearSky;      // céu sem nuvens
 
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
@@ -18,7 +20,12 @@ void main() {
   vec3 color;
   if (depth <= 0.0) {
     vec3 dir = viewDirFromUv(uv);
-    color = sampleSky(dir) + sunDisk(dir) + starField(dir);
+    if (frame.night.z > 0.0) {  // nuvens em meia resolução na frente do céu limpo, do sol e das estrelas
+      vec4 c = textureLod(cloudsScreen, uv, 0.0);
+      color = (textureLod(clearSky, skyLutUv(dir), 0.0).rgb + sunDisk(dir) + starField(dir)) * c.a + c.rgb;
+    } else {
+      color = sampleSky(dir) + sunDisk(dir) + starField(dir);
+    }
     color = applyHeightFog(color, frame.cameraPos.xyz + dir * 4000.0);  // céu atrás da névoa
   } else {
     GSample g = loadGBuffer(id);

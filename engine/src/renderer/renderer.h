@@ -144,6 +144,7 @@ class Renderer {
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
     std::array<rhi::Image, 2> taa;
+    std::array<rhi::Image, 2> clouds;  // nuvens da vista principal em meia resolução (atual / anterior)
     rhi::Image postA, postB, bloom;
     std::vector<VkImageView> bloomMips;
     std::array<rhi::Buffer, 2> reservoirs;  // [0] = após reuso temporal, [1] = final (persistente)
@@ -165,7 +166,7 @@ class Renderer {
   // Nuvens: ruído 3D (uma vez), céu limpo antes das nuvens, sombra das nuvens no chão.
   rhi::Image cloudNoise_, skyClear_, cloudShadow_;
   VkSampler cloudSampler_ = VK_NULL_HANDLE;  // linear, repete nas três direções (o ruído é periódico)
-  rhi::ComputePass cloudSkyPass_, cloudShadowPass_;
+  rhi::ComputePass cloudSkyPass_, cloudShadowPass_, cloudScreenPass_;
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::map<std::pair<VkSamplerAddressMode, VkSamplerAddressMode>, VkSampler> wrapSamplers_;  // samplers do glTF
