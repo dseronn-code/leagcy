@@ -162,7 +162,7 @@ void DynamicTlas::writeInstance(uint32_t slot, uint32_t index, const TlasInstanc
   for (int row = 0; row < 3; ++row)
     for (int col = 0; col < 4; ++col) r.transform.matrix[row][col] = m[col][row];
   r.instanceCustomIndex = instance.customIndex;
-  r.mask = 0xFF;
+  r.mask = instance.mask;
   r.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
             (instance.opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR);
   r.accelerationStructureReference = instance.blas->address;

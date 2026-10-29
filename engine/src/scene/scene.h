@@ -17,6 +17,17 @@ enum MaterialFlags : uint32_t {
   kMaterialAlphaMask = 1u << 0,  // recorte por alfa (folhas, grades)
   kMaterialTerrain = 1u << 1,    // terreno procedural (material.glsl)
   kMaterialSpecularGlossiness = 1u << 2,  // KHR_materials_pbrSpecularGlossiness
+  // Emissão já amostrada como luz (luz de malha ou a esfera visível de uma luz analítica): nos pontos atingidos por
+  // raios ela não soma, porque a amostragem de luzes (ReSTIR e a luz direta nos pontos atingidos) já a conta —
+  // contar pelos dois caminhos dobraria a energia (auditoria 1.4).
+  kMaterialEmissionSampled = 1u << 3,
+  // Geometria visível de uma luz analítica (globo da lâmpada): transparente para os raios de sombra, senão a lâmpada
+  // bloqueia a própria luz (auditoria 1.3).
+  kMaterialLightGeometry = 1u << 4,
+  kMaterialDoubleSided = 1u << 5,  // glTF doubleSided (luz de malha emite dos dois lados)
+  // KHR_materials_transmission: vidro. Por enquanto opaco na imagem, mas não bloqueia os raios de sombra (a luz das
+  // lanternas e janelas passa) — refração de verdade é o item 2.4 da auditoria.
+  kMaterialTransmissive = 1u << 6,
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
@@ -42,8 +53,15 @@ struct Material {
 };
 static_assert(sizeof(Material) == 96);
 
-// Luz pontual esférica em unidades fotométricas: intensidade luminosa em candela (cd) por canal;
-// iluminância a uma distância d = intensity / d² (lux).
+enum LightType : uint32_t {
+  kLightSphere = 0,    // esfera (pontual com tamanho) ou spot
+  kLightTriangle = 1,  // triângulo emissivo de uma malha (luz de malha, como no RTXDI)
+};
+
+// Luz em unidades fotométricas. Esfera: intensidade luminosa em candela (cd) por canal; iluminância a uma distância
+// d = intensity / d² (lux). Triângulo: vértice `position` + arestas `direction` e `edge2` (frente = cross das
+// arestas), radiância vinda do material do objeto (com a textura emissiva no ponto); `intensity` guarda a radiância
+// média (nits), usada só na escolha de luzes (BVH) e no alcance.
 struct PointLight {
   glm::vec3 position{0.0f};
   float radius = 0.05f;  // tamanho físico em metros (penumbra)
@@ -51,12 +69,21 @@ struct PointLight {
   float range = 10.0f;   // corte suave da influência (m)
   // Spot (KHR_lights_punctual): atenuação angular clamp(cos θ × spotScale + spotOffset, 0, 1)², com θ medido a partir
   // de `direction`; pontual = escala 0 e deslocamento 1 (sem atenuação).
-  glm::vec3 direction{0.0f, -1.0f, 0.0f};
+  glm::vec3 direction{0.0f, -1.0f, 0.0f};  // triângulo: aresta 1
   float spotScale = 0.0f;
+  glm::vec3 edge2{0.0f};  // triângulo: aresta 2
   float spotOffset = 1.0f;
-  float pad[3] = {};
+  uint32_t type = kLightSphere;
+  uint32_t object = 0, primitive = 0;  // triângulo: objeto e triângulo (para a textura emissiva)
+  float area = 0.0f;                   // triângulo: área (m²)
 };
-static_assert(sizeof(PointLight) == 64);
+static_assert(sizeof(PointLight) == 80);
+
+// Centro e caixa de uma luz (BVH de luzes).
+glm::vec3 lightCenter(const PointLight& l);
+void lightBounds(const PointLight& l, glm::vec3& lo, glm::vec3& hi);
+// Potência para a escolha de luzes: cd (esfera) ou radiância média × área (triângulo de frente).
+float lightPower(const PointLight& l);
 
 struct TextureData {
   uint32_t width = 0, height = 0;
@@ -138,6 +165,7 @@ class Scene {
 
   // Texturas em BC7 (4x menos memória de vídeo; ver texture_compress.h). false = RGBA8 com mips na GPU.
   bool compressTextures = true;
+  bool meshLights = true;  // triângulos emissivos viram luzes no upload
   std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
 
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }
@@ -186,6 +214,12 @@ class Scene {
   // Iluminância solar no topo da atmosfera (lux); a atmosfera atenua até ~100.000 lux ao meio-dia.
   float sunIlluminance = 120000.0f;  // 0 = noite
   bool sunFromAsset = false;  // direção do sol veio de uma luz direcional do glTF
+  // Primeira câmera perspectiva do glTF (vista inicial definida pelo autor do asset).
+  struct AssetCamera {
+    bool valid = false;
+    glm::vec3 position{0.0f}, forward{0.0f, 0.0f, -1.0f};
+    float fovY = 1.0f, nearPlane = 0.1f;
+  } assetCamera;
   // Névoa de altura (por metro ao nível do chão). Ainda sem sombra volumétrica (auditoria 3.7):
   // em interiores ela é iluminada pelo sol mesmo na sombra, então cenas fechadas usam valor baixo.
   float fogDensity = 0.0015f;
@@ -195,6 +229,16 @@ class Scene {
 
  private:
   void animateModel(Model& m, float dt);
+  // Luzes de malha: cada triângulo de um objeto emissivo (sem esqueleto) vira uma luz amostrada pelo ReSTIR.
+  struct MeshLightSource {
+    uint32_t object, firstLight;
+    std::vector<glm::vec3> local;  // 3 vértices por triângulo, espaço do objeto
+    std::vector<uint32_t> primitives;
+  };
+  void buildMeshLights();
+  void writeMeshLights(const MeshLightSource& src);
+  std::vector<MeshLightSource> meshLightSources_;
+  std::vector<int32_t> meshLightSourceOf_;  // objeto -> índice em meshLightSources_ (-1 = nenhum)
 
   std::vector<MeshData> cpuMeshes_;
   std::vector<uint32_t> changed_, movedNow_, movedLast_;

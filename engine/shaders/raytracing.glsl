@@ -48,9 +48,12 @@ bool alphaTestPasses(uint inst, uint prim, vec2 bary) {
       rayQueryConfirmIntersectionEXT(rq);                                                              \
   }
 
+// Raios de sombra veem só instâncias com este bit (rhi::TlasInstance::mask): globos de lâmpada e vidro não bloqueiam.
+const uint RAY_MASK_SHADOW = 0x01u;
+
 float traceVisibility(vec3 origin, vec3 dir, float tMax) {
   rayQueryEXT rq;
-  rayQueryInitializeEXT(rq, tlas, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, origin, 0.0, dir, tMax);
+  rayQueryInitializeEXT(rq, tlas, gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SHADOW, origin, 0.0, dir, tMax);
   RESOLVE_CANDIDATES(rq)
   return rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
 }

@@ -96,6 +96,8 @@ void Scene::update(float dt) {
   movedMark_.resize(objects.size(), 0);
   for (auto& a : animators_) a(*this, time, dt);
   for (auto& m : models) animateModel(m, dt);
+  for (uint32_t i : movedNow_)  // luzes de malha acompanham o objeto
+    if (i < meshLightSourceOf_.size() && meshLightSourceOf_[i] >= 0) writeMeshLights(meshLightSources_[size_t(meshLightSourceOf_[i])]);
   changed_ = movedLast_;
   changed_.insert(changed_.end(), movedNow_.begin(), movedNow_.end());
   for (uint32_t i : movedNow_) movedMark_[i] = 0;
@@ -112,8 +114,151 @@ void Scene::setTransform(uint32_t object, const glm::mat4& transform) {
 }
 
 rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
-  bool opaque = !(materials[objects[i].material].flags & kMaterialAlphaMask);
-  return {&meshes[objects[i].mesh].blas, objects[i].transform, i, opaque};
+  const uint32_t flags = materials[objects[i].material].flags;
+  const bool opaque = !(flags & kMaterialAlphaMask);
+  const uint8_t mask = (flags & (kMaterialLightGeometry | kMaterialTransmissive)) ? 0x02 : 0xFF;  // sem sombra
+  return {&meshes[objects[i].mesh].blas, objects[i].transform, i, opaque, mask};
+}
+
+glm::vec3 lightCenter(const PointLight& l) {
+  return l.type == kLightTriangle ? l.position + (l.direction + l.edge2) / 3.0f : l.position;
+}
+
+void lightBounds(const PointLight& l, glm::vec3& lo, glm::vec3& hi) {
+  if (l.type == kLightTriangle) {
+    const glm::vec3 a = l.position, b = l.position + l.direction, c = l.position + l.edge2;
+    lo = glm::min(a, glm::min(b, c));
+    hi = glm::max(a, glm::max(b, c));
+  } else {
+    lo = l.position - glm::vec3(l.radius);
+    hi = l.position + glm::vec3(l.radius);
+  }
+}
+
+float lightPower(const PointLight& l) {
+  const float lum = 0.2126f * l.intensity.r + 0.7152f * l.intensity.g + 0.0722f * l.intensity.b;
+  return std::max(lum, 0.0f) * (l.type == kLightTriangle ? l.area : 1.0f);
+}
+
+namespace {
+float srgbToLinear(float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); }
+
+// Versão pequena (até 128x128, cor linear) de uma textura emissiva, para estimar a potência de cada triângulo.
+struct SmallTexture {
+  uint32_t w = 1, h = 1;
+  std::vector<glm::vec3> px{glm::vec3(1.0f)};
+  glm::vec3 at(glm::vec2 uv) const {
+    const float fx = uv.x - std::floor(uv.x), fy = uv.y - std::floor(uv.y);  // repetição
+    return px[size_t(std::min(uint32_t(fy * float(h)), h - 1)) * w + std::min(uint32_t(fx * float(w)), w - 1)];
+  }
+};
+SmallTexture smallTexture(const TextureData& t) {
+  SmallTexture s;
+  std::vector<uint8_t> decoded;
+  const uint8_t* p = nullptr;
+  uint32_t w = t.width, h = t.height;
+  if (t.precompressed.format != VK_FORMAT_UNDEFINED) {
+    uint32_t level = 0;
+    while (level + 1 < t.precompressed.mips.size() && std::max(w, h) > 128) {
+      ++level;
+      w = std::max(1u, w / 2);
+      h = std::max(1u, h / 2);
+    }
+    decoded = decodeBc7(t.precompressed, level);
+    p = decoded.data();
+  } else {
+    p = t.rgba.data();
+  }
+  if (!p || w == 0 || h == 0) return s;
+  const uint32_t step = std::max(1u, std::max(w, h) / 128);  // RGBA grande: amostra de 1 em `step`
+  s.w = std::max(1u, w / step);
+  s.h = std::max(1u, h / step);
+  s.px.resize(size_t(s.w) * s.h);
+  for (uint32_t y = 0; y < s.h; ++y)
+    for (uint32_t x = 0; x < s.w; ++x) {
+      const uint8_t* q = p + (size_t(std::min(y * step, h - 1)) * w + std::min(x * step, w - 1)) * 4;
+      for (int c = 0; c < 3; ++c) s.px[size_t(y) * s.w + x][c] = t.srgb ? srgbToLinear(q[c] / 255.0f) : q[c] / 255.0f;
+    }
+  return s;
+}
+}  // namespace
+
+void Scene::writeMeshLights(const MeshLightSource& src) {
+  const glm::mat4& m = objects[src.object].transform;
+  const bool mirrored = glm::determinant(glm::mat3(m)) < 0.0f;  // espelhamento inverte a frente dos triângulos
+  for (size_t t = 0; t < src.primitives.size(); ++t) {
+    PointLight& l = lights[src.firstLight + t];
+    const glm::vec3 a = glm::vec3(m * glm::vec4(src.local[3 * t], 1.0f));
+    const glm::vec3 b = glm::vec3(m * glm::vec4(src.local[3 * t + 1], 1.0f));
+    const glm::vec3 c = glm::vec3(m * glm::vec4(src.local[3 * t + 2], 1.0f));
+    l.position = a;
+    l.direction = mirrored ? c - a : b - a;
+    l.edge2 = mirrored ? b - a : c - a;
+    l.area = 0.5f * glm::length(glm::cross(b - a, c - a));
+  }
+}
+
+void Scene::buildMeshLights() {
+  std::vector<SmallTexture> small(cpuTextures_.size());
+  std::vector<uint8_t> smallReady(cpuTextures_.size(), 0);
+  meshLightSourceOf_.assign(objects.size(), -1);
+  size_t triangles = 0;
+  for (uint32_t i = 0; i < objects.size(); ++i) {
+    Material& mat = materials[objects[i].material];
+    if (mat.flags & kMaterialLightGeometry) continue;  // já é a forma visível de uma luz analítica
+    const MeshData& md = cpuMeshes_[objects[i].mesh];
+    if (md.skinModel >= 0 || md.indices.empty()) continue;  // malha deformável: ainda não (raro em emissivos)
+    const auto lumOf = [](glm::vec3 c) { return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b; };
+    if (!(lumOf(mat.emissive) > 0.0f)) continue;
+    const SmallTexture* tex = nullptr;
+    if (mat.emissiveTex >= 0 && size_t(mat.emissiveTex) < cpuTextures_.size()) {
+      const size_t ti = size_t(mat.emissiveTex);
+      if (!smallReady[ti]) {
+        small[ti] = smallTexture(cpuTextures_[ti]);
+        smallReady[ti] = 1;
+      }
+      tex = &small[ti];
+    }
+    MeshLightSource src{i, uint32_t(lights.size()), {}, {}};
+    std::vector<glm::vec3> estimate;  // radiância média estimada de cada triângulo (vértices + centro na textura)
+    glm::vec3 sum(0.0f);
+    for (uint32_t t = 0; t + 2 < md.indices.size(); t += 3) {
+      const Vertex &va = md.vertices[md.indices[t]], &vb = md.vertices[md.indices[t + 1]], &vc = md.vertices[md.indices[t + 2]];
+      if (glm::length(glm::cross(vb.position - va.position, vc.position - va.position)) <= 0.0f) continue;  // degenerado
+      glm::vec3 Le = mat.emissive;
+      if (tex)
+        Le *= 0.25f * (tex->at(va.uv) + tex->at(vb.uv) + tex->at(vc.uv) + tex->at((va.uv + vb.uv + vc.uv) / 3.0f));
+      src.local.insert(src.local.end(), {va.position, vb.position, vc.position});
+      src.primitives.push_back(t / 3);
+      estimate.push_back(Le);
+      sum += Le;
+    }
+    if (src.primitives.empty() || !(lumOf(sum) > 0.0f)) continue;
+    mat.flags |= kMaterialEmissionSampled;
+    // Piso de 1% da média: um triângulo que a estimativa vê escuro ainda pode ter detalhe emissivo por dentro, e
+    // potência zero o tornaria impossível de amostrar (viés). O valor exato vem da textura no shader.
+    const glm::vec3 floorLe = 0.01f * sum / float(estimate.size());
+    for (size_t t = 0; t < src.primitives.size(); ++t) {
+      PointLight l;
+      l.type = kLightTriangle;
+      l.object = i;
+      l.primitive = src.primitives[t];
+      l.intensity = glm::max(estimate[t], floorLe);
+      l.radius = 0.0f;
+      lights.push_back(l);
+    }
+    writeMeshLights(src);
+    // Alcance: onde a iluminância do triângulo (radiância × área, de frente) cai a 0,002 lux.
+    for (size_t t = 0; t < src.primitives.size(); ++t) {
+      PointLight& l = lights[src.firstLight + t];
+      l.range = std::max(1.0f, std::sqrt(lumOf(l.intensity) * l.area / 0.002f));
+    }
+    triangles += src.primitives.size();
+    meshLightSourceOf_[i] = int32_t(meshLightSources_.size());
+    meshLightSources_.push_back(std::move(src));
+  }
+  if (triangles)
+    LOG_INFO("Luzes de malha: %zu triângulos emissivos em %zu objetos", triangles, meshLightSources_.size());
 }
 
 void Scene::bounds(glm::vec3& lo, glm::vec3& hi) const {
@@ -150,6 +295,7 @@ void Scene::modelBounds(int model, glm::vec3& lo, glm::vec3& hi) const {
 void Scene::upload(rhi::Context& ctx) {
   for (auto& m : models) animateModel(m, 0.0f);  // pose inicial
   for (auto& o : objects) o.prevTransform = o.transform;
+  if (meshLights) buildMeshLights();
 
   VkBufferUsageFlags geometryUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   if (ctx.rayTracing) geometryUsage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;

@@ -47,6 +47,24 @@ vec2 sphereUvFromDir(vec3 n) { return vec2(0.5 * (1.0 - n.z), fract(atan(n.y, n.
 //   G = cos no ponto da luz / dist² (converte área em ângulo sólido).
 bool lightPoint(uint li, vec2 uv, vec3 P, out vec3 L, out float dist, out vec3 Le, out float G) {
   PointLight l = lights[li];
+  if (l.type == LIGHT_TRIANGLE) {  // uv = baricêntricas do ponto no triângulo
+    vec3 nRaw = cross(l.direction, l.edge2);
+    vec3 d = l.position + uv.x * l.direction + uv.y * l.edge2 - P;
+    float d2 = dot(d, d);
+    dist = sqrt(d2);
+    L = dist > 0.0 ? d / dist : vec3(0.0, 1.0, 0.0);
+    Le = vec3(0.0);
+    G = 0.0;
+    if (dist <= 0.0 || dist >= l.range || dot(nRaw, nRaw) <= 0.0) return false;
+    bool doubleSided;
+    vec3 emitted = triangleLightRadiance(l, uv, doubleSided);
+    float cosY = -dot(normalize(nRaw), L);
+    if (doubleSided) cosY = abs(cosY);
+    if (cosY <= 0.0) return false;
+    Le = emitted * lightWindow(l, P, dist);
+    G = cosY / d2;
+    return dot(Le, Le) > 0.0;
+  }
   float r = max(l.radius, 1e-3);
   float dc = distance(l.position, P);
   L = vec3(0.0, 1.0, 0.0);
@@ -69,6 +87,11 @@ bool lightPoint(uint li, vec2 uv, vec3 P, out vec3 L, out float dist, out vec3 L
 // Amostra um ponto da parte visível da esfera (cone uniforme em ângulo sólido) e devolve sua pdf em área.
 bool sampleLightPoint(uint li, vec3 P, vec2 u, out vec2 uv, out float pdfArea) {
   PointLight l = lights[li];
+  if (l.type == LIGHT_TRIANGLE) {  // uniforme na área (a face de costas é rejeitada no lightPoint)
+    uv = triangleBarycentric(u);
+    pdfArea = l.area > 0.0 ? 1.0 / l.area : 0.0;
+    return pdfArea > 0.0;
+  }
   float r = max(l.radius, 1e-3);
   vec3 toC = l.position - P;
   float d2c = dot(toC, toC);
@@ -86,6 +109,20 @@ bool sampleLightPoint(uint li, vec3 P, vec2 u, out vec2 uv, out float pdfArea) {
   float cosY = -dot(n, L);
   if (cosY <= 1e-6) return false;
   pdfArea = cosY / (TWO_PI * oneMinusCos * t * t);  // dω = cos θ_y dA / d²  =>  p_A = p_ω cos θ_y / d²
+  return true;
+}
+
+// Amostra uma luz para sombrear um ponto atingido por raio (luz direta fora do ReSTIR): direção, distância até a
+// superfície da luz e iluminância equivalente E (estimador = BRDF × cos × E).
+bool sampleLightForShading(uint li, vec3 P, vec2 u, out vec3 L, out float tSurface, out vec3 E) {
+  PointLight l = lights[li];
+  if (l.type != LIGHT_TRIANGLE) return sampleSphereLight(l, P, u, L, tSurface, E);
+  vec2 uv = triangleBarycentric(u);
+  vec3 Le;
+  float G;
+  E = vec3(0.0);
+  if (!lightPoint(li, uv, P, L, tSurface, Le, G)) return false;
+  E = Le * G * l.area;  // pdf em área = 1 / área
   return true;
 }
 

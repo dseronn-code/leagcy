@@ -12,6 +12,10 @@
 const uint MATERIAL_ALPHA_MASK = 1u;
 const uint MATERIAL_TERRAIN = 2u;
 const uint MATERIAL_SPECULAR_GLOSSINESS = 4u;  // KHR_materials_pbrSpecularGlossiness
+const uint MATERIAL_EMISSION_SAMPLED = 8u;  // emissão já contada pela amostragem de luzes (scene.h)
+const uint MATERIAL_LIGHT_GEOMETRY = 16u;   // forma visível de uma luz analítica: sem sombra
+const uint MATERIAL_DOUBLE_SIDED = 32u;
+const uint MATERIAL_TRANSMISSIVE = 64u;     // vidro: sem sombra (por enquanto)
 
 struct Material {  // == scene::Material (96 bytes)
   vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
@@ -41,16 +45,20 @@ struct InstanceData {  // == InstanceGpu em scene.cpp
   uint64_t pad1;
 };
 
-struct PointLight {  // == scene::PointLight
-  vec3 position;
+struct PointLight {  // == scene::PointLight (esfera/spot ou triângulo emissivo)
+  vec3 position;   // triângulo: vértice 0
   float radius;
-  vec3 intensity;
+  vec3 intensity;  // triângulo: radiância média (só para escolher luzes; a exata vem do material)
   float range;
-  vec3 direction;  // eixo do spot
+  vec3 direction;  // spot: eixo | triângulo: aresta 1
   float spotScale;  // pontual: escala 0, deslocamento 1
+  vec3 edge2;      // triângulo: aresta 2
   float spotOffset;
-  float pad0, pad1, pad2;
+  uint type;
+  uint object, primitive;
+  float area;
 };
+const uint LIGHT_SPHERE = 0u, LIGHT_TRIANGLE = 1u;
 
 layout(set = 0, binding = 2, std430) readonly buffer Materials { Material materials[]; };
 layout(set = 0, binding = 3, std430) readonly buffer Instances { InstanceData instances[]; };
@@ -77,7 +85,7 @@ float lightWindow(PointLight l, vec3 P, float dist) {
   float x = dist / l.range;
   float w = clamp(1.0 - x * x * x * x, 0.0, 1.0);
   float spot = 1.0;
-  if (l.spotScale > 0.0) {
+  if (l.type == LIGHT_SPHERE && l.spotScale > 0.0) {
     float cd = dist > 0.0 ? dot(l.direction, (P - l.position) / dist) : 1.0;
     spot = clamp(cd * l.spotScale + l.spotOffset, 0.0, 1.0);
     spot *= spot;
@@ -114,6 +122,29 @@ bool sampleSphereLight(PointLight l, vec3 P, vec2 u, out vec3 L, out float tSurf
   float luminanceOfSurface = 1.0 / (PI * r * r);  // × intensidade: L = I / (π r²)
   E = l.intensity * lightWindow(l, P, d) * luminanceOfSurface * (TWO_PI * oneMinusCos);
   return true;
+}
+
+// Ponto uniforme num triângulo a partir de u em [0,1)² (coordenadas baricêntricas b1, b2).
+vec2 triangleBarycentric(vec2 u) {
+  float su = sqrt(u.x);
+  return vec2(1.0 - su, u.y * su);
+}
+
+// Radiância emitida (nits) pelo triângulo de uma luz de malha nas baricêntricas b: fator emissivo do material × textura
+// emissiva nas UVs interpoladas (o mesmo que a câmera vê).
+vec3 triangleLightRadiance(PointLight l, vec2 b, out bool doubleSided) {
+  InstanceData d = instances[l.object];
+  Material m = materials[d.material];
+  doubleSided = (m.flags & MATERIAL_DOUBLE_SIDED) != 0u;
+  vec3 Le = m.emissive;
+  if (m.emissiveTex >= 0) {
+    IndexData ib = IndexData(d.indices);
+    VertexData vb = VertexData(d.vertices);
+    uint i0 = ib.i[3u * l.primitive], i1 = ib.i[3u * l.primitive + 1u], i2 = ib.i[3u * l.primitive + 2u];
+    vec2 uv = fetchVertexUV(vb, i0) * (1.0 - b.x - b.y) + fetchVertexUV(vb, i1) * b.x + fetchVertexUV(vb, i2) * b.y;
+    Le *= textureLod(textures[nonuniformEXT(m.emissiveTex)], uv, 0.0).rgb;
+  }
+  return Le;
 }
 
 #endif

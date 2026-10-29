@@ -81,6 +81,7 @@ void addOrbitingLights(Scene& s, uint32_t sphereMesh, glm::vec3 center, float ra
     Material m;
     m.baseColor = glm::vec4(color, 1.0f);
     m.emissive = color * 9000.0f;  // nits
+    m.flags |= kMaterialLightGeometry | kMaterialEmissionSampled;  // a esfera é a forma visível da luz abaixo
     uint32_t object = s.addObject(sphereMesh, glm::mat4(1.0f), s.addMaterial(m));
     uint32_t light = s.addLight({center, 0.08f, color * intensity, 12.0f});  // cd
     float phase = glm::two_pi<float>() * float(i) / float(count);
@@ -145,6 +146,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   // Postes de luz ao longo de uma "rua" + luzes coloridas espalhadas.
   uint32_t pole = mat({0.05f, 0.05f, 0.05f}, 0.4f, 1.0f);
   uint32_t bulb = mat({1, 1, 1}, 0.5f, 0.0f, {40000.0f, 26000.0f, 12000.0f});  // globo de vapor de sódio (nits)
+  s.materials[bulb].flags |= kMaterialLightGeometry | kMaterialEmissionSampled;  // globo = forma da luz do poste
   for (int i = 0; i < 8; ++i) {
     float x = -21.0f + i * 6.0f, z = 9.0f, y = terrainHeight(x, z);
     s.addObject(cube, trs({x, y + 2.5f, z}, {0.06f, 2.5f, 0.06f}), pole);
@@ -173,6 +175,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   uint32_t glass = mat({0.02f, 0.02f, 0.02f}, 0.05f, 0.0f);
   uint32_t tire = mat({0.03f, 0.03f, 0.03f}, 0.9f, 0.0f);
   uint32_t lamp = mat({1, 1, 1}, 0.3f, 0.0f, {60000.0f, 55000.0f, 45000.0f});  // farol (nits)
+  s.materials[lamp].flags |= kMaterialLightGeometry | kMaterialEmissionSampled;  // forma visível do farol
   struct Part { uint32_t object; glm::mat4 local; };
   std::vector<Part> car;
   auto part = [&](uint32_t mesh, uint32_t material, glm::vec3 t, glm::vec3 sc) {
@@ -257,6 +260,12 @@ bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
   glm::vec3 c = 0.5f * (lo + hi);
   camera.position = c + glm::vec3(0.0f, 0.1f * (hi.y - lo.y), 0.0f);
   camera.lookAt(c + glm::vec3(hi.x - lo.x, 0.0f, 0.0f));
+  if (s.assetCamera.valid) {  // vista do autor do asset
+    camera.position = s.assetCamera.position;
+    camera.lookAt(s.assetCamera.position + s.assetCamera.forward);
+    camera.fovY = s.assetCamera.fovY;
+    camera.nearPlane = s.assetCamera.nearPlane;
+  }
   if (!s.sunFromAsset) s.sunDirection = sunFrom(35.0f, 120.0f);
   s.fogDensity = 0.0003f;
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
@@ -329,6 +338,7 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
   const uint32_t asphalt = mat({0.06f, 0.06f, 0.065f}, 0.85f, 0.0f), sidewalk = mat({0.42f, 0.40f, 0.37f}, 0.9f, 0.0f);
   const uint32_t pole = mat({0.05f, 0.05f, 0.05f}, 0.4f, 1.0f);
   const uint32_t bulb = mat({1, 1, 1}, 0.5f, 0.0f, {40000.0f, 30000.0f, 18000.0f});
+  s.materials[bulb].flags |= kMaterialLightGeometry | kMaterialEmissionSampled;  // globo = forma da luz do poste
   uint32_t concrete[4], glass[3], paint[5];
   const glm::vec3 concreteColors[4] = {{0.55f, 0.52f, 0.48f}, {0.62f, 0.58f, 0.50f}, {0.40f, 0.38f, 0.36f}, {0.70f, 0.66f, 0.60f}};
   for (int i = 0; i < 4; ++i) concrete[i] = mat(concreteColors[i], 0.8f, 0.0f);
@@ -418,6 +428,40 @@ bool buildReflectionTest(Scene& s, Camera& camera) {
   return true;
 }
 
+// Teste das luzes de malha: sala fechada (sem sol) iluminada só por emissivos — painel no teto, globos coloridos e o
+// capacete (textura emissiva). Comparada por path tracing com e sem --no-mesh-lights: devem convergir para o mesmo.
+bool buildMeshLightTest(Scene& s, Camera& camera) {
+  uint32_t cube = s.addMesh(makeCube());
+  uint32_t sphere = s.addMesh(makeSphere(48, 24));
+  auto mat = [&](glm::vec3 albedo, float rough, float metal, glm::vec3 emissive = glm::vec3(0.0f)) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    m.metallic = metal;
+    m.emissive = emissive;
+    return s.addMaterial(m);
+  };
+  const uint32_t floor = mat(glm::vec3(0.5f), 0.35f, 0.0f), wall = mat(glm::vec3(0.7f), 0.9f, 0.0f);
+  const uint32_t red = mat(glm::vec3(0.7f, 0.08f, 0.06f), 0.8f, 0.0f), metal = mat(glm::vec3(0.9f), 0.25f, 1.0f);
+  s.addObject(cube, trs({0.0f, -0.1f, 0.0f}, {4.0f, 0.1f, 4.0f}), floor);
+  s.addObject(cube, trs({0.0f, 3.1f, 0.0f}, {4.0f, 0.1f, 4.0f}), wall);
+  s.addObject(cube, trs({0.0f, 1.5f, -4.1f}, {4.0f, 1.6f, 0.1f}), red);
+  s.addObject(cube, trs({0.0f, 1.5f, 4.1f}, {4.0f, 1.6f, 0.1f}), wall);
+  s.addObject(cube, trs({-4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
+  s.addObject(cube, trs({4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
+  s.addObject(cube, trs({0.0f, 2.99f, -1.0f}, {0.8f, 0.01f, 0.4f}), mat(glm::vec3(1.0f), 0.5f, 0.0f, glm::vec3(3000.0f)));
+  s.addObject(sphere, trs({-2.0f, 0.15f, 0.5f}, glm::vec3(0.15f)), mat(glm::vec3(1.0f), 0.5f, 0.0f, {20000.0f, 6000.0f, 1500.0f}));
+  s.addObject(sphere, trs({2.2f, 1.2f, -2.0f}, glm::vec3(0.1f)), mat(glm::vec3(1.0f), 0.5f, 0.0f, {2000.0f, 9000.0f, 30000.0f}));
+  s.addObject(sphere, trs({1.2f, 0.5f, 0.6f}, glm::vec3(0.5f)), metal);
+  glm::mat4 helmet = glm::translate(glm::mat4(1.0f), {-0.6f, 1.0f, -1.5f});
+  loadGltf(s, kAssets + "/DamagedHelmet/DamagedHelmet.gltf", glm::scale(helmet, glm::vec3(0.6f)));
+  s.sunIlluminance = 0.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 1.6f, 3.6f);
+  camera.lookAt(glm::vec3(0.0f, 1.0f, -1.5f));
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
@@ -430,6 +474,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (opt.name == "shadows-far") return buildShadowTest(scene, camera, glm::vec3(4000.0f, 0.0f, -3000.0f));
   if (opt.name == "reflections") return buildReflectionTest(scene, camera);
   if (opt.name == "city") return buildCity(scene, camera, opt);
+  if (opt.name == "mesh-lights") return buildMeshLightTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 
