@@ -242,6 +242,8 @@ class Scene {
   float moonIlluminance = 0.0f;
   // Nuvens volumétricas (cúmulos entre 1,5 e 4 km): fração do céu coberta. 0 = céu limpo (sem custo).
   float cloudCoverage = 0.0f;
+  // Chuva (0..1): superfícies molhadas (escurecem e brilham), poças nas superfícies planas, respingos nas poças.
+  float wetness = 0.0f, puddles = 0.0f, rain = 0.0f;
   // Primeira câmera perspectiva do glTF (vista inicial definida pelo autor do asset).
   struct AssetCamera {
     bool valid = false;

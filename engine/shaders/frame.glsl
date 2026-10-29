@@ -32,6 +32,7 @@ layout(set = 0, binding = 0) uniform FrameData {
   vec4 environment;           // x = céu uniforme em nits (> 0: teste da fornalha branca)
   vec4 night;                 // x = 1: a luz direcional (sunDir) é a lua; y = iluminância de magnitude 0 (lux);
                               // z = cobertura de nuvens (0 = céu limpo); w = tempo (s, move as nuvens)
+  vec4 weather;               // x = superfícies molhadas, y = poças, z = chuva caindo (respingos), w = tempo (s)
 } frame;
 
 // Sombra das nuvens (cloud_shadow.comp): transmitância da camada na direção do sol, num quadrado em volta da câmera.
