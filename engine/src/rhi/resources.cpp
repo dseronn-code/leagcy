@@ -74,6 +74,7 @@ Image createImage3D(Context& ctx, VkExtent3D extent, VkFormat format, VkImageUsa
   Image img;
   img.format = format;
   img.extent = {extent.width, extent.height};
+  img.depth = extent.depth;
   VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
   ii.imageType = VK_IMAGE_TYPE_3D;
   ii.format = format;

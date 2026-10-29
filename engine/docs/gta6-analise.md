@@ -28,7 +28,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Shadow maps em cascata (fallback e performance) | ❌ | |
 | Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR de produção: BVH de luzes, GRIS/MIS em pares, correção de viés por ray tracing, filtro de boiling; viés < 1,5% contra força bruta (`tools/restir.py`) |
 | Céu e atmosfera física | ✅ | Pipeline completa de Hillaire (transmitância, múltiplo espalhamento, sky-view, perspectiva aérea), 4% de erro contra path tracing de referência |
-| Nuvens volumétricas, raios de luz (god rays) | ❌ | Hoje só temos névoa por altura |
+| Nuvens volumétricas, raios de luz (god rays) | ✅ | Nuvens Nubis/Hillaire (Perlin-Worley, múltiplo espalhamento, vento) no céu, nos reflexos e com sombra no chão; névoa volumétrica em froxels com sombra do sol por ray tracing e céu com visibilidade (raios de luz, névoa escura dentro de prédios) |
 | Ciclo dia/noite | ✅ | Sol físico; à noite lua (luz e disco), estrelas e luzes da cidade (milhares pelo ReSTIR + emissivos como luz) |
 
 ### Imagem

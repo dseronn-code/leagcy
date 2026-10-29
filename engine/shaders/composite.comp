@@ -3,6 +3,7 @@
 #extension GL_GOOGLE_include_directive : require
 #include "gbuffer.glsl"
 #include "brdf.glsl"
+#include "fog.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 1, binding = 4) uniform sampler2D gEmissive;
@@ -11,6 +12,25 @@ layout(set = 1, binding = 6) uniform sampler2D specularIn;
 layout(set = 1, binding = 7, rgba16f) uniform writeonly image2D sceneOut;
 layout(set = 1, binding = 8) uniform sampler2D cloudsScreen;  // nuvens na tela (rgb = luz, a = transmitância)
 layout(set = 1, binding = 9) uniform sampler2D clearSky;      // céu sem nuvens
+layout(set = 1, binding = 10) uniform sampler3D fogVolume;    // névoa volumétrica acumulada (fog_integrate.comp)
+
+// Névoa entre a câmera e um ponto a `dist` metros na direção v: trecho além de FOG_FAR pela fórmula analítica (sem
+// sombra), o resto pela grade volumétrica (com sombra: raios de luz).
+vec3 applyFog(vec3 color, vec2 uv, vec3 v, float dist) {
+  if (frame.params.z <= 0.0) return color;
+  if (dist > FOG_FAR) {
+    float T;
+    vec3 L;
+    heightFogSegment(frame.cameraPos.xyz, v, FOG_FAR, dist, T, L);
+    color = color * T + L;
+    dist = FOG_FAR;
+  }
+  float slices = float(textureSize(fogVolume, 0).z);
+  float f = fogSliceCoord(dist) * slices;  // a fatia z guarda o acumulado até o FIM dela (f = z + 1)
+  vec4 fog = textureLod(fogVolume, vec3(uv, (max(f - 1.0, 0.0) + 0.5) / slices), 0.0);
+  fog = mix(vec4(0.0, 0.0, 0.0, 1.0), fog, clamp(f, 0.0, 1.0));  // antes do fim da 1ª fatia: parte dela
+  return color * fog.a + fog.rgb;
+}
 
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
@@ -26,7 +46,7 @@ void main() {
     } else {
       color = sampleSky(dir) + sunDisk(dir) + starField(dir);
     }
-    color = applyHeightFog(color, frame.cameraPos.xyz + dir * 4000.0);  // céu atrás da névoa
+    color = applyFog(color, uv, dir, 4000.0);  // céu atrás da névoa
   } else {
     GSample g = loadGBuffer(id);
     BrdfContext bc = makeBrdfContext(g.N, g.V, g.f0, g.f90, g.roughness, energyCompensationEnabled());
@@ -38,7 +58,7 @@ void main() {
     color = dIn * g.diffuseColor + sIn * specularDemodulation(bc) +
             texelFetch(gEmissive, id, 0).rgb;
     color = applyAerialPerspective(color, uv, g.P);
-    color = applyHeightFog(color, g.P);
+    color = applyFog(color, uv, normalize(g.P - frame.cameraPos.xyz), distance(g.P, frame.cameraPos.xyz));
   }
   imageStore(sceneOut, id, vec4(clampHalf(color), 1.0));
 }

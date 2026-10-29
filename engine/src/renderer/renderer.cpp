@@ -19,6 +19,7 @@ constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 constexpr VkExtent3D kCloudNoiseExtent = {128, 128, 128};
 constexpr VkExtent2D kCloudShadowExtent = {256, 256};
+constexpr uint32_t kFogSlices = 64;  // fatias da névoa volumétrica (células de 8x8 pixels)
 constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;  // cor difusa e f0 (sRGB: precisão nos tons baixos)
 constexpr VkExtent2D kDfgLutExtent{128, 128};
 constexpr VkExtent2D kTransmittanceLutExtent{256, 64};
@@ -310,12 +311,14 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   cloudSkyPass_.init(ctx, "clouds_sky.comp", g, {SI, CIS});
   cloudShadowPass_.init(ctx, "cloud_shadow.comp", g, {SI});
   cloudScreenPass_.init(ctx, "clouds_screen.comp", g, {SI, CIS, CIS});
+  fogInjectPass_.init(ctx, rt ? "fog_inject_rt.comp" : "fog_inject.comp", g, {SI, CIS});
+  fogIntegratePass_.init(ctx, "fog_integrate.comp", g, {CIS, SI});
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS});
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS});
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI});
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
-  compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, CIS, CIS});
+  compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, CIS, CIS, CIS});
   taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI});
   rrGuidesPass_.init(ctx, "rr_guides.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   accumulatePass_.init(ctx, "accumulate.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI}, sizeof(uint32_t));
@@ -499,6 +502,9 @@ void Renderer::createTargets() {
   t_.accumulation = rhi::createImage2D(ctx, R, VK_FORMAT_R32G32B32A32_SFLOAT, storage);
   for (auto& c : t_.clouds)
     c = rhi::createImage2D(ctx, {std::max(1u, R.width / 2), std::max(1u, R.height / 2)}, kHdrFormat, storage);
+  const VkExtent3D froxels{(R.width + 7) / 8, (R.height + 7) / 8, kFogSlices};
+  for (auto& f : t_.fogInject) f = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
+  t_.fogIntegrated = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
@@ -522,7 +528,7 @@ void Renderer::createTargets() {
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                             &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
-                            &t_.clouds[1]})
+                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   if (upscalerReady_) {
@@ -562,7 +568,7 @@ void Renderer::destroyTargets() {
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                           &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
-                            &t_.clouds[1]})
+                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -660,6 +666,16 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     cloudScreenPass_.dispatch(cmd, gs, {Binding::storageImage(t_.clouds[cur].view), Binding::sampled(t_.clouds[cur ^ 1u].view, linear_),
                                         Binding::sampled(skyClear_.view, linear_)},
                               t_.clouds[cur].extent);
+    barrier();
+  }
+  // Névoa volumétrica: luz do sol com sombra em cada célula, depois a soma ao longo das fatias.
+  if (scene_->fogDensity > 0.0f) {
+    const VkExtent3D fe{t_.fogInject[cur].extent.width, t_.fogInject[cur].extent.height, t_.fogInject[cur].depth};
+    fogInjectPass_.dispatch(cmd, gs, {Binding::storageImage(t_.fogInject[cur].view), Binding::sampled(t_.fogInject[cur ^ 1u].view, linear_)},
+                            {fe.width, fe.height * fe.depth});
+    barrier();
+    fogIntegratePass_.dispatch(cmd, gs, {Binding::sampled(t_.fogInject[cur].view, linear_), Binding::storageImage(t_.fogIntegrated.view)},
+                               {fe.width, fe.height});
     barrier();
   }
   profiler_.mark(cmd, "ceu");
@@ -819,7 +835,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // ---- 6. Composição ----
   compositePass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.emissive), tex(*diffuseFinal), tex(*specularFinal),
                                     storage(t_.sceneColor), Binding::sampled(t_.clouds[cur].view, linear_),
-                                    Binding::sampled(skyClear_.view, linear_)}, R);
+                                    Binding::sampled(skyClear_.view, linear_), Binding::sampled(t_.fogIntegrated.view, linear_)}, R);
   barrier();
   profiler_.mark(cmd, "composicao");
 
@@ -1126,7 +1142,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
-  for (rhi::ComputePass* p : {&cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
