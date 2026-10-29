@@ -122,6 +122,24 @@ std::vector<uint8_t> encodeLevel(const std::vector<uint8_t>& px, uint32_t w, uin
   return out;
 }
 
+// Fração dos texels com alfa × escala acima do corte.
+float alphaCoverage(const std::vector<uint8_t>& px, float cutoff, float scale) {
+  size_t n = px.size() / 4, covered = 0;
+  for (size_t i = 0; i < n; ++i) covered += float(px[i * 4 + 3]) / 255.0f * scale > cutoff;
+  return n ? float(covered) / float(n) : 0.0f;
+}
+
+// Reescala o alfa do mip para a cobertura `target` (busca binária na escala).
+void preserveCoverage(std::vector<uint8_t>& px, float cutoff, float target) {
+  float lo = 0.0f, hi = 8.0f;
+  for (int i = 0; i < 16; ++i) {
+    const float mid = 0.5f * (lo + hi);
+    (alphaCoverage(px, cutoff, mid) < target ? lo : hi) = mid;
+  }
+  const float scale = 0.5f * (lo + hi);
+  for (size_t i = 3; i < px.size(); i += 4) px[i] = uint8_t(std::min(float(px[i]) * scale, 255.0f) + 0.5f);
+}
+
 uint64_t fnv1a(const uint8_t* data, size_t n, uint64_t h = 1469598103934665603ull) {
   for (size_t i = 0; i < n; ++i) h = (h ^ data[i]) * 1099511628211ull;
   return h;
@@ -166,7 +184,7 @@ void saveCache(const std::filesystem::path& file, const CompressedTexture& t) {
 }  // namespace
 
 CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t height, bool srgb, bool normalMap,
-                                  const std::string& cacheDir) {
+                                  const std::string& cacheDir, float alphaCutoff) {
   static std::once_flag init;
   std::call_once(init, [] {
     bc7enc_compress_block_init();
@@ -176,6 +194,7 @@ CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t 
   const uint32_t key[4] = {kCacheVersion, width, height, (srgb ? 1u : 0u) | (normalMap ? 2u : 0u)};
   uint64_t hash = fnv1a(reinterpret_cast<const uint8_t*>(key), sizeof(key));
   hash = fnv1a(rgba, size_t(width) * height * 4, hash);
+  if (alphaCutoff >= 0.0f) hash = fnv1a(reinterpret_cast<const uint8_t*>(&alphaCutoff), sizeof(alphaCutoff), hash);
   char name[32];
   std::snprintf(name, sizeof(name), "%016llx.bc7", static_cast<unsigned long long>(hash));
   const std::filesystem::path file = std::filesystem::path(cacheDir) / name;
@@ -187,13 +206,18 @@ CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t 
   t.width = width;
   t.height = height;
   std::vector<uint8_t> level(rgba, rgba + size_t(width) * height * 4);
+  const bool coverage = alphaCutoff >= 0.0f && !normalMap;
+  const float coverage0 = coverage ? alphaCoverage(level, alphaCutoff, 1.0f) : 0.0f;
+  std::vector<uint8_t> source = level;  // cada mip sai do anterior SEM o reajuste (o erro não se acumula)
   uint32_t w = width, h = height;
   for (;;) {
     t.mips.push_back(encodeLevel(level, w, h, srgb, normalMap));
     if (w == 1 && h == 1) break;
-    level = normalMap ? downsampleNormals(level, w, h) : downsample(level, w, h, srgb);
+    source = normalMap ? downsampleNormals(source, w, h) : downsample(source, w, h, srgb);
+    level = source;
     w = std::max(1u, w / 2);
     h = std::max(1u, h / 2);
+    if (coverage) preserveCoverage(level, alphaCutoff, coverage0);
   }
   saveCache(file, t);
   return t;

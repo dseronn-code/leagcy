@@ -355,8 +355,15 @@ void Scene::upload(rhi::Context& ctx) {
   uint32_t encoded = 0, precompressed = 0;
   auto t0 = std::chrono::steady_clock::now();
   for (auto& t : cpuTextures_) {
+    textureWrap.push_back({t.wrapU, t.wrapV});
     const double raw = double(t.width) * t.height * 4.0 * 4.0 / 3.0;  // RGBA8 com a cadeia de mips
     bytesRaw += raw;
+    if (t.precompressed.format != VK_FORMAT_UNDEFINED && t.alphaCutoff >= 0.0f) {
+      // DDS de recorte por alfa: os mips prontos perdem cobertura (folhagem some). Decodifica o nível 0 e refaz a
+      // cadeia preservando a cobertura (comprimida uma vez, depois vem do cache).
+      t.rgba = decodeBc7(t.precompressed, 0);
+      t.precompressed = {};
+    }
     if (t.precompressed.format != VK_FORMAT_UNDEFINED) {
       if (compress) {
         // Já em BC7 no disco: enviado sem recompressão (o formato segue o uso — cor sRGB ou dado linear).
@@ -371,7 +378,8 @@ void Scene::upload(rhi::Context& ctx) {
       }
     } else if (compress) {
       ++encoded;
-      CompressedTexture ct = compressTexture(t.rgba.data(), t.width, t.height, t.srgb, t.normalMap, textureCacheDir);
+      CompressedTexture ct =
+          compressTexture(t.rgba.data(), t.width, t.height, t.srgb, t.normalMap, textureCacheDir, t.alphaCutoff);
       for (const auto& m : ct.mips) bytesGpu += double(m.size());
       const double p = compressionPsnr(ct, t.rgba.data());
       psnrSum += p;

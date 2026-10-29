@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <tuple>
 #include <string>
 
 #define GLM_ENABLE_EXPERIMENTAL
@@ -39,7 +40,8 @@ struct Loader {
   Scene& scene;
   cgltf_data* data;
   std::filesystem::path dir;
-  std::map<std::pair<const cgltf_image*, bool>, int32_t> textureCache;  // (imagem, sRGB) -> índice
+  // (imagem, sRGB, repetição u, repetição v) -> índice
+  std::map<std::tuple<const cgltf_image*, bool, int, int>, int32_t> textureCache;
   struct Primitive {
     MeshData data;
     uint32_t material = 0;
@@ -49,6 +51,18 @@ struct Loader {
   std::vector<uint32_t> materialMap;
   uint32_t defaultMaterial = 0;
   int model = -1;  // índice do Model criado (arquivos com animação ou esqueleto)
+
+  // Repetição do sampler do glTF (códigos do OpenGL: 33071 = clamp, 33648 = espelhado, 10497 = repetir).
+  static void setWrap(TextureData& t, const cgltf_sampler* smp) {
+    auto mode = [](int gl) {
+      return gl == 33071 ? VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+           : gl == 33648 ? VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT
+                         : VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    };
+    if (!smp) return;
+    t.wrapU = mode(smp->wrap_s);
+    t.wrapV = mode(smp->wrap_t);
+  }
 
   // Imagem alternativa em DDS declarada por MSFT_texture_dds ({"source": índice}), ou nulo.
   const cgltf_image* ddsImage(const cgltf_texture& tex) const {
@@ -65,7 +79,8 @@ struct Loader {
   int32_t texture(const cgltf_texture_view& view, bool srgb, bool normalMap = false) {
     if (!view.texture || !view.texture->image) return -1;
     const cgltf_image* img = view.texture->image;
-    auto key = std::make_pair(img, srgb);
+    const cgltf_sampler* smp = view.texture->sampler;
+    auto key = std::make_tuple(img, srgb, smp ? smp->wrap_s : 10497, smp ? smp->wrap_t : 10497);
     if (auto it = textureCache.find(key); it != textureCache.end()) return it->second;
 
     int w = 0, h = 0, comp = 0;
@@ -93,6 +108,7 @@ struct Loader {
           t.srgb = srgb;
           t.normalMap = normalMap;
           t.name = dds->uri;
+          setWrap(t, smp);
           return textureCache[key] = int32_t(scene.addTexture(std::move(t)));
         }
       }
@@ -105,6 +121,7 @@ struct Loader {
     t.srgb = srgb;
     t.normalMap = normalMap;
     t.name = img->uri ? img->uri : (img->name ? img->name : "(embutida)");
+    setWrap(t, smp);
     t.rgba.assign(pixels, pixels + size_t(w) * h * 4);
     stbi_image_free(pixels);
     return textureCache[key] = int32_t(scene.addTexture(std::move(t)));
@@ -145,6 +162,7 @@ struct Loader {
       if (src.has_emissive_strength) m.emissive *= src.emissive_strength.emissive_strength;
       m.emissiveTex = texture(src.emissive_texture, true);
       m.normalTex = texture(src.normal_texture, false, true);
+      m.occlusionTex = texture(src.occlusion_texture, false);
       m.normalScale = src.normal_texture.texture ? src.normal_texture.scale : 1.0f;
       if (src.alpha_mode == cgltf_alpha_mode_mask) {
         m.flags |= kMaterialAlphaMask;
@@ -154,6 +172,7 @@ struct Loader {
         m.flags |= kMaterialAlphaMask;
         m.alphaCutoff = 0.5f;
       }
+      if (m.flags & kMaterialAlphaMask) scene.setTextureAlphaCutoff(m.baseColorTex, m.alphaCutoff);
       materialMap.push_back(scene.addMaterial(m));
     }
     defaultMaterial = scene.addMaterial({});

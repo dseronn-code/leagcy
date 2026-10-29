@@ -141,6 +141,26 @@ def reflexos(binario, rel):
         rel += [l + nome for l in p.stdout.strip().splitlines()] or ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
 
 
+def luzes(binario, rel):
+    """Luzes de malha (emissivos como luz): prova de energia por path tracing e motor x referência (tools/luzes.py),
+    mais o Bistro de dia e de noite para olhar."""
+    rel.append('\n== Luzes de malha (prova: com x sem tem que dar ~0; motor x referência: menor é melhor)')
+    p = subprocess.run([sys.executable, os.path.join(AQUI, 'luzes.py'), '--bin', binario, '--out', os.path.join(PASTA, 'luzes')],
+                       capture_output=True, text=True, encoding='utf-8', errors='replace',
+                       env=dict(os.environ, PYTHONIOENCODING='utf-8'))
+    rel += p.stdout.strip().splitlines() or ['falhou: ' + ' | '.join(p.stderr.strip().splitlines()[-2:])]
+    bistro = ['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf')]
+    arqs = []
+    for nome, extra in (('dia', []), ('noite', ['--night'])):
+        arq = os.path.join(PASTA, f'bistro_{nome}.png')
+        code, out = rodar(binario, ['--headless', '--pause', '--width', '1920', '--height', '1080', '--frames', '64',
+                                    '--out', arq] + bistro + extra)
+        rel.append(f'Bistro {nome}: ' + (linha(out, r'\d+ frames em [^\n]*') or f'falhou (código {code})'))
+        if code == 0:
+            arqs.append(arq)
+    lado_a_lado(arqs, os.path.join(PASTA, 'bistro_dia_noite.png'))
+
+
 def movimento(binario, rel):
     """Câmera andando: imagens para comparar rastros e ruído (denoiser e upscaler)."""
     rel.append('\n== Movimento (imagens lado a lado em resultados_pc/)')
@@ -176,7 +196,29 @@ def main():
     rel.append(linha(out, r'GPU: [^\n]*') or 'GPU: ?')
     rel.append('DLSS: ' + (linha(out, r'DLSS (ativo|indispon)[^\n]*') or '?'))
 
-    print('1/6 suíte de testes...', flush=True)
+    # --so secao1,secao2: só algumas seções (suite, desempenho, nitidez, denoisers, reflexos, luzes, movimento).
+    so = None
+    if '--so' in sys.argv:
+        so = set(sys.argv[sys.argv.index('--so') + 1].split(','))
+    quer = lambda s: so is None or s in so
+
+    if quer('suite'):
+        print('suíte de testes...', flush=True)
+        suite(binario, rel)
+    etapas = [('desempenho', desempenho), ('nitidez', nitidez), ('denoisers', denoisers), ('denoisers', texturas),
+              ('reflexos', reflexos), ('luzes', luzes), ('movimento', movimento)]
+    for nome, f in etapas:
+        if quer(nome):
+            print(f'{nome}...', flush=True)
+            f(binario, rel)
+
+    with open(os.path.join(PASTA, 'relatorio.txt'), 'w', encoding='utf-8') as f:
+        f.write('\n'.join(rel) + '\n')
+    print('\n'.join(rel))
+    print(f'\nPronto. Copie o texto acima (ou {PASTA}/relatorio.txt) e cole na conversa.')
+
+
+def suite(binario, rel):
     p = subprocess.run([sys.executable, os.path.join(AQUI, 'testes.py'), '--bin', binario], capture_output=True, text=True,
                        encoding='utf-8', errors='replace', env=dict(os.environ, PYTHONIOENCODING='utf-8'))
     rel.append('\n== Suíte de testes')
@@ -190,22 +232,6 @@ def main():
             detalhe += 1
     if p.returncode not in (0, 1):
         rel.append('suíte interrompida: ' + ' | '.join(p.stderr.strip().splitlines()[-3:]))
-    print('2/6 desempenho...', flush=True)
-    desempenho(binario, rel)
-    print('3/6 nitidez...', flush=True)
-    nitidez(binario, rel)
-    print('4/6 denoisers e texturas...', flush=True)
-    denoisers(binario, rel)
-    texturas(binario, rel)
-    print('5/6 reflexos...', flush=True)
-    reflexos(binario, rel)
-    print('6/6 movimento...', flush=True)
-    movimento(binario, rel)
-
-    with open(os.path.join(PASTA, 'relatorio.txt'), 'w', encoding='utf-8') as f:
-        f.write('\n'.join(rel) + '\n')
-    print('\n'.join(rel))
-    print(f'\nPronto. Copie o texto acima (ou {PASTA}/relatorio.txt) e cole na conversa.')
 
 
 if __name__ == '__main__':
