@@ -17,6 +17,8 @@ struct Surface {
   vec3 normal;
   float normalVariance;  // variância do normal map no mip lido (Toksvig) — alarga a rugosidade
   float occlusion;       // oclusão do material (glTF occlusionTexture), 1 = nenhuma
+  float transmission;    // KHR_materials_transmission: fração não refletida que atravessa (parede fina)
+  vec3 transmissionTint; // cor base: tinge o que atravessa
 };
 
 // N: normal geométrica interpolada; T: tangente (w = sinal da bitangente); T = 0 desliga o normal map.
@@ -56,6 +58,9 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
   s.normal = N;
   s.normalVariance = 0.0;
   s.occlusion = m.occlusionTex >= 0 ? MATERIAL_SAMPLE(m.occlusionTex, uv).r : 1.0;
+  s.transmission = m.transmission;
+  if (m.transmissionTex >= 0) s.transmission *= MATERIAL_SAMPLE(m.transmissionTex, uv).r;
+  s.transmissionTint = base.rgb;
   vec3 t = T.xyz - N * dot(N, T.xyz);
   if (m.normalTex >= 0 && dot(t, t) > 1e-8) {
     t = normalize(t);
@@ -90,6 +95,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
     s.roughness = mix(mix(0.9, 0.95, dirtMask), 0.7, rockMask);
   }
   s.roughness = clamp(s.roughness, 0.0, 1.0);
+  s.diffuseColor *= 1.0 - s.transmission;  // o que atravessa não espalha (glTF: mix(difuso, transmissão))
   return s;
 }
 

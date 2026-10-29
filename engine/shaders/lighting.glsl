@@ -40,7 +40,8 @@ vec4 packNrdNormalRoughness(vec3 n, float roughness) {
 
 // Dimensões da sequência de Sobol por pixel (cada uma é um par 2D independente).
 const uint DIM_SUN = 0u, DIM_LIGHT = 1u, DIM_DIFFUSE = 2u, DIM_SPECULAR = 3u;
-const uint DIM_HIT_SUN = 4u, DIM_HIT_LIGHT = 5u, DIM_HIT_LIGHT_PICK = 6u;
+const uint DIM_HIT_SUN = 4u, DIM_HIT_LIGHT = 5u, DIM_HIT_LIGHT_PICK = 6u;  // + 3 × rebote (0 GI, 1 reflexo, 2 vidro)
+const uint DIM_TRANSMISSION = 13u;
 
 // Limita a luminância de amostras indiretas: troca um viés pequeno por muito menos "vagalumes"
 // (amostras raras e muito brilhantes que o denoiser não consegue espalhar). Valor pré-exposto
@@ -54,10 +55,13 @@ vec3 clampFirefly(vec3 c) {
 #ifdef RAY_TRACING
 // Luz direta num ponto atingido por um raio, para a direção -dir: emissão + sol (disco, com sombra) + uma luz local
 // escolhida pela BVH de luzes (pdf exata, com sombra). BRDF completo (difuso + especular, compensação de energia).
-vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 uLight, uint rngLight) {
+//   countSampledEmission: soma também a emissão de luzes amostradas — só para raios cujo lobo a amostragem de luzes
+//   não cobre (a transmissão do vidro: o ReSTIR avalia só a reflexão).
+vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 uLight, uint rngLight,
+                       bool countSampledEmission) {
   // Emissão já amostrada como luz (luzes de malha, globo de lâmpada) entra pela luz direta abaixo; somá-la aqui também
   // dobraria a energia (auditoria 1.4).
-  bool emissionSampled = (materials[hit.material].flags & MATERIAL_EMISSION_SAMPLED) != 0u;
+  bool emissionSampled = !countSampledEmission && (materials[hit.material].flags & MATERIAL_EMISSION_SAMPLED) != 0u;
   vec3 radiance = emissionSampled ? vec3(0.0) : s.emissive * preExposure();
   vec3 kd, ks;
   // Ponto do raio: erro da ordem do epsilon do float × distância percorrida.
@@ -82,6 +86,27 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
     }
   }
   return radiance;
+}
+
+// Raio que atravessa vidro de parede fina (KHR_materials_transmission): passa reto por até 4 superfícies
+// transmissivas, multiplicando T pelo que cada uma deixa passar (transmissão × cor × (1 − Fresnel)); a reflexão e o
+// difuso do próprio vidro nesses raios secundários ficam de fora (poucos %). Devolve falso no céu; `blocked` = o vidro
+// absorveu tudo ou havia camadas demais.
+bool traceHitThroughGlass(vec3 origin, vec3 dir, float tMax, out HitInfo hit, out vec3 T, out bool blocked) {
+  T = vec3(1.0);
+  blocked = false;
+  for (int layer = 0; layer < 4; ++layer) {
+    if (!traceHit(origin, dir, tMax, hit)) return false;
+    Material m = materials[hit.material];
+    if ((m.flags & MATERIAL_TRANSMISSIVE) == 0u) return true;
+    Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
+    T *= s.transmission * s.transmissionTint * (vec3(1.0) - F_Schlick(s.f0, s.f90, abs(dot(hit.N, dir))));
+    if (max(T.r, max(T.g, T.b)) < 1e-4) break;
+    origin = offsetRayOrigin(hit.P, -hit.Ng, RAY_BIAS_EXACT * hit.t);  // continua do outro lado
+    tMax -= hit.t;
+  }
+  blocked = true;
+  return true;
 }
 
 // REFERÊNCIA (--reference-pt): luz indireta que sai de `hit` para -dir, por path tracing de verdade — escolhe o lobo
@@ -113,14 +138,18 @@ vec3 pathContinue(HitInfo hit, Surface s, BrdfContext bc, uint seed) {
     if (dot(dir, hit.Ng) <= 0.0) break;
     T *= w;
     HitInfo next;
-    if (!traceHit(offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t), dir, 1e4, next)) {
-      L += T * sampleSky(dir);
+    vec3 Tg;
+    bool blocked;
+    if (!traceHitThroughGlass(offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t), dir, 1e4, next, Tg, blocked)) {
+      L += T * Tg * sampleSky(dir);
       break;
     }
+    if (blocked) break;
+    T *= Tg;
     s = evalMaterial(materials[next.material], next.P, next.N, vec4(0.0), next.uv);
     bc = makeBrdfContext(next.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
     vec2 uSun = rand2(st), uLight = rand2(st);
-    L += T * hitDirectLighting(next, s, bc, uSun, uLight, pcg(st));
+    L += T * hitDirectLighting(next, s, bc, uSun, uLight, pcg(st), false);
     hit = next;
     if (b >= 2) {  // roleta russa
       float q = clamp(max(T.r, max(T.g, T.b)), 0.05, 1.0);
@@ -150,29 +179,27 @@ vec3 cachedIndirect(vec3 P, vec3 Ng, vec3 N) {
 // aproximada pelo mesmo M, especular). Ruído branco.
 vec3 secondaryRadiance(vec3 origin, vec3 dir, inout uint st) {
   HitInfo h;
-  if (!traceHit(origin, dir, 1e4, h)) return sampleSky(dir);
+  vec3 Tg;
+  bool blocked;
+  if (!traceHitThroughGlass(origin, dir, 1e4, h, Tg, blocked)) return clampFirefly(Tg * sampleSky(dir));
+  if (blocked) return vec3(0.0);
   Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv);
   BrdfContext c = makeBrdfContext(h.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
   vec2 uSun = rand2(st), uLight = rand2(st);
-  vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st));
+  vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st), false);
   L += (s.diffuseColor * c.diffuseWeight + specularAlbedo(s.f0, s.f90, c.dfg) * c.energyCompensation) * cachedIndirect(h.P, h.Ng, h.N);
-  return clampFirefly(L);
+  return clampFirefly(Tg * L);
 }
 
-// Radiância que sai do ponto atingido em direção à origem do raio: luz direta + o que vem depois dela — no motor,
-// indireta pelo cache de radiância (com um raio a mais em superfícies espelhadas); na referência, path tracing.
-// `bounce` separa as dimensões de Sobol do raio difuso e do especular.
-vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float hitDist) {
-  HitInfo hit;
-  hitDist = HIT_DIST_MISS;
-  if (!traceHit(origin, dir, 1e4, hit)) return sampleSky(dir);
-  hitDist = hit.t;
+// Radiância que sai de `hit` para a origem do raio (ver traceRadiance, logo abaixo).
+vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool countSampledEmission) {
   Material m = materials[hit.material];
   Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
   BrdfContext bc = makeBrdfContext(hit.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
   uint dimBase = bounce * 3u;
   uint rngLight = pcg3d(uvec3(floatBitsToUint(sample2D(sg, DIM_HIT_LIGHT_PICK + dimBase).x), bounce, frame.frameInfo.x)).x;
-  vec3 radiance = hitDirectLighting(hit, s, bc, sample2D(sg, DIM_HIT_SUN + dimBase), sample2D(sg, DIM_HIT_LIGHT + dimBase), rngLight);
+  vec3 radiance = hitDirectLighting(hit, s, bc, sample2D(sg, DIM_HIT_SUN + dimBase), sample2D(sg, DIM_HIT_LIGHT + dimBase), rngLight,
+                                    countSampledEmission);
   uint st = pcg3d(uvec3(gl_GlobalInvocationID.xy, frame.frameInfo.x * 8u + bounce)).x | 1u;
   // Mesmo limite de vagalumes do motor por amostra: a referência mede reflexos e luz indireta, não cáusticas (sol
   // refletido por espelho, que motor de jogo nenhum calcula e o limite corta — medido: era o resto do viés).
@@ -206,6 +233,21 @@ vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float h
     if (dot(d2, hit.Ng) > 0.0) rcAdd(hit.P, hit.Ng, secondaryRadiance(hitOrigin, d2, st));
   }
   return clampFirefly(radiance);
+}
+
+// Radiância que sai do ponto atingido em direção à origem do raio: luz direta + o que vem depois dela — no motor,
+// indireta pelo cache de radiância (com um raio a mais em superfícies espelhadas); na referência, path tracing.
+// `bounce` separa as dimensões de Sobol do raio difuso e do especular.
+//   countSampledEmission: ver hitDirectLighting (verdadeiro só para o raio de transmissão do vidro).
+vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float hitDist, bool countSampledEmission) {
+  HitInfo hit;
+  hitDist = HIT_DIST_MISS;
+  vec3 Tg;
+  bool blocked;
+  if (!traceHitThroughGlass(origin, dir, 1e4, hit, Tg, blocked)) return Tg * sampleSky(dir);
+  if (blocked) return vec3(0.0);
+  hitDist = hit.t;
+  return Tg * traceRadianceAt(hit, dir, sg, bounce, countSampledEmission);
 }
 
 // Referência por força bruta para medir o ReSTIR: todas as luzes no alcance, 16 amostras estratificadas
@@ -250,6 +292,11 @@ void main() {
   // pela aproximação de Lagarde (2014) que a converte para o lobo especular.
   float aoDiffuse = g.occlusion;
   float aoSpecular = clamp(pow(max(dot(g.N, g.V), 0.0) + g.occlusion, exp2(-16.0 * g.roughness - 1.0)) - 1.0 + g.occlusion, 0.0, 1.0);
+  // Vidro: transmissão e cor do material do pixel (só materiais transmissivos pagam a leitura).
+  Surface glass;
+  glass.transmission = 0.0;
+  if (sf.material != NO_MATERIAL && (materials[sf.material].flags & MATERIAL_TRANSMISSIVE) != 0u)
+    glass = evalMaterial(materials[sf.material], g.P, g.N, vec4(0.0), sf.uv);
 #ifdef RAY_TRACING
   // Raios de GI/reflexo saem do ponto exato; raios de sombra, do ponto corrigido para o terminator.
   vec3 origin = offsetRayOrigin(g.P, g.Ng, sf.rayBias);
@@ -299,7 +346,7 @@ void main() {
     vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
     if (dot(dirD, g.Ng) > 0.0) {
       float t;
-      vec3 Li = traceRadiance(origin, dirD, sg, 0u, t);
+      vec3 Li = traceRadiance(origin, dirD, sg, 0u, t, false);
       diffuse += bc.diffuseWeight * Li * aoDiffuse;
       if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
       diffHitSum += t;
@@ -316,9 +363,28 @@ void main() {
     float NoLr = dot(g.N, Lr);
     if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0) {
       float t;
-      specular += traceRadiance(origin, Lr, sg, 1u, t) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
+      specular += traceRadiance(origin, Lr, sg, 1u, t, false) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
                   G1_Smith(NoLr, a) * bc.energyCompensation * aoSpecular;
       specHitMin = min(specHitMin, t);
+    }
+
+    // Vidro de parede fina (KHR_materials_transmission): o lobo especular espelhado para o outro lado da superfície
+    // (a luz atravessa sem desviar, com o mesmo espalhamento da rugosidade), peso (1 − F) × cor × transmissão. Vai no
+    // sinal especular (nítido, depende da vista). O ReSTIR só avalia a reflexão, então este raio conta a emissão das
+    // luzes amostradas (a lâmpada dentro da lanterna aparece pelo vidro).
+    if (glass.transmission > 0.0) {
+      vec3 Ht2 = sampleGGXVNDF(vec3(dot(g.V, T), dot(g.V, B), dot(g.V, g.N)), a, sample2D(sg, DIM_TRANSMISSION));
+      vec3 H2 = dot(Ht2, Ht2) > 0.0 ? T * Ht2.x + B * Ht2.y + g.N * Ht2.z : g.N;
+      vec3 Lm = reflect(-g.V, H2);
+      float NoLm = dot(g.N, Lm);
+      vec3 Lt = Lm - 2.0 * dot(Lm, g.Ng) * g.Ng;  // espelhado pelo plano do triângulo: segue para trás do vidro
+      if (NoLm > 0.0 && dot(Lt, g.Ng) < 0.0) {
+        float t;
+        vec3 w = (vec3(1.0) - F_Schlick(g.f0, g.f90, max(dot(g.V, H2), 0.0))) * glass.transmissionTint *
+                 glass.transmission * G1_Smith(NoLm, a);
+        specular += traceRadiance(offsetRayOrigin(g.P, -g.Ng, sf.rayBias), Lt, sg, 2u, t, true) * w;
+        specHitMin = min(specHitMin, t);
+      }
     }
 #endif
   }

@@ -156,7 +156,11 @@ struct Loader {
       }
       if (src.has_ior) m.ior = src.ior.ior;
       if (src.double_sided) m.flags |= kMaterialDoubleSided;
-      if (src.has_transmission && src.transmission.transmission_factor > 0.0f) m.flags |= kMaterialTransmissive;
+      if (src.has_transmission && src.transmission.transmission_factor > 0.0f) {
+        m.flags |= kMaterialTransmissive;
+        m.transmission = src.transmission.transmission_factor;
+        m.transmissionTex = texture(src.transmission.transmission_texture, false);
+      }
       // glTF não define unidade para emissão; 1,0 = 1.000 nits (tela/letreiro típico).
       m.emissive = glm::make_vec3(src.emissive_factor) * kGltfEmissiveNits;
       if (src.has_emissive_strength) m.emissive *= src.emissive_strength.emissive_strength;
