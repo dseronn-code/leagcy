@@ -237,6 +237,9 @@ class Scene {
   // Iluminância solar no topo da atmosfera (lux); a atmosfera atenua até ~100.000 lux ao meio-dia.
   float sunIlluminance = 120000.0f;  // 0 = noite
   bool sunFromAsset = false;  // direção do sol veio de uma luz direcional do glTF
+  // Lua (à noite, quando sunIlluminance = 0): luz direcional com o disco no céu. Lua cheia ≈ 0,25 lux no chão.
+  glm::vec3 moonDirection = glm::normalize(glm::vec3(-0.35f, 0.55f, 0.45f));
+  float moonIlluminance = 0.0f;
   // Primeira câmera perspectiva do glTF (vista inicial definida pelo autor do asset).
   struct AssetCamera {
     bool valid = false;

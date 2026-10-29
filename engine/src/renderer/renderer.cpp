@@ -42,8 +42,9 @@ struct FrameUniforms {
   glm::uvec4 quality2;  // x = correção de viés do ReSTIR, y = sinal no formato do ReBLUR, z = mip bias (bits de float)
   glm::vec4 environment;  // x = céu uniforme (nits), y = modo de depuração, z = exposição da depuração,
                           // w = reusos do ReSTIR desligados (bit 0 temporal, bit 1 espacial)
+  glm::vec4 night;        // x = 1: a luz direcional é a lua; y = iluminância de uma estrela de magnitude 0 (lux)
 };
-static_assert(sizeof(FrameUniforms) == 640);
+static_assert(sizeof(FrameUniforms) == 656);
 
 // Frente dos triângulos: anti-horário, como no glTF (a projeção inverte o Y e o viewport do Vulkan também: as duas
 // inversões se cancelam — conferido pela imagem, com culling o chão e as paredes continuam lá).
@@ -580,6 +581,16 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.cameraPos = glm::vec4(cam.position, cam.nearPlane);
   u.prevCameraPos = glm::vec4(historyValid_ ? prevCameraPos_ : cam.position, 0.0f);
   u.sunDir = glm::vec4(glm::normalize(scene_->sunDirection), scene_->sunIlluminance);
+  // Noite: a lua faz o papel do sol (mesmo disco, sombra e céu espalhado, com a iluminância dela) e as estrelas
+  // aparecem no céu. Iluminância de magnitude 0 no topo da atmosfera: 2,5 µlux.
+  u.night = glm::vec4(0.0f);
+  if (scene_->sunIlluminance <= 0.0f) {
+    u.night.y = 2.5e-6f;
+    if (scene_->moonIlluminance > 0.0f) {
+      u.sunDir = glm::vec4(glm::normalize(scene_->moonDirection), scene_->moonIlluminance);
+      u.night.x = 1.0f;
+    }
+  }
   u.params = glm::vec4(settings.sunAngularRadius, dt, scene_->fogDensity, scene_->fogFalloff);
   u.jitter = glm::vec4(jitterUv, prevJitter_);
   u.renderSize = glm::vec4(R.width, R.height, 1.0f / R.width, 1.0f / R.height);

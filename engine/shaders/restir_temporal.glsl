@@ -101,6 +101,8 @@ void main() {
     }
   }
 
-  boilingFilter(gl_LocalInvocationIndex, r);
+  // O filtro troca viés (descarta amostras fortes) por estabilidade: fica fora da referência (--reference-pt), que
+  // tem que ser a verdade. Condição uniforme no despacho: as barreiras dentro dele continuam válidas.
+  if (!pathReference()) boilingFilter(gl_LocalInvocationIndex, r);
   if (insideRender(id)) outReservoirs[idx] = r;
 }
