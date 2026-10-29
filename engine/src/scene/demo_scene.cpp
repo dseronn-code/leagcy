@@ -462,6 +462,53 @@ bool buildMeshLightTest(Scene& s, Camera& camera) {
   return true;
 }
 
+// Teste do vidro: sala com janela de vidro claro, painel de vidro colorido, lanterna (globo de vidro com uma lâmpada
+// dentro) e uma janela dupla (duas lâminas). Sol entrando pela janela.
+bool buildGlassTest(Scene& s, Camera& camera) {
+  uint32_t cube = s.addMesh(makeCube());
+  uint32_t sphere = s.addMesh(makeSphere(48, 24));
+  auto mat = [&](glm::vec3 albedo, float rough, float transmission = 0.0f, glm::vec3 emissive = glm::vec3(0.0f)) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    m.emissive = emissive;
+    if (transmission > 0.0f) {
+      m.transmission = transmission;
+      m.flags |= kMaterialTransmissive;
+    }
+    return s.addMaterial(m);
+  };
+  const uint32_t floor = mat(glm::vec3(0.45f), 0.6f), wall = mat(glm::vec3(0.7f), 0.9f);
+  const uint32_t clear = mat(glm::vec3(1.0f), 0.0f, 0.95f), tinted = mat({0.2f, 0.6f, 1.0f}, 0.05f, 0.9f);
+  const uint32_t frosted = mat(glm::vec3(1.0f), 0.35f, 0.9f);
+  s.addObject(cube, trs({0.0f, -0.1f, 0.0f}, {6.0f, 0.1f, 6.0f}), floor);
+  s.addObject(cube, trs({0.0f, 3.1f, 0.0f}, {4.0f, 0.1f, 4.0f}), wall);
+  s.addObject(cube, trs({-4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
+  // Parede do fundo com uma janela (abertura de 2 x 1,6 m fechada por vidro claro).
+  s.addObject(cube, trs({-2.5f, 1.5f, -4.1f}, {1.5f, 1.6f, 0.1f}), wall);
+  s.addObject(cube, trs({2.5f, 1.5f, -4.1f}, {1.5f, 1.6f, 0.1f}), wall);
+  s.addObject(cube, trs({0.0f, 0.35f, -4.1f}, {1.0f, 0.45f, 0.1f}), wall);
+  s.addObject(cube, trs({0.0f, 2.75f, -4.1f}, {1.0f, 0.35f, 0.1f}), wall);
+  s.addObject(cube, trs({0.0f, 1.6f, -4.1f}, {1.0f, 0.8f, 0.01f}), clear);
+  s.addObject(cube, trs({4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
+  s.addObject(cube, trs({-1.6f, 1.0f, -1.5f}, {0.6f, 1.0f, 0.02f}), tinted);   // painel colorido
+  s.addObject(cube, trs({1.8f, 1.0f, -1.0f}, {0.5f, 1.0f, 0.02f}), frosted);   // vidro fosco
+  s.addObject(cube, trs({1.8f, 1.0f, -0.9f}, {0.5f, 1.0f, 0.02f}), frosted);   // segunda lâmina (janela dupla)
+  s.addObject(cube, trs({0.6f, 0.4f, -2.6f}, glm::vec3(0.4f)), mat({0.8f, 0.2f, 0.1f}, 0.5f));
+  s.addObject(cube, trs({-1.6f, 0.5f, -2.6f}, glm::vec3(0.5f)), mat({0.9f, 0.8f, 0.1f}, 0.5f));  // atrás do colorido
+  s.addObject(cube, trs({1.9f, 0.5f, -2.2f}, glm::vec3(0.5f)), mat({0.9f, 0.8f, 0.1f}, 0.5f));   // atrás do fosco
+  // Lanterna: globo de vidro com uma lâmpada emissiva dentro (luz de malha) sobre um pedestal.
+  s.addObject(cube, trs({-0.4f, 0.3f, 0.6f}, {0.1f, 0.3f, 0.1f}), wall);
+  s.addObject(sphere, trs({-0.4f, 0.85f, 0.6f}, glm::vec3(0.25f)), clear);
+  s.addObject(sphere, trs({-0.4f, 0.85f, 0.6f}, glm::vec3(0.05f)), mat(glm::vec3(1.0f), 0.5f, 0.0f, {60000.0f, 45000.0f, 25000.0f}));
+  s.sunDirection = sunFrom(25.0f, 10.0f);  // entra pela janela do fundo
+  s.sunIlluminance = 100000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 1.5f, 3.6f);
+  camera.lookAt(glm::vec3(0.0f, 1.1f, -3.0f));
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
@@ -475,6 +522,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (opt.name == "reflections") return buildReflectionTest(scene, camera);
   if (opt.name == "city") return buildCity(scene, camera, opt);
   if (opt.name == "mesh-lights") return buildMeshLightTest(scene, camera);
+  if (opt.name == "glass") return buildGlassTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 

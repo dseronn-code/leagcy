@@ -17,7 +17,7 @@ const uint MATERIAL_LIGHT_GEOMETRY = 16u;   // forma visível de uma luz analít
 const uint MATERIAL_DOUBLE_SIDED = 32u;
 const uint MATERIAL_TRANSMISSIVE = 64u;     // vidro: sem sombra (por enquanto)
 
-struct Material {  // == scene::Material (96 bytes)
+struct Material {  // == scene::Material (112 bytes)
   vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
   vec3 emissive;
   float alphaCutoff;
@@ -35,6 +35,9 @@ struct Material {  // == scene::Material (96 bytes)
   int specularTex;     // A = peso especular
   int specularColorTex;
   int occlusionTex;  // R: oclusão do glTF (só luz indireta)
+  float transmission;  // KHR_materials_transmission (parede fina)
+  int transmissionTex;
+  float pad1, pad2;
 };
 
 struct InstanceData {  // == InstanceGpu em scene.cpp

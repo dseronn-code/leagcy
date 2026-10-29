@@ -50,8 +50,13 @@ struct Material {
   int32_t specularTex = -1;
   int32_t specularColorTex = -1;
   int32_t occlusionTex = -1;  // glTF occlusionTexture (R): oclusão fina, só na luz indireta (o ray tracing faz o resto)
+  // KHR_materials_transmission (parede fina, sem volume): fração da luz não refletida que atravessa, tingida pela cor
+  // base (vidro de janela, garrafa). O difuso cai na mesma proporção.
+  float transmission = 0.0f;
+  int32_t transmissionTex = -1;  // R
+  float pad1 = 0.0f, pad2 = 0.0f;
 };
-static_assert(sizeof(Material) == 96);
+static_assert(sizeof(Material) == 112);
 
 enum LightType : uint32_t {
   kLightSphere = 0,    // esfera (pontual com tamanho) ou spot

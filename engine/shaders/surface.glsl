@@ -26,7 +26,10 @@ struct PixelSurface {
   float rayBias;  // margem da origem dos raios (m)
   vec3 Nb;        // normal suave interpolada (sem normal map), do lado da câmera
   vec3 Pshadow;   // origem dos raios de sombra (antes do deslocamento de Wächter-Binder)
+  uint material;  // material do triângulo (NO_MATERIAL se desconhecido)
+  vec2 uv;        // coordenadas de textura no ponto exato
 };
+const uint NO_MATERIAL = 0xFFFFFFFFu;
 
 // Interseção exata do raio (C, dir) com o triângulo `prim` do objeto `obj` (transformação `model`).
 // Preenche P, Ng, V, Nb, Pshadow e rayBias de `s`; falso se o triângulo está de lado para o raio.
@@ -66,6 +69,8 @@ bool intersectTriangle(uint obj, uint prim, mat4 model, vec3 C, vec3 dir, inout 
   vec3 Nb = normalize(n0 * b.x + n1 * b.y + n2 * b.z);
   if (dot(Nb, Ng) < 0.0) Nb = Ng;  // normais de vértice inconsistentes
 
+  s.material = d.material;
+  s.uv = fetchVertexUV(vb, i0) * b.x + fetchVertexUV(vb, i1) * b.y + fetchVertexUV(vb, i2) * b.z;
   s.g.P = P;
   s.g.Ng = Ng;
   s.g.V = -dir;
@@ -80,6 +85,8 @@ PixelSurface loadSurface(ivec2 id) {
   s.g = loadGBuffer(id);
   s.Nb = s.g.N;
   s.Pshadow = s.g.P;
+  s.material = NO_MATERIAL;
+  s.uv = vec2(0.0);
   s.rayBias = RAY_BIAS_DEPTH * length(frame.cameraPos.xyz - s.g.P);
   uvec2 vis = texelFetch(gVisibility, id, 0).xy;
   if (vis.x == 0u || s.g.depth <= 0.0) return s;
