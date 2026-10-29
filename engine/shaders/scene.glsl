@@ -16,8 +16,9 @@ const uint MATERIAL_EMISSION_SAMPLED = 8u;  // emissão já contada pela amostra
 const uint MATERIAL_LIGHT_GEOMETRY = 16u;   // forma visível de uma luz analítica: sem sombra
 const uint MATERIAL_DOUBLE_SIDED = 32u;
 const uint MATERIAL_TRANSMISSIVE = 64u;     // vidro: sem sombra (por enquanto)
+const uint MATERIAL_CLEARCOAT = 128u;       // verniz (KHR_materials_clearcoat)
 
-struct Material {  // == scene::Material (112 bytes)
+struct Material {  // == scene::Material (128 bytes)
   vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
   vec3 emissive;
   float alphaCutoff;
@@ -37,6 +38,10 @@ struct Material {  // == scene::Material (112 bytes)
   int occlusionTex;  // R: oclusão do glTF (só luz indireta)
   float transmission;  // KHR_materials_transmission (parede fina)
   int transmissionTex;
+  float clearcoat;     // KHR_materials_clearcoat
+  float clearcoatRoughness;
+  int clearcoatTex;
+  int clearcoatRoughnessTex;
   float pad1, pad2;
 };
 

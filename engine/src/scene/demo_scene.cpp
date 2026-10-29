@@ -172,6 +172,9 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
 
   // Carro: carroceria, cabine, rodas e faróis (luzes que se movem com ele).
   uint32_t paint = mat({0.02f, 0.05f, 0.25f}, 0.25f, 1.0f);
+  s.materials[paint].flags |= kMaterialClearcoat;  // pintura de carro: metálico sob verniz
+  s.materials[paint].clearcoat = 1.0f;
+  s.materials[paint].clearcoatRoughness = 0.03f;
   uint32_t glass = mat({0.02f, 0.02f, 0.02f}, 0.05f, 0.0f);
   uint32_t tire = mat({0.03f, 0.03f, 0.03f}, 0.9f, 0.0f);
   uint32_t lamp = mat({1, 1, 1}, 0.3f, 0.0f, {60000.0f, 55000.0f, 45000.0f});  // farol (nits)
@@ -345,7 +348,12 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
   const glm::vec3 glassColors[3] = {{0.55f, 0.65f, 0.70f}, {0.70f, 0.70f, 0.72f}, {0.45f, 0.55f, 0.50f}};
   for (int i = 0; i < 3; ++i) glass[i] = mat(glassColors[i], 0.08f, 1.0f);  // fachada de vidro espelhado
   const glm::vec3 paintColors[5] = {{0.6f, 0.05f, 0.04f}, {0.05f, 0.12f, 0.45f}, {0.8f, 0.8f, 0.8f}, {0.02f, 0.02f, 0.02f}, {0.7f, 0.55f, 0.1f}};
-  for (int i = 0; i < 5; ++i) paint[i] = mat(paintColors[i], 0.3f, 0.0f);
+  for (int i = 0; i < 5; ++i) {
+    paint[i] = mat(paintColors[i], 0.35f, 0.3f);  // pintura de carro: base levemente metálica sob verniz
+    s.materials[paint[i]].flags |= kMaterialClearcoat;
+    s.materials[paint[i]].clearcoat = 1.0f;
+    s.materials[paint[i]].clearcoatRoughness = 0.03f;
+  }
 
   const uint32_t n = std::max(1u, opt.cityBlocks);
   const float block = 60.0f, street = 14.0f, pitch = block + street, half = 0.5f * float(n) * pitch;
@@ -509,6 +517,39 @@ bool buildGlassTest(Scene& s, Camera& camera) {
   return true;
 }
 
+// Teste da pintura de carro: esferas com e sem verniz (KHR_materials_clearcoat) ao sol, sobre um piso listrado que o
+// verniz reflete.
+bool buildPaintTest(Scene& s, Camera& camera) {
+  uint32_t cube = s.addMesh(makeCube());
+  uint32_t sphere = s.addMesh(makeSphere(96, 48));
+  auto paint = [&](glm::vec3 color, float metallic, float rough, float coat, float coatRough) {
+    Material m;
+    m.baseColor = glm::vec4(color, 1.0f);
+    m.metallic = metallic;
+    m.roughness = rough;
+    if (coat > 0.0f) {
+      m.flags |= kMaterialClearcoat;
+      m.clearcoat = coat;
+      m.clearcoatRoughness = coatRough;
+    }
+    return s.addMaterial(m);
+  };
+  const uint32_t light = paint(glm::vec3(0.6f), 0.0f, 0.8f, 0.0f, 0.0f), dark = paint(glm::vec3(0.08f), 0.0f, 0.8f, 0.0f, 0.0f);
+  for (int i = -6; i <= 6; ++i)  // piso listrado
+    s.addObject(cube, trs({float(i) * 1.0f, -0.05f, 0.0f}, {0.5f, 0.05f, 6.0f}), (i & 1) ? dark : light);
+  const uint32_t mats[] = {paint({0.55f, 0.02f, 0.02f}, 0.3f, 0.45f, 0.0f, 0.0f),   // vermelho sem verniz
+                           paint({0.55f, 0.02f, 0.02f}, 0.3f, 0.45f, 1.0f, 0.03f),  // vermelho com verniz
+                           paint({0.02f, 0.02f, 0.02f}, 0.0f, 0.5f, 1.0f, 0.02f),   // preto com verniz
+                           paint({0.1f, 0.25f, 0.7f}, 0.8f, 0.35f, 1.0f, 0.15f)};   // azul metálico, verniz acetinado
+  for (int i = 0; i < 4; ++i) s.addObject(sphere, trs({-2.4f + 1.6f * float(i), 0.6f, 0.0f}, glm::vec3(0.6f)), mats[i]);
+  s.sunDirection = sunFrom(35.0f, 150.0f);
+  s.sunIlluminance = 100000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 1.4f, 4.2f);
+  camera.lookAt(glm::vec3(0.0f, 0.5f, 0.0f));
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
@@ -523,6 +564,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (opt.name == "city") return buildCity(scene, camera, opt);
   if (opt.name == "mesh-lights") return buildMeshLightTest(scene, camera);
   if (opt.name == "glass") return buildGlassTest(scene, camera);
+  if (opt.name == "paint") return buildPaintTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 

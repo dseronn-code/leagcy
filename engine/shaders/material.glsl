@@ -19,6 +19,8 @@ struct Surface {
   float occlusion;       // oclusão do material (glTF occlusionTexture), 1 = nenhuma
   float transmission;    // KHR_materials_transmission: fração não refletida que atravessa (parede fina)
   vec3 transmissionTint; // cor base: tinge o que atravessa
+  float clearcoat;       // KHR_materials_clearcoat: intensidade do verniz
+  float clearcoatRoughness;
 };
 
 // N: normal geométrica interpolada; T: tangente (w = sinal da bitangente); T = 0 desliga o normal map.
@@ -61,6 +63,11 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
   s.transmission = m.transmission;
   if (m.transmissionTex >= 0) s.transmission *= MATERIAL_SAMPLE(m.transmissionTex, uv).r;
   s.transmissionTint = base.rgb;
+  s.clearcoat = m.clearcoat;
+  s.clearcoatRoughness = m.clearcoatRoughness;
+  if (m.clearcoatTex >= 0) s.clearcoat *= MATERIAL_SAMPLE(m.clearcoatTex, uv).r;
+  if (m.clearcoatRoughnessTex >= 0) s.clearcoatRoughness *= MATERIAL_SAMPLE(m.clearcoatRoughnessTex, uv).g;
+  s.clearcoatRoughness = clamp(s.clearcoatRoughness, 0.0, 1.0);
   vec3 t = T.xyz - N * dot(N, T.xyz);
   if (m.normalTex >= 0 && dot(t, t) > 1e-8) {
     t = normalize(t);

@@ -41,7 +41,7 @@ vec4 packNrdNormalRoughness(vec3 n, float roughness) {
 // Dimensões da sequência de Sobol por pixel (cada uma é um par 2D independente).
 const uint DIM_SUN = 0u, DIM_LIGHT = 1u, DIM_DIFFUSE = 2u, DIM_SPECULAR = 3u;
 const uint DIM_HIT_SUN = 4u, DIM_HIT_LIGHT = 5u, DIM_HIT_LIGHT_PICK = 6u;  // + 3 × rebote (0 GI, 1 reflexo, 2 vidro)
-const uint DIM_TRANSMISSION = 13u;
+const uint DIM_TRANSMISSION = 16u, DIM_CLEARCOAT = 17u;  // (13–15: rebote 3, o raio do verniz)
 
 // Limita a luminância de amostras indiretas: troca um viés pequeno por muito menos "vagalumes"
 // (amostras raras e muito brilhantes que o denoiser não consegue espalhar). Valor pré-exposto
@@ -288,15 +288,30 @@ void main() {
   imageStore(outViewZ, id, vec4((frame.view * vec4(g.P, 1.0)).z));
   imageStore(outNrdNormalRoughness, id, packNrdNormalRoughness(g.N, g.roughness));
   vec3 diffuse = vec3(0.0), specular = vec3(0.0), kd, ks;
+  // Material do pixel relido só onde o G-buffer não basta: vidro (transmissão) e verniz (duas camadas).
+  Surface px;
+  px.transmission = 0.0;
+  px.clearcoat = 0.0;
+  uint pxFlags = sf.material != NO_MATERIAL ? materials[sf.material].flags : 0u;
+  if ((pxFlags & (MATERIAL_TRANSMISSIVE | MATERIAL_CLEARCOAT)) != 0u)
+    px = evalMaterial(materials[sf.material], g.P, g.N, vec4(0.0), sf.uv);
+  // A demodulação do especular usa o contexto do G-buffer: a composição remultiplica pelo mesmo valor.
+  BrdfContext bcDemod = brdfContextFor(g);
+  // Verniz (KHR_materials_clearcoat): a base usa a própria rugosidade; o verniz é um GGX dielétrico (f0 = 4%) na
+  // normal suave, e a base recebe só o que o verniz deixa passar (1 − cc × F).
+  float coat = px.clearcoat;
+  BrdfContext bcCoat;
+  float coatAtten = 1.0;
+  vec3 coatSpec = vec3(0.0);
+  if (coat > 0.0) {
+    if (coat >= 0.5) g.roughness = px.roughness;  // o G-buffer guardou a do verniz
+    bcCoat = makeBrdfContext(sf.Nb, g.V, vec3(0.04), 1.0, px.clearcoatRoughness, energyCompensationEnabled());
+    coatAtten = 1.0 - coat * F_Schlick(vec3(0.04), 1.0, bcCoat.NoV).x;
+  }
   // Oclusão do material (glTF): detalhe menor que a geometria, aplicado só à luz indireta — difusa direto, especular
   // pela aproximação de Lagarde (2014) que a converte para o lobo especular.
   float aoDiffuse = g.occlusion;
   float aoSpecular = clamp(pow(max(dot(g.N, g.V), 0.0) + g.occlusion, exp2(-16.0 * g.roughness - 1.0)) - 1.0 + g.occlusion, 0.0, 1.0);
-  // Vidro: transmissão e cor do material do pixel (só materiais transmissivos pagam a leitura).
-  Surface glass;
-  glass.transmission = 0.0;
-  if (sf.material != NO_MATERIAL && (materials[sf.material].flags & MATERIAL_TRANSMISSIVE) != 0u)
-    glass = evalMaterial(materials[sf.material], g.P, g.N, vec4(0.0), sf.uv);
 #ifdef RAY_TRACING
   // Raios de GI/reflexo saem do ponto exato; raios de sombra, do ponto corrigido para o terminator.
   vec3 origin = offsetRayOrigin(g.P, g.Ng, sf.rayBias);
@@ -306,6 +321,12 @@ void main() {
   Reservoir r = reservoirs[resIdx];
   vec3 sunE = sunIrradianceAt(g.P);
   BrdfContext bc = brdfContextFor(g);
+  vec3 coatSunKs = vec3(0.0);
+  if (coat > 0.0 && dot(sunE, sunE) > 0.0) {
+    vec3 unused;
+    evalBRDF(bcCoat, frame.sunDir.xyz, sqrt(min(px.clearcoatRoughness * px.clearcoatRoughness + 0.5 * frame.params.x, 1.0)),
+             unused, coatSunKs);
+  }
 
   // Sol como disco de verdade: o BRDF usa a direção central com a rugosidade alargada pelo tamanho
   // angular do disco (Karis 2013) — sem o pico de um sol pontual. É determinístico: fica fora do laço.
@@ -338,6 +359,7 @@ void main() {
       sunVisSum += vis;
       diffuse += sunKd * sunE * vis;
       specular += sunKs * sunE * vis;
+      coatSpec += coatSunKs * sunE * vis;
     }
 
 #ifdef RAY_TRACING
@@ -368,11 +390,28 @@ void main() {
       specHitMin = min(specHitMin, t);
     }
 
+    // Verniz: um raio de reflexo próprio (VNDF com a rugosidade do verniz, na normal suave).
+    if (coat > 0.0) {
+      float ac = alphaFromRoughness(px.clearcoatRoughness);
+      vec3 Tc, Bc;
+      orthonormalBasis(sf.Nb, Tc, Bc);
+      vec3 Hct = sampleGGXVNDF(vec3(dot(g.V, Tc), dot(g.V, Bc), dot(g.V, sf.Nb)), ac, sample2D(sg, DIM_CLEARCOAT));
+      vec3 Hc = dot(Hct, Hct) > 0.0 ? Tc * Hct.x + Bc * Hct.y + sf.Nb * Hct.z : sf.Nb;
+      vec3 Lc = reflect(-g.V, Hc);
+      float NoLc = dot(sf.Nb, Lc);
+      if (NoLc > 0.0 && dot(Lc, g.Ng) > 0.0) {
+        float t;
+        coatSpec += traceRadiance(origin, Lc, sg, 3u, t, false) * F_Schlick(vec3(0.04), 1.0, max(dot(g.V, Hc), 0.0)) *
+                    G1_Smith(NoLc, ac) * bcCoat.energyCompensation * aoSpecular;
+        specHitMin = min(specHitMin, t);
+      }
+    }
+
     // Vidro de parede fina (KHR_materials_transmission): o lobo especular espelhado para o outro lado da superfície
     // (a luz atravessa sem desviar, com o mesmo espalhamento da rugosidade), peso (1 − F) × cor × transmissão. Vai no
     // sinal especular (nítido, depende da vista). O ReSTIR só avalia a reflexão, então este raio conta a emissão das
     // luzes amostradas (a lâmpada dentro da lanterna aparece pelo vidro).
-    if (glass.transmission > 0.0) {
+    if (px.transmission > 0.0) {
       vec3 Ht2 = sampleGGXVNDF(vec3(dot(g.V, T), dot(g.V, B), dot(g.V, g.N)), a, sample2D(sg, DIM_TRANSMISSION));
       vec3 H2 = dot(Ht2, Ht2) > 0.0 ? T * Ht2.x + B * Ht2.y + g.N * Ht2.z : g.N;
       vec3 Lm = reflect(-g.V, H2);
@@ -380,8 +419,8 @@ void main() {
       vec3 Lt = Lm - 2.0 * dot(Lm, g.Ng) * g.Ng;  // espelhado pelo plano do triângulo: segue para trás do vidro
       if (NoLm > 0.0 && dot(Lt, g.Ng) < 0.0) {
         float t;
-        vec3 w = (vec3(1.0) - F_Schlick(g.f0, g.f90, max(dot(g.V, H2), 0.0))) * glass.transmissionTint *
-                 glass.transmission * G1_Smith(NoLm, a);
+        vec3 w = (vec3(1.0) - F_Schlick(g.f0, g.f90, max(dot(g.V, H2), 0.0))) * px.transmissionTint *
+                 px.transmission * G1_Smith(NoLm, a);
         specular += traceRadiance(offsetRayOrigin(g.P, -g.Ng, sf.rayBias), Lt, sg, 2u, t, true) * w;
         specHitMin = min(specHitMin, t);
       }
@@ -390,6 +429,7 @@ void main() {
   }
   diffuse /= float(spp);
   specular /= float(spp);
+  coatSpec /= float(spp);
 
   // Luzes locais: o ponto de luz escolhido pelo ReSTIR (o mesmo testado e reaproveitado), com sombra.
   vec3 localLight = vec3(0.0);
@@ -407,6 +447,14 @@ void main() {
       diffuse += kdl * w;
       specular += ksl * w;
       localLight = (kdl * g.diffuseColor + ksl) * w;
+      if (coat > 0.0) {  // mesmo ponto de luz para o verniz
+        vec3 Lc, Le, kdc, ksc;
+        float distc, Gc;
+        if (lightPoint(r.light, r.uv, g.P, Lc, distc, Le, Gc)) {
+          evalBRDF(bcCoat, Lc, -1.0, kdc, ksc);
+          coatSpec += ksc * Le * Gc * w;
+        }
+      }
     }
   }
 
@@ -442,7 +490,10 @@ void main() {
   // Rede de segurança: um único NaN se espalharia pelo denoiser e pelo histórico do TAA.
   if (any(isnan(diffuse)) || any(isinf(diffuse))) diffuse = vec3(0.0);
   if (any(isnan(specular)) || any(isinf(specular))) specular = vec3(0.0);
-  specular /= specularDemodulation(bc);  // remultiplicado em composite.comp
+  // Verniz por cima: a base recebe o que ele deixa passar; o reflexo dele soma no especular.
+  diffuse *= coatAtten;
+  specular = specular * coatAtten + coat * coatSpec;
+  specular /= specularDemodulation(bcDemod);  // remultiplicado em composite.comp (mesmo contexto do G-buffer)
   float diffHit = diffHitCount > 0.0 ? diffHitSum / diffHitCount : 0.0;  // 0 = nenhum raio lançado
   float specHit = specHitMin <= HIT_DIST_MISS ? specHitMin : 0.0;
   if (reblurSignal()) {
