@@ -53,5 +53,7 @@ void main() {
   outNormal = vec4(s.normal, gRoughness);
   outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
   outSpecular = vec4(s.f0, s.f90);
-  outVisibility = uvec2(vObject + 1u, uint(gl_PrimitiveID));
+  // Mar: a superfície deslocada não é o triângulo guardado (plano parado nos raios): os passes de RT reconstroem o
+  // ponto pela profundidade (0 = sem triângulo exato).
+  outVisibility = (m.flags & MATERIAL_WATER) != 0u ? uvec2(0u) : uvec2(vObject + 1u, uint(gl_PrimitiveID));
 }

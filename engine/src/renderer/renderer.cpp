@@ -203,6 +203,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   skyClear_ = rhi::createImage2D(ctx, skyLutExtent_, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   cloudShadow_ = rhi::createImage2D(ctx, kCloudShadowExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   cloudSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+  oceanSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
     frameUbo_[i] = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     objectBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.objects.size()) * sizeof(ObjectGpu),
@@ -270,6 +271,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {14, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {15, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {16, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {17, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {18, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -285,7 +288,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {CIS, kFramesInFlight * (7 + kMaxTextures)},
+      {CIS, kFramesInFlight * (9 + kMaxTextures)},
       {SB, kFramesInFlight * 7},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
@@ -301,6 +304,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   ai.descriptorSetCount = kFramesInFlight;
   ai.pSetLayouts = layouts.data();
   VK_CHECK(vkAllocateDescriptorSets(dev, &ai, globalSets_.data()));
+  if (scene.ocean) ocean_.init(ctx, globalLayout_, scene.windSpeed, scene.windDirection, scene.waveHeight);
   writeGlobalDescriptors();
 
   // ---- Passes ----
@@ -440,6 +444,10 @@ void Renderer::writeGlobalDescriptors() {
     VkDescriptorImageInfo clouds[2] = {{cloudSampler_, cloudNoise_.view, VK_IMAGE_LAYOUT_GENERAL},
                                        {linear_, cloudShadow_.view, VK_IMAGE_LAYOUT_GENERAL}};
     for (uint32_t b = 0; b < 2; ++b) add(15 + b, CIS, 1).pImageInfo = &clouds[b];
+    // Oceano (sem oceano na cena: qualquer imagem válida; os shaders só leem com material de água).
+    VkDescriptorImageInfo ocean[2] = {{oceanSampler_, ocean_.ready() ? ocean_.displacement().view : cloudShadow_.view, VK_IMAGE_LAYOUT_GENERAL},
+                                      {oceanSampler_, ocean_.ready() ? ocean_.slope().view : cloudShadow_.view, VK_IMAGE_LAYOUT_GENERAL}};
+    for (uint32_t b = 0; b < 2; ++b) add(17 + b, CIS, 1).pImageInfo = &ocean[b];
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -652,6 +660,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   cpuLast_ = std::chrono::steady_clock::now();
   ++cpuFrames_;
   updateDynamicScene(cmd, slot);
+  if (ocean_.ready()) ocean_.update(cmd, gs, scene_->time);
   barrier();
   profiler_.mark(cmd, "cena");
 
@@ -1132,6 +1141,8 @@ void Renderer::destroy() {
   rhi::destroyImage(ctx, skyLut_);
   for (rhi::Image* img : {&cloudNoise_, &skyClear_, &cloudShadow_}) rhi::destroyImage(ctx, *img);
   vkDestroySampler(ctx.device, cloudSampler_, nullptr);
+  vkDestroySampler(ctx.device, oceanSampler_, nullptr);
+  ocean_.destroy(ctx);
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);

@@ -1,0 +1,53 @@
+#version 460
+// IFFT de 256 pontos por grupo de trabalho (uma linha ou uma coluna), em memória compartilhada: reordenação por
+// inversão de bits e 8 estágios de borboleta (Cooley-Tukey radix 2). Quatro sinais complexos por elemento.
+layout(local_size_x = 256) in;
+layout(set = 1, binding = 0, rgba32f) uniform image2D dataA;
+layout(set = 1, binding = 1, rgba32f) uniform image2D dataB;
+layout(push_constant) uniform Push { uint vertical; } pc;
+
+const uint N = 256u, LOG2N = 8u;
+shared vec4 sA[N], sB[N];  // (complexo 0, complexo 1) de cada imagem
+
+vec2 cmul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+
+void main() {
+  uint i = gl_LocalInvocationID.x, line = gl_WorkGroupID.x;
+  ivec2 p = pc.vertical != 0u ? ivec2(line, i) : ivec2(i, line);
+  uint r = bitfieldReverse(i) >> (32u - LOG2N);
+  sA[r] = imageLoad(dataA, p);
+  sB[r] = imageLoad(dataB, p);
+  barrier();
+  for (uint s = 1u; s <= LOG2N; ++s) {
+    uint half_ = 1u << (s - 1u), j = i & (half_ - 1u), block = (i >> (s - 1u)) << s;
+    uint a = block + j, b = a + half_;
+    // Só metade das invocações faz uma borboleta; a outra metade espera na barreira.
+    vec4 A0, B0, A1, B1;
+    bool doesButterfly = i < N / 2u;
+    if (doesButterfly) {
+      uint ii = i;  // reindexa: borboleta número ii
+      uint jj = ii & (half_ - 1u), bb = (ii >> (s - 1u)) << s;
+      a = bb + jj;
+      b = a + half_;
+      float ang = 6.28318530718 * float(jj) / float(half_ << 1u);  // inversa: e^{+iθ}
+      vec2 tw = vec2(cos(ang), sin(ang));
+      vec4 ta = sA[b], tb = sB[b];
+      ta = vec4(cmul(ta.xy, tw), cmul(ta.zw, tw));
+      tb = vec4(cmul(tb.xy, tw), cmul(tb.zw, tw));
+      A0 = sA[a] + ta;
+      A1 = sA[a] - ta;
+      B0 = sB[a] + tb;
+      B1 = sB[a] - tb;
+    }
+    barrier();
+    if (doesButterfly) {
+      sA[a] = A0;
+      sA[b] = A1;
+      sB[a] = B0;
+      sB[b] = B1;
+    }
+    barrier();
+  }
+  imageStore(dataA, p, sA[i]);
+  imageStore(dataB, p, sB[i]);
+}

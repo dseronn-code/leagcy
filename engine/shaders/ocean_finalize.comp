@@ -1,0 +1,25 @@
+#version 460
+// Depois das duas IFFTs: corrige o sinal do espectro centrado ((-1)^(x+z)), monta deslocamento e inclinação e
+// acumula a espuma onde a superfície dobra (Jacobiano da deformação < 1: crista quebrando), que some aos poucos.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba32f) uniform readonly image2D dataA;
+layout(set = 1, binding = 1, rgba32f) uniform readonly image2D dataB;
+layout(set = 1, binding = 2, rgba16f) uniform writeonly image2D displacementOut;
+layout(set = 1, binding = 3, rgba16f) uniform image2D slopeOut;  // lida também: espuma do frame anterior
+
+const float CHOPPY = 1.3;  // λ de Tessendorf: cristas mais pontudas
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, imageSize(slopeOut)))) return;
+  float sgn = ((id.x + id.y) & 1) != 0 ? -1.0 : 1.0;
+  vec4 a = imageLoad(dataA, id) * sgn, b = imageLoad(dataB, id) * sgn;
+  vec3 disp = vec3(a.x * CHOPPY, a.z, a.y * CHOPPY);
+  float dxz = a.w * CHOPPY, dxx = b.z * CHOPPY, dzz = b.w * CHOPPY;
+  float J = (1.0 + dxx) * (1.0 + dzz) - dxz * dxz;
+  // Inclinação da superfície deslocada: as derivadas horizontais esticam/comprimem (aproximação usual).
+  vec2 slope = vec2(b.x / max(1.0 + dxx, 0.2), b.y / max(1.0 + dzz, 0.2));
+  float foam = max(imageLoad(slopeOut, id).z * 0.985, clamp((0.75 - J) * 2.0, 0.0, 1.0));
+  imageStore(displacementOut, id, vec4(disp, J));
+  imageStore(slopeOut, id, vec4(slope, foam, 0.0));
+}

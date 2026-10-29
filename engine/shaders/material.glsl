@@ -69,7 +69,33 @@ void applyWetness(inout Surface s, vec3 P, vec3 N) {
 }
 
 // N: normal geométrica interpolada; T: tangente (w = sinal da bitangente); T = 0 desliga o normal map.
+// Mar (renderer/ocean.h): normal e espuma da simulação FFT na posição do mundo, mais uma segunda amostra em outra
+// escala (ondas curtas). Água: f0 2%, quase espelho; o "difuso" é a luz que sobe de dentro d'água (azul-esverdeado
+// escuro); a espuma é branca e áspera.
+Surface evalWater(vec3 P) {
+  Surface s;
+  vec2 uv0 = P.xz / OCEAN_PATCH;
+  vec4 a = textureLod(oceanSlope, uv0, 0.0);
+  vec2 b = textureLod(oceanSlope, uv0 * 5.37 + vec2(0.31, 0.71), 0.0).xy * 0.35;
+  float foam = clamp(a.z, 0.0, 1.0);
+  s.normal = normalize(vec3(-(a.x + b.x), 1.0, -(a.y + b.y)));
+  s.diffuseColor = mix(vec3(0.004, 0.018, 0.022), vec3(0.7), foam);
+  s.f0 = vec3(0.02);
+  s.f90 = 1.0;
+  s.alpha = 1.0;
+  s.roughness = mix(0.02, 0.55, foam);
+  s.emissive = vec3(0.0);
+  s.normalVariance = 0.0;
+  s.occlusion = 1.0;
+  s.transmission = 0.0;
+  s.transmissionTint = vec3(1.0);
+  s.clearcoat = 0.0;
+  s.clearcoatRoughness = 0.0;
+  return s;
+}
+
 Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
+  if ((m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
   Surface s;
   vec4 base = m.baseColor;
   if (m.baseColorTex >= 0) base *= MATERIAL_SAMPLE(m.baseColorTex, uv);

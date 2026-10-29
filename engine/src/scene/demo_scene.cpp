@@ -598,6 +598,35 @@ bool buildMeshLightSimple(Scene& s, Camera& camera, int variant) {
   return true;
 }
 
+// Mar aberto: oceano por FFT com um píer e boias, sol e nuvens.
+bool buildOcean(Scene& s, Camera& camera, const DemoOptions& opt) {
+  Material water;
+  water.flags = kMaterialWater;
+  s.addObject(s.addMesh(makeRadialGrid(220, 256, 0.6f, 6000.0f)), glm::mat4(1.0f), s.addMaterial(water));
+  s.ocean = true;
+  uint32_t cube = s.addMesh(makeCube()), sphere = s.addMesh(makeSphere(48, 24));
+  auto mat = [&](glm::vec3 albedo, float rough) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    return s.addMaterial(m);
+  };
+  const uint32_t wood = mat({0.32f, 0.22f, 0.14f}, 0.8f), red = mat({0.7f, 0.06f, 0.04f}, 0.4f), yellow = mat({0.8f, 0.6f, 0.05f}, 0.4f);
+  s.addObject(cube, trs({0.0f, 1.2f, 10.0f}, {2.0f, 0.15f, 12.0f}), wood);  // píer
+  for (int i = 0; i < 6; ++i)
+    for (float x : {-1.8f, 1.8f}) s.addObject(cube, trs({x, -2.0f, -1.0f + 4.0f * float(i)}, {0.15f, 3.2f, 0.15f}), wood);
+  for (int i = 0; i < 5; ++i)
+    s.addObject(sphere, trs({-12.0f + 6.0f * float(i), 0.2f, -25.0f - 7.0f * float(i % 2)}, glm::vec3(0.6f)), i % 2 ? red : yellow);
+  s.sunDirection = sunFrom(opt.night ? -10.0f : 22.0f, 200.0f);
+  s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
+  s.cloudCoverage = 0.35f;
+  s.fogDensity = 0.00005f;
+  camera.position = glm::vec3(0.0f, 3.2f, 20.0f);
+  camera.lookAt(glm::vec3(0.0f, 1.5f, -40.0f));
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -633,6 +662,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "mesh-lights-ball-analytic") return buildMeshLightSimple(scene, camera, 3);
   if (opt.name == "mesh-lights-panel-free") return buildMeshLightSimple(scene, camera, 4);
   if (opt.name == "glass") return buildGlassTest(scene, camera);
+  if (opt.name == "ocean") return buildOcean(scene, camera, opt);
   if (opt.name == "paint") return buildPaintTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }

@@ -27,6 +27,22 @@ void main() {
   vObject = DrawList(pc.drawList).objects[gl_InstanceIndex];
   vMaterial = instances[vObject].material;
   ObjectData o = objects[vObject];
+  if ((materials[vMaterial].flags & MATERIAL_WATER) != 0u) {
+    // Mar: a malha (radial, em volta da origem) segue a câmera em passos de 2 m e é deslocada pelas ondas, lidas na
+    // posição do mundo (a forma não "nada" com a câmera). As ondas somem ao longe (já menores que um pixel).
+    vec2 snapped = floor(frame.cameraPos.xz * 0.5) * 2.0;
+    vec3 base = vec3(snapped.x + aPosition.x, o.model[3].y, snapped.y + aPosition.z);
+    float fade = 1.0 - smoothstep(800.0, 4000.0, distance(base.xz, frame.cameraPos.xz));
+    vec3 world = base + textureLod(oceanDisplacement, base.xz / OCEAN_PATCH, 0.0).xyz * fade;
+    vWorldPos = world;
+    vNormal = vec3(0.0, 1.0, 0.0);
+    vTangent = vec4(1.0, 0.0, 0.0, 1.0);
+    vUV = world.xz;
+    vCurClip = frame.viewProjNoJitter * vec4(world, 1.0);
+    vPrevClip = frame.prevViewProjNoJitter * vec4(world, 1.0);
+    gl_Position = frame.proj * vec4(mat3(frame.view) * (world - frame.cameraPos.xyz), 1.0);
+    return;
+  }
   vec4 world = o.model * vec4(aPosition, 1.0);
   mat3 normalMatrix = transpose(inverse(mat3(o.model)));
   vWorldPos = world.xyz;
