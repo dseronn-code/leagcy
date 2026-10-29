@@ -3,6 +3,7 @@
 #include "frame.glsl"
 #include "scene.glsl"
 #define MATERIAL_SAMPLE(i, uv) texture(textures[nonuniformEXT(i)], uv, textureMipBias())
+#define MATERIAL_DERIVATIVES  // dFdx/dFdy disponíveis (flocos metálicos medem o tamanho do pixel)
 #include "material.glsl"
 
 layout(location = 0) in vec3 vWorldPos;
