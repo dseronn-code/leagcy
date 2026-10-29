@@ -44,7 +44,7 @@ void main() {
 
   // Movimento da câmera + do objeto + da deformação do esqueleto.
   outMotion = (vCurClip.xy / vCurClip.w - vPrevClip.xy / vPrevClip.w) * 0.5;
-  outDiffuse = vec4(s.diffuseColor, 1.0);
+  outDiffuse = vec4(s.diffuseColor, s.occlusion);  // a: oclusão do material (luz indireta)
   outNormal = vec4(s.normal, filterRoughness(s.normal, s.roughness, s.normalVariance));
   outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
   outSpecular = vec4(s.f0, s.f90);

@@ -34,7 +34,7 @@ struct Material {  // == scene::Material (96 bytes)
   float ior;           // KHR_materials_ior
   int specularTex;     // A = peso especular
   int specularColorTex;
-  float pad;
+  int occlusionTex;  // R: oclusão do glTF (só luz indireta)
 };
 
 struct InstanceData {  // == InstanceGpu em scene.cpp

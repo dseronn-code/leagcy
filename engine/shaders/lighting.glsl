@@ -246,6 +246,10 @@ void main() {
   imageStore(outViewZ, id, vec4((frame.view * vec4(g.P, 1.0)).z));
   imageStore(outNrdNormalRoughness, id, packNrdNormalRoughness(g.N, g.roughness));
   vec3 diffuse = vec3(0.0), specular = vec3(0.0), kd, ks;
+  // Oclusão do material (glTF): detalhe menor que a geometria, aplicado só à luz indireta — difusa direto, especular
+  // pela aproximação de Lagarde (2014) que a converte para o lobo especular.
+  float aoDiffuse = g.occlusion;
+  float aoSpecular = clamp(pow(max(dot(g.N, g.V), 0.0) + g.occlusion, exp2(-16.0 * g.roughness - 1.0)) - 1.0 + g.occlusion, 0.0, 1.0);
 #ifdef RAY_TRACING
   // Raios de GI/reflexo saem do ponto exato; raios de sombra, do ponto corrigido para o terminator.
   vec3 origin = offsetRayOrigin(g.P, g.Ng, sf.rayBias);
@@ -296,7 +300,7 @@ void main() {
     if (dot(dirD, g.Ng) > 0.0) {
       float t;
       vec3 Li = traceRadiance(origin, dirD, sg, 0u, t);
-      diffuse += bc.diffuseWeight * Li;
+      diffuse += bc.diffuseWeight * Li * aoDiffuse;
       if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
       diffHitSum += t;
       diffHitCount += 1.0;
@@ -313,7 +317,7 @@ void main() {
     if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0) {
       float t;
       specular += traceRadiance(origin, Lr, sg, 1u, t) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
-                  G1_Smith(NoLr, a) * bc.energyCompensation;
+                  G1_Smith(NoLr, a) * bc.energyCompensation * aoSpecular;
       specHitMin = min(specHitMin, t);
     }
 #endif
@@ -363,10 +367,10 @@ void main() {
   }
 
 #ifndef RAY_TRACING
-  diffuse += bc.diffuseWeight * sampleSky(normalize(g.N + vec3(0, 1, 0))) * 0.8;
+  diffuse += bc.diffuseWeight * sampleSky(normalize(g.N + vec3(0, 1, 0))) * 0.8 * aoDiffuse;
   vec3 R = reflect(-g.V, g.N);
   specular += specularAlbedo(g.f0, g.f90, bc.dfg) * bc.energyCompensation *
-              sampleSky(normalize(mix(R, g.N, g.roughness * g.roughness)));
+              sampleSky(normalize(mix(R, g.N, g.roughness * g.roughness))) * aoSpecular;
 #endif
 
   // Rede de segurança: um único NaN se espalharia pelo denoiser e pelo histórico do TAA.

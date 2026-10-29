@@ -16,6 +16,7 @@ struct Surface {
   vec3 emissive;
   vec3 normal;
   float normalVariance;  // variância do normal map no mip lido (Toksvig) — alarga a rugosidade
+  float occlusion;       // oclusão do material (glTF occlusionTexture), 1 = nenhuma
 };
 
 // N: normal geométrica interpolada; T: tangente (w = sinal da bitangente); T = 0 desliga o normal map.
@@ -54,6 +55,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
 
   s.normal = N;
   s.normalVariance = 0.0;
+  s.occlusion = m.occlusionTex >= 0 ? MATERIAL_SAMPLE(m.occlusionTex, uv).r : 1.0;
   vec3 t = T.xyz - N * dot(N, T.xyz);
   if (m.normalTex >= 0 && dot(t, t) > 1e-8) {
     t = normalize(t);

@@ -43,6 +43,7 @@ struct GSample {
   vec3 diffuseColor;
   vec3 f0;
   float f90;
+  float occlusion;  // oclusão do material: escurece só a luz indireta
 };
 
 GSample loadGBuffer(ivec2 id) {
@@ -53,7 +54,9 @@ GSample loadGBuffer(ivec2 id) {
   vec4 n = texelFetch(gNormal, id, 0);
   g.N = normalize(n.xyz);
   g.roughness = n.w;
-  g.diffuseColor = texelFetch(gDiffuse, id, 0).rgb;
+  vec4 albedo = texelFetch(gDiffuse, id, 0);
+  g.diffuseColor = albedo.rgb;
+  g.occlusion = albedo.a;
   vec4 spec = texelFetch(gSpecular, id, 0);
   g.f0 = spec.rgb;
   g.f90 = spec.a;

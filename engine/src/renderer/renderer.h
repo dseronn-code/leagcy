@@ -4,6 +4,7 @@
 #include <string>
 #include <utility>
 #include <limits>
+#include <map>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -163,11 +164,13 @@ class Renderer {
   rhi::Image skyLut_, dfgLut_, transmittanceLut_, multiScatterLut_, aerialPerspective_;
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
+  std::map<std::pair<VkSamplerAddressMode, VkSamplerAddressMode>, VkSampler> wrapSamplers_;  // samplers do glTF
   std::array<rhi::Buffer, kFramesInFlight> frameUbo_, objectBuffers_, jointBuffers_, lightBuffers_, lightBvhBuffers_;
   rhi::Buffer histogram_, exposureState_;
   // Desenho instanciado do G-buffer: índices de objetos ordenados por malha, um lote (draw call) por malha.
   struct DrawBatch {
     uint32_t mesh, first, count;
+    bool doubleSided, mirrored;  // glTF doubleSided: sem culling | transformação espelhada: frente invertida
   };
   std::vector<DrawBatch> drawBatches_;
   rhi::Buffer drawList_;

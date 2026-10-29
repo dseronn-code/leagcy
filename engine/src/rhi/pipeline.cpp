@@ -61,9 +61,10 @@ VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
   cb.attachmentCount = uint32_t(blends.size());
   cb.pAttachments = blends.data();
 
-  VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_CULL_MODE,
+                          VK_DYNAMIC_STATE_FRONT_FACE};
   VkPipelineDynamicStateCreateInfo dy{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-  dy.dynamicStateCount = 2;
+  dy.dynamicStateCount = d.dynamicCulling ? 4 : 2;
   dy.pDynamicStates = dyn;
 
   VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};

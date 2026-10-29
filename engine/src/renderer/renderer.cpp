@@ -45,6 +45,10 @@ struct FrameUniforms {
 };
 static_assert(sizeof(FrameUniforms) == 640);
 
+// Frente dos triângulos: anti-horário, como no glTF (a projeção inverte o Y e o viewport do Vulkan também: as duas
+// inversões se cancelam — conferido pela imagem, com culling o chão e as paredes continuam lá).
+constexpr bool kFrontFaceClockwise = false;
+
 struct GBufferPush {
   VkDeviceAddress drawList;  // lista de objetos ordenada por malha (shaders/gbuffer.vert)
 };
@@ -205,11 +209,20 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   {
     std::vector<uint32_t> order(scene.objects.size());
     for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
-    std::stable_sort(order.begin(), order.end(),
-                     [&](uint32_t a, uint32_t b) { return scene.objects[a].mesh < scene.objects[b].mesh; });
+    // Lotes por (dois lados, espelhado, malha). Um lote espelhado inverte a frente; objetos que passem a espelhar
+    // depois do início (raro) só desenham do lado errado se forem de um lado só.
+    auto key = [&](uint32_t i) {
+      const auto& o = scene.objects[i];
+      const bool ds = (scene.materials[o.material].flags & scene::kMaterialDoubleSided) != 0;
+      const bool mirrored = glm::determinant(glm::mat3(o.transform)) < 0.0f;
+      return std::make_tuple(ds, mirrored, o.mesh);
+    };
+    std::stable_sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return key(a) < key(b); });
     for (uint32_t k = 0; k < order.size(); ++k) {
-      const uint32_t mesh = scene.objects[order[k]].mesh;
-      if (drawBatches_.empty() || drawBatches_.back().mesh != mesh) drawBatches_.push_back({mesh, k, 0});
+      const auto [ds, mirrored, mesh] = key(order[k]);
+      if (drawBatches_.empty() || drawBatches_.back().mesh != mesh || drawBatches_.back().doubleSided != ds ||
+          drawBatches_.back().mirrored != mirrored)
+        drawBatches_.push_back({mesh, k, 0, ds, mirrored});
       ++drawBatches_.back().count;
     }
     if (order.empty()) order.push_back(0);
@@ -320,7 +333,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   gb.colorFormats = {kAlbedoFormat, kHdrFormat, kMotionFormat, kHdrFormat, kAlbedoFormat, kVisibilityFormat};
   gb.depthFormat = kDepthFormat;
   gb.depthTest = gb.depthWrite = true;
-  gb.cullMode = VK_CULL_MODE_NONE;  // materiais de dois lados (folhagem, tecidos)
+  gb.dynamicCulling = true;  // por lote: de um lado só (padrão do glTF) ou dos dois (doubleSided: folhagem, tecidos)
   gbufferPipeline_ = rhi::createGraphicsPipeline(ctx, gb);
 
   tonemapLayout_.init(ctx, g, {CIS, CIS, SB}, sizeof(TonemapPush));
@@ -356,7 +369,19 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 void Renderer::writeGlobalDescriptors() {
   scene::Scene& s = *scene_;
   std::vector<VkDescriptorImageInfo> texInfos;
-  for (auto& t : s.textures) texInfos.push_back({textureSampler_, t.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+  for (size_t i = 0; i < s.textures.size(); ++i) {
+    // Um sampler por modo de repetição do glTF (no máximo 9), com o mesmo filtro anisotrópico.
+    const auto wrap = i < s.textureWrap.size() ? s.textureWrap[i]
+                                               : std::make_pair(VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+    VkSampler& smp = wrapSamplers_[wrap];
+    if (!smp) {
+      const float anisotropy = std::min(settings.quality.anisotropy, ctx_->properties.limits.maxSamplerAnisotropy);
+      smp = wrap.first == VK_SAMPLER_ADDRESS_MODE_REPEAT && wrap.second == VK_SAMPLER_ADDRESS_MODE_REPEAT
+                ? textureSampler_
+                : makeSampler(*ctx_, VK_FILTER_LINEAR, wrap.first, wrap.second, true, anisotropy);
+    }
+    texInfos.push_back({smp, s.textures[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+  }
   if (texInfos.size() > kMaxTextures) FATAL("Cena com mais de %u texturas", kMaxTextures);
 
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
@@ -624,6 +649,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
     for (const DrawBatch& b : drawBatches_) {
       const auto& m = scene_->meshes[b.mesh];
+      vkCmdSetCullMode(cmd, b.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+      vkCmdSetFrontFace(cmd, b.mirrored != kFrontFaceClockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
       VkBuffer vbs[2] = {m.vertices.handle, m.skinned ? m.prevVertices.handle : m.vertices.handle};
       VkDeviceSize offsets[2] = {0, 0};
       vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
@@ -1044,6 +1071,9 @@ void Renderer::destroy() {
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
+  for (auto& [wrap, smp] : wrapSamplers_)
+    if (smp != textureSampler_) vkDestroySampler(ctx.device, smp, nullptr);
+  wrapSamplers_.clear();
   for (auto* arr : {&frameUbo_, &objectBuffers_, &jointBuffers_, &lightBuffers_, &lightBvhBuffers_})
     for (auto& b : *arr) rhi::destroyBuffer(ctx, b);
   rhi::destroyBuffer(ctx, histogram_);

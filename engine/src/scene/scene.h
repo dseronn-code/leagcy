@@ -49,7 +49,7 @@ struct Material {
   float ior = 1.5f;               // KHR_materials_ior (1,5 => f0 = 4%)
   int32_t specularTex = -1;
   int32_t specularColorTex = -1;
-  float pad = 0.0f;
+  int32_t occlusionTex = -1;  // glTF occlusionTexture (R): oclusão fina, só na luz indireta (o ray tracing faz o resto)
 };
 static_assert(sizeof(Material) == 96);
 
@@ -92,6 +92,9 @@ struct TextureData {
   bool normalMap = false;  // normal map de espaço tangente: comprimido em BC5 (xy), z reconstruído no shader
   std::string name;  // arquivo de origem (diagnóstico)
   CompressedTexture precompressed;  // já em BC7 no disco (DDS): enviado como está; `rgba` fica vazio
+  // Sampler do glTF: repetição em u e v (filtro: sempre trilinear + anisotrópico, o melhor disponível).
+  VkSamplerAddressMode wrapU = VK_SAMPLER_ADDRESS_MODE_REPEAT, wrapV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  float alphaCutoff = -1.0f;  // >= 0: cor base de material com recorte por alfa (mips preservam a cobertura)
 };
 
 struct Object {
@@ -171,6 +174,10 @@ class Scene {
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }
   uint32_t addMaterial(const Material& m) { materials.push_back(m); return uint32_t(materials.size() - 1); }
   uint32_t addTexture(TextureData t) { cpuTextures_.push_back(std::move(t)); return uint32_t(cpuTextures_.size() - 1); }
+  // Marca a textura como cor base de material recortado por alfa (antes do upload).
+  void setTextureAlphaCutoff(int32_t texture, float cutoff) {
+    if (texture >= 0 && size_t(texture) < cpuTextures_.size()) cpuTextures_[size_t(texture)].alphaCutoff = cutoff;
+  }
   uint32_t addObject(uint32_t mesh, const glm::mat4& transform, uint32_t material) {
     objects.push_back({mesh, transform, material, transform});
     return uint32_t(objects.size() - 1);
@@ -205,6 +212,7 @@ class Scene {
   std::vector<Model> models;
   std::vector<GpuMesh> meshes;
   std::vector<rhi::Image> textures;
+  std::vector<std::pair<VkSamplerAddressMode, VkSamplerAddressMode>> textureWrap;  // por textura (u, v)
   rhi::DynamicTlas tlas;
   rhi::Buffer materialBuffer, instanceBuffer, skinScratch;
   uint32_t totalJoints = 0;

@@ -19,8 +19,10 @@ struct CompressedTexture {
 // independentes (x, y), o formato padrão da indústria para normais: o BC7 divide os bits entre três canais e erra
 // muito em normais com detalhe fino (medido: 26 dB no pior normal map da Sponza). Em várias threads; o resultado vai
 // para um cache em disco (`cacheDir`), então só a primeira carga de cada textura comprime.
+// alphaCutoff >= 0 (textura de material com recorte por alfa): cada mip tem o alfa reescalado para manter a mesma
+// cobertura do nível 0 (Castaño, "Computing Alpha Mipmaps") — sem isso a folhagem afina e some à distância.
 CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t height, bool srgb, bool normalMap,
-                                  const std::string& cacheDir);
+                                  const std::string& cacheDir, float alphaCutoff = -1.0f);
 
 // Textura já comprimida em DDS (BC7, cabeçalho DX10; usada por assets como o Bistro via MSFT_texture_dds): blocos e
 // mips lidos como estão, sem recompressão. Falso se o arquivo não existe ou o formato não é BC7.
