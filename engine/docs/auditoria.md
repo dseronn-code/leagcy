@@ -80,11 +80,11 @@ Gravidade: **🔴 bug** (resultado errado) · **🟠 qualidade** (funciona, mas 
 
 1. ✅ **Base numérica e física**: unidades fotométricas + pré-exposição + float32 onde precisa (1.1, 1.2, 2.5) — ver resultado abaixo
 2. ✅ **Ruído e amostragem**: Sobol-Owen, amostragem correta da esfera, offset robusto com normal geométrica (1.5, 1.6, 1.11)
-3. ❌ **Luzes reais**: luzes como geometria emissiva + `KHR_lights_punctual` (1.3, 1.4, 2.2) — **ainda não feito**
-   (achado na revisão de 28/10: a numeração "item 1–7" seguiu a lista da comparação com o GTA 6 e pulou este)
-4. 🟡 **Assets profissionais**: especular/glossiness ✅ (2.3), BC7/BC5 ✅ (2.10), DDS ✅ (2.1, 28/10); faltam
-   vidro (2.4), doubleSided (2.6), MikkTSpace exato (2.7), samplers/cores/texture_transform/oclusão/câmeras (2.8),
-   cobertura alfa nos mips (2.9)
+3. ✅ **Luzes reais** (29/10): luzes de malha + `KHR_lights_punctual` + globo da lâmpada sem sombra e sem contar duas
+   vezes (1.3, 1.4, 2.2) — ver "Itens 3 e 4 do plano original" abaixo
+4. 🟡 **Assets profissionais**: especular/glossiness (2.3), BC7/BC5 (2.10), DDS (2.1), vidro de parede fina (2.4),
+   doubleSided (2.6), samplers/oclusão/câmera (2.8), cobertura alfa nos mips (2.9) ✅; faltam MikkTSpace de
+   referência (2.7, aguardando aprovação para baixar a biblioteca), `KHR_texture_transform`, `COLOR_0`, `TEXCOORD_1`
 5. **ReSTIR de produção**: ReGIR, pairwise MIS, visibilidade, filtro de boiling (1.7–1.9)
 6. **Denoiser de ponta**: NRD (ReBLUR/ReLAX/SIGMA) + specular AA (1.10, 1.13)
 7. Itens 3–5 restantes
@@ -497,3 +497,45 @@ sido corrigido). Corrigido: `loadDds` lê os blocos BC7 e os mips como estão e 
 2,2 GB de memória de vídeo; em RGBA8 seriam ~9 GB). Sem BC7 na GPU, o nível 0 é decodificado e vai em RGBA8.
 Revisando o plano acima também apareceu que os itens 3 (luzes reais) e 4 (assets) do plano original nunca foram
 feitos — agora estão marcados e entram na fila antes da otimização.
+
+### Itens 3 e 4 do plano original (29/10) — luzes reais e assets profissionais
+
+**Luzes de malha.** Cada triângulo de um objeto emissivo vira uma luz da BVH de luzes, amostrada pelo ReSTIR e pela
+luz direta nos pontos atingidos por raios (como o RTXDI faz no Bistro): potência por triângulo estimada na textura
+emissiva, radiância exata no shader (textura nas UVs do ponto), um lado só (ou os dois com `doubleSided`); objetos que
+se movem levam as luzes junto. A emissão de luzes amostradas não soma nos pontos atingidos por raios (somaria duas
+vezes, 1.4), exceto no raio de transmissão do vidro (o ReSTIR só avalia reflexão). Globos que são a forma visível de
+uma luz analítica não fazem sombra (1.3).
+
+Prova de energia por path tracing sem limite de vagalumes: a mesma cena COM luzes de malha × SEM (a luz dos
+emissivos só pelos raios que batem neles — o caminho ingênuo, sem viés). Dois erros achados e corrigidos no caminho:
+
+| Cena | 1ª medição | Causa | Depois |
+|---|---|---|---|
+| Globo emissivo (992 triângulos) | −51% | o raio de sombra esbarrava no próprio triângulo da luz (folga de 0,001% no fim do raio; agora 0,1%) | **−0,3%** |
+| Sala com painel, globos e capacete | −16% nas paredes | a janela de alcance das luzes pontuais (corte artístico) tirava luz bem antes do corte | sem janela nas luzes de malha |
+| Painel no ar | — | — | **+0,02%** |
+
+(Um painel encostado no teto, com a face de cima no mesmo plano do teto, dá −2%: geometria degenerada, nenhum dos dois
+caminhos define o que acontece ali.) Também: a referência (`--reference-pt`) deixou de usar o filtro de boiling do
+ReSTIR, que descarta amostras de propósito; e os raios especulares passaram a pesar G2/G1 correlacionado (antes G1,
+o G2 não correlacionado), o mesmo BRDF que a amostragem de luzes avalia.
+
+Bistro à noite: 76 mil triângulos emissivos (letreiros, lâmpadas, cordões de luz) + as 96 luzes do arquivo. Antes, a
+luz dos emissivos só chegava por raios de GI — névoa roxa e pontinhos; agora a rua é iluminada pelos postes e pelos
+cordões.
+
+**Assets.**
+- DDS/BC7 (`MSFT_texture_dds`) sem recompressão; câmera do glTF como vista inicial; samplers por textura;
+  `doubleSided` com culling (lotes com cull/frente dinâmicos, imagem idêntica na cena de reflexos);
+  `occlusionTexture` só na luz indireta; mips de recorte por alfa com a cobertura preservada (Castaño).
+- **Vidro de parede fina** (`KHR_materials_transmission`): o pixel de vidro traça o lobo especular espelhado para
+  trás da superfície (peso (1 − F) × cor × transmissão); raios de GI/reflexo atravessam até 4 lâminas tingindo; vidro
+  não faz sombra (sombra colorida e refração com volume ficam para depois).
+- **Pintura de carro**: verniz `KHR_materials_clearcoat` (GGX dielétrico na normal suave, com sol, luz do ReSTIR e
+  raio de reflexo próprios; a base recebe 1 − cc × F) e flocos metálicos (de perto cada floco brilha; de longe viram
+  rugosidade, sem cintilar).
+- Céu noturno: lua cheia como luz direcional (0,25 lux, disco com mares; o céu de lua sai azul como em fotos de longa
+  exposição) e estrelas (magnitudes −1 a 6, apagadas no horizonte pela atmosfera).
+- Pendente: MikkTSpace de referência (o download da biblioteca foi bloqueado pela política de permissões do ambiente;
+  a versão pronta está guardada para quando for aprovada).

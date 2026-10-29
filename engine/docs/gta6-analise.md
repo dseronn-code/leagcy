@@ -29,7 +29,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR de produção: BVH de luzes, GRIS/MIS em pares, correção de viés por ray tracing, filtro de boiling; viés < 1,5% contra força bruta (`tools/restir.py`) |
 | Céu e atmosfera física | ✅ | Pipeline completa de Hillaire (transmitância, múltiplo espalhamento, sky-view, perspectiva aérea), 4% de erro contra path tracing de referência |
 | Nuvens volumétricas, raios de luz (god rays) | ❌ | Hoje só temos névoa por altura |
-| Ciclo dia/noite | 🟡 | O sol se move; faltam lua, estrelas e luzes da cidade |
+| Ciclo dia/noite | ✅ | Sol físico; à noite lua (luz e disco), estrelas e luzes da cidade (milhares pelo ReSTIR + emissivos como luz) |
 
 ### Imagem
 
@@ -46,9 +46,9 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 |---|---|---|
 | PBR | ✅ | Unidades físicas, compensação de energia (teste da fornalha), especular/glossiness, KHR specular/ior, AA especular |
 | Texturas, normal maps, mipmaps, compressão BC7 | ✅ | BC7 na cor, BC5 nos normal maps (padrão da indústria), mips na CPU, cache: 4x menos memória de vídeo, PSNR médio 46,8 dB, imagem final a 1,6% do RGBA8 |
-| Importar assets profissionais (glTF completo) | 🟡 | Especular/glossiness, BC7 e DDS (28/10) ok; faltam luzes do glTF (o Bistro tem 97), luzes como geometria emissiva, doubleSided, MikkTSpace exato, samplers/texture_transform/oclusão, cobertura alfa nos mips (auditoria, itens 3 e 4) |
-| Pintura de carro (clearcoat, flocos metálicos) | ❌ | |
-| Vidro e transparência | ❌ | |
+| Importar assets profissionais (glTF completo) | 🟡 | DDS, luzes do glTF, luzes de malha (energia provada: −0,3% / +0,02% contra path tracing ingênuo), câmera, samplers, doubleSided, oclusão, cobertura alfa, vidro e verniz; faltam MikkTSpace de referência (aguarda aprovação), texture_transform, COLOR_0 |
+| Pintura de carro (clearcoat, flocos metálicos) | ✅ | `KHR_materials_clearcoat` (verniz com reflexo traçado próprio) + flocos metálicos que viram rugosidade à distância (sem cintilar) |
+| Vidro e transparência | 🟡 | Vidro de parede fina por ray tracing (janelas, vitrines, lanternas, vidro fosco e colorido, várias lâminas); faltam refração com volume, sombra colorida e transparência por mistura (BLEND) |
 | Decals (sujeira, marcas, pichação) | ❌ | |
 | Chuva, superfícies molhadas e poças | ❌ | |
 | Água: oceano FFT, ondas, rios, espuma, cena subaquática | ❌ | Miami ficcional: água em todo lugar |

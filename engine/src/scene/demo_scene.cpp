@@ -208,6 +208,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
 
   s.sunDirection = sunFrom(16.0f, 55.0f);
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
+  s.cloudCoverage = 0.4f;  // céu com cúmulos
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
   camera.position = {2.0f, terrainHeight(2, 16) + 3.2f, 16.0f};
   camera.lookAt({0.0f, 1.0f, -6.0f});
@@ -272,6 +273,7 @@ bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
     camera.nearPlane = s.assetCamera.nearPlane;
   }
   if (!s.sunFromAsset) s.sunDirection = sunFrom(35.0f, 120.0f);
+  s.cloudCoverage = 0.4f;  // céu com cúmulos
   s.fogDensity = 0.0003f;
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
@@ -397,6 +399,7 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
     }
   s.sunDirection = sunFrom(opt.night ? -10.0f : 35.0f, 140.0f);
   s.sunIlluminance = opt.night ? 0.0f : 100000.0f;
+  s.cloudCoverage = 0.4f;
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
   s.fogDensity = 0.0f;
   // Na rua, entre dois quarteirões perto do centro, olhando ao longo da avenida.
@@ -558,7 +561,8 @@ bool buildPaintTest(Scene& s, Camera& camera) {
 
 // Variante simples da prova das luzes de malha: só o painel do teto e um globo grande e fraco (sem emissores minúsculos
 // e muito fortes, que o caminho sem amostragem de luz não converge).
-bool buildMeshLightSimple(Scene& s, Camera& camera) {
+// variant: 0 = painel e globo, 1 = só o painel, 2 = só o globo.
+bool buildMeshLightSimple(Scene& s, Camera& camera, int variant) {
   uint32_t cube = s.addMesh(makeCube());
   uint32_t sphere = s.addMesh(makeSphere(32, 16));
   auto mat = [&](glm::vec3 albedo, float rough, glm::vec3 emissive = glm::vec3(0.0f)) {
@@ -575,8 +579,18 @@ bool buildMeshLightSimple(Scene& s, Camera& camera) {
   s.addObject(cube, trs({0.0f, 1.5f, 4.1f}, {4.0f, 1.6f, 0.1f}), wall);
   s.addObject(cube, trs({-4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
   s.addObject(cube, trs({4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
-  s.addObject(cube, trs({0.0f, 2.95f, -1.0f}, {0.8f, 0.05f, 0.4f}), mat(glm::vec3(1.0f), 0.5f, glm::vec3(300.0f)));
-  s.addObject(sphere, trs({-1.8f, 0.6f, 0.0f}, glm::vec3(0.6f)), mat(glm::vec3(1.0f), 0.5f, {400.0f, 200.0f, 80.0f}));
+  if (variant != 2 && variant != 4)
+    s.addObject(cube, trs({0.0f, 2.95f, -1.0f}, {0.8f, 0.05f, 0.4f}), mat(glm::vec3(1.0f), 0.5f, glm::vec3(300.0f)));
+  if (variant == 4)  // painel solto no ar (sem encostar no teto)
+    s.addObject(cube, trs({0.0f, 2.3f, -1.0f}, {0.8f, 0.05f, 0.4f}), mat(glm::vec3(1.0f), 0.5f, glm::vec3(300.0f)));
+  if (variant == 0 || variant == 2)
+    s.addObject(sphere, trs({-1.8f, 0.6f, 0.0f}, glm::vec3(0.6f)), mat(glm::vec3(1.0f), 0.5f, {400.0f, 200.0f, 80.0f}));
+  if (variant == 3) {  // o mesmo globo como luz esférica analítica (I = L π r²), com a esfera visível sem sombra
+    const uint32_t globe = mat(glm::vec3(1.0f), 0.5f, {400.0f, 200.0f, 80.0f});
+    s.materials[globe].flags |= kMaterialLightGeometry | kMaterialEmissionSampled;
+    s.addObject(sphere, trs({-1.8f, 0.6f, 0.0f}, glm::vec3(0.6f)), globe);
+    s.addLight({{-1.8f, 0.6f, 0.0f}, 0.6f, glm::vec3(400.0f, 200.0f, 80.0f) * glm::pi<float>() * 0.36f, 1e30f});
+  }
   s.sunIlluminance = 0.0f;
   s.fogDensity = 0.0f;
   camera.position = glm::vec3(0.0f, 1.6f, 3.6f);
@@ -584,7 +598,15 @@ bool buildMeshLightSimple(Scene& s, Camera& camera) {
   return true;
 }
 
+bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
+  if (!buildDemoSceneDefaults(scene, camera, opt)) return false;
+  if (opt.clouds >= 0.0f) scene.cloudCoverage = std::min(opt.clouds, 1.0f);
+  return true;
+}
+
+bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
     return opt.name.size() > n && opt.name.compare(opt.name.size() - n, n, ext) == 0;
@@ -597,7 +619,11 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (opt.name == "reflections") return buildReflectionTest(scene, camera);
   if (opt.name == "city") return buildCity(scene, camera, opt);
   if (opt.name == "mesh-lights") return buildMeshLightTest(scene, camera);
-  if (opt.name == "mesh-lights-simple") return buildMeshLightSimple(scene, camera);
+  if (opt.name == "mesh-lights-simple") return buildMeshLightSimple(scene, camera, 0);
+  if (opt.name == "mesh-lights-panel") return buildMeshLightSimple(scene, camera, 1);
+  if (opt.name == "mesh-lights-ball") return buildMeshLightSimple(scene, camera, 2);
+  if (opt.name == "mesh-lights-ball-analytic") return buildMeshLightSimple(scene, camera, 3);
+  if (opt.name == "mesh-lights-panel-free") return buildMeshLightSimple(scene, camera, 4);
   if (opt.name == "glass") return buildGlassTest(scene, camera);
   if (opt.name == "paint") return buildPaintTest(scene, camera);
   return buildSponza(scene, camera, opt);

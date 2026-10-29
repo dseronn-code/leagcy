@@ -28,6 +28,12 @@ float G1_Smith(float NoX, float a) {
   float a2 = a * a;
   return 2.0 * NoX / (NoX + sqrt(a2 + (1.0 - a2) * NoX * NoX));
 }
+// Peso de uma amostra VNDF (sem o Fresnel): G2(V, L) / G1(V) com o G2 correlacionado em altura — o mesmo BRDF que
+// evalBRDF avalia na amostragem de luzes. Antes usava G1(L), que é o G2 não correlacionado: os raios especulares
+// pesavam um pouco mais que a luz direta (medido: ~2% a mais na prova das luzes de malha, cena mesh-lights-panel).
+float vndfWeight(float NoV, float NoL, float a) {
+  return V_SmithGGXCorrelated(NoV, NoL, a) * 4.0 * NoV * NoL / max(G1_Smith(NoV, a), 1e-6);
+}
 float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
 // Rugosidade perceptual mínima: abaixo disso o GGX vira um pico que nenhum filtro resolve.

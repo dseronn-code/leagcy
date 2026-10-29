@@ -30,8 +30,13 @@ layout(set = 0, binding = 0) uniform FrameData {
                               // w = bit 0: referência por path tracing (rebotes de verdade); bit 1: cache de radiância desligado;
                               //     bit 2: movimento virtual do reflexo desligado no SVGF (medição)
   vec4 environment;           // x = céu uniforme em nits (> 0: teste da fornalha branca)
-  vec4 night;                 // x = 1: a luz direcional (sunDir) é a lua; y = iluminância de magnitude 0 (lux)
+  vec4 night;                 // x = 1: a luz direcional (sunDir) é a lua; y = iluminância de magnitude 0 (lux);
+                              // z = cobertura de nuvens (0 = céu limpo); w = tempo (s, move as nuvens)
 } frame;
+
+// Sombra das nuvens (cloud_shadow.comp): transmitância da camada na direção do sol, num quadrado em volta da câmera.
+layout(set = 0, binding = 16) uniform sampler2D cloudShadowMap;
+const float CLOUD_SHADOW_EXTENT = 40000.0;  // m
 
 bool energyCompensationEnabled() { return frame.quality1.w > 0.5; }
 bool reblurSignal() { return frame.quality2.y != 0u; }
@@ -99,10 +104,20 @@ vec3 lutDirection(vec2 uv) {
 // Radiância do céu (nits), já pré-exposta: a LUT é escrita com a pré-exposição do frame.
 vec3 sampleSky(vec3 dir) { return textureLod(skyViewLut, skyLutUv(dir), 0.0).rgb; }
 
-// Iluminância do sol (lux) chegando ao ponto, já pré-exposta.
+// Fração da luz do sol que passa pelas nuvens até o ponto: o ponto é levado ao chão ao longo da direção do sol.
+float cloudShadow(vec3 worldPos) {
+  if (frame.night.z <= 0.0) return 1.0;
+  vec3 L = frame.sunDir.xyz;
+  vec2 ground = worldPos.xz - L.xz / max(L.y, 0.03) * max(worldPos.y, 0.0);
+  vec2 uv = (ground - frame.cameraPos.xz) / CLOUD_SHADOW_EXTENT + 0.5;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 1.0;
+  return textureLod(cloudShadowMap, uv, 0.0).r;
+}
+
+// Iluminância do sol (lux) chegando ao ponto, já pré-exposta (atmosfera e nuvens).
 vec3 sunIrradianceAt(vec3 worldPos) {
   if (frame.sunDir.w <= 0.0) return vec3(0.0);
-  return frame.sunDir.w * preExposure() * transmittanceToSun(planetPos(worldPos), frame.sunDir.xyz);
+  return frame.sunDir.w * preExposure() * transmittanceToSun(planetPos(worldPos), frame.sunDir.xyz) * cloudShadow(worldPos);
 }
 
 vec3 sunDisk(vec3 dir) {
@@ -140,7 +155,7 @@ vec3 starField(vec3 dir) {
   float theta = acos(clamp(dot(dir, star), -1.0, 1.0));
   float magnitude = -1.0 + 7.0 * sqrt(r.y);                    // de -1 (Sírius) a 6 (limite do olho)
   float E = frame.night.y * pow(10.0, -0.4 * magnitude);       // lux
-  vec3 tint = mix(vec3(0.75, 0.85, 1.0), vec3(1.0, 0.85, 0.65), r.z * 80.0);  // estrelas azuladas a alaranjadas
+  vec3 tint = mix(vec3(0.85, 0.9, 1.0), vec3(1.0, 0.92, 0.8), r.z * 80.0);  // de levemente azuladas a levemente amareladas
   float profile = exp(-0.5 * theta * theta / (sigma * sigma)) / (TWO_PI * sigma * sigma);  // 1/sr, integra 1
   return E * profile * tint * preExposure() * transmittanceToSun(planetPos(frame.cameraPos.xyz), dir);
 }

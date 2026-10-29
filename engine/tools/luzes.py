@@ -19,9 +19,13 @@ import numpy as np
 from PIL import Image
 
 W, H = 480, 272
-CENAS = {  # nome: argumentos
-    'mesh-lights': ['--scene', 'mesh-lights', '--exposure', '6'],
-    'bistro-noite': ['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf'), '--night', '--exposure', '1'],
+# Prova (sem limite de vagalumes: o caminho sem amostrar luzes perderia energia nele) em cenas que o caminho ingênuo
+# consegue convergir: globo emissivo e painel no ar. O Bistro à noite mede só o motor contra a referência.
+CENAS = {  # nome: (argumentos, prova?)
+    'globo': (['--scene', 'mesh-lights-ball', '--exposure', '3'], True),
+    'painel': (['--scene', 'mesh-lights-panel-free', '--exposure', '3'], True),
+    'mesh-lights': (['--scene', 'mesh-lights', '--exposure', '6'], False),
+    'bistro-noite': (['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf'), '--night', '--no-moon', '--exposure', '1'], False),
 }
 
 
@@ -53,16 +57,20 @@ def main():
     pasta = a.out or tempfile.mkdtemp()
     os.makedirs(pasta, exist_ok=True)
     for cena in a.cenas.split(','):
-        args = CENAS[cena]
-        com = rodar(a.bin, args + ['--reference-pt', '--frames', str(a.ref_frames)], os.path.join(pasta, f'luzes_{cena}_ref.png'))
-        # Sem amostragem de luz o ruído é bem maior: 4x mais frames.
-        sem = rodar(a.bin, args + ['--reference-pt', '--no-mesh-lights', '--frames', str(4 * a.ref_frames)],
-                    os.path.join(pasta, f'luzes_{cena}_ref_sem.png'))
-        motor = rodar(a.bin, args + ['--frames', '64'], os.path.join(pasta, f'luzes_{cena}_motor.png'))
-        e1, v1 = comparar(com, sem)
-        e2, v2 = comparar(motor, com)
-        print(f'{cena:13s} prova (com x sem luzes de malha): diferença {e1:.4f}, viés {v1:+.1f}%  |  '
-              f'motor x referência: erro {e2:.4f}, viés {v2:+.1f}%', flush=True)
+        args, prova = CENAS[cena]
+        if prova:
+            com = rodar(a.bin, args + ['--reference-pt', '--no-firefly-clamp', '--frames', str(a.ref_frames)],
+                        os.path.join(pasta, f'luzes_{cena}_ref.png'))
+            # Sem amostragem de luz o ruído é bem maior: 4x mais frames.
+            sem = rodar(a.bin, args + ['--reference-pt', '--no-firefly-clamp', '--no-mesh-lights', '--frames',
+                                       str(4 * a.ref_frames)], os.path.join(pasta, f'luzes_{cena}_ref_sem.png'))
+            e1, v1 = comparar(com, sem)
+            print(f'{cena:13s} prova (com x sem luzes de malha): diferença {e1:.4f}, viés {v1:+.2f}%', flush=True)
+        else:
+            ref = rodar(a.bin, args + ['--reference-pt', '--frames', str(a.ref_frames)], os.path.join(pasta, f'luzes_{cena}_ref.png'))
+            motor = rodar(a.bin, args + ['--frames', '64'], os.path.join(pasta, f'luzes_{cena}_motor.png'))
+            e2, v2 = comparar(motor, ref)
+            print(f'{cena:13s} motor x referência: erro {e2:.4f}, viés {v2:+.1f}%', flush=True)
 
 
 if __name__ == '__main__':

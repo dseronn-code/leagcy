@@ -17,6 +17,8 @@ constexpr uint32_t kMaxTextures = 4096;
 constexpr uint32_t kHistogramBins = 256;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 constexpr VkFormat kHdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+constexpr VkExtent3D kCloudNoiseExtent = {128, 128, 128};
+constexpr VkExtent2D kCloudShadowExtent = {256, 256};
 constexpr VkFormat kAlbedoFormat = VK_FORMAT_R8G8B8A8_SRGB;  // cor difusa e f0 (sRGB: precisão nos tons baixos)
 constexpr VkExtent2D kDfgLutExtent{128, 128};
 constexpr VkExtent2D kTransmittanceLutExtent{256, 64};
@@ -195,6 +197,10 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   transmittanceLut_ = rhi::createImage2D(ctx, kTransmittanceLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   multiScatterLut_ = rhi::createImage2D(ctx, kMultiScatterLutExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   aerialPerspective_ = rhi::createImage3D(ctx, kAerialPerspectiveExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  cloudNoise_ = rhi::createImage3D(ctx, kCloudNoiseExtent, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  skyClear_ = rhi::createImage2D(ctx, skyLutExtent_, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  cloudShadow_ = rhi::createImage2D(ctx, kCloudShadowExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  cloudSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
     frameUbo_[i] = rhi::createBuffer(ctx, sizeof(FrameUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     objectBuffers_[i] = rhi::createBuffer(ctx, std::max<size_t>(1, scene.objects.size()) * sizeof(ObjectGpu),
@@ -260,6 +266,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {12, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {13, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {14, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {15, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {16, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -275,7 +283,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {CIS, kFramesInFlight * (5 + kMaxTextures)},
+      {CIS, kFramesInFlight * (7 + kMaxTextures)},
       {SB, kFramesInFlight * 7},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
@@ -299,6 +307,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
   aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
+  cloudSkyPass_.init(ctx, "clouds_sky.comp", g, {SI, CIS});
+  cloudShadowPass_.init(ctx, "cloud_shadow.comp", g, {SI});
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS});
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS});
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI});
@@ -347,12 +357,14 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   // LUTs constantes, calculadas uma vez: DFG (integral do BRDF), transmitância e múltiplo
   // espalhamento da atmosfera (esta depende da de transmitância).
-  rhi::ComputePass dfgPass, transmittancePass, multiScatterPass;
+  rhi::ComputePass dfgPass, transmittancePass, multiScatterPass, cloudNoisePass;
   dfgPass.init(ctx, "dfg_lut.comp", g, {SI});
+  cloudNoisePass.init(ctx, "cloud_noise.comp", g, {SI});
   transmittancePass.init(ctx, "atmosphere_transmittance.comp", g, {SI});
   multiScatterPass.init(ctx, "atmosphere_multiscatter.comp", g, {SI});
   ctx.immediateSubmit([&](VkCommandBuffer cmd) {
-    for (rhi::Image* img : {&skyLut_, &dfgLut_, &transmittanceLut_, &multiScatterLut_, &aerialPerspective_})
+    for (rhi::Image* img : {&skyLut_, &dfgLut_, &transmittanceLut_, &multiScatterLut_, &aerialPerspective_, &cloudNoise_,
+                            &skyClear_, &cloudShadow_})
       rhi::imageBarrier(cmd, img->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                         VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -360,9 +372,11 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     transmittancePass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(transmittanceLut_.view)}, kTransmittanceLutExtent);
     rhi::memoryBarrier(cmd);
     multiScatterPass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(multiScatterLut_.view)}, kMultiScatterLutExtent);
+    cloudNoisePass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(cloudNoise_.view)},
+                            {kCloudNoiseExtent.width, kCloudNoiseExtent.height});
     rhi::memoryBarrier(cmd);
   });
-  for (rhi::ComputePass* p : {&dfgPass, &transmittancePass, &multiScatterPass}) p->destroy(ctx);
+  for (rhi::ComputePass* p : {&dfgPass, &transmittancePass, &multiScatterPass, &cloudNoisePass}) p->destroy(ctx);
   profiler_.init(ctx, kFramesInFlight);
   createTargets();
 }
@@ -418,6 +432,9 @@ void Renderer::writeGlobalDescriptors() {
                                      {linear_, multiScatterLut_.view, VK_IMAGE_LAYOUT_GENERAL},
                                      {linear_, aerialPerspective_.view, VK_IMAGE_LAYOUT_GENERAL}};
     for (uint32_t b = 0; b < 3; ++b) add(10 + b, CIS, 1).pImageInfo = &atmo[b];
+    VkDescriptorImageInfo clouds[2] = {{cloudSampler_, cloudNoise_.view, VK_IMAGE_LAYOUT_GENERAL},
+                                       {linear_, cloudShadow_.view, VK_IMAGE_LAYOUT_GENERAL}};
+    for (uint32_t b = 0; b < 2; ++b) add(15 + b, CIS, 1).pImageInfo = &clouds[b];
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -583,7 +600,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.sunDir = glm::vec4(glm::normalize(scene_->sunDirection), scene_->sunIlluminance);
   // Noite: a lua faz o papel do sol (mesmo disco, sombra e céu espalhado, com a iluminância dela) e as estrelas
   // aparecem no céu. Iluminância de magnitude 0 no topo da atmosfera: 2,5 µlux.
-  u.night = glm::vec4(0.0f);
+  u.night = glm::vec4(0.0f, 0.0f, scene_->cloudCoverage, scene_->time);
   if (scene_->sunIlluminance <= 0.0f) {
     u.night.y = 2.5e-6f;
     if (scene_->moonIlluminance > 0.0f) {
@@ -625,11 +642,18 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   barrier();
   profiler_.mark(cmd, "cena");
 
-  // ---- 1. Atmosfera ----
-  skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view)}, skyLutExtent_);
+  // ---- 1. Atmosfera (e nuvens: o céu limpo vai para skyClear_ e as nuvens o compõem na LUT final) ----
+  const bool clouds = scene_->cloudCoverage > 0.0f && scene_->uniformSkyLuminance <= 0.0f;
+  skyLutPass_.dispatch(cmd, gs, {Binding::storageImage(clouds ? skyClear_.view : skyLut_.view)}, skyLutExtent_);
   aerialPerspectivePass_.dispatch(cmd, gs, {Binding::storageImage(aerialPerspective_.view)},
                                   {kAerialPerspectiveExtent.width, kAerialPerspectiveExtent.height});
+  if (clouds) cloudShadowPass_.dispatch(cmd, gs, {Binding::storageImage(cloudShadow_.view)}, kCloudShadowExtent);
   barrier();
+  if (clouds) {
+    cloudSkyPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view), Binding::sampled(skyClear_.view, linear_)},
+                           skyLutExtent_);
+    barrier();
+  }
   profiler_.mark(cmd, "ceu");
 
   // ---- 2. G-buffer ----
@@ -1079,6 +1103,8 @@ void Renderer::destroy() {
   destroyTargets();
   profiler_.destroy();
   rhi::destroyImage(ctx, skyLut_);
+  for (rhi::Image* img : {&cloudNoise_, &skyClear_, &cloudShadow_}) rhi::destroyImage(ctx, *img);
+  vkDestroySampler(ctx.device, cloudSampler_, nullptr);
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
@@ -1091,7 +1117,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
-  for (rhi::ComputePass* p : {&skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&cloudSkyPass_, &cloudShadowPass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

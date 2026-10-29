@@ -1,0 +1,29 @@
+#version 460
+// Sombra das nuvens no chão: transmitância da camada ao longo da direção do sol (ou da lua), num quadrado de 40 km em
+// volta da câmera. sunIrradianceAt (frame.glsl) multiplica a luz do sol por ela em todo o motor.
+#extension GL_GOOGLE_include_directive : require
+#include "clouds.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D shadowOut;
+
+void main() {
+  ivec2 size = imageSize(shadowOut);
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, size))) return;
+  vec2 xz = frame.cameraPos.xz + ((vec2(id) + 0.5) / vec2(size) - 0.5) * CLOUD_SHADOW_EXTENT;
+  vec3 o = cloudPlanetPos(vec3(xz.x, 0.0, xz.y));
+  vec3 L = frame.sunDir.xyz;
+  L.y = max(L.y, 0.03);  // sol no horizonte: caminho limitado (a sombra fica longa, não infinita)
+  L = normalize(L);
+  float tStart, tEnd, tau = 0.0;
+  if (cloudCoverage() > 0.0 && cloudSegment(o, L, tStart, tEnd)) {
+    tEnd = min(tEnd, tStart + 20.0);
+    float dt = (tEnd - tStart) / 16.0;
+    for (int i = 0; i < 16; ++i) {
+      vec3 p = o + L * (tStart + (float(i) + 0.5) * dt);
+      tau += cloudDensity(p, cloudHeightFraction(p), false) * CLOUD_EXTINCTION * dt;
+    }
+  }
+  imageStore(shadowOut, id, vec4(exp(-tau), 0.0, 0.0, 1.0));
+}

@@ -1,0 +1,68 @@
+#version 460
+// Ruído 3D das nuvens (128³, repete nas bordas), calculado uma vez: R = Perlin-Worley (forma das nuvens: bolhas
+// arredondadas do Worley com a continuidade do Perlin), G/B/A = Worley em 3 frequências (erosão das bordas e coverage).
+// Mesma receita do "Nubis" da Guerrilla (Schneider 2015, 2022).
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba8) uniform writeonly image3D noiseOut;
+
+vec3 cellPoint(ivec3 c, int period) {
+  c = ((c % period) + period) % period;  // periódico: o ruído emenda nas bordas
+  return vec3(pcg3d(uvec3(c) + uvec3(0x9e37u, 0x79b9u, 0x7f4au))) * (1.0 / 4294967296.0);
+}
+
+// Worley (distância ao ponto de célula mais próximo), invertido: 1 no centro das bolhas.
+float worley(vec3 p, int period) {
+  ivec3 ci = ivec3(floor(p));
+  vec3 f = fract(p);
+  float d = 1e9;
+  for (int z = -1; z <= 1; ++z)
+    for (int y = -1; y <= 1; ++y)
+      for (int x = -1; x <= 1; ++x) {
+        ivec3 o = ivec3(x, y, z);
+        vec3 r = vec3(o) + cellPoint(ci + o, period) - f;
+        d = min(d, dot(r, r));
+      }
+  return 1.0 - clamp(sqrt(d), 0.0, 1.0);
+}
+
+vec3 gradient(ivec3 c, int period) { return normalize(cellPoint(c, period) * 2.0 - 1.0 + 1e-4); }
+
+// Perlin periódico (gradientes nos cantos da célula), em [-1, 1] aproximadamente.
+float perlin(vec3 p, int period) {
+  ivec3 i = ivec3(floor(p));
+  vec3 f = fract(p), u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  float n[8];
+  for (int k = 0; k < 8; ++k) {
+    ivec3 o = ivec3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
+    n[k] = dot(gradient(i + o, period), f - vec3(o));
+  }
+  return mix(mix(mix(n[0], n[1], u.x), mix(n[2], n[3], u.x), u.y), mix(mix(n[4], n[5], u.x), mix(n[6], n[7], u.x), u.y), u.z);
+}
+
+float worleyFbm(vec3 uvw, int period) {
+  return worley(uvw * float(period), period) * 0.625 + worley(uvw * float(2 * period), 2 * period) * 0.25 +
+         worley(uvw * float(4 * period), 4 * period) * 0.125;
+}
+
+void main() {
+  ivec3 size = imageSize(noiseOut);
+  ivec2 xy = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(xy, size.xy))) return;
+  for (int z = 0; z < size.z; ++z) {
+    vec3 uvw = (vec3(xy, z) + 0.5) / vec3(size);
+    float p = 0.0, amp = 0.5;
+    for (int o = 0; o < 4; ++o) {
+      int period = 4 << o;
+      p += amp * perlin(uvw * float(period), period);
+      amp *= 0.5;
+    }
+    p = clamp(p * 0.7 + 0.5, 0.0, 1.0);
+    float w = worleyFbm(uvw, 4);
+    // Perlin-Worley: o Perlin remapeado pelo Worley (bordas de bolha arredondadas).
+    float pw = clamp((p - (w - 1.0)) / (1.0 - (w - 1.0)), 0.0, 1.0);
+    imageStore(noiseOut, ivec3(xy, z), vec4(pw, worleyFbm(uvw, 8), worleyFbm(uvw, 16), worleyFbm(uvw, 32)));
+  }
+}
