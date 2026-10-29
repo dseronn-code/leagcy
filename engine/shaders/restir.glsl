@@ -63,6 +63,9 @@ bool lightPoint(uint li, vec2 uv, vec3 P, out vec3 L, out float dist, out vec3 L
     if (cosY <= 0.0) return false;
     Le = emitted * lightWindow(l, P, dist);
     G = cosY / d2;
+    // O raio de sombra para antes do triângulo da própria luz com folga de 0,1%: com menos que isso ele esbarra nela
+    // (medido no llvmpipe: com 0,001% sumia metade da luz de um globo; 0,01% ainda perdia 1%; 0,1% = sem sombra).
+    dist *= 0.999;
     return dot(Le, Le) > 0.0;
   }
   float r = max(l.radius, 1e-3);

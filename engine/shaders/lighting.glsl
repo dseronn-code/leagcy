@@ -130,7 +130,7 @@ vec3 pathContinue(HitInfo hit, Surface s, BrdfContext bc, uint seed) {
       dir = reflect(-bc.V, H);
       float NoL = dot(bc.N, dir);
       if (NoL <= 0.0) break;
-      w = F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) * G1_Smith(NoL, a) * bc.energyCompensation / pSpec;
+      w = F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) * vndfWeight(bc.NoV, NoL, a) * bc.energyCompensation / pSpec;
     } else {
       dir = cosineSampleHemisphere(bc.N, rand2(st));
       w = diffA / (1.0 - pSpec);
@@ -222,7 +222,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
     float NoL = dot(bc.N, Lr);
     if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0)
       radiance += secondaryRadiance(hitOrigin, Lr, st) * F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) *
-                  G1_Smith(NoL, a) * bc.energyCompensation;
+                  vndfWeight(bc.NoV, NoL, a) * bc.energyCompensation;
   } else {
     radiance += specularAlbedo(s.f0, s.f90, bc.dfg) * bc.energyCompensation *
                 (cached ? M : sampleSky(reflect(dir, hit.N)));
@@ -386,7 +386,7 @@ void main() {
     if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0) {
       float t;
       specular += traceRadiance(origin, Lr, sg, 1u, t, false) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
-                  G1_Smith(NoLr, a) * bc.energyCompensation * aoSpecular;
+                  vndfWeight(bc.NoV, NoLr, a) * bc.energyCompensation * aoSpecular;
       specHitMin = min(specHitMin, t);
     }
 
@@ -402,7 +402,7 @@ void main() {
       if (NoLc > 0.0 && dot(Lc, g.Ng) > 0.0) {
         float t;
         coatSpec += traceRadiance(origin, Lc, sg, 3u, t, false) * F_Schlick(vec3(0.04), 1.0, max(dot(g.V, Hc), 0.0)) *
-                    G1_Smith(NoLc, ac) * bcCoat.energyCompensation * aoSpecular;
+                    vndfWeight(bcCoat.NoV, NoLc, ac) * bcCoat.energyCompensation * aoSpecular;
         specHitMin = min(specHitMin, t);
       }
     }
@@ -420,7 +420,7 @@ void main() {
       if (NoLm > 0.0 && dot(Lt, g.Ng) < 0.0) {
         float t;
         vec3 w = (vec3(1.0) - F_Schlick(g.f0, g.f90, max(dot(g.V, H2), 0.0))) * px.transmissionTint *
-                 px.transmission * G1_Smith(NoLm, a);
+                 px.transmission * vndfWeight(bc.NoV, NoLm, a);
         specular += traceRadiance(offsetRayOrigin(g.P, -g.Ng, sf.rayBias), Lt, sg, 2u, t, true) * w;
         specHitMin = min(specHitMin, t);
       }

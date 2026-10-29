@@ -1,0 +1,31 @@
+#version 460
+// Nuvens no panorama do céu (sky-view LUT): céu limpo × transmitância das nuvens + luz que elas espalham. Como todo o
+// motor lê o céu por essa LUT (fundo da imagem, reflexos, GI, cache de radiância, luz ambiente), as nuvens aparecem nos
+// reflexos e o dia nublado fica mais escuro. Média temporal com o frame anterior (a marcha usa um deslocamento
+// aleatório por frame).
+#extension GL_GOOGLE_include_directive : require
+#include "clouds.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform image2D skyOut;  // LUT final (lida também: histórico)
+layout(set = 1, binding = 1) uniform sampler2D clearSky;        // céu limpo deste frame
+
+void main() {
+  ivec2 size = imageSize(skyOut);
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, size))) return;
+  vec2 uv = (vec2(id) + 0.5) / vec2(size);
+  vec3 dir = lutDirection(uv);
+  vec3 sky = textureLod(clearSky, uv, 0.0).rgb;
+  // Luz ambiente nas nuvens: média de céu do zênite e do horizonte (já pré-exposta).
+  vec3 ambient = 0.5 * (textureLod(clearSky, skyLutUv(vec3(0.0, 1.0, 0.0)), 0.0).rgb +
+                        textureLod(clearSky, skyLutUv(normalize(vec3(dir.x, 0.05, dir.z))), 0.0).rgb);
+  float jitter = fract(hash12(vec2(id)) + float(frame.frameInfo.x) * 0.618034);
+  vec3 S;
+  float T;
+  cloudMarch(cloudPlanetPos(frame.cameraPos.xyz), dir, jitter, ambient, S, T);
+  vec3 L = sky * T + S;
+  // Histórico: só quando o frame anterior existe (a câmera anda pouco perto da escala das nuvens).
+  if (frame.frameInfo.w != 0u) L = mix(imageLoad(skyOut, id).rgb, L, 0.25);
+  imageStore(skyOut, id, vec4(clampHalf(L), 1.0));
+}

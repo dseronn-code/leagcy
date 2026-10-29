@@ -162,6 +162,10 @@ class Renderer {
   Targets t_;
 
   rhi::Image skyLut_, dfgLut_, transmittanceLut_, multiScatterLut_, aerialPerspective_;
+  // Nuvens: ruído 3D (uma vez), céu limpo antes das nuvens, sombra das nuvens no chão.
+  rhi::Image cloudNoise_, skyClear_, cloudShadow_;
+  VkSampler cloudSampler_ = VK_NULL_HANDLE;  // linear, repete nas três direções (o ruído é periódico)
+  rhi::ComputePass cloudSkyPass_, cloudShadowPass_;
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::map<std::pair<VkSamplerAddressMode, VkSamplerAddressMode>, VkSampler> wrapSamplers_;  // samplers do glTF

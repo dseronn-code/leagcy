@@ -240,6 +240,8 @@ class Scene {
   // Lua (à noite, quando sunIlluminance = 0): luz direcional com o disco no céu. Lua cheia ≈ 0,25 lux no chão.
   glm::vec3 moonDirection = glm::normalize(glm::vec3(-0.35f, 0.55f, 0.45f));
   float moonIlluminance = 0.0f;
+  // Nuvens volumétricas (cúmulos entre 1,5 e 4 km): fração do céu coberta. 0 = céu limpo (sem custo).
+  float cloudCoverage = 0.0f;
   // Primeira câmera perspectiva do glTF (vista inicial definida pelo autor do asset).
   struct AssetCamera {
     bool valid = false;
