@@ -51,7 +51,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Vidro e transparência | 🟡 | Vidro de parede fina por ray tracing (janelas, vitrines, lanternas, vidro fosco e colorido, várias lâminas); faltam refração com volume, sombra colorida e transparência por mistura (BLEND) |
 | Decals (sujeira, marcas, pichação) | ❌ | |
 | Chuva, superfícies molhadas e poças | 🟡 | Molhado por porosidade, poças com reflexo por ray tracing, anéis dos pingos animados, céu fechado (`--rain`); faltam os pingos caindo (partículas) e a oclusão da chuva sob telhados |
-| Água: oceano FFT, ondas, rios, espuma, cena subaquática | ❌ | Miami ficcional: água em todo lugar |
+| Água: oceano FFT, ondas, rios, espuma, cena subaquática | 🟡 | Oceano FFT de Tessendorf (256², Phillips com vento, ondas "choppy", espuma pelo Jacobiano, reflexo por ray tracing, `--scene ocean`); faltam espalhamento na crista (cor turquesa), refração/vista subaquática, rios e interação com objetos |
 
 ### Personagens
 

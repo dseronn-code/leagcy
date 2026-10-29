@@ -29,6 +29,9 @@ enum MaterialFlags : uint32_t {
   // lanternas e janelas passa) — refração de verdade é o item 2.4 da auditoria.
   kMaterialTransmissive = 1u << 6,
   kMaterialClearcoat = 1u << 7,  // KHR_materials_clearcoat: verniz por cima (pintura de carro)
+  // Superfície do mar: no G-buffer a malha segue a câmera e é deslocada pelas ondas da FFT; nos raios é o plano parado,
+  // com a normal e a espuma lidas da simulação. Ver renderer/ocean.h.
+  kMaterialWater = 1u << 8,
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
@@ -244,6 +247,11 @@ class Scene {
   float cloudCoverage = 0.0f;
   // Chuva (0..1): superfícies molhadas (escurecem e brilham), poças nas superfícies planas, respingos nas poças.
   float wetness = 0.0f, puddles = 0.0f, rain = 0.0f;
+  // Oceano (simulação FFT): objetos com material kMaterialWater viram a superfície do mar, que segue a câmera.
+  bool ocean = false;
+  float windSpeed = 9.0f;       // m/s
+  float windDirection = 0.6f;   // rad
+  float waveHeight = 1.4f;      // altura significativa (m)
   // Primeira câmera perspectiva do glTF (vista inicial definida pelo autor do asset).
   struct AssetCamera {
     bool valid = false;

@@ -1,0 +1,34 @@
+#version 460
+// Espectro do oceano no instante t (Tessendorf 2001): h~(k,t) = h0(k) e^{iωt} + conj(h0(-k)) e^{-iωt}, ω = √(g k).
+// Quatro campos reais empacotados dois a dois em espectros complexos (a IFFT de F + iG dá f + i g quando f e g são
+// reais): (dx, dz), (h, ∂dx/∂z), (∂h/∂x, ∂h/∂z), (∂dx/∂x, ∂dz/∂z).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, std430) readonly buffer H0 { vec4 h0[]; };  // (h0(k), conj(h0(-k)))
+layout(set = 1, binding = 1, rgba32f) uniform writeonly image2D outA;   // (dx + i dz, h + i dxz)
+layout(set = 1, binding = 2, rgba32f) uniform writeonly image2D outB;   // (sx + i sz, dxx + i dzz)
+layout(push_constant) uniform Push { float time; float patchSize; uint size; uint pad; } pc;
+
+vec2 cmul(vec2 a, vec2 b) { return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+vec2 mulI(vec2 a) { return vec2(-a.y, a.x); }  // × i
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(uvec2(id), uvec2(pc.size)))) return;
+  vec2 k = 6.28318530718 * (vec2(id) - float(pc.size / 2u)) / pc.patchSize;
+  float kl = length(k);
+  vec4 h = h0[id.y * int(pc.size) + id.x];
+  float w = sqrt(9.81 * kl) * pc.time;
+  vec2 e = vec2(cos(w), sin(w));
+  vec2 ht = cmul(h.xy, e) + cmul(h.zw, vec2(e.x, -e.y));
+  vec2 dx = vec2(0.0), dz = vec2(0.0), dxz = vec2(0.0), dxx = vec2(0.0), dzz = vec2(0.0);
+  if (kl > 1e-6) {
+    dx = mulI(ht) * (-k.x / kl);  // −i kx/k h~
+    dz = mulI(ht) * (-k.y / kl);
+    dxz = ht * (k.x * k.y / kl);  // (−i kx/k)(i kz) h~
+    dxx = ht * (k.x * k.x / kl);
+    dzz = ht * (k.y * k.y / kl);
+  }
+  vec2 sx = mulI(ht) * k.x, sz = mulI(ht) * k.y;
+  imageStore(outA, id, vec4(dx + mulI(dz), ht + mulI(dxz)));
+  imageStore(outB, id, vec4(sx + mulI(sz), dxx + mulI(dzz)));
+}

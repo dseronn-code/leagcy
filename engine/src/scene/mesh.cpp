@@ -26,6 +26,29 @@ MeshData makeSphere(uint32_t segments, uint32_t rings) {
   return m;
 }
 
+MeshData makeRadialGrid(uint32_t rings, uint32_t segments, float innerRadius, float outerRadius) {
+  MeshData m;
+  m.vertices.push_back({{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}});
+  for (uint32_t r = 0; r < rings; ++r) {
+    const float radius = innerRadius * std::pow(outerRadius / innerRadius, float(r) / float(rings - 1));
+    for (uint32_t k = 0; k < segments; ++k) {
+      const float a = glm::two_pi<float>() * float(k) / float(segments);
+      glm::vec3 p(radius * std::cos(a), 0.0f, radius * std::sin(a));
+      m.vertices.push_back({p, {0.0f, 1.0f, 0.0f}, {p.x, p.z}, {1.0f, 0.0f, 0.0f, 1.0f}});
+    }
+  }
+  auto ring = [&](uint32_t r, uint32_t k) { return 1u + r * segments + k % segments; };
+  // Frente para cima (+y): com o ângulo crescendo de +x para +z, o triângulo (centro, k+1, k) é anti-horário visto
+  // de cima (cross((k+1) - centro, k - centro) aponta para +y).
+  for (uint32_t k = 0; k < segments; ++k) m.indices.insert(m.indices.end(), {0u, ring(0, k + 1), ring(0, k)});
+  for (uint32_t r = 0; r + 1 < rings; ++r)
+    for (uint32_t k = 0; k < segments; ++k) {
+      const uint32_t a = ring(r, k), b = ring(r, k + 1), c = ring(r + 1, k), d = ring(r + 1, k + 1);
+      m.indices.insert(m.indices.end(), {a, b, c, b, d, c});
+    }
+  return m;
+}
+
 MeshData makeCube() {
   // normal, eixo U, eixo V de cada face (U x V = normal => winding anti-horário)
   const glm::vec3 faces[6][3] = {

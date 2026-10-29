@@ -12,6 +12,7 @@
 #include "rhi/pass.h"
 #include "renderer/light_bvh.h"
 #include "renderer/nrd_denoiser.h"
+#include "renderer/ocean.h"
 #include "renderer/upscaler.h"
 #include "rhi/profiler.h"
 #include "scene/camera.h"
@@ -169,6 +170,8 @@ class Renderer {
   rhi::Image cloudNoise_, skyClear_, cloudShadow_;
   VkSampler cloudSampler_ = VK_NULL_HANDLE;  // linear, repete nas três direções (o ruído é periódico)
   rhi::ComputePass cloudSkyPass_, cloudShadowPass_, cloudScreenPass_, fogInjectPass_, fogIntegratePass_;
+  Ocean ocean_;  // simulação FFT (só nas cenas com oceano)
+  VkSampler oceanSampler_ = VK_NULL_HANDLE;  // linear, repete (o patch do oceano é periódico)
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;
   std::map<std::pair<VkSamplerAddressMode, VkSamplerAddressMode>, VkSampler> wrapSamplers_;  // samplers do glTF
