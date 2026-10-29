@@ -208,6 +208,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
 
   s.sunDirection = sunFrom(16.0f, 55.0f);
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
   camera.position = {2.0f, terrainHeight(2, 16) + 3.2f, 16.0f};
   camera.lookAt({0.0f, 1.0f, -6.0f});
   return true;
@@ -246,6 +247,7 @@ bool buildSponza(Scene& s, Camera& camera, const DemoOptions& opt) {
   s.sunDirection = sunFrom(65.0f, 100.0f);
   s.fogDensity = 0.0001f;  // átrio: névoa sem sombra volumétrica viraria um véu branco nas áreas de sombra
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
   // Do fundo do átrio olhando ao longo do eixo X (o comprido).
   camera.position = {-8.5f, 1.6f, -0.6f};
   camera.lookAt({5.0f, 3.4f, 0.4f});
@@ -272,6 +274,7 @@ bool buildFromFile(Scene& s, Camera& camera, const DemoOptions& opt) {
   if (!s.sunFromAsset) s.sunDirection = sunFrom(35.0f, 120.0f);
   s.fogDensity = 0.0003f;
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
   return true;
 }
 
@@ -394,6 +397,7 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
     }
   s.sunDirection = sunFrom(opt.night ? -10.0f : 35.0f, 140.0f);
   s.sunIlluminance = opt.night ? 0.0f : 100000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
   s.fogDensity = 0.0f;
   // Na rua, entre dois quarteirões perto do centro, olhando ao longo da avenida.
   camera.position = glm::vec3(-0.5f * street, 1.7f, 0.25f * pitch);
@@ -552,6 +556,34 @@ bool buildPaintTest(Scene& s, Camera& camera) {
   return true;
 }
 
+// Variante simples da prova das luzes de malha: só o painel do teto e um globo grande e fraco (sem emissores minúsculos
+// e muito fortes, que o caminho sem amostragem de luz não converge).
+bool buildMeshLightSimple(Scene& s, Camera& camera) {
+  uint32_t cube = s.addMesh(makeCube());
+  uint32_t sphere = s.addMesh(makeSphere(32, 16));
+  auto mat = [&](glm::vec3 albedo, float rough, glm::vec3 emissive = glm::vec3(0.0f)) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    m.emissive = emissive;
+    return s.addMaterial(m);
+  };
+  const uint32_t wall = mat(glm::vec3(0.7f), 0.9f), red = mat(glm::vec3(0.7f, 0.08f, 0.06f), 0.8f);
+  s.addObject(cube, trs({0.0f, -0.1f, 0.0f}, {4.0f, 0.1f, 4.0f}), wall);
+  s.addObject(cube, trs({0.0f, 3.1f, 0.0f}, {4.0f, 0.1f, 4.0f}), wall);
+  s.addObject(cube, trs({0.0f, 1.5f, -4.1f}, {4.0f, 1.6f, 0.1f}), red);
+  s.addObject(cube, trs({0.0f, 1.5f, 4.1f}, {4.0f, 1.6f, 0.1f}), wall);
+  s.addObject(cube, trs({-4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
+  s.addObject(cube, trs({4.1f, 1.5f, 0.0f}, {0.1f, 1.6f, 4.0f}), wall);
+  s.addObject(cube, trs({0.0f, 2.95f, -1.0f}, {0.8f, 0.05f, 0.4f}), mat(glm::vec3(1.0f), 0.5f, glm::vec3(300.0f)));
+  s.addObject(sphere, trs({-1.8f, 0.6f, 0.0f}, glm::vec3(0.6f)), mat(glm::vec3(1.0f), 0.5f, {400.0f, 200.0f, 80.0f}));
+  s.sunIlluminance = 0.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 1.6f, 3.6f);
+  camera.lookAt(glm::vec3(0.0f, 1.0f, -1.5f));
+  return true;
+}
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   auto endsWith = [&](const char* ext) {
     size_t n = std::strlen(ext);
@@ -565,6 +597,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (opt.name == "reflections") return buildReflectionTest(scene, camera);
   if (opt.name == "city") return buildCity(scene, camera, opt);
   if (opt.name == "mesh-lights") return buildMeshLightTest(scene, camera);
+  if (opt.name == "mesh-lights-simple") return buildMeshLightSimple(scene, camera);
   if (opt.name == "glass") return buildGlassTest(scene, camera);
   if (opt.name == "paint") return buildPaintTest(scene, camera);
   return buildSponza(scene, camera, opt);

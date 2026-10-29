@@ -91,6 +91,7 @@ vec2 fetchVertexUV(VertexData vb, uint i) { return vec2(vb.v[i * 12u + 6u], vb.v
 // Janela suave que leva a influência da luz a zero no alcance (evita corte seco), vezes o cone do spot
 // (KHR_lights_punctual), avaliado na direção do centro da luz até P.
 float lightWindow(PointLight l, vec3 P, float dist) {
+  if (l.type == LIGHT_TRIANGLE) return 1.0;  // luz de malha: física, sem alcance artístico
   float x = dist / l.range;
   float w = clamp(1.0 - x * x * x * x, 0.0, 1.0);
   float spot = 1.0;

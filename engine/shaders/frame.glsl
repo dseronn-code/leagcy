@@ -30,6 +30,7 @@ layout(set = 0, binding = 0) uniform FrameData {
                               // w = bit 0: referência por path tracing (rebotes de verdade); bit 1: cache de radiância desligado;
                               //     bit 2: movimento virtual do reflexo desligado no SVGF (medição)
   vec4 environment;           // x = céu uniforme em nits (> 0: teste da fornalha branca)
+  vec4 night;                 // x = 1: a luz direcional (sunDir) é a lua; y = iluminância de magnitude 0 (lux)
 } frame;
 
 bool energyCompensationEnabled() { return frame.quality1.w > 0.5; }
@@ -110,7 +111,38 @@ vec3 sunDisk(vec3 dir) {
   if (mu <= cosR || frame.sunDir.w <= 0.0) return vec3(0.0);
   float r = sqrt(max(0.0, 1.0 - mu * mu)) / sin(frame.params.x);
   float limb = 1.0 - 0.6 * (1.0 - sqrt(max(0.0, 1.0 - r * r)));  // escurecimento de borda
+  if (frame.night.x > 0.5) {
+    // Lua: sem escurecimento de borda (superfície que espalha) e com os "mares" escuros, por ruído de baixa frequência
+    // num referencial preso ao disco.
+    vec3 t, b;
+    orthonormalBasis(frame.sunDir.xyz, t, b);
+    vec2 p = vec2(dot(dir, t), dot(dir, b)) / sin(frame.params.x);
+    limb = 1.15 - 0.45 * smoothstep(0.35, 0.75, fbm(p * 2.2 + 3.7, 4));
+  }
   return sunIrradianceAt(frame.cameraPos.xyz) / (TWO_PI * (1.0 - cosR)) * limb;
+}
+
+// Estrelas (só à noite): uma por célula de uma grade em volta da câmera, com magnitude sorteada (muitas fracas, poucas
+// fortes), desenhadas como uma gaussiana do tamanho de ~1 pixel que integra a iluminância da estrela — o brilho no
+// pixel não depende da resolução. Apagadas perto do horizonte pela transmitância da atmosfera.
+vec3 starField(vec3 dir) {
+  if (frame.night.y <= 0.0 || dir.y <= 0.0) return vec3(0.0);
+  const float GRID = 420.0;
+  vec3 p = dir * GRID;
+  vec3 cell = floor(p);
+  uvec3 h = pcg3d(uvec3(ivec3(cell) + ivec3(4096)));
+  vec3 r = vec3(h) * (1.0 / 4294967296.0);
+  if (r.x > 0.012) return vec3(0.0);  // ~1 célula em 80 tem estrela
+  vec3 jitter = vec3(pcg3d(h ^ uvec3(0x68e31da4u))) * (1.0 / 4294967296.0);
+  vec3 star = normalize(cell + 0.2 + 0.6 * jitter);  // longe da borda da célula
+  float pixelAngle = 2.0 * frame.renderSize.w / abs(frame.proj[1][1]);  // ângulo de um pixel (proj[1][1] = ±1/tan(fov/2))
+  float sigma = 0.6 * pixelAngle;
+  float theta = acos(clamp(dot(dir, star), -1.0, 1.0));
+  float magnitude = -1.0 + 7.0 * sqrt(r.y);                    // de -1 (Sírius) a 6 (limite do olho)
+  float E = frame.night.y * pow(10.0, -0.4 * magnitude);       // lux
+  vec3 tint = mix(vec3(0.75, 0.85, 1.0), vec3(1.0, 0.85, 0.65), r.z * 80.0);  // estrelas azuladas a alaranjadas
+  float profile = exp(-0.5 * theta * theta / (sigma * sigma)) / (TWO_PI * sigma * sigma);  // 1/sr, integra 1
+  return E * profile * tint * preExposure() * transmittanceToSun(planetPos(frame.cameraPos.xyz), dir);
 }
 
 // Perspectiva aérea: atmosfera entre a câmera e um ponto da cena (volume 32³, até 32 km).

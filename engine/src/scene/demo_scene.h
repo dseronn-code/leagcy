@@ -8,7 +8,8 @@ namespace scene {
 
 struct DemoOptions {
   std::string name = "sponza";  // sponza, outdoor, furnace, shadows, shadows-far ou arquivo .gltf/.glb
-  bool night = false;           // noite: sem sol, só luzes locais (vitrine do ReSTIR)
+  bool night = false;           // noite: sem sol; luzes locais (vitrine do ReSTIR), lua e estrelas
+  bool moon = true;             // à noite, lua cheia (--no-moon: noite sem lua)
   uint32_t lightCount = 0;      // 0 = padrão da cena
   uint32_t cityBlocks = 16;     // cena "city": quarteirões por lado (16 = ~5 mil objetos; 64 = ~90 mil)
 };

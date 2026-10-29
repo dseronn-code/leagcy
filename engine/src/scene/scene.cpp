@@ -248,11 +248,10 @@ void Scene::buildMeshLights() {
       lights.push_back(l);
     }
     writeMeshLights(src);
-    // Alcance: onde a iluminância do triângulo (radiância × área, de frente) cai a 0,002 lux.
-    for (size_t t = 0; t < src.primitives.size(); ++t) {
-      PointLight& l = lights[src.firstLight + t];
-      l.range = std::max(1.0f, std::sqrt(lumOf(l.intensity) * l.area / 0.002f));
-    }
+    // Sem alcance: a janela de alcance das luzes pontuais (corte suave artístico) já tira luz bem antes do corte, e
+    // numa luz de malha isso seria viés — medido: −16% nas paredes da cena mesh-lights. A BVH de luzes já faz as
+    // luzes distantes e fracas quase nunca serem escolhidas.
+    for (size_t t = 0; t < src.primitives.size(); ++t) lights[src.firstLight + t].range = 1e30f;
     triangles += src.primitives.size();
     meshLightSourceOf_[i] = int32_t(meshLightSources_.size());
     meshLightSources_.push_back(std::move(src));

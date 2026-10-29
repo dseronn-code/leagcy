@@ -30,19 +30,19 @@ Vídeos (Dia 3): [Sponza à noite com personagens](docs/videos/dia03_sponza_noit
 | Sistema | Técnica | Onde |
 |---|---|---|
 | RHI Vulkan moderno | Dynamic rendering, synchronization2, push descriptors, texturas bindless, VMA | `src/rhi/` |
-| Assets | glTF 2.0 (cgltf), texturas JPG/PNG com mipmaps gerados na GPU, normal maps | `src/scene/gltf_loader.cpp` |
+| Assets | glTF 2.0 (cgltf): JPG/PNG comprimidos em BC7/BC5 (cache em disco) e DDS BC7 (`MSFT_texture_dds`); luzes `KHR_lights_punctual` (pontual, spot, direcional); câmera; samplers; `doubleSided`; oclusão; mips de recorte por alfa com cobertura preservada | `src/scene/gltf_loader.cpp` |
 | Renderização | Deferred: G-buffer + iluminação em compute | `src/renderer/` |
 | Cena dinâmica | Transformações por frame, vetores de movimento por objeto, TLAS reconstruído na GPU, luzes móveis | `src/renderer/renderer.cpp` |
 | Animação esquelética | Esqueletos e clipes glTF, skinning em compute, refit de BLAS (sombras/reflexos seguem a pose) | `shaders/skinning.comp` |
 | Ray tracing | BLAS/TLAS + `VK_KHR_ray_query`, com teste de alfa (folhagem, grades) | `shaders/raytracing.glsl` |
 | Sombras | Traçadas por raio, penumbra física (sol e luzes) | `shaders/lighting.glsl` |
-| Milhares de luzes | **ReSTIR DI**: RIS + reuso temporal e espacial + visibilidade | `shaders/restir*.glsl` |
+| Milhares de luzes | **ReSTIR DI**: RIS + reuso temporal e espacial + visibilidade; BVH de luzes; **luzes de malha** (cada triângulo emissivo é uma luz, como no RTXDI) | `shaders/restir*.glsl` |
 | Iluminação global | 1 rebote difuso traçado + reflexões VNDF (GGX) | `shaders/lighting.glsl` |
-| Denoiser | **SVGF**: acumulação temporal com reprojeção + à-trous guiado por variância | `shaders/svgf_*.comp` |
+| Denoiser | **DLSS Ray Reconstruction** (padrão em RTX); sem RTX, **SVGF** próprio (ou NRD ReLAX/ReBLUR) | `shaders/svgf_*.comp`, `src/renderer/upscaler.cpp` |
 | Anti-aliasing / upscaling | **TAAU** próprio (reconstrução gaussiana, Catmull-Rom, clipping YCoCg, nitidez RCAS) ou **NVIDIA DLSS 4** / **AMD FSR 3** (`--upscaler`), com volta automática ao TAAU | `shaders/taa.comp`, `src/renderer/upscaler.cpp` |
 | Pós-processamento | Auto-exposição por histograma, bloom físico (COD:AW), DOF com autofoco, motion blur, ACES | `shaders/` |
-| Materiais | PBR glTF (metálico/rugosidade, especular/glossiness, KHR specular/ior); GGX com compensação de energia (Turquin), difuso com conservação de energia, AA especular | `shaders/brdf.glsl` |
-| Céu | Atmosfera física Rayleigh/Mie/ozônio + sky-view LUT (Hillaire 2020) | `shaders/atmosphere.glsl` |
+| Materiais | PBR glTF (metálico/rugosidade, especular/glossiness, KHR specular/ior); GGX com compensação de energia (Turquin), difuso com conservação de energia, AA especular; **vidro** (`KHR_materials_transmission`, por ray tracing); **pintura de carro** (verniz `KHR_materials_clearcoat` + flocos metálicos) | `shaders/brdf.glsl`, `shaders/lighting.glsl` |
+| Céu | Atmosfera física Rayleigh/Mie/ozônio + sky-view LUT (Hillaire 2020); à noite, lua (luz e disco) e estrelas | `shaders/atmosphere.glsl`, `shaders/frame.glsl` |
 | Câmera | Reverse-Z com plano distante infinito; exposição física em EV100 | `src/scene/camera.h` |
 | Unidades físicas | Sol em lux, luzes em candela, emissão em nits, pré-exposição dos alvos HDR | `shaders/frame.glsl` |
 
@@ -131,12 +131,12 @@ Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sob
 ## Limitações conhecidas
 
 - FSR 3 só no build do Windows; XeSS não existe para Vulkan.
-- Texturas sobem para a GPU sem compressão (BC7 pendente), então cenas grandes usam bastante VRAM.
-- Materiais com transparência (`BLEND`) são tratados como recorte por alfa.
+- Materiais com transparência (`BLEND`) são tratados como recorte por alfa; vidro com volume (refração, `KHR_materials_volume`) ainda não.
+- Tangentes: aproximação do MikkTSpace quando o arquivo não traz tangentes (a biblioteca de referência espera aprovação).
 - Sem ray tracing (`--no-rt`) não há sombras; shadow maps em cascata entram depois.
 - Animação: morph targets ainda não suportados; interpolação CUBICSPLINE usa só os valores-chave.
 - Cada personagem tem sua própria cópia da malha deformável (multidões instanciadas vêm depois).
-- Desempenho ainda não foi medido em GPU real (desenvolvido e validado com o driver por software lavapipe).
+- Desempenho medido numa RTX 3070 Ti (`tools/teste_pc.py`); a otimização vem depois da paridade visual.
 
 ## Arquitetura
 

@@ -49,6 +49,7 @@ struct Options {
 
 Options parseArgs(int argc, char** argv) {
   Options o;
+  bool noFireflyClamp = false;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     auto next = [&]() -> const char* { return i + 1 < argc ? argv[++i] : ""; };
@@ -66,6 +67,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
     else if (a == "--no-mesh-lights") o.meshLights = false;
+    else if (a == "--no-firefly-clamp") noFireflyClamp = true;
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
     else if (a == "--sun-azimuth") o.sunAzimuth = float(std::atof(next()));
@@ -78,6 +80,7 @@ Options parseArgs(int argc, char** argv) {
       o.customCamera = true;
     }
     else if (a == "--night") o.scene.night = true;
+    else if (a == "--no-moon") o.scene.moon = false;
     else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--city-blocks") o.scene.cityBlocks = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--scale") o.scaleOverride = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
@@ -142,7 +145,7 @@ Options parseArgs(int argc, char** argv) {
       std::printf(
           "uso: legacy [opções]\n"
           "  --scene sponza|outdoor|furnace|arquivo.gltf   cena (furnace = teste da fornalha branca)\n"
-          "  --night                  noite: só luzes locais (ReSTIR)\n"
+          "  --night [--no-moon]      noite: luzes locais (ReSTIR), lua cheia e estrelas\n"
           "  --lights N               número de luzes pontuais\n"
           "  --scene city [--city-blocks N]  cidade procedural de NxN quarteirões (teste de escala; padrão 16)\n"
           "  --quality P              baixo | medio | alto | ultra (padrão) | cinema (sem economia)\n"
@@ -161,6 +164,7 @@ Options parseArgs(int argc, char** argv) {
           "  --reference-pt             idem, com os rebotes por path tracing (verdade de GI e reflexos)\n"
           "  --no-texture-compression   texturas em RGBA8 (padrão: BC7, 4x menos memória de vídeo)\n"
           "  --no-mesh-lights           emissivos sem amostragem de luz (só para medir as luzes de malha)\n"
+          "  --no-firefly-clamp         sem limite de vagalumes (medição)\n"
           "  --no-radiance-cache        desliga o cache de radiância (rebotes além do 1º pelo céu aproximado)\n"
           "  --sharpness X              nitidez RCAS na saída (0 a 1; padrão 0,5, ou 0 com DLSS)\n"
           "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
@@ -172,6 +176,8 @@ Options parseArgs(int argc, char** argv) {
     }
   }
   if (o.scaleOverride > 0.0f) o.render.quality.renderScale = o.scaleOverride;
+  // Medição: sem o limite de "vagalumes" (o caminho ingênuo sem amostrar luzes perde energia nele).
+  if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;
   return o;
 }
 
