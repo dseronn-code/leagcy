@@ -45,7 +45,11 @@ void main() {
   // Movimento da câmera + do objeto + da deformação do esqueleto.
   outMotion = (vCurClip.xy / vCurClip.w - vPrevClip.xy / vPrevClip.w) * 0.5;
   outDiffuse = vec4(s.diffuseColor, s.occlusion);  // a: oclusão do material (luz indireta)
-  outNormal = vec4(s.normal, filterRoughness(s.normal, s.roughness, s.normalVariance));
+  // Com verniz forte, a rugosidade do G-buffer é a do verniz (o lobo mais nítido decide o denoiser e as guias do
+  // DLSS-RR); a iluminação relê a rugosidade da base no material.
+  float gRoughness = s.clearcoat >= 0.5 ? filterRoughness(normalize(N), s.clearcoatRoughness, 0.0)
+                                        : filterRoughness(s.normal, s.roughness, s.normalVariance);
+  outNormal = vec4(s.normal, gRoughness);
   outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
   outSpecular = vec4(s.f0, s.f90);
   outVisibility = uvec2(vObject + 1u, uint(gl_PrimitiveID));

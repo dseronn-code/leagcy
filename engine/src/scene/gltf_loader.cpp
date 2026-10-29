@@ -156,6 +156,13 @@ struct Loader {
       }
       if (src.has_ior) m.ior = src.ior.ior;
       if (src.double_sided) m.flags |= kMaterialDoubleSided;
+      if (src.has_clearcoat && src.clearcoat.clearcoat_factor > 0.0f) {
+        m.flags |= kMaterialClearcoat;
+        m.clearcoat = src.clearcoat.clearcoat_factor;
+        m.clearcoatRoughness = src.clearcoat.clearcoat_roughness_factor;
+        m.clearcoatTex = texture(src.clearcoat.clearcoat_texture, false);
+        m.clearcoatRoughnessTex = texture(src.clearcoat.clearcoat_roughness_texture, false);
+      }
       if (src.has_transmission && src.transmission.transmission_factor > 0.0f) {
         m.flags |= kMaterialTransmissive;
         m.transmission = src.transmission.transmission_factor;

@@ -28,6 +28,7 @@ enum MaterialFlags : uint32_t {
   // KHR_materials_transmission: vidro. Por enquanto opaco na imagem, mas não bloqueia os raios de sombra (a luz das
   // lanternas e janelas passa) — refração de verdade é o item 2.4 da auditoria.
   kMaterialTransmissive = 1u << 6,
+  kMaterialClearcoat = 1u << 7,  // KHR_materials_clearcoat: verniz por cima (pintura de carro)
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
@@ -54,9 +55,15 @@ struct Material {
   // base (vidro de janela, garrafa). O difuso cai na mesma proporção.
   float transmission = 0.0f;
   int32_t transmissionTex = -1;  // R
+  // KHR_materials_clearcoat: camada de verniz (dielétrico, f0 = 4%) sobre o material, com rugosidade própria e a
+  // normal suave da geometria (o verniz cobre o relevo do normal map).
+  float clearcoat = 0.0f;
+  float clearcoatRoughness = 0.0f;
+  int32_t clearcoatTex = -1;           // R
+  int32_t clearcoatRoughnessTex = -1;  // G
   float pad1 = 0.0f, pad2 = 0.0f;
 };
-static_assert(sizeof(Material) == 112);
+static_assert(sizeof(Material) == 128);
 
 enum LightType : uint32_t {
   kLightSphere = 0,    // esfera (pontual com tamanho) ou spot
