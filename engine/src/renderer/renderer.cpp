@@ -209,6 +209,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   cloudNoise_ = rhi::createImage3D(ctx, kCloudNoiseExtent, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   skyClear_ = rhi::createImage2D(ctx, skyLutExtent_, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   cloudShadow_ = rhi::createImage2D(ctx, kCloudShadowExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  rainOcclusion_ = rhi::createImage2D(ctx, {256, 256}, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   cloudSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
   oceanSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
@@ -281,6 +282,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {17, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {18, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {19, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {20, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -296,7 +298,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {CIS, kFramesInFlight * (9 + kMaxTextures)},
+      {CIS, kFramesInFlight * (10 + kMaxTextures)},
       {SB, kFramesInFlight * 8},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
@@ -327,6 +329,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   fogInjectPass_.init(ctx, rt ? "fog_inject_rt.comp" : "fog_inject.comp", g, {SI, CIS});
   fogIntegratePass_.init(ctx, "fog_integrate.comp", g, {CIS, SI});
   sssPass_.init(ctx, "sss.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SI}, sizeof(glm::ivec2));
+  if (rt) rainOcclusionPass_.init(ctx, "rain_occlusion.comp", g, {SI});
   for (const auto& m : scene.materials) hasSubsurface_ = hasSubsurface_ || (m.flags & scene::kMaterialSubsurface);
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS});
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS});
@@ -398,7 +401,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   multiScatterPass.init(ctx, "atmosphere_multiscatter.comp", g, {SI});
   ctx.immediateSubmit([&](VkCommandBuffer cmd) {
     for (rhi::Image* img : {&skyLut_, &dfgLut_, &transmittanceLut_, &multiScatterLut_, &aerialPerspective_, &cloudNoise_,
-                            &skyClear_, &cloudShadow_})
+                            &skyClear_, &cloudShadow_, &rainOcclusion_})
       rhi::imageBarrier(cmd, img->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                         VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
@@ -475,6 +478,8 @@ void Renderer::writeGlobalDescriptors() {
     for (uint32_t b = 0; b < 2; ++b) add(17 + b, CIS, 1).pImageInfo = &ocean[b];
     VkDescriptorBufferInfo decals{s.decalBuffer.handle, 0, VK_WHOLE_SIZE};
     add(19, SB, 1).pBufferInfo = &decals;
+    VkDescriptorImageInfo rainOcc{linear_, rainOcclusion_.view, VK_IMAGE_LAYOUT_GENERAL};
+    add(20, CIS, 1).pImageInfo = &rainOcc;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -650,7 +655,9 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // Noite: a lua faz o papel do sol (mesmo disco, sombra e céu espalhado, com a iluminância dela) e as estrelas
   // aparecem no céu. Iluminância de magnitude 0 no topo da atmosfera: 2,5 µlux.
   u.night = glm::vec4(0.0f, 0.0f, scene_->cloudCoverage, scene_->time);
-  u.weather = glm::vec4(scene_->wetness, scene_->puddles, scene_->rain, historyValid_ ? prevSceneTime_ : scene_->time);
+  const bool rainMap = ctx_->rayTracing && scene_->wetness > 0.0f;  // mapa de oclusão da chuva (rain_occlusion.comp)
+  u.weather = glm::vec4(scene_->wetness, scene_->puddles, rainMap ? scene_->rain : -1.0f - scene_->rain,
+                        historyValid_ ? prevSceneTime_ : scene_->time);
   prevSceneTime_ = scene_->time;
   if (scene_->sunIlluminance <= 0.0f) {
     u.night.y = 2.5e-6f;
@@ -700,6 +707,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   aerialPerspectivePass_.dispatch(cmd, gs, {Binding::storageImage(aerialPerspective_.view)},
                                   {kAerialPerspectiveExtent.width, kAerialPerspectiveExtent.height});
   if (clouds) cloudShadowPass_.dispatch(cmd, gs, {Binding::storageImage(cloudShadow_.view)}, kCloudShadowExtent);
+  if (ctx_->rayTracing && scene_->wetness > 0.0f)
+    rainOcclusionPass_.dispatch(cmd, gs, {Binding::storageImage(rainOcclusion_.view)}, {256, 256});
   barrier();
   if (clouds) {
     cloudSkyPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view), Binding::sampled(skyClear_.view, linear_)},
@@ -1198,7 +1207,7 @@ void Renderer::destroy() {
   destroyTargets();
   profiler_.destroy();
   rhi::destroyImage(ctx, skyLut_);
-  for (rhi::Image* img : {&cloudNoise_, &skyClear_, &cloudShadow_}) rhi::destroyImage(ctx, *img);
+  for (rhi::Image* img : {&cloudNoise_, &skyClear_, &cloudShadow_, &rainOcclusion_}) rhi::destroyImage(ctx, *img);
   vkDestroySampler(ctx.device, cloudSampler_, nullptr);
   vkDestroySampler(ctx.device, oceanSampler_, nullptr);
   ocean_.destroy(ctx);
@@ -1214,7 +1223,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
-  for (rhi::ComputePass* p : {&sssPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

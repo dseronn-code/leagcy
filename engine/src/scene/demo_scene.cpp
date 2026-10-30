@@ -687,6 +687,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
     if (opt.clouds < 0.0f && scene.sunIlluminance > 0.0f)  // chuva vem com céu fechado
       scene.cloudCoverage = std::max(scene.cloudCoverage, 0.5f + 0.4f * scene.rain);
     scene.addEmitter(kParticleRain, glm::vec3(0.0f), 0.0f, scene.rain, uint32_t(40000.0f * scene.rain));  // pingos
+    scene.addEmitter(kParticleSplash, glm::vec3(0.0f), 0.0f, scene.rain, uint32_t(4000.0f * scene.rain));  // respingos
   }
   return true;
 }

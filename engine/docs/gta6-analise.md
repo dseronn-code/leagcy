@@ -50,7 +50,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Pintura de carro (clearcoat, flocos metálicos) | ✅ | `KHR_materials_clearcoat` (verniz com reflexo traçado próprio) + flocos metálicos que viram rugosidade à distância (sem cintilar) |
 | Vidro e transparência | 🟡 | Vidro de parede fina por ray tracing (janelas, vitrines, lanternas, vidro fosco e colorido, várias lâminas); faltam refração com volume, sombra colorida e transparência por mistura (BLEND) |
 | Decals (sujeira, marcas, pichação) | 🟡 | Decals procedurais por caixa projetada (faixa de pedestre, tracejado, sujeira, óleo, rachaduras) aplicados no material — aparecem também nos reflexos e molham com a chuva; faltam decals de textura (pichação, cartazes), em paredes, e uma grade espacial para milhares deles |
-| Chuva, superfícies molhadas e poças | 🟡 | Molhado por porosidade, poças com reflexo por ray tracing, anéis dos pingos animados, céu fechado (`--rain`); pingos caindo (partículas); falta a oclusão da chuva sob telhados |
+| Chuva, superfícies molhadas e poças | ✅ | Molhado por porosidade, poças com reflexo por ray tracing e anéis dos pingos, pingos caindo e respingos no chão (partículas), céu fechado; abrigo sob telhados por um mapa de oclusão traçado de cima (`--rain`). Sem ray tracing, molha tudo |
 | Água: oceano FFT, ondas, rios, espuma, cena subaquática | 🟡 | Oceano FFT de Tessendorf (256², Phillips com vento, ondas "choppy", espuma pelo Jacobiano, reflexo por ray tracing, `--scene ocean`); faltam espalhamento na crista (cor turquesa), refração/vista subaquática, rios e interação com objetos |
 
 ### Personagens

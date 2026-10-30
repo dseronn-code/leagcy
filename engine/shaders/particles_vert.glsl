@@ -45,7 +45,8 @@ void main() {
   }
   float alpha = p.alpha;
   vColor = vec4(light * preExposure() * max(alpha, 1.0 - step(1e-6, alpha)), alpha);  // emissivo: soma pura
-  if (e.type == PARTICLE_RAIN) vColor.rgb = sampleSky(normalize(vec3(0.0, 1.0, 0.0) + toCam)) * 0.6 * alpha;
+  if (e.type == PARTICLE_RAIN || e.type == PARTICLE_SPLASH)  // água: devolve a luz do céu (refração e reflexo)
+    vColor.rgb = sampleSky(normalize(vec3(0.0, 1.0, 0.0) + toCam)) * 0.6 * alpha;
   vCorner = c;
   vec3 rel = world - frame.cameraPos.xyz;
   vViewDepth = -(mat3(frame.view) * rel).z;

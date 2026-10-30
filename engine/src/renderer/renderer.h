@@ -175,7 +175,8 @@ class Renderer {
   Ocean ocean_;  // simulação FFT (só nas cenas com oceano)
   float prevSceneTime_ = 0.0f;
   bool hasSubsurface_ = false;  // a cena tem material com espalhamento subsuperficial
-  rhi::ComputePass sssPass_;
+  rhi::ComputePass sssPass_, rainOcclusionPass_;
+  rhi::Image rainOcclusion_;  // altura exposta à chuva em volta da câmera (R16F seria pouco: guarda metros)
   VkSampler oceanSampler_ = VK_NULL_HANDLE;  // linear, repete (o patch do oceano é periódico)
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;

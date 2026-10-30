@@ -105,7 +105,7 @@ struct PointLight {
 static_assert(sizeof(PointLight) == 80);
 
 // Emissor de partículas (shaders/particles.glsl): fogo, fumaça, faíscas ou chuva (em volta da câmera).
-enum ParticleType : uint32_t { kParticleFire = 0, kParticleSmoke = 1, kParticleSparks = 2, kParticleRain = 3 };
+enum ParticleType : uint32_t { kParticleFire = 0, kParticleSmoke = 1, kParticleSparks = 2, kParticleRain = 3, kParticleSplash = 4 };
 struct ParticleEmitter {
   glm::vec3 position{0.0f};
   uint32_t type = kParticleFire;
