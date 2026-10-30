@@ -20,6 +20,7 @@ const uint MATERIAL_CLEARCOAT = 128u;       // verniz (KHR_materials_clearcoat)
 const uint MATERIAL_WATER = 256u;           // mar (renderer/ocean.h)
 const uint MATERIAL_FOLIAGE = 512u;         // balança com o vento (gbuffer.vert)
 const uint MATERIAL_SUBSURFACE = 1024u;     // espalhamento subsuperficial (sss.comp)
+const uint MATERIAL_BLEND = 2048u;          // misturado no G-buffer (decals BLEND do glTF)
 
 // Simulação do oceano (renderer/ocean.cpp): repete a cada OCEAN_PATCH metros.
 layout(set = 0, binding = 17) uniform sampler2D oceanDisplacement;  // xyz = deslocamento, w = Jacobiano

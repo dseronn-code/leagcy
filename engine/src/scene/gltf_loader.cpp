@@ -184,8 +184,8 @@ struct Loader {
         m.flags |= kMaterialAlphaMask;
         m.alphaCutoff = src.alpha_cutoff;
       } else if (src.alpha_mode == cgltf_alpha_mode_blend) {
-        // Transparência real ainda não existe; trata como recorte (melhor que opaco).
-        m.flags |= kMaterialAlphaMask;
+        // Misturado no G-buffer (passe de decals); nos raios, recorte por alfa.
+        m.flags |= kMaterialAlphaMask | kMaterialBlend;
         m.alphaCutoff = 0.5f;
       }
       if (m.flags & kMaterialAlphaMask) scene.setTextureAlphaCutoff(m.baseColorTex, m.alphaCutoff);

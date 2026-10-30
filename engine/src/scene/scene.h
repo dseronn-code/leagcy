@@ -35,6 +35,9 @@ enum MaterialFlags : uint32_t {
   // Folhagem: balança com o vento no vertex shader (marcado no glTF para materiais de recorte por alfa e dois lados).
   kMaterialFoliage = 1u << 9,
   kMaterialSubsurface = 1u << 10,  // espalhamento subsuperficial (shaders/sss.comp)
+  // glTF alphaMode BLEND: misturado no G-buffer por cima do que já está lá (decals de sujeira, marcas), sem escrever
+  // profundidade; nos raios vale o recorte por alfa.
+  kMaterialBlend = 1u << 11,
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
