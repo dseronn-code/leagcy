@@ -252,6 +252,18 @@ struct GpuMesh {
   // (m) a partir da qual cada uma é usada. -1 = sem esse nível.
   int lod[2] = {-1, -1};
   float lodDistance[2] = {0.0f, 0.0f};
+  // Streaming: malha de uma célula do mundo, na GPU só quando a câmera está perto (Scene::stream).
+  bool resident = true;
+  int cell = -1;  // -1 = sempre residente
+};
+
+// Célula de streaming: as malhas dela sobem para a GPU (buffers e BLAS) quando a câmera chega a loadDistance da
+// borda e saem quando passa de unloadDistance (histerese: não fica carregando e descarregando na fronteira).
+struct StreamCell {
+  glm::vec3 center{0.0f};
+  float radius = 0.0f;
+  std::vector<uint32_t> meshes;
+  bool resident = false;
 };
 
 class Scene {
@@ -304,6 +316,37 @@ class Scene {
   std::vector<PointLight> lights;
   std::vector<ParticleEmitter> emitters;
   std::vector<CrowdClip> crowdClips;
+  // Streaming do mundo: células e a malha de cada uma (antes do upload). stream() a cada frame.
+  std::vector<StreamCell> streamCells;
+  float streamLoadDistance = 350.0f, streamUnloadDistance = 450.0f;  // m da borda da célula
+  float streamBudgetMB = 24.0f;                                      // por chamada de stream()
+  uint32_t addStreamCell(glm::vec3 center, float radius) {
+    streamCells.push_back({center, radius, {}, false});
+    return uint32_t(streamCells.size() - 1);
+  }
+  void setMeshCell(uint32_t mesh, uint32_t cell) {
+    if (meshCellPending_.size() <= mesh) meshCellPending_.resize(mesh + 1, -1);
+    meshCellPending_[mesh] = int(cell);
+    streamCells[cell].meshes.push_back(mesh);
+  }
+  // Carrega/descarrega células pela posição da câmera (fora da gravação de comandos). Devolve se algo mudou.
+  bool stream(rhi::Context& ctx, glm::vec3 camera);
+  // Objetos cujas entradas do buffer de instâncias (endereços da malha) mudaram: o renderer reescreve na GPU.
+  std::vector<uint32_t> takeInstanceUpdates() { return std::move(instanceUpdates_); }
+  rhi::Buffer& instances() { return instanceBuffer; }
+  size_t residentStreamBytes() const { return residentBytes_; }
+  // TLAS compacto: só objetos com malha na memória entram (posição no TLAS por objeto, -1 = fora). O layout muda
+  // quando o streaming carrega/descarrega; o renderer então reescreve todas as instâncias.
+  int32_t tlasSlotOf(uint32_t object) const { return object < tlasSlot_.size() ? tlasSlot_[object] : -1; }
+  uint32_t tlasInstanceCount() const { return tlasCount_; }
+  uint32_t tlasLayout() const { return tlasLayout_; }
+  // Endereços de vértices/índices de uma malha para o buffer de instâncias: a malha vazia (válida) se ela está fora
+  // da memória — nenhum shader lê endereço inválido mesmo que um driver ignore a máscara da instância.
+  void instanceAddresses(uint32_t mesh, uint64_t& vertices, uint64_t& indices) const {
+    const bool r = meshes[mesh].resident;
+    vertices = r ? meshes[mesh].vertices.address : emptyVertices_.address;
+    indices = r ? meshes[mesh].indices.address : emptyIndices_.address;
+  }
   // Assa `frames` poses do clipe ativo da malha com esqueleto do modelo (pele feita na CPU) e devolve o índice do
   // clipe. Chame antes do upload.
   uint32_t bakeCrowdClip(int model, uint32_t frames);
@@ -369,6 +412,24 @@ class Scene {
 
   std::vector<MeshData> cpuMeshes_;
   std::vector<uint32_t> crowdObjects_;
+  // Streaming: dados de CPU das malhas de células (ficam na RAM), objetos por malha, destruições adiadas.
+  std::vector<int> meshCellPending_;
+  std::vector<MeshData> streamData_;
+  std::vector<std::vector<uint32_t>> objectsOfMesh_;
+  std::vector<uint32_t> instanceUpdates_;
+  struct PendingDestroy {
+    uint32_t mesh;
+    uint32_t framesLeft;
+  };
+  std::vector<PendingDestroy> pendingDestroy_;
+  size_t residentBytes_ = 0;
+  rhi::Context* ctx_ = nullptr;
+  rhi::Buffer emptyVertices_, emptyIndices_;  // malha vazia: endereços válidos para objetos fora da memória
+  std::vector<int32_t> tlasSlot_;
+  uint32_t tlasCount_ = 0, tlasLayout_ = 0;
+  void rebuildTlasLayout();
+  void makeResident(uint32_t mesh);
+  void evict(uint32_t mesh);
   std::vector<uint32_t> changed_, movedNow_, movedLast_;
   std::vector<uint8_t> movedMark_;
   std::vector<TextureData> cpuTextures_;

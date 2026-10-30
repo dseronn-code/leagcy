@@ -8,6 +8,8 @@
 
 namespace rhi {
 
+constexpr uint32_t kFramesInFlightMax = 3;  // folga para destruir recursos que um frame em voo ainda usa
+
 struct AccelStructure {
   VkAccelerationStructureKHR handle = VK_NULL_HANDLE;
   Buffer storage;

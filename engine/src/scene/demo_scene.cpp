@@ -832,6 +832,93 @@ bool buildHairTest(Scene& s, Camera& camera) {
   return true;
 }
 
+// Acrescenta uma caixa (centro, meias-medidas) a uma malha, com normais e UVs por face.
+void appendBox(MeshData& m, glm::vec3 c, glm::vec3 h) {
+  const glm::vec3 n[6] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  for (const glm::vec3& nf : n) {
+    const glm::vec3 u = std::abs(nf.y) > 0.5f ? glm::vec3(1, 0, 0) : glm::normalize(glm::cross(glm::vec3(0, 1, 0), nf));
+    const glm::vec3 v = glm::cross(nf, u);
+    const uint32_t base = uint32_t(m.vertices.size());
+    for (int k = 0; k < 4; ++k) {
+      const float su = (k == 1 || k == 2) ? 1.0f : -1.0f, sv = (k >= 2) ? 1.0f : -1.0f;
+      const glm::vec3 p = c + h * (nf + u * su + v * sv);
+      m.vertices.push_back({p, nf, {su * 0.5f + 0.5f, sv * 0.5f + 0.5f}, {u, 1.0f}});
+    }
+    m.indices.insert(m.indices.end(), {base, base + 1, base + 2, base, base + 2, base + 3});
+  }
+}
+
+// Torre procedural única: andares escalonados (recuos), janelas em relevo em todas as fachadas, caixa d'água.
+MeshData makeTower(uint32_t seed) {
+  std::mt19937 rng(seed);
+  std::uniform_real_distribution<float> u(0.0f, 1.0f);
+  MeshData m;
+  float w = 8.0f + 8.0f * u(rng), d = 8.0f + 8.0f * u(rng), y = 0.0f;
+  const int tiers = 2 + int(u(rng) * 3.0f);
+  for (int t = 0; t < tiers; ++t) {
+    const float h = 12.0f + 30.0f * u(rng);
+    appendBox(m, {0.0f, y + 0.5f * h, 0.0f}, {0.5f * w, 0.5f * h, 0.5f * d});
+    // Janelas: caixinhas rasas saindo das 4 fachadas, a cada 3,5 m de altura e ~3 m de largura.
+    const int floors = int(h / 3.5f), colsX = std::max(1, int(w / 3.0f)), colsZ = std::max(1, int(d / 3.0f));
+    for (int f = 0; f < floors; ++f) {
+      const float wy = y + 1.8f + 3.5f * float(f);
+      for (int i = 0; i < colsX; ++i) {
+        const float x = -0.5f * w + (float(i) + 0.5f) * w / float(colsX);
+        appendBox(m, {x, wy, 0.5f * d + 0.05f}, {0.6f, 0.8f, 0.05f});
+        appendBox(m, {x, wy, -0.5f * d - 0.05f}, {0.6f, 0.8f, 0.05f});
+      }
+      for (int i = 0; i < colsZ; ++i) {
+        const float z = -0.5f * d + (float(i) + 0.5f) * d / float(colsZ);
+        appendBox(m, {0.5f * w + 0.05f, wy, z}, {0.05f, 0.8f, 0.6f});
+        appendBox(m, {-0.5f * w - 0.05f, wy, z}, {0.05f, 0.8f, 0.6f});
+      }
+    }
+    y += h;
+    w *= 0.65f + 0.25f * u(rng);  // recuo
+    d *= 0.65f + 0.25f * u(rng);
+  }
+  appendBox(m, {0.0f, y + 2.0f, 0.0f}, {1.5f, 2.0f, 1.5f});  // caixa d'água
+  return m;
+}
+
+// Streaming do mundo: 40 x 40 quarteirões (2,4 km) com uma torre ÚNICA por quarteirão (malha própria, milhares de
+// triângulos); só as células perto da câmera ficam na GPU. --move anda pela avenida e mostra o carrega/descarrega.
+bool buildStreamTest(Scene& s, Camera& camera, const DemoOptions& opt) {
+  const int n = int(std::max(4u, std::min(opt.cityBlocks, 64u)));
+  const float pitch = 60.0f, half = 0.5f * float(n) * pitch;
+  uint32_t cube = s.addMesh(makeCube());
+  Material ground;
+  ground.baseColor = glm::vec4(0.07f, 0.07f, 0.075f, 1.0f);
+  ground.roughness = 0.85f;
+  s.addObject(cube, trs({0.0f, -0.5f, 0.0f}, {half + 50.0f, 0.5f, half + 50.0f}), s.addMaterial(ground));
+  uint32_t facade[4];
+  const glm::vec3 colors[4] = {{0.55f, 0.52f, 0.48f}, {0.4f, 0.45f, 0.5f}, {0.6f, 0.55f, 0.45f}, {0.35f, 0.33f, 0.32f}};
+  for (int i = 0; i < 4; ++i) {
+    Material m;
+    m.baseColor = glm::vec4(colors[i], 1.0f);
+    m.roughness = 0.7f;
+    facade[i] = s.addMaterial(m);
+  }
+  for (int bz = 0; bz < n; ++bz)
+    for (int bx = 0; bx < n; ++bx) {
+      const glm::vec3 c(-half + pitch * (float(bx) + 0.5f), 0.0f, -half + pitch * (float(bz) + 0.5f));
+      const uint32_t mesh = s.addMesh(makeTower(uint32_t(bz * n + bx + 1)));
+      const uint32_t cell = s.addStreamCell(c + glm::vec3(0.0f, 40.0f, 0.0f), 45.0f);
+      s.setMeshCell(mesh, cell);
+      s.addObject(mesh, glm::translate(glm::mat4(1.0f), c), facade[(bx * 7 + bz * 3) % 4]);
+    }
+  s.streamLoadDistance = 300.0f;
+  s.streamUnloadDistance = 380.0f;
+
+  s.sunDirection = sunFrom(opt.night ? -10.0f : 30.0f, 140.0f);
+  s.sunIlluminance = opt.night ? 0.0f : 100000.0f;
+  s.cloudCoverage = 0.3f;
+  s.fogDensity = 0.0006f;
+  camera.position = glm::vec3(-half + 30.0f, 2.0f, 0.0f);  // na avenida do meio, olhando ao longo dela
+  camera.lookAt(camera.position + glm::vec3(1.0f, 0.05f, 0.0f));
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -876,6 +963,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "vfx") return buildVfx(scene, camera, opt);
   if (opt.name == "crowd") return buildCrowd(scene, camera, opt);
   if (opt.name == "hair") return buildHairTest(scene, camera);
+  if (opt.name == "stream") return buildStreamTest(scene, camera, opt);
   return buildSponza(scene, camera, opt);
 }
 

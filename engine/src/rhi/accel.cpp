@@ -165,7 +165,8 @@ void DynamicTlas::writeInstance(uint32_t slot, uint32_t index, const TlasInstanc
   r.mask = instance.mask;
   r.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
             (instance.opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : VK_GEOMETRY_INSTANCE_FORCE_NO_OPAQUE_BIT_KHR);
-  r.accelerationStructureReference = instance.blas->address;
+  // Sem BLAS (malha fora da memória: streaming): instância inativa — endereço 0, nunca atingida.
+  r.accelerationStructureReference = instance.blas ? instance.blas->address : 0;
   std::memcpy(static_cast<VkAccelerationStructureInstanceKHR*>(instanceBuffers_[slot % kSlots].mapped) + index, &r, sizeof(r));
 }
 

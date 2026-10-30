@@ -131,7 +131,107 @@ rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
   // Multidão: a BLAS da pose deste frame (cada pose assada tem a sua).
   const uint32_t mesh = objects[i].crowdClip != ~0u ? crowdClips[objects[i].crowdClip].firstMesh + objects[i].animFrame
                                                     : objects[i].mesh;
-  return {&meshes[mesh].blas, objects[i].transform, i, opaque, mask};
+  return {&meshes[mesh].blas, objects[i].transform, i, opaque, mask};  // só chamado para objetos com malha na memória
+}
+
+// Objetos com malha fora da memória (streaming) ficam fora do TLAS: nem como instância inativa (o llvmpipe trava
+// com uma mistura de ativas e inativas; outros drivers também podem tratar mal), nem pagando espaço na hierarquia.
+void Scene::rebuildTlasLayout() {
+  tlasSlot_.assign(objects.size(), -1);
+  tlasCount_ = 0;
+  for (uint32_t i = 0; i < objects.size(); ++i)
+    if (meshes[objects[i].mesh].resident) tlasSlot_[i] = int32_t(tlasCount_++);
+  ++tlasLayout_;
+}
+
+void Scene::makeResident(uint32_t mi) {
+  rhi::Context& ctx = *ctx_;
+  GpuMesh& gm = meshes[mi];
+  const MeshData& data = streamData_[mi];
+  VkBufferUsageFlags geometryUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+  if (ctx.rayTracing) geometryUsage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+  const VkDeviceSize vbytes = data.vertices.size() * sizeof(Vertex), ibytes = data.indices.size() * sizeof(uint32_t);
+  gm.vertices = rhi::createBufferWithData(ctx, data.vertices.data(), vbytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | geometryUsage);
+  gm.indices = rhi::createBufferWithData(ctx, data.indices.data(), ibytes, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | geometryUsage);
+  if (ctx.rayTracing) {
+    rhi::BlasInput in{gm.vertices.address, gm.vertexCount, sizeof(Vertex), gm.indices.address, gm.indexCount};
+    gm.blas = rhi::buildBlas(ctx, in, false);
+  }
+  gm.resident = true;
+  residentBytes_ += vbytes + ibytes + (ctx.rayTracing ? gm.blas.storage.size : 0);
+  for (uint32_t o : objectsOfMesh_[mi]) {
+    instanceUpdates_.push_back(o);  // endereços novos da malha no buffer de instâncias
+    // Reescreve o objeto na GPU neste frame (visível de novo). Direto em changed_: stream() roda depois de update(),
+    // e um setTransform aqui seria tratado como "movido fora do update" e descartado no próximo.
+    changed_.push_back(o);
+  }
+}
+
+void Scene::evict(uint32_t mi) {
+  GpuMesh& gm = meshes[mi];
+  gm.resident = false;
+  for (uint32_t o : objectsOfMesh_[mi]) {
+    instanceUpdates_.push_back(o);  // volta a apontar para a malha vazia antes que esta seja destruída
+    changed_.push_back(o);          // objeto oculto (o TLAS sai pelo novo layout)
+  }
+  pendingDestroy_.push_back({mi, rhi::kFramesInFlightMax + 1});  // a GPU pode ainda estar usando
+}
+
+bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
+  bool changed = false;
+  // Destruições adiadas: só quando nenhum frame em voo usa mais a malha.
+  for (size_t k = 0; k < pendingDestroy_.size();) {
+    PendingDestroy& p = pendingDestroy_[k];
+    if (--p.framesLeft > 0 || meshes[p.mesh].resident) {
+      if (meshes[p.mesh].resident) {  // voltou a ser usada antes de destruir: nada a fazer
+        pendingDestroy_[k] = pendingDestroy_.back();
+        pendingDestroy_.pop_back();
+        continue;
+      }
+      ++k;
+      continue;
+    }
+    GpuMesh& gm = meshes[p.mesh];
+    residentBytes_ -= gm.vertices.size + gm.indices.size + (ctx.rayTracing ? gm.blas.storage.size : 0);
+    rhi::destroyBuffer(ctx, gm.vertices);
+    rhi::destroyBuffer(ctx, gm.indices);
+    if (ctx.rayTracing) rhi::destroyAccel(ctx, gm.blas);
+    pendingDestroy_[k] = pendingDestroy_.back();
+    pendingDestroy_.pop_back();
+  }
+  // Células a carregar (mais perto primeiro) e a descarregar.
+  std::vector<std::pair<float, uint32_t>> toLoad;
+  for (uint32_t c = 0; c < streamCells.size(); ++c) {
+    StreamCell& cell = streamCells[c];
+    const float d = std::max(glm::length(cell.center - camera) - cell.radius, 0.0f);
+    if (!cell.resident && d < streamLoadDistance) toLoad.push_back({d, c});
+    if (cell.resident && d > streamUnloadDistance) {
+      for (uint32_t m : cell.meshes) evict(m);
+      cell.resident = false;
+      changed = true;
+    }
+  }
+  std::sort(toLoad.begin(), toLoad.end());
+  double budget = double(streamBudgetMB) * 1048576.0;
+  for (const auto& [d, c] : toLoad) {
+    StreamCell& cell = streamCells[c];
+    size_t bytes = 0;
+    for (uint32_t m : cell.meshes) bytes += streamData_[m].vertices.size() * sizeof(Vertex) + streamData_[m].indices.size() * 4;
+    if (budget <= 0.0 && d > 0.0) break;  // orçamento do frame acabou (a célula onde a câmera está sempre carrega)
+    for (uint32_t m : cell.meshes)
+      if (!meshes[m].resident) makeResident(m);
+    cell.resident = true;
+    budget -= double(bytes);
+    changed = true;
+  }
+  if (changed) {
+    rebuildTlasLayout();
+    size_t resident = 0;
+    for (const StreamCell& cell : streamCells) resident += cell.resident ? 1 : 0;
+    LOG_INFO("Streaming: %zu de %zu células na GPU, %.1f MB (malhas + BLAS)", resident, streamCells.size(),
+             double(residentBytes_) / 1048576.0);
+  }
+  return changed;
 }
 
 uint32_t Scene::bakeCrowdClip(int modelIndex, uint32_t frames) {
@@ -297,6 +397,7 @@ void Scene::buildMeshLights() {
   for (uint32_t i = 0; i < objects.size(); ++i) {
     Material& mat = materials[objects[i].material];
     if (mat.flags & kMaterialLightGeometry) continue;  // já é a forma visível de uma luz analítica
+    if (objects[i].mesh < meshCellPending_.size() && meshCellPending_[objects[i].mesh] >= 0) continue;  // streaming
     const MeshData& md = cpuMeshes_[objects[i].mesh];
     if (md.skinModel >= 0 || md.indices.empty()) continue;  // malha deformável: ainda não (raro em emissivos)
     const auto lumOf = [](glm::vec3 c) { return 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b; };
@@ -398,7 +499,8 @@ void Scene::upload(rhi::Context& ctx) {
     for (size_t i = 0; i < original; ++i) {
       const MeshData& md = cpuMeshes_[i];
       const uint32_t tris = uint32_t(md.indices.size() / 3);
-      if (excluded[i] || tris < 3000 || md.skinModel >= 0 || md.clothWidth > 0) continue;
+      const bool streamed = i < meshCellPending_.size() && meshCellPending_[i] >= 0;
+      if (excluded[i] || streamed || tris < 3000 || md.skinModel >= 0 || md.clothWidth > 0) continue;
       glm::vec3 lo(1e30f), hi(-1e30f);
       for (const Vertex& v : md.vertices) {
         lo = glm::min(lo, v.position);
@@ -420,8 +522,29 @@ void Scene::upload(rhi::Context& ctx) {
 
   size_t triangles = 0, skinnedCount = 0;
   VkDeviceSize scratchTotal = 0;
+  ctx_ = &ctx;
+  meshCellPending_.resize(cpuMeshes_.size(), -1);
+  streamData_.resize(cpuMeshes_.size());
   for (auto& data : cpuMeshes_) {
     GpuMesh gm;
+    const size_t meshIndex = meshes.size();
+    if (meshCellPending_[meshIndex] >= 0) {
+      // Malha de célula de streaming: os dados ficam na RAM; sobe para a GPU quando a câmera chega perto.
+      gm.cell = meshCellPending_[meshIndex];
+      gm.resident = false;
+      gm.vertexCount = uint32_t(data.vertices.size());
+      gm.indexCount = uint32_t(data.indices.size());
+      gm.boundsMin = glm::vec3(1e30f);
+      gm.boundsMax = glm::vec3(-1e30f);
+      for (const auto& v : data.vertices) {
+        gm.boundsMin = glm::min(gm.boundsMin, v.position);
+        gm.boundsMax = glm::max(gm.boundsMax, v.position);
+      }
+      triangles += data.indices.size() / 3;
+      streamData_[meshIndex] = std::move(data);
+      meshes.push_back(gm);
+      continue;
+    }
     bool skinned = !data.joints.empty() && data.skinModel >= 0 && data.skin >= 0;
     const bool cloth = data.clothWidth > 0;
     VkDeviceSize vbytes = data.vertices.size() * sizeof(Vertex);
@@ -554,15 +677,33 @@ void Scene::upload(rhi::Context& ctx) {
     if (gpuDecals.empty()) gpuDecals.push_back({glm::mat4(1.0f), glm::vec4(0.0f), 0xFFFFFFFFu});  // nenhum: marcador
     decalBuffer = rhi::createBufferWithData(ctx, gpuDecals.data(), gpuDecals.size() * sizeof(Decal), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
   }
+  // Malha vazia (endereços válidos para objetos fora da memória e BLAS das instâncias inativas).
+  {
+    const Vertex tri[3] = {{{0, 0, 0}, {0, 1, 0}, {0, 0}, {1, 0, 0, 1}}, {{1e-3f, 0, 0}, {0, 1, 0}, {0, 0}, {1, 0, 0, 1}},
+                           {{0, 0, 1e-3f}, {0, 1, 0}, {0, 0}, {1, 0, 0, 1}}};
+    const uint32_t idx[3] = {0, 1, 2};
+    emptyVertices_ = rhi::createBufferWithData(ctx, tri, sizeof(tri), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | geometryUsage);
+    emptyIndices_ = rhi::createBufferWithData(ctx, idx, sizeof(idx), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | geometryUsage);
+  }
   std::vector<InstanceGpu> inst;
-  for (auto& o : objects) inst.push_back({meshes[o.mesh].vertices.address, meshes[o.mesh].indices.address, o.material, 0, 0});
-  instanceBuffer = rhi::createBufferWithData(ctx, inst.data(), inst.size() * sizeof(InstanceGpu), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  for (auto& o : objects) {
+    InstanceGpu g{0, 0, o.material, 0, 0};
+    instanceAddresses(o.mesh, g.vertices, g.indices);
+    inst.push_back(g);
+  }
+  // TRANSFER_DST: o streaming reescreve os endereços das malhas que entram (Renderer::updateDynamicScene).
+  instanceBuffer = rhi::createBufferWithData(ctx, inst.data(), inst.size() * sizeof(InstanceGpu),
+                                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+  objectsOfMesh_.assign(meshes.size(), {});
+  for (uint32_t i = 0; i < objects.size(); ++i) objectsOfMesh_[objects[i].mesh].push_back(i);
 
   if (ctx.rayTracing) {
     tlas.init(ctx, uint32_t(objects.size()));
+    rebuildTlasLayout();
     for (uint32_t slot = 0; slot < rhi::DynamicTlas::kSlots; ++slot)
-      for (uint32_t i = 0; i < objects.size(); ++i) tlas.writeInstance(slot, i, tlasInstance(i));
-    ctx.immediateSubmit([&](VkCommandBuffer cmd) { tlas.build(cmd, 0, uint32_t(objects.size())); });
+      for (uint32_t i = 0; i < objects.size(); ++i)
+        if (tlasSlot_[i] >= 0) tlas.writeInstance(slot, uint32_t(tlasSlot_[i]), tlasInstance(i));
+    ctx.immediateSubmit([&](VkCommandBuffer cmd) { tlas.build(cmd, 0, tlasCount_); });
   }
   size_t drawn = 0;
   for (auto& o : objects) drawn += meshes[o.mesh].indexCount / 3;
@@ -580,7 +721,9 @@ void Scene::destroy(rhi::Context& ctx) {
     if (ctx.rayTracing) rhi::destroyAccel(ctx, m.blas);
   }
   for (auto& t : textures) rhi::destroyImage(ctx, t);
-  for (rhi::Buffer* b : {&materialBuffer, &instanceBuffer, &skinScratch, &decalBuffer}) rhi::destroyBuffer(ctx, *b);
+  for (rhi::Buffer* b : {&materialBuffer, &instanceBuffer, &skinScratch, &decalBuffer, &emptyVertices_, &emptyIndices_})
+    rhi::destroyBuffer(ctx, *b);
+  pendingDestroy_.clear();
   meshes.clear();
   textures.clear();
 }
