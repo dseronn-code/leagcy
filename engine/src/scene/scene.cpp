@@ -120,6 +120,12 @@ rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
   return {&meshes[objects[i].mesh].blas, objects[i].transform, i, opaque, mask};
 }
 
+void Scene::addDecal(DecalType type, glm::vec3 center, glm::vec3 halfExtent, float yawRad, glm::vec4 color) {
+  glm::mat4 m = glm::translate(glm::mat4(1.0f), center) * glm::rotate(glm::mat4(1.0f), yawRad, glm::vec3(0, 1, 0)) *
+                glm::scale(glm::mat4(1.0f), halfExtent);
+  decals.push_back({glm::inverse(m), color, uint32_t(type), float(decals.size()) * 0.618034f});
+}
+
 void Scene::addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count) {
   emitters.push_back({position, uint32_t(type), radius, scale, particleCount, count});
   particleCount += count;
@@ -417,6 +423,11 @@ void Scene::upload(rhi::Context& ctx) {
   if (materials.empty()) addMaterial({});
   materialBuffer = rhi::createBufferWithData(ctx, materials.data(), materials.size() * sizeof(Material),
                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  {
+    std::vector<Decal> gpuDecals = decals;
+    if (gpuDecals.empty()) gpuDecals.push_back({glm::mat4(1.0f), glm::vec4(0.0f), 0xFFFFFFFFu});  // nenhum: marcador
+    decalBuffer = rhi::createBufferWithData(ctx, gpuDecals.data(), gpuDecals.size() * sizeof(Decal), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  }
   std::vector<InstanceGpu> inst;
   for (auto& o : objects) inst.push_back({meshes[o.mesh].vertices.address, meshes[o.mesh].indices.address, o.material, 0, 0});
   instanceBuffer = rhi::createBufferWithData(ctx, inst.data(), inst.size() * sizeof(InstanceGpu), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -442,7 +453,7 @@ void Scene::destroy(rhi::Context& ctx) {
     if (ctx.rayTracing) rhi::destroyAccel(ctx, m.blas);
   }
   for (auto& t : textures) rhi::destroyImage(ctx, t);
-  for (rhi::Buffer* b : {&materialBuffer, &instanceBuffer, &skinScratch}) rhi::destroyBuffer(ctx, *b);
+  for (rhi::Buffer* b : {&materialBuffer, &instanceBuffer, &skinScratch, &decalBuffer}) rhi::destroyBuffer(ctx, *b);
   meshes.clear();
   textures.clear();
 }

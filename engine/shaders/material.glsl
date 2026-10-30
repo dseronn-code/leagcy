@@ -24,6 +24,52 @@ struct Surface {
   float clearcoatRoughness;
 };
 
+// Decals procedurais (scene::Decal): caixa projetada de cima para baixo sobre superfícies viradas para cima.
+struct Decal {
+  mat4 worldToDecal;
+  vec4 color;
+  uint type;
+  float seed, pad0, pad1;
+};
+layout(set = 0, binding = 19, std430) readonly buffer Decals { Decal decals[]; };
+const uint DECAL_CROSSWALK = 0u, DECAL_LANE = 1u, DECAL_DIRT = 2u, DECAL_OIL = 3u, DECAL_CRACKS = 4u;
+
+void applyDecals(inout Surface s, vec3 P, vec3 N) {
+  if (N.y < 0.5) return;
+  for (int i = 0; i < decals.length(); ++i) {
+    Decal d = decals[i];
+    if (d.type == 0xFFFFFFFFu) break;
+    vec3 q = (d.worldToDecal * vec4(P, 1.0)).xyz;
+    if (any(greaterThan(abs(q), vec3(1.0)))) continue;
+    // Medidas reais da caixa (m): o padrão tem tamanho fixo no mundo.
+    vec2 halfSize = vec2(1.0 / length(d.worldToDecal[0].xyz), 1.0 / length(d.worldToDecal[2].xyz));
+    vec2 m = q.xz * halfSize;  // metros a partir do centro
+    float edge = smoothstep(1.0, 0.95, max(abs(q.x), abs(q.z))) * smoothstep(1.0, 0.6, abs(q.y));
+    float wear = smoothstep(0.35, 0.6, fbm(P.xz * 1.7 + d.seed * 31.0, 4));  // tinta gasta
+    if (d.type == DECAL_CROSSWALK || d.type == DECAL_LANE) {
+      float paint = d.type == DECAL_CROSSWALK ? step(0.45, fract(m.x / 0.9))           // listras de 45 cm
+                                              : step(0.55, fract(m.y / 6.0 + d.seed));   // tracejado 3 m / 3 m
+      paint *= edge * (1.0 - 0.6 * wear) * d.color.a;
+      s.diffuseColor = mix(s.diffuseColor, d.color.rgb * 0.8, paint);
+      s.f0 = mix(s.f0, vec3(0.04), paint);
+      s.roughness = mix(s.roughness, 0.55, paint);
+    } else if (d.type == DECAL_DIRT) {
+      float dirt = smoothstep(0.4, 0.75, fbm(P.xz * 0.9 + d.seed * 17.0, 5)) * edge * d.color.a;
+      s.diffuseColor *= mix(1.0, 0.5, dirt);
+      s.roughness = mix(s.roughness, min(s.roughness + 0.25, 1.0), dirt);
+    } else if (d.type == DECAL_OIL) {
+      float r = length(m) / max(min(halfSize.x, halfSize.y), 1e-3);
+      float oil = smoothstep(1.0, 0.6, r + 0.3 * (fbm(P.xz * 3.0 + d.seed * 11.0, 3) - 0.5)) * edge * d.color.a;
+      s.diffuseColor *= mix(1.0, 0.25, oil);
+      s.roughness = mix(s.roughness, 0.18, oil);  // filme de óleo: liso e escuro
+    } else if (d.type == DECAL_CRACKS) {
+      float n = fbm(P.xz * 2.3 + d.seed * 7.0, 5);
+      float crack = smoothstep(0.035, 0.0, abs(n - 0.5)) * edge * d.color.a;
+      s.diffuseColor *= mix(1.0, 0.3, crack);
+    }
+  }
+}
+
 // Chuva (Lagarde 2012, "Water drop" 2–4, usado em Remember Me): a água entra nos poros e escurece o difuso
 // (materiais porosos e ásperos escurecem mais), forma uma película que deixa a superfície lisa, e nas superfícies
 // planas viradas para cima junta em poças — água por cima (f0 2%, quase espelho, normal plana) com os anéis dos
@@ -195,6 +241,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
     s.roughness = mix(mix(0.9, 0.95, dirtMask), 0.7, rockMask);
   }
   s.roughness = clamp(s.roughness, 0.0, 1.0);
+  applyDecals(s, P, N);
   if (frame.weather.x > 0.0 && s.transmission <= 0.0) applyWetness(s, P, N);
   s.diffuseColor *= 1.0 - s.transmission;  // o que atravessa não espalha (glTF: mix(difuso, transmissão))
   return s;

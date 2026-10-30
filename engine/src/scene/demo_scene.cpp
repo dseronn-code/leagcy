@@ -376,6 +376,19 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
     for (uint32_t bx = 0; bx < n; ++bx) {
       const float cx = -half + pitch * (float(bx) + 0.5f), cz = -half + pitch * (float(bz) + 0.5f);
       s.addObject(cube, trs({cx, 0.08f, cz}, {0.5f * block, 0.08f, 0.5f * block}), sidewalk);
+      // Sinalização e desgaste nas ruas do centro (decals procedurais): linha tracejada no meio de cada rua, faixa de
+      // pedestre antes do cruzamento, sujeira na calçada e manchas de óleo onde os carros param.
+      if (std::abs(int(bx) - int(n / 2)) <= 2 && std::abs(int(bz) - int(n / 2)) <= 2) {
+        const float ex = cx + 0.5f * pitch, ez = cz + 0.5f * pitch;  // ruas a leste e ao sul do quarteirão
+        const glm::vec4 white(0.95f, 0.95f, 0.92f, 1.0f), yellow(0.95f, 0.75f, 0.15f, 1.0f);
+        s.addDecal(kDecalLaneLine, {ex, 0.0f, cz}, {0.08f, 0.5f, 0.5f * block}, 0.0f, yellow);
+        s.addDecal(kDecalLaneLine, {cx, 0.0f, ez}, {0.08f, 0.5f, 0.5f * block}, glm::half_pi<float>(), yellow);
+        s.addDecal(kDecalCrosswalk, {ex, 0.0f, cz + 0.5f * block - 3.0f}, {0.5f * street - 0.5f, 0.5f, 2.0f}, 0.0f, white);
+        s.addDecal(kDecalCrosswalk, {cx + 0.5f * block - 3.0f, 0.0f, ez}, {0.5f * street - 0.5f, 0.5f, 2.0f}, glm::half_pi<float>(), white);
+        s.addDecal(kDecalDirt, {cx, 0.16f, cz}, {0.5f * block, 0.5f, 0.5f * block}, 0.0f, glm::vec4(1.0f));
+        const float jitter = std::fmod(std::abs(std::sin(float(bx) * 12.9898f + float(bz) * 78.233f)) * 43758.55f, 1.0f);  // não mexe no rng
+        s.addDecal(kDecalOil, {ex - 3.5f, 0.0f, cz + 10.0f * (jitter - 0.5f)}, {0.9f, 0.5f, 1.4f}, jitter * 3.0f, glm::vec4(1.0f));
+      }
       // Prédios: 2x3 lotes por quarteirão, alturas de 8 a 90 m (mais altos perto do centro da cidade).
       const float centrality = 1.0f - glm::length(glm::vec2(cx, cz)) / (half * 1.42f);
       for (int lz = 0; lz < 3; ++lz)
