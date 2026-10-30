@@ -9,6 +9,7 @@
 #define MATERIAL_SAMPLE(i, uv) textureLod(textures[nonuniformEXT(i)], uv, frame.quality1.x)
 #include "material.glsl"
 #ifdef RAY_TRACING
+#define GLASS_SHADOWS 1  // traceTransmittance tinge pela cor do vidro (glassTransmittanceAlong, abaixo)
 #include "raytracing.glsl"
 #include "radiance_cache.glsl"
 #endif
@@ -71,7 +72,7 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
     vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), uSun);
     if (dot(hit.N, Ls) > 0.0) {
       evalBRDF(bc, Ls, sqrt(min(s.roughness * s.roughness + 0.5 * frame.params.x, 1.0)), kd, ks);
-      if (dot(kd + ks, vec3(1.0)) > 0.0) radiance += (kd * s.diffuseColor + ks) * sunE * traceVisibility(shadowOrigin2, Ls, 1e4);
+      if (dot(kd + ks, vec3(1.0)) > 0.0) radiance += (kd * s.diffuseColor + ks) * sunE * traceTransmittance(shadowOrigin2, Ls, 1e4);
     }
   }
   uint li;
@@ -92,21 +93,75 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
 // transmissivas, multiplicando T pelo que cada uma deixa passar (transmissão × cor × (1 − Fresnel)); a reflexão e o
 // difuso do próprio vidro nesses raios secundários ficam de fora (poucos %). Devolve falso no céu; `blocked` = o vidro
 // absorveu tudo ou havia camadas demais.
-bool traceHitThroughGlass(vec3 origin, vec3 dir, float tMax, out HitInfo hit, out vec3 T, out bool blocked) {
+// Vidro com volume (KHR_materials_volume): a direção dobra pela lei de Snell ao entrar e ao sair, e dentro do
+// material a luz é absorvida pela lei de Beer (attenuationColor a cada attenuationDistance metros). Reflexão interna
+// total devolve o raio para dentro. `inside` = o raio está dentro de um volume.
+vec3 refractThroughSurface(vec3 dir, vec3 Ng, float ior, bool inside, out bool reflected) {
+  vec3 n = dot(dir, Ng) < 0.0 ? Ng : -Ng;  // contra o raio
+  float eta = inside ? ior : 1.0 / ior;
+  vec3 r = refract(dir, n, eta);
+  reflected = dot(r, r) == 0.0;
+  return reflected ? reflect(dir, n) : normalize(r);
+}
+
+// Transmitância das lâminas de vidro entre origin e origin + dir × tMax (só instâncias de vidro: RAY_MASK_GLASS).
+vec3 glassTransmittanceAlong(vec3 origin, vec3 dir, float tMax) {
+  vec3 T = vec3(1.0);
+  bool inside = false;
+  vec3 absorb = vec3(0.0);
+  for (int layer = 0; layer < 6 && tMax > 0.0; ++layer) {
+    rayQueryEXT rq;
+    rayQueryInitializeEXT(rq, tlas, gl_RayFlagsNoneEXT, RAY_MASK_GLASS, origin, 0.0, dir, tMax);
+    RESOLVE_CANDIDATES(rq)
+    if (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT) break;
+    float t = rayQueryGetIntersectionTEXT(rq, true);
+    if (inside) T *= exp(-absorb * t);
+    uint inst = uint(rayQueryGetIntersectionInstanceCustomIndexEXT(rq, true));
+    Material m = materials[instances[inst].material];
+    T *= m.transmission * (inside ? vec3(1.0) : m.baseColor.rgb) * 0.96;  // ~4% refletido em cada face
+    if (m.thickness > 0.0) {  // volume: a sombra não desvia (aproximação), mas absorve dentro
+      inside = !inside;
+      absorb = (inside && m.attenuationDistance > 0.0) ? -log(max(m.attenuationColor, vec3(1e-4))) / m.attenuationDistance : vec3(0.0);
+    }
+    if (max(T.r, max(T.g, T.b)) < 1e-3) return vec3(0.0);
+    origin += dir * (t + 1e-4 * (1.0 + t));
+    tMax -= t + 1e-4 * (1.0 + t);
+  }
+  return T;
+}
+
+// Raio que atravessa vidro (KHR_materials_transmission): em parede fina passa reto; com volume refrata na entrada e
+// na saída e absorve no caminho. Até 6 superfícies transmissivas, multiplicando T pelo que cada uma deixa passar
+// (transmissão × cor × (1 − Fresnel)); a reflexão e o difuso do próprio vidro nesses raios secundários ficam de fora
+// (poucos %). Devolve falso no céu (dir_out = direção final); `blocked` = absorveu tudo ou camadas demais.
+bool traceHitThroughGlassDir(vec3 origin, inout vec3 dir, float tMax, out HitInfo hit, out vec3 T, out bool blocked,
+                             bool inside, vec3 absorb) {  // absorb: coeficiente de absorção do volume de partida (1/m)
   T = vec3(1.0);
   blocked = false;
-  for (int layer = 0; layer < 4; ++layer) {
+  for (int layer = 0; layer < 6; ++layer) {
     if (!traceHit(origin, dir, tMax, hit)) return false;
+    if (inside) T *= exp(-absorb * hit.t);  // Beer no trecho dentro do volume
     Material m = materials[hit.material];
     if ((m.flags & MATERIAL_TRANSMISSIVE) == 0u) return true;
     Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
-    T *= s.transmission * s.transmissionTint * (vec3(1.0) - F_Schlick(s.f0, s.f90, abs(dot(hit.N, dir))));
+    T *= s.transmission * (inside ? vec3(1.0) : s.transmissionTint) * (vec3(1.0) - F_Schlick(s.f0, s.f90, abs(dot(hit.N, dir))));
     if (max(T.r, max(T.g, T.b)) < 1e-4) break;
-    origin = offsetRayOrigin(hit.P, -hit.Ng, RAY_BIAS_EXACT * hit.t);  // continua do outro lado
+    if (m.thickness > 0.0) {  // volume: refrata e entra/sai
+      bool reflected;
+      dir = refractThroughSurface(dir, hit.Ng, m.ior, inside, reflected);
+      if (!reflected) inside = !inside;
+      absorb = (inside && m.attenuationDistance > 0.0) ? -log(max(m.attenuationColor, vec3(1e-4))) / m.attenuationDistance : vec3(0.0);
+      origin = offsetRayOrigin(hit.P, dot(dir, hit.Ng) > 0.0 ? hit.Ng : -hit.Ng, RAY_BIAS_EXACT * hit.t);
+    } else {
+      origin = offsetRayOrigin(hit.P, -hit.Ng, RAY_BIAS_EXACT * hit.t);  // parede fina: continua do outro lado
+    }
     tMax -= hit.t;
   }
   blocked = true;
   return true;
+}
+bool traceHitThroughGlass(vec3 origin, vec3 dir, float tMax, out HitInfo hit, out vec3 T, out bool blocked) {
+  return traceHitThroughGlassDir(origin, dir, tMax, hit, T, blocked, false, vec3(0.0));
 }
 
 // REFERÊNCIA (--reference-pt): luz indireta que sai de `hit` para -dir, por path tracing de verdade — escolhe o lobo
@@ -239,15 +294,19 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
 // indireta pelo cache de radiância (com um raio a mais em superfícies espelhadas); na referência, path tracing.
 // `bounce` separa as dimensões de Sobol do raio difuso e do especular.
 //   countSampledEmission: ver hitDirectLighting (verdadeiro só para o raio de transmissão do vidro).
-vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float hitDist, bool countSampledEmission) {
+vec3 traceRadianceFrom(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float hitDist, bool countSampledEmission,
+                       bool inside, vec3 absorb) {
   HitInfo hit;
   hitDist = HIT_DIST_MISS;
   vec3 Tg;
   bool blocked;
-  if (!traceHitThroughGlass(origin, dir, 1e4, hit, Tg, blocked)) return Tg * sampleSky(dir);
+  if (!traceHitThroughGlassDir(origin, dir, 1e4, hit, Tg, blocked, inside, absorb)) return Tg * sampleSky(dir);
   if (blocked) return vec3(0.0);
   hitDist = hit.t;
   return Tg * traceRadianceAt(hit, dir, sg, bounce, countSampledEmission);
+}
+vec3 traceRadiance(vec3 origin, vec3 dir, SampleGen sg, uint bounce, out float hitDist, bool countSampledEmission) {
+  return traceRadianceFrom(origin, dir, sg, bounce, hitDist, countSampledEmission, false, vec3(0.0));
 }
 
 // Referência por força bruta para medir o ReSTIR: todas as luzes no alcance, 16 amostras estratificadas
@@ -352,12 +411,12 @@ void main() {
     if (dot(sunE, sunE) > 0.0) {
 #ifdef RAY_TRACING
       vec3 L = sampleCone(frame.sunDir.xyz, cos(frame.params.x), sample2D(sg, DIM_SUN));
-      float vis = frame.shadowParams.y > 0.5 ? sunShadowMap(g.P, g.Ng)  // --shadow-maps: comparação/desempenho
-                : dot(sf.Nb, L) > 0.0 ? traceVisibility(shadowOrigin, L, 1e4) : 0.0;
+      vec3 vis = frame.shadowParams.y > 0.5 ? vec3(sunShadowMap(g.P, g.Ng))  // --shadow-maps: comparação/desempenho
+                : dot(sf.Nb, L) > 0.0 ? traceTransmittance(shadowOrigin, L, 1e4) : vec3(0.0);
 #else
-      float vis = shadowMapsEnabled() ? sunShadowMap(g.P, g.Ng) : 1.0;  // sem ray tracing: shadow maps em cascata
+      vec3 vis = vec3(shadowMapsEnabled() ? sunShadowMap(g.P, g.Ng) : 1.0);  // sem ray tracing: shadow maps em cascata
 #endif
-      sunVisSum += vis;
+      sunVisSum += luminance(vis);
       diffuse += sunKd * sunE * vis;
       specular += sunKs * sunE * vis;
       coatSpec += coatSunKs * sunE * vis;
@@ -418,11 +477,19 @@ void main() {
       vec3 Lm = reflect(-g.V, H2);
       float NoLm = dot(g.N, Lm);
       vec3 Lt = Lm - 2.0 * dot(Lm, g.Ng) * g.Ng;  // espelhado pelo plano do triângulo: segue para trás do vidro
+      Material pm = materials[sf.material];
+      bool volume = pm.thickness > 0.0;
+      if (volume) {  // com volume: refrata pela microfaceta sorteada e começa dentro do material
+        vec3 r = refract(-g.V, H2, 1.0 / pm.ior);
+        Lt = dot(r, r) > 0.0 ? normalize(r) : Lt;
+      }
       if (NoLm > 0.0 && dot(Lt, g.Ng) < 0.0) {
         float t;
         vec3 w = (vec3(1.0) - F_Schlick(g.f0, g.f90, max(dot(g.V, H2), 0.0))) * px.transmissionTint *
                  px.transmission * vndfWeight(bc.NoV, NoLm, a);
-        specular += traceRadiance(offsetRayOrigin(g.P, -g.Ng, sf.rayBias), Lt, sg, 2u, t, true) * w;
+        vec3 absorb = (volume && pm.attenuationDistance > 0.0)
+                          ? -log(max(pm.attenuationColor, vec3(1e-4))) / pm.attenuationDistance : vec3(0.0);
+        specular += traceRadianceFrom(offsetRayOrigin(g.P, -g.Ng, sf.rayBias), Lt, sg, 2u, t, true, volume, absorb) * w;
         specHitMin = min(specHitMin, t);
       }
     }
