@@ -88,6 +88,7 @@ struct TonemapPush {
   uint32_t manualSrgb;
   uint32_t debugView;  // 1 = mostra o valor cru (linear) sem exposição, bloom nem tonemap
   float sharpness;     // RCAS
+  float lensFlare;     // intensidade do reflexo nas lentes (0 = desligado)
 };
 
 bool isSrgb(VkFormat f) {
@@ -937,7 +938,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const bool dlss = upscalerReady_ && (upscaler_.kind() == Upscaler::Kind::Dlss || upscaler_.kind() == Upscaler::Kind::DlssRR);
   const float sharpness = settings.sharpness >= 0.0f ? settings.sharpness : (dlss ? 0.0f : 0.5f);
   TonemapPush tp{settings.bloomStrength, 1.0f / float(mips), isSrgb(outputFormat_) ? 0u : 1u, (debug || showValidation) ? 1u : 0u,
-                 sharpness};
+                 sharpness, settings.lensFlare};
   tonemapLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs,
                       {tex(*color), Binding::sampled(t_.bloomMips[0], linear_), Binding::storageBuffer(exposureState_)}, &tp);
   vkCmdDraw(cmd, 3, 1, 0, 0);

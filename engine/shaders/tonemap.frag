@@ -1,4 +1,6 @@
 #version 460
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
 // Final: mistura do bloom, exposição (automática), ACES filmic, nitidez RCAS e vinheta.
 layout(set = 1, binding = 0) uniform sampler2D colorIn;
 layout(set = 1, binding = 1) uniform sampler2D bloomIn;
@@ -7,6 +9,7 @@ layout(set = 1, binding = 2, std430) readonly buffer ExposureState { vec4 state;
 layout(push_constant) uniform Push {
   float bloomStrength; float bloomNorm; uint manualSrgb; uint debugView;
   float sharpness;  // RCAS: 0 = desligado, 1 = máximo
+  float lensFlare;  // 0 = sem reflexo nas lentes
 } pc;
 layout(location = 0) in vec2 vUV;
 layout(location = 0) out vec4 outColor;
@@ -22,12 +25,45 @@ vec3 rrtOdt(vec3 v) {
 vec3 acesFitted(vec3 c) { return clamp(ACES_OUT * rrtOdt(ACES_IN * c), 0.0, 1.0); }
 vec3 linearToSrgb(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 
+// Reflexo nas lentes ("pseudo lens flare", Chapman 2013 — como em muitos jogos): as reflexões entre os elementos da
+// objetiva projetam imagens "fantasmas" das fontes fortes espelhadas pelo centro da imagem, mais um halo em anel, com
+// dispersão cromática. Feito sobre o bloom (já borrado) e modulado por uma "sujeira" da lente procedural. Sem limiar,
+// como numa lente de verdade: toda a luz gera fantasmas com a mesma fração pequena (~0,8% cada, uma objetiva de vários elementos), e só as fontes muito
+// mais fortes que a cena (sol, faróis, lâmpadas) ficam visíveis.
+vec3 brightBloom(vec2 uv, float exposure) {
+  return textureLod(bloomIn, clamp(uv, 0.0, 1.0), 0.0).rgb * pc.bloomNorm * exposure;
+}
+vec3 chromatic(vec2 uv, vec2 dir, float exposure) {
+  const float D = 0.006;
+  return vec3(brightBloom(uv - dir * D, exposure).r, brightBloom(uv, exposure).g, brightBloom(uv + dir * D, exposure).b);
+}
+vec3 lensFlare(vec2 uv, float exposure) {
+  vec2 flipped = vec2(1.0) - uv;
+  vec2 ghostVec = (vec2(0.5) - flipped) * 0.35;
+  vec2 dir = normalize(ghostVec + 1e-6);
+  vec3 sum = vec3(0.0);
+  for (int i = 0; i < 6; ++i) {
+    vec2 p = fract(flipped + ghostVec * float(i));
+    float w = pow(1.0 - clamp(length(vec2(0.5) - p) / 0.7071, 0.0, 1.0), 6.0);  // fantasmas fortes perto do centro
+    sum += chromatic(p, dir, exposure) * w * 0.008;
+  }
+  vec2 haloP = flipped + dir * 0.45;
+  float hw = pow(1.0 - clamp(length(vec2(0.5) - fract(haloP)) / 0.7071, 0.0, 1.0), 5.0);
+  sum += chromatic(haloP, dir, exposure) * hw * 0.01;
+  // Sujeira da lente: manchas suaves que só aparecem contra a luz forte.
+  float dirt = 0.35 + 0.65 * smoothstep(0.45, 0.75, fbm(uv * vec2(6.0, 3.5), 4));
+  return sum * dirt * pc.lensFlare;
+}
+
 // HDR -> cor de tela (antes da vinheta) num ponto da imagem.
 vec3 display(vec2 uv) {
   vec3 hdr = textureLod(colorIn, uv, 0.0).rgb;
   vec3 bloom = textureLod(bloomIn, uv, 0.0).rgb * pc.bloomNorm;
   hdr = mix(hdr, bloom, pc.bloomStrength);  // mistura que conserva energia
-  return acesFitted(hdr * (state.x / max(state.w, 1e-20)));
+  float exposure = state.x / max(state.w, 1e-20);
+  vec3 c = hdr * exposure;
+  if (pc.lensFlare > 0.0) c += lensFlare(uv, exposure);
+  return acesFitted(c);
 }
 
 // AMD FidelityFX RCAS ("Robust Contrast Adaptive Sharpening", FSR 1, licença MIT): nitidez em cruz que nunca
@@ -60,9 +96,7 @@ void main() {
     outColor = vec4(pc.manualSrgb != 0u ? linearToSrgb(c) : c, 1.0);
     return;
   }
-  vec3 bloom = textureLod(bloomIn, vUV, 0.0).rgb * pc.bloomNorm;
-  hdr = mix(hdr, bloom, pc.bloomStrength);  // mistura que conserva energia
-  vec3 c = acesFitted(hdr * (state.x / max(state.w, 1e-20)));
+  vec3 c = display(vUV);
   if (pc.sharpness > 0.0) c = rcas(vUV, c);
   vec2 d = vUV - 0.5;
   c *= 1.0 - 0.35 * dot(d, d);
