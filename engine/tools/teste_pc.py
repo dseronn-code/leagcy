@@ -161,6 +161,30 @@ def luzes(binario, rel):
     lado_a_lado(arqs, os.path.join(PASTA, 'bistro_dia_noite.png'))
 
 
+def galeria(binario, rel):
+    """Imagens 1080p dos recursos novos, com o tempo de quadro de cada um (aparência e custo numa GPU de verdade)."""
+    rel.append('\n== Galeria (imagens em resultados_pc/galeria_*.png; ms/frame no Ultra a 1080p)')
+    bistro = os.path.join('assets', 'Bistro', 'bistro.gltf')
+    casos = [
+        ('oceano_por_do_sol', ['--scene', 'ocean', '--sun-elevation', '6', '--sun-azimuth', '15']),
+        ('oceano_dia', ['--scene', 'ocean']),
+        ('cidade_chuva', ['--scene', 'city', '--rain', '0.8']),
+        ('cidade_noite_chuva', ['--scene', 'city', '--night', '--rain', '0.6']),
+        ('sponza_raios_de_luz', ['--fog', '0.02']),
+        ('externa_nuvens', ['--scene', 'outdoor', '--sun-elevation', '50', '--cam', '0,3,20', '--look', '0,12,-60']),
+        ('fogueira_noite', ['--scene', 'outdoor', '--night', '--look', '-3,1.5,11']),
+        ('bistro_dia', ['--scene', bistro]),
+        ('bistro_noite', ['--scene', bistro, '--night']),
+        ('vidro', ['--scene', 'glass']),
+        ('pintura', ['--scene', 'paint']),
+        ('ceu_lua_estrelas', ['--scene', 'outdoor', '--night', '--cam', '0,2,30', '--look', '3,8,25', '--exposure', '-6']),
+    ]
+    for nome, args in casos:
+        arq = os.path.join(PASTA, f'galeria_{nome}.png')
+        code, out = rodar(binario, ['--headless', '--width', '1920', '--height', '1080', '--frames', '96', '--out', arq] + args)
+        rel.append(f'{nome}: ' + (linha(out, r'\d+ frames em [^\n]*') or f'falhou (código {code})'))
+
+
 def movimento(binario, rel):
     """Câmera andando: imagens para comparar rastros e ruído (denoiser e upscaler)."""
     rel.append('\n== Movimento (imagens lado a lado em resultados_pc/)')
@@ -196,7 +220,7 @@ def main():
     rel.append(linha(out, r'GPU: [^\n]*') or 'GPU: ?')
     rel.append('DLSS: ' + (linha(out, r'DLSS (ativo|indispon)[^\n]*') or '?'))
 
-    # --so secao1,secao2: só algumas seções (suite, desempenho, nitidez, denoisers, reflexos, luzes, movimento).
+    # --so secao1,secao2: só algumas seções (suite, desempenho, nitidez, denoisers, reflexos, luzes, galeria, movimento).
     so = None
     if '--so' in sys.argv:
         so = set(sys.argv[sys.argv.index('--so') + 1].split(','))
@@ -206,7 +230,7 @@ def main():
         print('suíte de testes...', flush=True)
         suite(binario, rel)
     etapas = [('desempenho', desempenho), ('nitidez', nitidez), ('denoisers', denoisers), ('denoisers', texturas),
-              ('reflexos', reflexos), ('luzes', luzes), ('movimento', movimento)]
+              ('reflexos', reflexos), ('luzes', luzes), ('galeria', galeria), ('movimento', movimento)]
     for nome, f in etapas:
         if quer(nome):
             print(f'{nome}...', flush=True)
