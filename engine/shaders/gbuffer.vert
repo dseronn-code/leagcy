@@ -54,8 +54,19 @@ void main() {
     gl_Position = frame.proj * vec4(mat3(frame.view) * (world - frame.cameraPos.xyz), 1.0);
     return;
   }
-  vec4 world = o.model * vec4(aPosition, 1.0);
-  vec4 prevWorld = o.prevModel * vec4(aPrevPosition, 1.0);
+  // Multidão: a pose deste frame e a do anterior vêm das poses assadas (vertex pulling pelo índice do vértice).
+  vec3 position = aPosition, normal = aNormal, prevPosition = aPrevPosition;
+  vec4 tangent = aTangent;
+  if (o.anim.x != 0xFFFFFFFFu) {
+    VertexData cur = VertexData(crowdFrames[o.anim.x + o.anim.y]), prv = VertexData(crowdFrames[o.anim.x + o.anim.z]);
+    uint vi = uint(gl_VertexIndex);
+    position = fetchVertexPosition(cur, vi);
+    normal = fetchVertexNormal(cur, vi);
+    tangent = vec4(cur.v[vi * 12u + 8u], cur.v[vi * 12u + 9u], cur.v[vi * 12u + 10u], cur.v[vi * 12u + 11u]);
+    prevPosition = fetchVertexPosition(prv, vi);
+  }
+  vec4 world = o.model * vec4(position, 1.0);
+  vec4 prevWorld = o.prevModel * vec4(prevPosition, 1.0);
   vec3 wind = vec3(0.0);
   if ((materials[vMaterial].flags & MATERIAL_FOLIAGE) != 0u) {
     float height = max(world.y - o.model[3].y, 0.0);
@@ -65,13 +76,13 @@ void main() {
   }
   mat3 normalMatrix = transpose(inverse(mat3(o.model)));
   vWorldPos = world.xyz;
-  vNormal = normalMatrix * aNormal;
-  vTangent = vec4(mat3(o.model) * aTangent.xyz, aTangent.w);
+  vNormal = normalMatrix * normal;
+  vTangent = vec4(mat3(o.model) * tangent.xyz, tangent.w);
   vUV = aUV;
   vCurClip = frame.viewProjNoJitter * world;
   vPrevClip = frame.prevViewProjNoJitter * prevWorld;
   // Relativo à câmera (mundo aberto): a translação do objeto menos a da câmera é exata para valores próximos
   // (Sterbenz), então a projeção não multiplica coordenadas de 4 km. Mesma conta que viewProj * world.
-  vec3 rel = mat3(o.model) * aPosition + (o.model[3].xyz - frame.cameraPos.xyz) + wind;
+  vec3 rel = mat3(o.model) * position + (o.model[3].xyz - frame.cameraPos.xyz) + wind;
   gl_Position = frame.proj * vec4(mat3(frame.view) * rel, 1.0);
 }

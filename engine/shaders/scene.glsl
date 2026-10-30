@@ -26,6 +26,9 @@ layout(set = 0, binding = 17) uniform sampler2D oceanDisplacement;  // xyz = des
 layout(set = 0, binding = 18) uniform sampler2D oceanSlope;         // xy = inclinação, z = espuma
 const float OCEAN_PATCH = 256.0;
 
+// Multidões: endereço dos vértices de cada pose assada (Scene::bakeCrowdClip).
+layout(set = 0, binding = 22, std430) readonly buffer CrowdFrames { uint64_t crowdFrames[]; };
+
 struct Material {  // == scene::Material (144 bytes)
   vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
   vec3 emissive;
@@ -87,6 +90,7 @@ layout(set = 0, binding = 5) uniform sampler2D textures[];
 struct ObjectData {  // == ObjectGpu em renderer.cpp
   mat4 model;
   mat4 prevModel;
+  uvec4 anim;  // multidão: x = 1ª pose do clipe em crowdFrames (~0 = objeto comum), y = pose atual, z = anterior
 };
 layout(set = 0, binding = 7, std430) readonly buffer Objects { ObjectData objects[]; };
 
