@@ -70,6 +70,44 @@ VkImageView makeView(Context& ctx, const Image& img, uint32_t baseMip, uint32_t 
 }
 }  // namespace
 
+Image createImage2DArray(Context& ctx, VkExtent2D extent, uint32_t layers, VkFormat format, VkImageUsageFlags usage) {
+  Image img;
+  img.format = format;
+  img.extent = extent;
+  img.depth = layers;
+  VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  ii.imageType = VK_IMAGE_TYPE_2D;
+  ii.format = format;
+  ii.extent = {extent.width, extent.height, 1};
+  ii.mipLevels = 1;
+  ii.arrayLayers = layers;
+  ii.samples = VK_SAMPLE_COUNT_1_BIT;
+  ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+  ii.usage = usage;
+  VmaAllocationCreateInfo ai{};
+  ai.usage = VMA_MEMORY_USAGE_AUTO;
+  ai.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+  VK_CHECK(vmaCreateImage(ctx.allocator, &ii, &ai, &img.handle, &img.allocation, nullptr));
+  VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  vi.image = img.handle;
+  vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  vi.format = format;
+  vi.subresourceRange = {VkImageAspectFlags(isDepthFormat(format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT), 0, 1, 0, layers};
+  VK_CHECK(vkCreateImageView(ctx.device, &vi, nullptr, &img.view));
+  return img;
+}
+
+VkImageView createLayerView(Context& ctx, const Image& img, uint32_t layer) {
+  VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  vi.image = img.handle;
+  vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  vi.format = img.format;
+  vi.subresourceRange = {VkImageAspectFlags(isDepthFormat(img.format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT), 0, 1, layer, 1};
+  VkImageView v;
+  VK_CHECK(vkCreateImageView(ctx.device, &vi, nullptr, &v));
+  return v;
+}
+
 Image createImage3D(Context& ctx, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage) {
   Image img;
   img.format = format;

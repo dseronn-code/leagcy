@@ -28,6 +28,8 @@ void main() {
     float vis = 1.0;
 #ifdef RAY_TRACING
     if (dot(sunE, sunE) > 0.0) vis = traceVisibility(p, frame.sunDir.xyz, 1e4);
+#else
+    if (shadowMapsEnabled()) vis = sunShadowMap(p, vec3(0.0));
 #endif
     // Luz do céu: uma direção sorteada na esfera e um raio de visibilidade — dentro de um prédio o céu está tapado e a
     // névoa fica escura (estimador sem viés de ∫ céu × visibilidade × fase isotrópica; a média temporal tira o ruído).

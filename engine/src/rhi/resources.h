@@ -35,6 +35,10 @@ uint32_t mipCount(VkExtent2D extent);
 Image createImage2D(Context& ctx, VkExtent2D extent, VkFormat format, VkImageUsageFlags usage, uint32_t mipLevels = 1);
 // Volume 3D (ex.: perspectiva aérea em froxels). Um mip.
 Image createImage3D(Context& ctx, VkExtent3D extent, VkFormat format, VkImageUsageFlags usage);
+// Array 2D (ex.: cascatas de sombra): `view` vê todas as camadas (2D_ARRAY), `depth` = nº de camadas.
+Image createImage2DArray(Context& ctx, VkExtent2D extent, uint32_t layers, VkFormat format, VkImageUsageFlags usage);
+// View de uma camada do array (para desenhar nela). Quem chama destrói.
+VkImageView createLayerView(Context& ctx, const Image& img, uint32_t layer);
 // View de um único mip (para escrita em compute, ex.: cadeia do bloom). Quem chama destrói.
 VkImageView createMipView(Context& ctx, const Image& img, uint32_t mip);
 void destroyImage(Context& ctx, Image& img);

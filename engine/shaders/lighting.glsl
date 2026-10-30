@@ -352,9 +352,10 @@ void main() {
     if (dot(sunE, sunE) > 0.0) {
 #ifdef RAY_TRACING
       vec3 L = sampleCone(frame.sunDir.xyz, cos(frame.params.x), sample2D(sg, DIM_SUN));
-      float vis = dot(sf.Nb, L) > 0.0 ? traceVisibility(shadowOrigin, L, 1e4) : 0.0;
+      float vis = frame.shadowParams.y > 0.5 ? sunShadowMap(g.P, g.Ng)  // --shadow-maps: comparação/desempenho
+                : dot(sf.Nb, L) > 0.0 ? traceVisibility(shadowOrigin, L, 1e4) : 0.0;
 #else
-      float vis = 1.0;
+      float vis = shadowMapsEnabled() ? sunShadowMap(g.P, g.Ng) : 1.0;  // sem ray tracing: shadow maps em cascata
 #endif
       sunVisSum += vis;
       diffuse += sunKd * sunE * vis;
