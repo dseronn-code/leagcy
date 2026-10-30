@@ -257,18 +257,22 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
     // Lotes por (dois lados, espelhado, malha). Um lote espelhado inverte a frente; objetos que passem a espelhar
     // depois do início (raro) só desenham do lado errado se forem de um lado só.
+    // Os misturados (decals BLEND) vão por último: são desenhados num segundo passe, por cima.
     auto key = [&](uint32_t i) {
       const auto& o = scene.objects[i];
-      const bool ds = (scene.materials[o.material].flags & scene::kMaterialDoubleSided) != 0;
+      const uint32_t flags = scene.materials[o.material].flags;
+      const bool ds = (flags & scene::kMaterialDoubleSided) != 0, blend = (flags & scene::kMaterialBlend) != 0;
       const bool mirrored = glm::determinant(glm::mat3(o.transform)) < 0.0f;
-      return std::make_tuple(ds, mirrored, o.mesh);
+      return std::make_tuple(blend, ds, mirrored, o.mesh);
     };
     std::stable_sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return key(a) < key(b); });
     for (uint32_t k = 0; k < order.size(); ++k) {
-      const auto [ds, mirrored, mesh] = key(order[k]);
+      const auto [blend, ds, mirrored, mesh] = key(order[k]);
       if (drawBatches_.empty() || drawBatches_.back().mesh != mesh || drawBatches_.back().doubleSided != ds ||
-          drawBatches_.back().mirrored != mirrored)
+          drawBatches_.back().mirrored != mirrored || drawBatches_.back().blend != blend) {
         drawBatches_.push_back({mesh, k, 0, ds, mirrored});
+        drawBatches_.back().blend = blend;
+      }
       ++drawBatches_.back().count;
     }
     // Culling na GPU (cull.comp): lote de cada entrada, caixa local da malha por lote e um comando de desenho
@@ -471,6 +475,23 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   gb.depthTest = gb.depthWrite = true;
   gb.dynamicCulling = true;  // por lote: de um lado só (padrão do glTF) ou dos dois (doubleSided: folhagem, tecidos)
   gbufferPipeline_ = rhi::createGraphicsPipeline(ctx, gb);
+  {  // decals BLEND: sem escrever profundidade; mistura por alfa na cor difusa, normal e f0 (o .a de cada anexo,
+     // que guarda outra coisa — oclusão, rugosidade, f90 —, fica como estava); movimento, emissão e visibilidade não
+    rhi::GraphicsPipelineDesc bd = gb;
+    bd.depthWrite = false;
+    VkPipelineColorBlendAttachmentState mix{};
+    mix.blendEnable = VK_TRUE;
+    mix.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    mix.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    mix.colorBlendOp = VK_BLEND_OP_ADD;
+    mix.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    mix.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    mix.alphaBlendOp = VK_BLEND_OP_ADD;
+    mix.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT;
+    VkPipelineColorBlendAttachmentState none{};
+    bd.blendStates = {mix, mix, none, none, mix, none};  // diffuse, normal, motion, emissive, specular, visibility
+    gbufferBlendPipeline_ = rhi::createGraphicsPipeline(ctx, bd);
+  }
   if (useShadowMaps_) {  // mesma entrada de vértices do G-buffer, só profundidade (convencional: 0 perto, 1 longe)
     shadowLayout_.init(ctx, g, {}, 16);
     rhi::GraphicsPipelineDesc sd = gb;
@@ -929,10 +950,18 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
     // Uma chamada por malha com todas as suas instâncias (medido na cidade: 98 mil chamadas, uma por objeto, custavam
     // ~25 ms de CPU por frame).
+    bool blendBound = false;
     GBufferPush p{culledList_.address};
     vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
+    // Dois passes: opacos, depois os misturados (decals) por cima, com o pipeline de mistura.
+    for (uint32_t pass = 0; pass < 2; ++pass)
     for (uint32_t bi = 0; bi < drawBatches_.size(); ++bi) {
       const DrawBatch& b = drawBatches_[bi];
+      if (b.blend != (pass == 1)) continue;
+      if (pass == 1 && (bi == 0 || drawBatches_[bi - 1].blend != b.blend || !blendBound)) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferBlendPipeline_);
+        blendBound = true;
+      }
       const auto& m = scene_->meshes[b.mesh];
       vkCmdSetCullMode(cmd, b.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
       vkCmdSetFrontFace(cmd, b.mirrored != kFrontFaceClockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
@@ -1459,6 +1488,7 @@ void Renderer::destroy() {
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
   vkDestroyPipeline(ctx.device, gbufferPipeline_, nullptr);
+  vkDestroyPipeline(ctx.device, gbufferBlendPipeline_, nullptr);
   if (particlePipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(ctx.device, particlePipeline_, nullptr);
   rhi::destroyBuffer(ctx, emitterBuffer_);
   particleLayout_.destroy(ctx);

@@ -200,6 +200,7 @@ class Renderer {
     uint32_t mesh, first, count;
     bool doubleSided, mirrored;  // glTF doubleSided: sem culling | transformação espelhada: frente invertida
     uint32_t lod = 0, lodBase = 0;  // nível de detalhe (0 = completo) e o lote completo de origem
+    bool blend = false;             // decals BLEND: segundo passe, misturado no G-buffer
   };
   std::vector<DrawBatch> drawBatches_;
   rhi::Buffer drawList_;
@@ -225,6 +226,7 @@ class Renderer {
   VkPipeline particlePipeline_ = VK_NULL_HANDLE;
   rhi::Buffer emitterBuffer_;  // scene::ParticleEmitter (só com partículas na cena)
   VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
+  VkPipeline gbufferBlendPipeline_ = VK_NULL_HANDLE;  // decals BLEND: mistura na cor, normal e especular
 
   rhi::GpuProfiler profiler_;
   uint64_t frameIndex_ = 0;

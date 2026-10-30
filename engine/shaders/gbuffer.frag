@@ -42,18 +42,21 @@ void main() {
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;  // materiais de dois lados
   Surface s = evalMaterial(m, vWorldPos, N, vTangent, vUV);
-  if ((m.flags & MATERIAL_ALPHA_MASK) != 0u && s.alpha < m.alphaCutoff) discard;
+  // Misturados (decals BLEND): sem recorte, o alfa vai para a mistura (pipeline de decals: .a de cada anexo).
+  bool blend = (m.flags & MATERIAL_BLEND) != 0u;
+  if (!blend && (m.flags & MATERIAL_ALPHA_MASK) != 0u && s.alpha < m.alphaCutoff) discard;
+  if (blend && s.alpha <= 0.002) discard;
 
   // Movimento da câmera + do objeto + da deformação do esqueleto.
   outMotion = (vCurClip.xy / vCurClip.w - vPrevClip.xy / vPrevClip.w) * 0.5;
-  outDiffuse = vec4(s.diffuseColor, s.occlusion);  // a: oclusão do material (luz indireta)
+  outDiffuse = vec4(s.diffuseColor, blend ? s.alpha : s.occlusion);  // a: oclusão do material (luz indireta)
   // Com verniz forte, a rugosidade do G-buffer é a do verniz (o lobo mais nítido decide o denoiser e as guias do
   // DLSS-RR); a iluminação relê a rugosidade da base no material.
   float gRoughness = s.clearcoat >= 0.5 ? filterRoughness(normalize(N), s.clearcoatRoughness, 0.0)
                                         : filterRoughness(s.normal, s.roughness, s.normalVariance);
-  outNormal = vec4(s.normal, gRoughness);
+  outNormal = vec4(s.normal, blend ? s.alpha : gRoughness);
   outEmissive = vec4(clampHalf(s.emissive * preExposure()), 1.0);  // nits, pré-exposto
-  outSpecular = vec4(s.f0, s.f90);
+  outSpecular = vec4(s.f0, blend ? s.alpha : s.f90);
   // Mar: a superfície deslocada não é o triângulo guardado (plano parado nos raios): os passes de RT reconstroem o
   // ponto pela profundidade (0 = sem triângulo exato).
   // O mesmo vale para os LODs (o triângulo é da malha simplificada, não da guardada no objeto).

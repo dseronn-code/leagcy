@@ -64,6 +64,7 @@ VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
       b.colorBlendOp = b.alphaBlendOp = VK_BLEND_OP_ADD;
     }
   }
+  if (!d.blendStates.empty()) blends = d.blendStates;
   VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
   cb.attachmentCount = uint32_t(blends.size());
   cb.pAttachments = blends.data();

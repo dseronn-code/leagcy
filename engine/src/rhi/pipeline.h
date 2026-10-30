@@ -25,6 +25,8 @@ struct GraphicsPipelineDesc {
   bool dynamicCulling = false;
   // Mistura pré-multiplicada (cor = src + dst × (1 − src.a)): partículas e transparências sobre a imagem.
   bool blendPremultiplied = false;
+  // Por anexo de cor (se não vazio): mistura e máscara de escrita próprias (decals no G-buffer).
+  std::vector<VkPipelineColorBlendAttachmentState> blendStates;
 };
 
 VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& desc);
