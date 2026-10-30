@@ -212,6 +212,7 @@ class Renderer {
   rhi::Buffer crowdFrames_;
   std::vector<uint32_t> crowdFrameBase_;
   float clothTime_ = 0.0f;  // tempo da cena na última simulação de tecido
+  std::array<uint32_t, kFramesInFlight> tlasLayoutSeen_{};  // layout do TLAS já escrito em cada slot (streaming)
   rhi::Buffer radianceCache_;  // cache de radiância no espaço do mundo (shaders/radiance_cache.glsl)
 
   VkDescriptorPool pool_ = VK_NULL_HANDLE;

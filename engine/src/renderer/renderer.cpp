@@ -958,6 +958,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     for (uint32_t bi = 0; bi < drawBatches_.size(); ++bi) {
       const DrawBatch& b = drawBatches_[bi];
       if (b.blend != (pass == 1)) continue;
+      if (!scene_->meshes[b.mesh].resident) continue;  // streaming: fora da memória (o culling já não pôs ninguém)
       if (pass == 1 && (bi == 0 || drawBatches_[bi - 1].blend != b.blend || !blendBound)) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferBlendPipeline_);
         blendBound = true;
@@ -999,6 +1000,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       vkCmdPushConstants(cmd, shadowLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(sp), &sp);
       for (const DrawBatch& b : drawBatches_) {
         if (b.lod != 0) continue;  // sombra com a malha completa (os lotes de LOD repetem os objetos)
+        if (!scene_->meshes[b.mesh].resident) continue;  // streaming
         const auto& m = scene_->meshes[b.mesh];
         VkBuffer vbs[2] = {m.vertices.handle, m.vertices.handle};
         VkDeviceSize offsets[2] = {0, 0};
@@ -1292,6 +1294,12 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
 
   // Transformações atual e anterior de cada objeto (vetores de movimento por objeto) e as instâncias do TLAS: só as
   // que mudaram (medido na cidade de 98 mil objetos: ~35 ms de CPU por frame reescrevendo tudo).
+  // Streaming: endereços das malhas que acabaram de entrar no buffer de instâncias (antes dos passes que o leem).
+  for (uint32_t o : s.takeInstanceUpdates()) {
+    struct { uint64_t vertices, indices; uint32_t material, pad0; uint64_t pad1; } inst{0, 0, s.objects[o].material, 0, 0};
+    s.instanceAddresses(s.objects[o].mesh, inst.vertices, inst.indices);
+    vkCmdUpdateBuffer(cmd, s.instances().handle, VkDeviceSize(o) * sizeof(inst), sizeof(inst), &inst);
+  }
   const auto& changed = s.changedObjects();
   for (uint32_t k = 0; k < kFramesInFlight; ++k)
     pendingObjects_[k].insert(pendingObjects_[k].end(), changed.begin(), changed.end());
@@ -1299,14 +1307,22 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   auto* objs = static_cast<ObjectGpu*>(objectBuffers_[slot].mapped);
   auto writeObject = [&](uint32_t i) {
     const auto& ob = s.objects[i];
-    const glm::uvec4 anim = ob.crowdClip != ~0u
-                                ? glm::uvec4(crowdFrameBase_[ob.crowdClip], ob.animFrame, historyValid_ ? ob.prevAnimFrame : ob.animFrame, 0)
-                                : glm::uvec4(~0u, 0, 0, 0);
+    glm::uvec4 anim = ob.crowdClip != ~0u
+                          ? glm::uvec4(crowdFrameBase_[ob.crowdClip], ob.animFrame, historyValid_ ? ob.prevAnimFrame : ob.animFrame, 0)
+                          : glm::uvec4(~0u, 0, 0, 0);
+    anim.w = s.meshes[ob.mesh].resident ? 0u : 1u;  // streaming: malha fora da memória = objeto oculto no culling
     objs[i] = {ob.transform, historyValid_ ? ob.prevTransform : ob.transform, anim};
-    if (ctx.rayTracing) s.tlas.writeInstance(slot, i, s.tlasInstance(i));
+    if (ctx.rayTracing && s.tlasSlotOf(i) >= 0) s.tlas.writeInstance(slot, uint32_t(s.tlasSlotOf(i)), s.tlasInstance(i));
   };
-  const bool full = objectsFull_[slot];
-  if (full) {
+  // Layout do TLAS mudou (streaming): as posições das instâncias mudaram — reescreve todas neste slot.
+  const bool layoutChanged = ctx.rayTracing && tlasLayoutSeen_[slot] != s.tlasLayout();
+  if (layoutChanged) {
+    for (uint32_t i = 0; i < s.objects.size(); ++i)
+      if (s.tlasSlotOf(i) >= 0) s.tlas.writeInstance(slot, uint32_t(s.tlasSlotOf(i)), s.tlasInstance(i));
+    tlasLayoutSeen_[slot] = s.tlasLayout();
+  }
+  const bool full = objectsFull_[slot] || layoutChanged;
+  if (objectsFull_[slot]) {
     for (uint32_t i = 0; i < s.objects.size(); ++i) writeObject(i);
     objectsFull_[slot] = false;
   } else {
@@ -1398,7 +1414,7 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   cpuMark("esqueletos");
   // TLAS reconstruído só quando algo mudou (objeto movido ou malha com esqueleto refeita); parado, o da GPU vale.
   if (ctx.rayTracing && (objectsMoved || anySkinned || !tlasBuilt_)) {
-    s.tlas.build(cmd, slot, uint32_t(s.objects.size()));
+    s.tlas.build(cmd, slot, s.tlasInstanceCount());
     tlasBuilt_ = true;
   }
   cpuMark("tlas");

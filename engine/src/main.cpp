@@ -273,6 +273,7 @@ int runHeadless(const Options& opt) {
     if (opt.move != 0.0f && (opt.moveStop == 0 || f < opt.moveStop)) camera.position += moveDir * (opt.move * dt);
     const bool frozen = opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
     scene.update(frozen ? 0.0f : dt);
+    scene.stream(ctx, camera.position);  // streaming do mundo (células perto da câmera)
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
       auto c0 = std::chrono::steady_clock::now();
@@ -452,6 +453,7 @@ int runWindowed(const Options& opt) {
     (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
 
     scene.update(opt.pause ? 0.0f : glm::clamp(dt, 0.0f, 0.1f));
+    scene.stream(ctx, camera.position);
 
     // ---- Frame ----
     FrameSync& f = frames[slot];
