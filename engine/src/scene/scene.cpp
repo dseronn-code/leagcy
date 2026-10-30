@@ -286,7 +286,20 @@ uint32_t Scene::addCrowdAgent(uint32_t clip, const glm::mat4& transform, float p
 void Scene::addDecal(DecalType type, glm::vec3 center, glm::vec3 halfExtent, float yawRad, glm::vec4 color) {
   glm::mat4 m = glm::translate(glm::mat4(1.0f), center) * glm::rotate(glm::mat4(1.0f), yawRad, glm::vec3(0, 1, 0)) *
                 glm::scale(glm::mat4(1.0f), halfExtent);
-  decals.push_back({glm::inverse(m), color, uint32_t(type), float(decals.size()) * 0.618034f});
+  decals.push_back({glm::inverse(m), color, uint32_t(type), float(decals.size()) * 0.618034f, -1, 0.6f});
+}
+
+void Scene::addWallDecal(int32_t texture, glm::vec3 center, glm::vec3 wallNormal, float width, float height, float roughness) {
+  const glm::vec3 z = glm::normalize(wallNormal);
+  const glm::vec3 x = glm::normalize(glm::cross(std::abs(z.y) > 0.99f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0), z));
+  const glm::vec3 y = glm::cross(z, x);
+  glm::mat4 m(1.0f);
+  m[0] = glm::vec4(-x * 0.5f * width, 0.0f);  // u cresce para a direita de quem olha a parede
+  m[1] = glm::vec4(y * 0.5f * height, 0.0f);
+  m[2] = glm::vec4(z * 0.15f, 0.0f);         // projeta 15 cm para dentro e para fora da parede
+  m[3] = glm::vec4(center, 1.0f);
+  Decal d{glm::inverse(m), glm::vec4(1.0f), uint32_t(kDecalTexture), 0.0f, texture, roughness};
+  decals.push_back(d);
 }
 
 void Scene::addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count) {
@@ -678,7 +691,7 @@ void Scene::upload(rhi::Context& ctx) {
                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
   {
     std::vector<Decal> gpuDecals = decals;
-    if (gpuDecals.empty()) gpuDecals.push_back({glm::mat4(1.0f), glm::vec4(0.0f), 0xFFFFFFFFu});  // nenhum: marcador
+    if (gpuDecals.empty()) gpuDecals.push_back({glm::mat4(1.0f), glm::vec4(0.0f), 0xFFFFFFFFu, 0.0f, -1, 0.0f});  // marcador
     decalBuffer = rhi::createBufferWithData(ctx, gpuDecals.data(), gpuDecals.size() * sizeof(Decal), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
   }
   // Malha vazia (endereços válidos para objetos fora da memória e BLAS das instâncias inativas).

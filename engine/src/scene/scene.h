@@ -144,13 +144,16 @@ enum DecalType : uint32_t {
   kDecalDirt = 2,       // sujeira/encardido (escurece, fica mais áspero)
   kDecalOil = 3,        // mancha de óleo (escura e lisa)
   kDecalCracks = 4,     // rachaduras (linhas escuras finas)
+  kDecalTexture = 5,    // imagem (pichação, cartaz, placa): textura RGBA projetada pelo eixo z da caixa, em qualquer
+                        // superfície virada para ela (paredes incluídas)
 };
 struct Decal {
   glm::mat4 worldToDecal{1.0f};  // leva o mundo ao cubo [-1, 1]³ da caixa
   glm::vec4 color{1.0f};         // cor da tinta (a = opacidade)
   uint32_t type = kDecalDirt;
   float seed = 0.0f;
-  float pad0 = 0.0f, pad1 = 0.0f;
+  int32_t texture = -1;  // kDecalTexture: índice da textura (Scene::addTexture)
+  float roughness = 0.6f;  // da tinta/papel
 };
 static_assert(sizeof(Decal) == 96);
 
@@ -364,6 +367,8 @@ class Scene {
   rhi::Buffer decalBuffer;
   // Caixa do decal: centro, meias-medidas (x, y = espessura da projeção, z) e giro em torno do eixo vertical.
   void addDecal(DecalType type, glm::vec3 center, glm::vec3 halfExtent, float yawRad, glm::vec4 color = glm::vec4(1.0f));
+  // Decal de imagem numa parede: centro na superfície, normal da parede (para fora), largura e altura (m).
+  void addWallDecal(int32_t texture, glm::vec3 center, glm::vec3 wallNormal, float width, float height, float roughness = 0.6f);
   uint32_t particleCount = 0;
   // Acrescenta um emissor com `count` partículas. Fogo também cria uma luz que tremula (a chama ilumina a cena).
   void addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count);
