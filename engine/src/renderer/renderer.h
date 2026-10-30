@@ -60,6 +60,8 @@ struct Settings {
   float dofAperture = 8.0f;         // CoC (px) de um objeto no infinito
   float dofMaxCoc = 14.0f;
   bool motionBlur = true;
+  bool shadowMaps = false;  // shadow maps em cascata mesmo com ray tracing (sem RT eles são sempre usados)
+  float shadowDistance = 150.0f;  // m cobertos pelas cascatas
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
   float lensFlare = 1.0f;  // reflexos fantasmas e halo das lentes (0 = desligado)
@@ -176,7 +178,16 @@ class Renderer {
   float prevSceneTime_ = 0.0f;
   bool hasSubsurface_ = false;  // a cena tem material com espalhamento subsuperficial
   rhi::ComputePass sssPass_, rainOcclusionPass_;
-  rhi::Image rainOcclusion_;  // altura exposta à chuva em volta da câmera (R16F seria pouco: guarda metros)
+  rhi::Image rainOcclusion_;
+  // Shadow maps em cascata (sol sem ray tracing): 4 camadas de profundidade vistas do sol.
+  rhi::Image shadowMap_;
+  std::array<VkImageView, 4> shadowLayerViews_{};
+  VkSampler shadowSampler_ = VK_NULL_HANDLE;  // comparação (PCF por hardware)
+  rhi::PassLayout shadowLayout_;
+  VkPipeline shadowPipeline_ = VK_NULL_HANDLE;
+  bool useShadowMaps_ = false;
+  std::array<glm::mat4, 4> shadowMatrices_{};
+  glm::vec4 shadowSplits_{0.0f}, shadowParams_{0.0f};  // altura exposta à chuva em volta da câmera (R16F seria pouco: guarda metros)
   VkSampler oceanSampler_ = VK_NULL_HANDLE;  // linear, repete (o patch do oceano é periódico)
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;

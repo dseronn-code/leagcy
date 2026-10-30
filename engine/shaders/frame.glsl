@@ -34,7 +34,33 @@ layout(set = 0, binding = 0) uniform FrameData {
                               // z = cobertura de nuvens (0 = céu limpo); w = tempo (s, move as nuvens)
   vec4 weather;               // x = superfícies molhadas, y = poças, z = chuva caindo (respingos),
                               // w = tempo da cena no frame anterior (s; o atual é night.w)
+  mat4 shadowMatrices[4];     // shadow maps em cascata: mundo -> clip de cada cascata (vista do sol)
+  vec4 shadowSplits;          // xyz = fim das cascatas 0..2 (m da câmera), w = fim da última; 0 = desligado
+  vec4 shadowParams;          // x = metros por texel da cascata 0, y = 1: usa os shadow maps mesmo com ray tracing
 } frame;
+
+// Shadow maps em cascata (sem ray tracing, ou --shadow-maps): visibilidade do sol num ponto, com PCF.
+layout(set = 0, binding = 21) uniform sampler2DArrayShadow shadowCascades;
+bool shadowMapsEnabled() { return frame.shadowSplits.w > 0.0; }
+float sunShadowMap(vec3 P, vec3 Ng) {
+  float dist = distance(P, frame.cameraPos.xyz);
+  if (dist >= frame.shadowSplits.w) return 1.0;  // além da última cascata: sem sombra
+  int c = dist < frame.shadowSplits.x ? 0 : dist < frame.shadowSplits.y ? 1 : dist < frame.shadowSplits.z ? 2 : 3;
+  // Texel cresce com a cascata (cada uma cobre mais); deslocamento pela normal contra a "acne".
+  float texel = frame.shadowParams.x * pow(2.6, float(c));
+  vec3 p = P + Ng * texel * 1.5;
+  vec4 clip = frame.shadowMatrices[c] * vec4(p, 1.0);
+  vec3 s = clip.xyz / clip.w;
+  vec2 uv = s.xy * 0.5 + 0.5;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 1.0;
+  float d = s.z - 0.0005;
+  vec2 ts = 1.0 / vec2(textureSize(shadowCascades, 0).xy);
+  float sum = 0.0;
+  for (int y = -1; y <= 1; ++y)
+    for (int x = -1; x <= 1; ++x)  // textureGrad: vale também em compute (sem derivadas implícitas)
+      sum += textureGrad(shadowCascades, vec4(uv + vec2(x, y) * ts * 1.5, float(c), d), vec2(0.0), vec2(0.0));
+  return sum / 9.0;
+}
 
 // Sombra das nuvens (cloud_shadow.comp): transmitância da camada na direção do sol, num quadrado em volta da câmera.
 layout(set = 0, binding = 16) uniform sampler2D cloudShadowMap;

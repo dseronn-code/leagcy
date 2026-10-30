@@ -123,6 +123,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--sharpness") o.render.sharpness = glm::clamp(float(std::atof(next())), 0.0f, 1.0f);
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--no-lens-flare") o.render.lensFlare = 0.0f;
+    else if (a == "--shadow-maps") o.render.shadowMaps = true;
     else if (a == "--no-radiance-cache") o.render.radianceCache = false;
     else if (a == "--no-virtual-motion") o.render.virtualMotion = false;  // medição do SVGF
     else if (a == "--reference" || a == "--reference-pt") {  // verdade por acumulação: sem denoiser, TAA, upscaling nem blur

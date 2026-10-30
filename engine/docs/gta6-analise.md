@@ -25,7 +25,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | GI por ray tracing | ✅ | 1 rebote traçado + cache de radiância no espaço do mundo (infinitos rebotes); sala de teste contra path tracing: viés −64% → −4% |
 | Reflexos por ray tracing | ✅ | 100% ray tracing (inclui fora da tela), reflexo do reflexo em espelhos, luz indireta pelo cache, movimento virtual no denoiser; erro 0,068 contra path tracing |
 | Sombra do sol | ✅ | Ray tracing com penumbra física do disco solar; sem acne e sem degraus no terminator (visibility buffer + Hanika 2021 + Chiang 2019, medido em `tools/sombras.py`) |
-| Shadow maps em cascata (fallback e performance) | ❌ | |
+| Shadow maps em cascata (fallback e performance) | ✅ | 4 cascatas 2048² (divisão prática λ = 0,75, esfera envolvente estável, passos de um texel), PCF por comparação em hardware, folhagem com recorte e vento; sempre sem ray tracing, e com `--shadow-maps` numa RTX (imagem praticamente igual à sombra traçada na Sponza). Sem RT a luz ambiente ainda não tem oclusão |
 | Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR de produção: BVH de luzes, GRIS/MIS em pares, correção de viés por ray tracing, filtro de boiling; viés < 1,5% contra força bruta (`tools/restir.py`) |
 | Céu e atmosfera física | ✅ | Pipeline completa de Hillaire (transmitância, múltiplo espalhamento, sky-view, perspectiva aérea), 4% de erro contra path tracing de referência |
 | Nuvens volumétricas, raios de luz (god rays) | ✅ | Nuvens Nubis/Hillaire (Perlin-Worley, múltiplo espalhamento, vento) no céu, nos reflexos e com sombra no chão; névoa volumétrica em froxels com sombra do sol por ray tracing e céu com visibilidade (raios de luz, névoa escura dentro de prédios) |

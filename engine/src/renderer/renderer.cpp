@@ -48,8 +48,12 @@ struct FrameUniforms {
   glm::vec4 night;        // x = 1: a luz direcional é a lua; y = iluminância de uma estrela de magnitude 0 (lux)
   glm::vec4 weather;      // x = superfícies molhadas (0..1), y = poças (0..1), z = chuva caindo (respingos),
                           // w = tempo da cena no frame anterior (movimento de vento/ondas para os vetores de movimento)
+  glm::mat4 shadowMatrices[4];  // shadow maps em cascata: mundo -> clip de cada cascata
+  glm::vec4 shadowSplits;       // fim de cada cascata (m); w = 0: desligado
+  glm::vec4 shadowParams;       // x = m por texel da cascata 0, y = 1: shadow maps mesmo com ray tracing
 };
-static_assert(sizeof(FrameUniforms) == 672);
+static_assert(sizeof(FrameUniforms) == 960);
+constexpr uint32_t kShadowMapSize = 2048;
 
 // Frente dos triângulos: anti-horário, como no glTF (a projeção inverte o Y e o viewport do Vulkan também: as duas
 // inversões se cancelam — conferido pela imagem, com culling o chão e as paredes continuam lá).
@@ -210,6 +214,19 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   skyClear_ = rhi::createImage2D(ctx, skyLutExtent_, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   cloudShadow_ = rhi::createImage2D(ctx, kCloudShadowExtent, kHdrFormat, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   rainOcclusion_ = rhi::createImage2D(ctx, {256, 256}, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+  useShadowMaps_ = !ctx.rayTracing || settings.shadowMaps;
+  {
+    const uint32_t size = useShadowMaps_ ? kShadowMapSize : 16;  // sem uso: só um alvo válido para o descritor
+    shadowMap_ = rhi::createImage2DArray(ctx, {size, size}, 4, kDepthFormat,
+                                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+    for (uint32_t c = 0; c < 4; ++c) shadowLayerViews_[c] = rhi::createLayerView(ctx, shadowMap_, c);
+    VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+    si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    si.compareEnable = VK_TRUE;
+    si.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    VK_CHECK(vkCreateSampler(ctx.device, &si, nullptr, &shadowSampler_));
+  }
   cloudSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
   oceanSampler_ = makeSampler(ctx, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_SAMPLER_ADDRESS_MODE_REPEAT);
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
@@ -283,6 +300,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {18, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {19, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {20, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {21, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -298,7 +316,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {CIS, kFramesInFlight * (10 + kMaxTextures)},
+      {CIS, kFramesInFlight * (11 + kMaxTextures)},
       {SB, kFramesInFlight * 8},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
@@ -368,6 +386,18 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   gb.depthTest = gb.depthWrite = true;
   gb.dynamicCulling = true;  // por lote: de um lado só (padrão do glTF) ou dos dois (doubleSided: folhagem, tecidos)
   gbufferPipeline_ = rhi::createGraphicsPipeline(ctx, gb);
+  if (useShadowMaps_) {  // mesma entrada de vértices do G-buffer, só profundidade (convencional: 0 perto, 1 longe)
+    shadowLayout_.init(ctx, g, {}, 16);
+    rhi::GraphicsPipelineDesc sd = gb;
+    sd.vertexShader = "shadow.vert";
+    sd.fragmentShader = "shadow.frag";
+    sd.layout = shadowLayout_.pipelineLayout;
+    sd.colorFormats = {};
+    sd.depthCompare = VK_COMPARE_OP_LESS_OR_EQUAL;
+    sd.dynamicCulling = false;
+    sd.cullMode = VK_CULL_MODE_NONE;  // as duas faces projetam sombra (sem vazamento em paredes finas)
+    shadowPipeline_ = rhi::createGraphicsPipeline(ctx, sd);
+  }
 
   // Partículas: quadrados sobre a imagem composta, antes do TAA (mistura pré-multiplicada, sem depth: o fragment
   // compara com a profundidade da cena).
@@ -405,6 +435,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       rhi::imageBarrier(cmd, img->handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
                         VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                         VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+    rhi::imageBarrier(cmd, shadowMap_.handle, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                      VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                      VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     dfgPass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(dfgLut_.view)}, kDfgLutExtent);
     transmittancePass.dispatch(cmd, globalSets_[0], {rhi::Binding::storageImage(transmittanceLut_.view)}, kTransmittanceLutExtent);
     rhi::memoryBarrier(cmd);
@@ -480,6 +513,8 @@ void Renderer::writeGlobalDescriptors() {
     add(19, SB, 1).pBufferInfo = &decals;
     VkDescriptorImageInfo rainOcc{linear_, rainOcclusion_.view, VK_IMAGE_LAYOUT_GENERAL};
     add(20, CIS, 1).pImageInfo = &rainOcc;
+    VkDescriptorImageInfo cascades{shadowSampler_, shadowMap_.view, VK_IMAGE_LAYOUT_GENERAL};
+    add(21, CIS, 1).pImageInfo = &cascades;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -668,6 +703,46 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
   u.params = glm::vec4(settings.sunAngularRadius, dt, scene_->fogDensity, scene_->fogFalloff);
   u.jitter = glm::vec4(jitterUv, prevJitter_);
+  // Shadow maps em cascata: 4 fatias do frustum (divisão "prática", λ = 0,75: meio caminho entre logarítmica e
+  // uniforme), cada uma numa projeção ortográfica do sol que cobre a esfera envolvente da fatia (não muda de tamanho ao
+  // girar a câmera) e anda em passos de um texel (a sombra não "tremula" quando a câmera anda).
+  if (useShadowMaps_ && u.sunDir.w > 0.0f) {
+    const glm::vec3 L = glm::vec3(u.sunDir), fwd = cam.forward(), right = cam.right(), up = glm::cross(right, fwd);
+    const float n = cam.nearPlane, f = settings.shadowDistance, th = std::tan(0.5f * cam.fovY);
+    float prevSplit = n;
+    for (uint32_t c = 0; c < 4; ++c) {
+      const float t = float(c + 1) / 4.0f;
+      const float split = 0.75f * n * std::pow(f / n, t) + 0.25f * (n + (f - n) * t);
+      glm::vec3 corners[8], center(0.0f);
+      for (int k = 0; k < 8; ++k) {
+        const float d = (k & 4) ? split : prevSplit, hh = d * th, ww = hh * aspect;
+        corners[k] = cam.position + fwd * d + right * ((k & 1) ? ww : -ww) + up * ((k & 2) ? hh : -hh);
+        center += corners[k] / 8.0f;
+      }
+      float radius = 0.0f;
+      for (const glm::vec3& p : corners) radius = std::max(radius, glm::length(p - center));
+      radius = std::ceil(radius * 16.0f) / 16.0f;
+      const float back = 400.0f;  // quem fica atrás (até 400 m na direção do sol) também projeta sombra
+      const glm::vec3 lup = std::abs(L.y) > 0.99f ? glm::vec3(0, 0, 1) : glm::vec3(0, 1, 0);
+      const glm::mat4 view = glm::lookAt(center + L * (radius + back), center, lup);
+      glm::mat4 proj = glm::orthoRH_ZO(-radius, radius, -radius, radius, 0.0f, 2.0f * radius + back);
+      glm::vec4 o = proj * view * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+      const float half = 0.5f * float(kShadowMapSize);
+      const glm::vec2 snapped = glm::round(glm::vec2(o) * half) / half;
+      proj[3][0] += snapped.x - o.x;
+      proj[3][1] += snapped.y - o.y;
+      shadowMatrices_[c] = proj * view;
+      u.shadowMatrices[c] = shadowMatrices_[c];
+      if (c < 3) u.shadowSplits[c] = split;
+      if (c == 0) u.shadowParams.x = 2.0f * radius / float(kShadowMapSize);
+      prevSplit = split;
+    }
+    u.shadowSplits.w = prevSplit;
+    u.shadowParams.y = (ctx_->rayTracing && settings.shadowMaps) ? 1.0f : 0.0f;
+  } else {
+    u.shadowSplits = glm::vec4(0.0f);
+    u.shadowParams = glm::vec4(0.0f);
+  }
   u.renderSize = glm::vec4(R.width, R.height, 1.0f / R.width, 1.0f / R.height);
   u.outputSize = glm::vec4(O.width, O.height, 1.0f / O.width, 1.0f / O.height);
   u.frameInfo = glm::uvec4(uint32_t(frameIndex_), ctx_->rayTracing ? 1u : 0u, uint32_t(scene_->lights.size()),
@@ -775,6 +850,35 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const Binding gDepth = tex(t_.depth[cur]), gNormal = tex(t_.normal[cur]), gDiffuse = tex(t_.diffuse),
                 gSpecular = tex(t_.specular);
   const Binding gDepthPrev = tex(t_.depth[prev]), gNormalPrev = tex(t_.normal[prev]), gMotion = tex(t_.motion);
+
+  // ---- 2b. Shadow maps em cascata (sem ray tracing ou --shadow-maps) ----
+  if (useShadowMaps_ && u.shadowSplits.w > 0.0f) {
+    for (uint32_t c = 0; c < 4; ++c) {
+      VkRenderingAttachmentInfo depth = attachment(shadowLayerViews_[c], VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR);
+      depth.clearValue.depthStencil = {1.0f, 0};
+      VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+      ri.renderArea = {{0, 0}, shadowMap_.extent};
+      ri.layerCount = 1;
+      ri.pDepthAttachment = &depth;
+      vkCmdBeginRendering(cmd, &ri);
+      setViewport(cmd, shadowMap_.extent);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowPipeline_);
+      vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shadowLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
+      struct { VkDeviceAddress drawList; uint32_t cascade, pad; } sp{drawList_.address, c, 0};
+      vkCmdPushConstants(cmd, shadowLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(sp), &sp);
+      for (const DrawBatch& b : drawBatches_) {
+        const auto& m = scene_->meshes[b.mesh];
+        VkBuffer vbs[2] = {m.vertices.handle, m.vertices.handle};
+        VkDeviceSize offsets[2] = {0, 0};
+        vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
+        vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, m.indexCount, b.count, 0, 0, b.first);
+      }
+      vkCmdEndRendering(cmd);
+    }
+    barrier();
+    profiler_.mark(cmd, "sombra_cascatas");
+  }
 
   // ---- 3. ReSTIR DI ----
   restirTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion,
@@ -1207,6 +1311,11 @@ void Renderer::destroy() {
   destroyTargets();
   profiler_.destroy();
   rhi::destroyImage(ctx, skyLut_);
+  for (VkImageView v : shadowLayerViews_) vkDestroyImageView(ctx.device, v, nullptr);
+  rhi::destroyImage(ctx, shadowMap_);
+  vkDestroySampler(ctx.device, shadowSampler_, nullptr);
+  if (shadowPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(ctx.device, shadowPipeline_, nullptr);
+  shadowLayout_.destroy(ctx);
   for (rhi::Image* img : {&cloudNoise_, &skyClear_, &cloudShadow_, &rainOcclusion_}) rhi::destroyImage(ctx, *img);
   vkDestroySampler(ctx.device, cloudSampler_, nullptr);
   vkDestroySampler(ctx.device, oceanSampler_, nullptr);
