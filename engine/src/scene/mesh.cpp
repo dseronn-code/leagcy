@@ -26,6 +26,35 @@ MeshData makeSphere(uint32_t segments, uint32_t rings) {
   return m;
 }
 
+MeshData makeGrassClump(uint32_t blades, float height, uint32_t seed) {
+  MeshData m;
+  uint32_t st = seed * 747796405u + 2891336453u;
+  auto rnd = [&]() {
+    st = st * 747796405u + 2891336453u;
+    uint32_t w = ((st >> ((st >> 28u) + 4u)) ^ st) * 277803737u;
+    return float((w >> 22u) ^ w) / 4294967296.0f;
+  };
+  for (uint32_t b = 0; b < blades; ++b) {
+    const float a = glm::two_pi<float>() * rnd(), r = 0.12f * std::sqrt(rnd());
+    const glm::vec3 root(r * std::cos(a), 0.0f, r * std::sin(a));
+    const float facing = glm::two_pi<float>() * rnd(), lean = 0.25f + 0.45f * rnd(), h = height * (0.6f + 0.6f * rnd());
+    const glm::vec3 side(std::cos(facing), 0.0f, std::sin(facing)), forward(-side.z, 0.0f, side.x);
+    const uint32_t base = uint32_t(m.vertices.size());
+    for (int k = 0; k <= 3; ++k) {  // 3 segmentos: largura 1,2 cm na base até a ponta
+      const float t = float(k) / 3.0f, width = 0.012f * (1.0f - t);
+      const glm::vec3 c = root + glm::vec3(0.0f, h * t, 0.0f) + forward * (lean * h * t * t);
+      const glm::vec3 n = glm::normalize(glm::cross(side, glm::normalize(glm::vec3(0.0f, h, 0.0f) + forward * (2.0f * lean * h * t))));
+      m.vertices.push_back({c - side * width, n, {0.0f, t}, {side, 1.0f}});
+      m.vertices.push_back({c + side * width, n, {1.0f, t}, {side, 1.0f}});
+    }
+    for (uint32_t k = 0; k < 3; ++k) {
+      const uint32_t v = base + 2 * k;
+      m.indices.insert(m.indices.end(), {v, v + 1, v + 2, v + 1, v + 3, v + 2});
+    }
+  }
+  return m;
+}
+
 MeshData makeRadialGrid(uint32_t rings, uint32_t segments, float innerRadius, float outerRadius) {
   MeshData m;
   m.vertices.push_back({{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}});

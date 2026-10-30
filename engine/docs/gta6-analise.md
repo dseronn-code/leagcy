@@ -70,7 +70,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Streaming do mundo | ❌ | O item mais difícil: carregar e descarregar o mapa enquanto o jogador anda |
 | LOD e HLOD de cidade inteira | ❌ | |
 | Renderização GPU-driven (culling em compute, oclusão, meshlets) | ❌ | Sem isso não dá para desenhar milhões de objetos |
-| Vegetação instanciada com vento | 🟡 | Folhagem dos assets (recorte por alfa + dois lados) balança com rajadas, curvatura pela altura e tremor das folhas, com vetores de movimento certos; desenho instanciado por malha; falta gerar vegetação (grama/árvores procedurais) e a sombra traçada seguir o balanço |
+| Vegetação instanciada com vento | ✅ | Grama procedural (tufos de lâminas curvas) instanciada aos milhares (uma chamada e uma BLAS por variação), folhagem dos assets e grama balançam com rajadas, curvatura pela altura e tremor das folhas, com vetores de movimento certos. Falta a sombra traçada seguir o balanço (BLAS parada) |
 | Terreno grande (clipmaps) | 🟡 | Temos terreno procedural de tamanho fixo |
 | Partículas e VFX (fogo, fumaça, explosões) | 🟡 | Partículas sem estado na GPU (fogo de corpo negro com luz que tremula, fumaça iluminada por sol com sombra traçada e céu, faíscas, chuva), soft particles; faltam explosões, texturas animadas (flipbook), luz das lâmpadas na fumaça e máscara reativa para o DLSS/TAA |
 | Ray tracing com geometria dinâmica (carros e pessoas se movendo) | ✅ | TLAS por frame, BLAS deformáveis (Dia 3) |

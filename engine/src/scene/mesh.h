@@ -29,6 +29,8 @@ MeshData makeSphere(uint32_t segments = 96, uint32_t rings = 48);
 MeshData makeCube();
 // Disco no plano y = 0 com anéis em progressão geométrica (denso no centro, ralo na borda): a superfície do mar, que
 // segue a câmera (o centro fica sob ela).
+// Tufo de grama: `blades` lâminas finas e curvadas (3 segmentos cada) em volta da origem, altura ~`height` m.
+MeshData makeGrassClump(uint32_t blades, float height, uint32_t seed);
 MeshData makeRadialGrid(uint32_t rings, uint32_t segments, float innerRadius, float outerRadius);
 // Grade de `res`x`res` quads cobrindo `size` metros; altura dada por heightFn(x, z).
 MeshData makeTerrain(float size, uint32_t res, const std::function<float(float, float)>& heightFn);
