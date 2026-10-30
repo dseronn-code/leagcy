@@ -365,6 +365,12 @@ void Scene::upload(rhi::Context& ctx) {
       }
     }
     triangles += data.indices.size() / 3;
+    gm.boundsMin = glm::vec3(1e30f);
+    gm.boundsMax = glm::vec3(-1e30f);
+    for (const auto& v : data.vertices) {
+      gm.boundsMin = glm::min(gm.boundsMin, v.position);
+      gm.boundsMax = glm::max(gm.boundsMax, v.position);
+    }
     meshes.push_back(gm);
   }
   cpuMeshes_.clear();

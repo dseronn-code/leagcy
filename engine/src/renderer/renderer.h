@@ -61,6 +61,7 @@ struct Settings {
   float dofMaxCoc = 14.0f;
   bool motionBlur = true;
   bool shadowMaps = false;  // shadow maps em cascata mesmo com ray tracing (sem RT eles são sempre usados)
+  bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
@@ -201,6 +202,9 @@ class Renderer {
   };
   std::vector<DrawBatch> drawBatches_;
   rhi::Buffer drawList_;
+  // Culling na GPU: lote de cada entrada, caixas por lote, comandos indiretos e a lista visível compactada.
+  rhi::Buffer entryBatch_, cullBatches_, drawCommands_, culledList_;
+  rhi::ComputePass cullPass_, cullResetPass_;
   rhi::Buffer radianceCache_;  // cache de radiância no espaço do mundo (shaders/radiance_cache.glsl)
 
   VkDescriptorPool pool_ = VK_NULL_HANDLE;
