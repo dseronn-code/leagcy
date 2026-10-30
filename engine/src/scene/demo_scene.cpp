@@ -919,6 +919,67 @@ bool buildStreamTest(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Altura das montanhas do mundo aberto (m): cadeias de montanhas por fbm com cristas (ridged) e vales largos.
+float worldHeight(float x, float z) {
+  const float base = fbm(x * 0.00025f + 11.0f, z * 0.00025f + 3.0f, 5);
+  const float ridge = 1.0f - std::abs(fbm(x * 0.0009f + 5.0f, z * 0.0009f + 9.0f, 5) * 2.0f - 1.0f);
+  const float mountains = std::pow(glm::smoothstep(0.35f, 0.8f, base), 1.5f) * (ridge * ridge) * 900.0f;
+  const float hills = (fbm(x * 0.004f, z * 0.004f, 4) - 0.5f) * 40.0f;
+  return mountains + hills;
+}
+
+// Grade de terreno em [x0, x0+size] x [z0, z0+size] com `res` células, altura worldHeight − drop.
+MeshData makeWorldTile(float x0, float z0, float size, uint32_t res, float drop) {
+  MeshData m;
+  const float step = size / float(res), e = step;
+  for (uint32_t j = 0; j <= res; ++j)
+    for (uint32_t i = 0; i <= res; ++i) {
+      const float x = x0 + float(i) * step, z = z0 + float(j) * step;
+      const glm::vec3 n = glm::normalize(glm::vec3(worldHeight(x - e, z) - worldHeight(x + e, z), 2.0f * e,
+                                                   worldHeight(x, z - e) - worldHeight(x, z + e)));
+      m.vertices.push_back({{x, worldHeight(x, z) - drop, z}, n, {x, z}, {1.0f, 0.0f, 0.0f, 1.0f}});
+    }
+  for (uint32_t j = 0; j < res; ++j)
+    for (uint32_t i = 0; i < res; ++i) {
+      const uint32_t a = j * (res + 1) + i, b = a + res + 1;
+      m.indices.insert(m.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+    }
+  return m;
+}
+
+// Mundo aberto: 8 x 8 km de montanhas. Perto da câmera, blocos de 256 m com 4 m de resolução carregados pelo
+// streaming (até ~1,2 km); ao longe, uma malha grossa do terreno todo (62 m), sempre na memória e um pouco abaixo
+// (os blocos detalhados cobrem ela onde existem). Nuvens, névoa e atmosfera completam a distância.
+bool buildWorldTest(Scene& s, Camera& camera, const DemoOptions& opt) {
+  const float world = 8192.0f, half = 0.5f * world, tile = 256.0f;
+  Material ground;
+  ground.flags = kMaterialTerrain;
+  const uint32_t mat = s.addMaterial(ground);
+  s.addObject(s.addMesh(makeWorldTile(-half, -half, world, 132, 2.0f)), glm::mat4(1.0f), mat);
+  const int tiles = int(world / tile);
+  for (int tz = 0; tz < tiles; ++tz)
+    for (int tx = 0; tx < tiles; ++tx) {
+      const float x0 = -half + float(tx) * tile, z0 = -half + float(tz) * tile;
+      const uint32_t mesh = s.addMesh(makeWorldTile(x0, z0, tile, 64, 0.0f));
+      const glm::vec3 c(x0 + 0.5f * tile, worldHeight(x0 + 0.5f * tile, z0 + 0.5f * tile), z0 + 0.5f * tile);
+      s.setMeshCell(mesh, s.addStreamCell(c, tile * 0.75f));
+      s.addObject(mesh, glm::mat4(1.0f), mat);
+    }
+  s.streamLoadDistance = 1000.0f;
+  s.streamUnloadDistance = 1200.0f;
+  s.streamBudgetMB = 64.0f;
+  s.sunDirection = sunFrom(opt.night ? -10.0f : 18.0f, 200.0f);
+  s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
+  s.cloudCoverage = 0.45f;
+  s.fogDensity = 0.00015f;
+  s.fogFalloff = 0.004f;
+  const float cx = -600.0f, cz = 900.0f;
+  camera.position = glm::vec3(cx, worldHeight(cx, cz) + 60.0f, cz);
+  camera.lookAt(camera.position + glm::vec3(1.0f, -0.05f, -0.6f));
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -964,6 +1025,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "crowd") return buildCrowd(scene, camera, opt);
   if (opt.name == "hair") return buildHairTest(scene, camera);
   if (opt.name == "stream") return buildStreamTest(scene, camera, opt);
+  if (opt.name == "world") return buildWorldTest(scene, camera, opt);
   return buildSponza(scene, camera, opt);
 }
 
