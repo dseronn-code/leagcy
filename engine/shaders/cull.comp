@@ -1,0 +1,51 @@
+#version 460
+// Culling na GPU (renderização GPU-driven): uma invocação por instância da lista de desenho testa a caixa do objeto
+// (transformada) contra o frustum da câmera; as visíveis entram compactadas no lote da malha e o número de instâncias
+// de cada desenho indireto (VkDrawIndexedIndirectCommand) é contado aqui. A CPU não olha objeto por objeto.
+#extension GL_GOOGLE_include_directive : require
+#include "frame.glsl"
+#include "scene.glsl"
+
+layout(local_size_x = 64) in;
+struct CullBatch {  // == CullBatch em renderer.cpp
+  vec3 boundsMin;
+  uint first;
+  vec3 boundsMax;
+  uint alwaysVisible;  // malha que se deforma (esqueleto, mar): sem teste
+};
+struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
+layout(set = 1, binding = 0, std430) readonly buffer DrawList { uint drawList[]; };
+layout(set = 1, binding = 1, std430) readonly buffer EntryBatch { uint entryBatch[]; };
+layout(set = 1, binding = 2, std430) readonly buffer Batches { CullBatch batches[]; };
+layout(set = 1, binding = 3, std430) buffer Commands { DrawCommand commands[]; };
+layout(set = 1, binding = 4, std430) writeonly buffer Culled { uint culled[]; };
+layout(push_constant) uniform Push { uint entryCount; uint enabled; } pc;
+
+bool visible(CullBatch b, mat4 model) {
+  if (b.alwaysVisible != 0u || pc.enabled == 0u) return true;
+  // Os 8 cantos no clip space: fora se TODOS estão do mesmo lado de fora de um plano. Cantos atrás da câmera (w ≤ 0)
+  // deixam os planos laterais ambíguos: aí só descarta se a caixa inteira está atrás.
+  int outL = 0, outR = 0, outB = 0, outT = 0, behind = 0;
+  for (int k = 0; k < 8; ++k) {
+    vec3 p = mix(b.boundsMin, b.boundsMax, vec3(k & 1, (k >> 1) & 1, (k >> 2) & 1));
+    vec4 c = frame.viewProjNoJitter * (model * vec4(p, 1.0));
+    if (c.w <= 1e-4) { ++behind; continue; }
+    outL += c.x < -c.w ? 1 : 0;
+    outR += c.x > c.w ? 1 : 0;
+    outB += c.y < -c.w ? 1 : 0;
+    outT += c.y > c.w ? 1 : 0;
+  }
+  if (behind == 8) return false;
+  if (behind > 0) return true;
+  return !(outL == 8 || outR == 8 || outB == 8 || outT == 8);
+}
+
+void main() {
+  uint k = gl_GlobalInvocationID.x;
+  if (k >= pc.entryCount) return;
+  uint object = drawList[k];
+  uint b = entryBatch[k];
+  if (!visible(batches[b], objects[object].model)) return;
+  uint slot = atomicAdd(commands[b].instanceCount, 1u);
+  culled[batches[b].first + slot] = object;
+}

@@ -59,6 +59,14 @@ constexpr uint32_t kShadowMapSize = 2048;
 // inversões se cancelam — conferido pela imagem, com culling o chão e as paredes continuam lá).
 constexpr bool kFrontFaceClockwise = false;
 
+// Espelha CullBatch em shaders/cull.comp.
+struct CullBatch {
+  glm::vec3 boundsMin;
+  uint32_t first;
+  glm::vec3 boundsMax;
+  uint32_t alwaysVisible;
+};
+
 struct GBufferPush {
   VkDeviceAddress drawList;  // lista de objetos ordenada por malha (shaders/gbuffer.vert)
 };
@@ -260,9 +268,39 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
         drawBatches_.push_back({mesh, k, 0, ds, mirrored});
       ++drawBatches_.back().count;
     }
+    // Culling na GPU (cull.comp): lote de cada entrada, caixa local da malha por lote e um comando de desenho
+    // indireto por lote (o compute preenche o número de instâncias visíveis).
+    std::vector<uint32_t> entryBatch(order.size(), 0);
+    std::vector<CullBatch> cullBatches;
+    std::vector<VkDrawIndexedIndirectCommand> commands;
+    for (uint32_t b = 0; b < drawBatches_.size(); ++b) {
+      const DrawBatch& db = drawBatches_[b];
+      const scene::GpuMesh& gm = scene.meshes[db.mesh];
+      bool always = gm.skinned, foliage = false;
+      for (uint32_t k = db.first; k < db.first + db.count; ++k) {
+        entryBatch[k] = b;
+        const uint32_t flags = scene.materials[scene.objects[order[k]].material].flags;
+        always = always || (flags & scene::kMaterialWater);  // o mar segue a câmera no vertex shader
+        foliage = foliage || (flags & scene::kMaterialFoliage);
+      }
+      const glm::vec3 margin(foliage ? 0.6f : 0.0f);  // o vento empurra a folhagem para fora da caixa
+      cullBatches.push_back({gm.boundsMin - margin, db.first, gm.boundsMax + margin, always ? 1u : 0u});
+      commands.push_back({gm.indexCount, 0, 0, 0, db.first});
+    }
     if (order.empty()) order.push_back(0);
+    if (cullBatches.empty()) {
+      cullBatches.push_back({});
+      commands.push_back({});
+    }
     drawList_ = rhi::createBufferWithData(ctx, order.data(), order.size() * sizeof(uint32_t),
                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    entryBatch_ = rhi::createBufferWithData(ctx, entryBatch.data(), entryBatch.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    cullBatches_ = rhi::createBufferWithData(ctx, cullBatches.data(), cullBatches.size() * sizeof(CullBatch), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    drawCommands_ = rhi::createBufferWithData(ctx, commands.data(), commands.size() * sizeof(VkDrawIndexedIndirectCommand),
+                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+    culledList_ = rhi::createBuffer(ctx, order.size() * sizeof(uint32_t),
+                                    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                    rhi::MemoryUsage::GpuOnly);
   }
   std::vector<uint32_t> zeros(kHistogramBins, 0);
   histogram_ = rhi::createBufferWithData(ctx, zeros.data(), zeros.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -346,6 +384,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   cloudScreenPass_.init(ctx, "clouds_screen.comp", g, {SI, CIS, CIS});
   fogInjectPass_.init(ctx, rt ? "fog_inject_rt.comp" : "fog_inject.comp", g, {SI, CIS});
   fogIntegratePass_.init(ctx, "fog_integrate.comp", g, {CIS, SI});
+  cullPass_.init(ctx, "cull.comp", g, {SB, SB, SB, SB, SB}, 2 * sizeof(uint32_t));
+  cullResetPass_.init(ctx, "cull_reset.comp", g, {SB}, sizeof(uint32_t));
   sssPass_.init(ctx, "sss.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SI}, sizeof(glm::ivec2));
   if (rt) rainOcclusionPass_.init(ctx, "rain_occlusion.comp", g, {SI});
   for (const auto& m : scene.materials) hasSubsurface_ = hasSubsurface_ || (m.flags & scene::kMaterialSubsurface);
@@ -805,7 +845,19 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
   profiler_.mark(cmd, "ceu");
 
-  // ---- 2. G-buffer ----
+  // ---- 2. G-buffer (culling por frustum na GPU, depois desenho indireto) ----
+  {
+    const uint32_t batchCount = uint32_t(drawBatches_.size()), entries = uint32_t(scene_->objects.size());
+    cullResetPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(drawCommands_)}, (batchCount + 63) / 64 + 1, 1, &batchCount);
+    barrier();
+    const uint32_t cp[2] = {entries, settings.gpuCulling ? 1u : 0u};
+    cullPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(drawList_), Binding::storageBuffer(entryBatch_),
+                                       Binding::storageBuffer(cullBatches_), Binding::storageBuffer(drawCommands_),
+                                       Binding::storageBuffer(culledList_)},
+                             (entries + 63) / 64 + 1, 1, cp);
+    barrier();
+    profiler_.mark(cmd, "culling");
+  }
   {
     VkRenderingAttachmentInfo colors[6] = {
         attachment(t_.diffuse.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
@@ -829,9 +881,10 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
     // Uma chamada por malha com todas as suas instâncias (medido na cidade: 98 mil chamadas, uma por objeto, custavam
     // ~25 ms de CPU por frame).
-    GBufferPush p{drawList_.address};
+    GBufferPush p{culledList_.address};
     vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
-    for (const DrawBatch& b : drawBatches_) {
+    for (uint32_t bi = 0; bi < drawBatches_.size(); ++bi) {
+      const DrawBatch& b = drawBatches_[bi];
       const auto& m = scene_->meshes[b.mesh];
       vkCmdSetCullMode(cmd, b.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
       vkCmdSetFrontFace(cmd, b.mirrored != kFrontFaceClockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
@@ -839,7 +892,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       VkDeviceSize offsets[2] = {0, 0};
       vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
       vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(cmd, m.indexCount, b.count, 0, 0, b.first);
+      vkCmdDrawIndexedIndirect(cmd, drawCommands_.handle, VkDeviceSize(bi) * sizeof(VkDrawIndexedIndirectCommand), 1,
+                               sizeof(VkDrawIndexedIndirectCommand));
     }
     vkCmdEndRendering(cmd);
   }
@@ -1332,7 +1386,8 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
-  for (rhi::ComputePass* p : {&sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::Buffer* b : {&entryBatch_, &cullBatches_, &drawCommands_, &culledList_}) rhi::destroyBuffer(ctx, *b);
+  for (rhi::ComputePass* p : {&cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

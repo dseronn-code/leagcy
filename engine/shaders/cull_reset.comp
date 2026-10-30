@@ -1,0 +1,9 @@
+#version 460
+// Zera o número de instâncias de cada desenho indireto antes do culling (cull.comp).
+layout(local_size_x = 64) in;
+struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
+layout(set = 1, binding = 0, std430) buffer Commands { DrawCommand commands[]; };
+layout(push_constant) uniform Push { uint batchCount; } pc;
+void main() {
+  if (gl_GlobalInvocationID.x < pc.batchCount) commands[gl_GlobalInvocationID.x].instanceCount = 0u;
+}

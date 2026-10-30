@@ -69,7 +69,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 |---|---|---|
 | Streaming do mundo | ❌ | O item mais difícil: carregar e descarregar o mapa enquanto o jogador anda |
 | LOD e HLOD de cidade inteira | ❌ | |
-| Renderização GPU-driven (culling em compute, oclusão, meshlets) | ❌ | Sem isso não dá para desenhar milhões de objetos |
+| Renderização GPU-driven (culling em compute, oclusão, meshlets) | 🟡 | Culling por frustum em compute (uma invocação por instância, caixa transformada) com desenho indireto por malha; imagem idêntica com e sem (conferido na Sponza e na cidade). Faltam oclusão (HiZ em duas fases), meshlets e o ganho medido numa GPU de verdade (no llvmpipe o custo é quase todo de pixel) |
 | Vegetação instanciada com vento | ✅ | Grama procedural (tufos de lâminas curvas) instanciada aos milhares (uma chamada e uma BLAS por variação), folhagem dos assets e grama balançam com rajadas, curvatura pela altura e tremor das folhas, com vetores de movimento certos. Falta a sombra traçada seguir o balanço (BLAS parada) |
 | Terreno grande (clipmaps) | 🟡 | Temos terreno procedural de tamanho fixo |
 | Partículas e VFX (fogo, fumaça, explosões) | ✅ | Partículas sem estado na GPU: fogo de corpo negro com luz que tremula, fumaça iluminada (sol com sombra traçada, céu), faíscas, explosões (bola de fogo que esfria, fuligem, fragmentos, clarão de luz), chuva e respingos; soft particles (`--scene vfx`). Limite: sem máscara reativa para o DLSS/TAA (rastro leve em partículas rápidas) |

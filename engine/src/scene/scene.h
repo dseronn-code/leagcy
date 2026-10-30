@@ -216,6 +216,7 @@ struct GpuMesh {
   int skinModel = -1, skin = -1;
   uint32_t jointOffset = 0, jointCount = 0;  // posição no buffer global de juntas
   VkDeviceSize updateScratchOffset = 0;
+  glm::vec3 boundsMin{0.0f}, boundsMax{0.0f};  // caixa local (culling na GPU)
 };
 
 class Scene {
