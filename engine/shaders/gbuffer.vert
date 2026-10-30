@@ -76,6 +76,11 @@ void main() {
     float side = aUV.x * 2.0 - 1.0, w = aTangent.w;
     vec3 c = position - side * w * cross(normal, aTangent.xyz);  // linha central (lado = normal × tangente)
     vec3 cw = (o.model * vec4(c, 1.0)).xyz, tw = normalize(mat3(o.model) * aTangent.xyz);
+    // Vento nos fios: a ponta balança mais que a raiz (posição ao longo do fio ao quadrado).
+    float along = aUV.y * aUV.y;
+    vec3 sway = windSway(cw, 6.0 * along, frame.night.w) * 0.08 * along;
+    vec3 swayPrev = windSway(cw, 6.0 * along, frame.weather.w) * 0.08 * along;
+    cw += sway;
     vec3 toCam = normalize(frame.cameraPos.xyz - cw);
     vec3 across = normalize(cross(tw, toCam) + vec3(1e-6));
     float dist = distance(frame.cameraPos.xyz, cw);
@@ -89,7 +94,7 @@ void main() {
     vTangent = vec4(tw, 1.0);
     vUV = aUV;
     vCurClip = frame.viewProjNoJitter * vec4(worldPos, 1.0);
-    vec3 cp = (o.prevModel * vec4(c, 1.0)).xyz;
+    vec3 cp = (o.prevModel * vec4(c, 1.0)).xyz + swayPrev;
     vPrevClip = frame.prevViewProjNoJitter * vec4(cp + across * side * half_, 1.0);
     gl_Position = frame.proj * vec4(mat3(frame.view) * (worldPos - frame.cameraPos.xyz), 1.0);
     return;
