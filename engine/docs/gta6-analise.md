@@ -58,7 +58,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Recurso | Legacy | Observação |
 |---|---|---|
 | Skinning (esqueleto) | ✅ | Skinning em compute + refit de BLAS (Dia 3) |
-| Pele com subsurface scattering, olhos | 🟡 | Espalhamento subsuperficial separável (Jimenez 2015) com raio por canal em metros, seguindo a superfície (`--scene skin`); faltam transmissão em partes finas (orelhas contra a luz) e o shader de olhos |
+| Pele com subsurface scattering, olhos | ✅ | Espalhamento subsuperficial separável (Jimenez 2015) com raio por canal em metros, transmissão em partes finas contra a luz (espessura e saída por ray tracing) e olho procedural (íris com fibras, anel límbico, pupila, esclera com veias, córnea com reflexo nítido) — `--scene skin`, `skin-backlit`. Falta um personagem com pele de verdade (scan) para comparar |
 | Cabelo por fios | ❌ | |
 | Tecido simulado | 🟡 | Tecido por Verlet com restrições (PBD) na GPU, num grupo de trabalho em memória compartilhada: gravidade, vento com rajadas, borda presa; sombras e reflexos acompanham (refit da BLAS). Bandeira na cena externa. Faltam colisão com corpos e roupas presas a esqueletos |
 | Multidões (centenas de NPCs animados) | ✅ | Animação assada (32 poses do ciclo) lida no vertex shader por pessoa, sem skinning individual; no ray tracing cada pessoa aponta para a BLAS da sua pose (sombras e reflexos certos); culling na GPU. 300 pessoas: 1,6 ms de CPU por quadro (`--scene crowd`). Falta LOD/impostores para milhares ao longe |
