@@ -102,6 +102,28 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   Material ground;
   ground.flags = kMaterialTerrain;
   s.addObject(terrain, glm::mat4(1.0f), s.addMaterial(ground));
+  // Grama: 4 variações de tufo instanciadas aos milhares na encosta perto da câmera (uma chamada por variação; no
+  // ray tracing, uma BLAS por variação). Balança com o vento (folhagem).
+  {
+    Material grass;
+    grass.baseColor = glm::vec4(0.16f, 0.24f, 0.06f, 1.0f);
+    grass.roughness = 0.6f;
+    grass.flags = kMaterialDoubleSided | kMaterialFoliage;
+    const uint32_t grassMat = s.addMaterial(grass);
+    uint32_t clumps[4];
+    for (uint32_t v = 0; v < 4; ++v) clumps[v] = s.addMesh(makeGrassClump(14, 0.45f, v + 1));
+    std::mt19937 grng(99);
+    std::uniform_real_distribution<float> gu(0.0f, 1.0f);
+    for (int i = 0; i < 6000; ++i) {
+      const float x = -30.0f + 60.0f * gu(grng), z = -12.0f + 45.0f * gu(grng);
+      if (std::abs(z - 9.0f) < 1.5f) continue;  // a "rua" dos postes fica livre
+      const float y = terrainHeight(x, z);
+      glm::mat4 t = glm::translate(glm::mat4(1.0f), {x, y - 0.02f, z});
+      t = glm::rotate(t, glm::two_pi<float>() * gu(grng), glm::vec3(0, 1, 0));
+      t = glm::scale(t, glm::vec3(0.7f + 0.6f * gu(grng)));
+      s.addObject(clumps[i % 4], t, grassMat);
+    }
+  }
 
   auto mat = [&](glm::vec3 albedo, float rough, float metal, glm::vec3 emissive = glm::vec3(0.0f)) {
     Material m;
