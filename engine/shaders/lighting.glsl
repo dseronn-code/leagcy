@@ -39,6 +39,40 @@ vec4 packNrdNormalRoughness(vec3 n, float roughness) {
   return vec4(r, 0.0);  // material 0
 }
 
+// Cabelo (Kajiya & Kay 1989 com as duas lobas deslocadas de Scheuermann 2004): reflexo da cutícula (branco,
+// deslocado para a raiz) e reflexo que passa pelo fio e volta (cor do cabelo, deslocado para a ponta, mais largo);
+// difuso com "wrap" (o cabelo espalha luz para todo lado). kd sem o albedo (demodulado), ks já colorido.
+void hairBSDF(vec3 T, vec3 N, vec3 V, vec3 L, vec3 color, float roughness, out vec3 kd, out vec3 ks) {
+  float TL = dot(T, L);
+  float sinTL = sqrt(max(1.0 - TL * TL, 0.0));
+  kd = vec3(mix(0.25, 1.0, clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0)) * sinTL / PI);
+  vec3 H = normalize(L + V);
+  float e1 = mix(400.0, 25.0, roughness), e2 = e1 * 0.3;
+  vec3 T1 = normalize(T - N * 0.08), T2 = normalize(T + N * 0.12);
+  float th1 = dot(T1, H), th2 = dot(T2, H);
+  float s1 = pow(sqrt(max(1.0 - th1 * th1, 0.0)), e1) * smoothstep(-1.0, 0.0, th1);
+  float s2 = pow(sqrt(max(1.0 - th2 * th2, 0.0)), e2) * smoothstep(-1.0, 0.0, th2);
+  float F = 0.046 + 0.954 * pow(1.0 - max(dot(V, H), 0.0), 5.0);  // cutícula, IOR 1,55
+  // Normalização das lobas (e + 2)/(2π) × sin(T,L): a energia não explode com expoentes altos.
+  ks = (F * s1 * (e1 + 2.0) + 0.6 * color * s2 * (e2 + 2.0)) / TWO_PI * sinTL * 0.25;
+}
+
+// Tangente do fio de cabelo no pixel (triângulo do visibility buffer, média das tangentes dos 3 vértices).
+vec3 hairTangentAt(ivec2 id) {
+  uvec2 vis = texelFetch(gVisibility, id, 0).xy;
+  if (vis.x == 0u) return vec3(0.0, 1.0, 0.0);
+  uint obj = vis.x - 1u;
+  InstanceData d = instances[obj];
+  IndexData ib = IndexData(d.indices);
+  VertexData vb = VertexData(d.vertices);
+  vec3 t = vec3(0.0);
+  for (uint k = 0u; k < 3u; ++k) {
+    uint i = ib.i[vis.y * 3u + k];
+    t += vec3(vb.v[i * 12u + 8u], vb.v[i * 12u + 9u], vb.v[i * 12u + 10u]);
+  }
+  return normalize(mat3(objects[obj].model) * t);
+}
+
 // Dimensões da sequência de Sobol por pixel (cada uma é um par 2D independente).
 const uint DIM_SUN = 0u, DIM_LIGHT = 1u, DIM_DIFFUSE = 2u, DIM_SPECULAR = 3u;
 const uint DIM_HIT_SUN = 4u, DIM_HIT_LIGHT = 5u, DIM_HIT_LIGHT_PICK = 6u;  // + 3 × rebote (0 GI, 1 reflexo, 2 vidro)
@@ -380,6 +414,11 @@ void main() {
   Reservoir r = reservoirs[resIdx];
   vec3 sunE = sunIrradianceAt(g.P);
   BrdfContext bc = brdfContextFor(g);
+  // Cabelo: troca o BRDF do sol pelo do fio (a tangente vem do triângulo exato).
+  bool hair = (pxFlags & MATERIAL_HAIR) != 0u;
+  vec3 hairT = hair ? hairTangentAt(id) : vec3(0.0);
+  vec3 hairColor = hair ? materials[sf.material].baseColor.rgb : vec3(0.0);
+  float hairRough = hair ? materials[sf.material].roughness : 0.0;
   vec3 coatSunKs = vec3(0.0);
   if (coat > 0.0 && dot(sunE, sunE) > 0.0) {
     vec3 unused;
@@ -396,6 +435,7 @@ void main() {
     float bump = bumpShadowing(sf.Nb, g.N, frame.sunDir.xyz);
     sunKd *= bump;
     sunKs *= bump;
+    if (hair) hairBSDF(hairT, g.N, g.V, frame.sunDir.xyz, hairColor, hairRough, sunKd, sunKs);
   }
 
   // Amostras por pixel (preset de qualidade): a sequência de Sobol do pixel avança spp posições por
@@ -412,7 +452,7 @@ void main() {
 #ifdef RAY_TRACING
       vec3 L = sampleCone(frame.sunDir.xyz, cos(frame.params.x), sample2D(sg, DIM_SUN));
       vec3 vis = frame.shadowParams.y > 0.5 ? vec3(sunShadowMap(g.P, g.Ng))  // --shadow-maps: comparação/desempenho
-                : dot(sf.Nb, L) > 0.0 ? traceTransmittance(shadowOrigin, L, 1e4) : vec3(0.0);
+                : (hair || dot(sf.Nb, L) > 0.0) ? traceTransmittance(shadowOrigin, L, 1e4) : vec3(0.0);
 #else
       vec3 vis = vec3(shadowMapsEnabled() ? sunShadowMap(g.P, g.Ng) : 1.0);  // sem ray tracing: shadow maps em cascata
 #endif
@@ -523,7 +563,17 @@ void main() {
   if (r.light != NO_LIGHT && r.W > 0.0) {
     vec3 kdl, ksl, L;
     float dist;
-    if (lightContribution(g, bc, r.light, r.uv, kdl, ksl, L, dist) && dot(sf.Nb, L) > 0.0) {
+    bool lit = lightContribution(g, bc, r.light, r.uv, kdl, ksl, L, dist);
+    if (lit && hair) {  // mesmo ponto de luz, BSDF do fio
+      vec3 Le, Lh;
+      float dh, Gh;
+      lightPoint(r.light, r.uv, g.P, Lh, dh, Le, Gh);
+      vec3 hk, hs;
+      hairBSDF(hairT, g.N, g.V, Lh, hairColor, hairRough, hk, hs);
+      kdl = hk * Le * Gh;
+      ksl = hs * Le * Gh;
+    }
+    if (lit && (hair || dot(sf.Nb, L) > 0.0)) {
 #ifdef RAY_TRACING
       float vis = traceVisibility(shadowOrigin, L, dist * 0.99999);
       if (vis == 0.0) reservoirs[resIdx].W = 0.0;  // visibilidade final reaproveitada no próximo frame

@@ -393,7 +393,7 @@ void Scene::upload(rhi::Context& ctx) {
     const size_t original = cpuMeshes_.size();
     std::vector<uint8_t> excluded(original, 0);
     for (const Object& o : objects)
-      if (o.crowdClip != ~0u || (materials[o.material].flags & kMaterialWater)) excluded[o.mesh] = 1;
+      if (o.crowdClip != ~0u || (materials[o.material].flags & (kMaterialWater | kMaterialHair))) excluded[o.mesh] = 1;
     size_t made = 0;
     for (size_t i = 0; i < original; ++i) {
       const MeshData& md = cpuMeshes_[i];

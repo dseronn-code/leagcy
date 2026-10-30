@@ -22,6 +22,7 @@ const uint MATERIAL_FOLIAGE = 512u;         // balança com o vento (gbuffer.ver
 const uint MATERIAL_SUBSURFACE = 1024u;     // espalhamento subsuperficial (sss.comp)
 const uint MATERIAL_BLEND = 2048u;          // misturado no G-buffer (decals BLEND do glTF)
 const uint MATERIAL_EYE = 4096u;            // olho procedural (material.glsl)
+const uint MATERIAL_HAIR = 8192u;           // cabelo por fios (gbuffer.vert, lighting.glsl)
 
 // Simulação do oceano (renderer/ocean.cpp): repete a cada OCEAN_PATCH metros.
 layout(set = 0, binding = 17) uniform sampler2D oceanDisplacement;  // xyz = deslocamento, w = Jacobiano
