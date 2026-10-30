@@ -7,6 +7,8 @@
 #include "frame.glsl"
 
 const uint PARTICLE_FIRE = 0u, PARTICLE_SMOKE = 1u, PARTICLE_SPARKS = 2u, PARTICLE_RAIN = 3u, PARTICLE_SPLASH = 4u;
+const uint PARTICLE_EXPLOSION = 5u;
+const float EXPLOSION_PERIOD = 5.0;  // s entre explosões (o clarão da luz segue o mesmo ciclo: Scene::addEmitter)
 
 struct ParticleEmitter {  // == scene::ParticleEmitter
   vec3 position;
@@ -74,6 +76,31 @@ ParticleState particleState(ParticleEmitter e, uint i, float time) {
     p.size = 0.015 + 0.06 * age01;
     p.alpha = ground > -1e3 ? 0.35 * e.scale * (1.0 - age01) : 0.0;
     p.albedo = vec3(1.0);
+    return p;
+  }
+  if (e.type == PARTICLE_EXPLOSION) {
+    // Explosão: bola de fogo que se expande desacelerando (arrasto do ar), esfria de ~2500 K a ~1000 K em ~0,6 s e
+    // vira fumaça escura que sobe; um terço das partículas são fragmentos/faíscas balísticos.
+    float t = mod(time, EXPLOSION_PERIOD);
+    vec3 dir = normalize(vec3(h.x - 0.5, 0.25 + 0.75 * h.y, h.z - 0.5));
+    if (g.y < 0.33) {  // fragmentos incandescentes
+      vec3 v0 = dir * (10.0 + 14.0 * g.z) * e.scale;
+      p.position = e.position + v0 * t + vec3(0.0, -4.9, 0.0) * t * t;
+      p.velocity = v0 + vec3(0.0, -9.8 * t, 0.0);
+      p.size = 0.03 * e.scale;
+      p.emission = blackbody(mix(2400.0, 1200.0, clamp(t / 1.5, 0.0, 1.0))) * 20000.0 * max(1.0 - t / 1.5, 0.0);
+      p.alpha = 0.0;
+      p.streak = true;
+      return p;
+    }
+    float R = e.scale * 4.0 * (1.0 - exp(-t * 4.0)) * (0.5 + 0.5 * g.z);
+    p.position = e.position + dir * R + vec3(0.0, 1.5 * t * t * e.scale, 0.0);
+    p.velocity = dir * e.scale * 16.0 * exp(-t * 4.0);
+    p.size = e.scale * (0.8 + 1.2 * min(t, 2.0)) * (0.6 + 0.6 * g.x);
+    float heat = clamp(1.0 - t / 0.6, 0.0, 1.0);
+    p.emission = blackbody(mix(1000.0, 2500.0, heat)) * 4000.0 * heat * heat;  // volume fino somado (ver fogo)
+    p.alpha = 0.18 * smoothstep(0.05, 0.4, t) * clamp(1.0 - (t - 1.0) / 3.0, 0.0, 1.0);  // fumaça depois do clarão
+    p.albedo = vec3(0.06 + 0.1 * clamp(t / 3.0, 0.0, 1.0));  // fuligem
     return p;
   }
   float life = e.type == PARTICLE_SMOKE ? 6.0 : e.type == PARTICLE_SPARKS ? 1.4 : 1.1;

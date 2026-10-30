@@ -129,6 +129,14 @@ void Scene::addDecal(DecalType type, glm::vec3 center, glm::vec3 halfExtent, flo
 void Scene::addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count) {
   emitters.push_back({position, uint32_t(type), radius, scale, particleCount, count});
   particleCount += count;
+  if (type == kParticleExplosion) {  // clarão: luz forte que decai em ~0,3 s, no mesmo ciclo das partículas
+    const uint32_t light = addLight({position, 1.0f * scale, glm::vec3(0.0f), 80.0f * scale});
+    addAnimator([light, scale](Scene& s, float t, float) {
+      const float k = std::fmod(t, 5.0f);  // == EXPLOSION_PERIOD em shaders/particles.glsl
+      s.lights[light].intensity = glm::vec3(1.0f, 0.6f, 0.25f) * (400000.0f * scale * std::exp(-k * 7.0f));
+    });
+    return;
+  }
   if (type != kParticleFire) return;
   // Chama ~1800 K: ~1000 cd por metro de altura, centro um pouco acima da base, tremulando.
   const uint32_t light = addLight({position + glm::vec3(0.0f, 0.5f * scale, 0.0f), 0.3f * scale,
