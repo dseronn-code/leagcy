@@ -325,6 +325,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   cloudScreenPass_.init(ctx, "clouds_screen.comp", g, {SI, CIS, CIS});
   fogInjectPass_.init(ctx, rt ? "fog_inject_rt.comp" : "fog_inject.comp", g, {SI, CIS});
   fogIntegratePass_.init(ctx, "fog_integrate.comp", g, {CIS, SI});
+  sssPass_.init(ctx, "sss.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SI}, sizeof(glm::ivec2));
+  for (const auto& m : scene.materials) hasSubsurface_ = hasSubsurface_ || (m.flags & scene::kMaterialSubsurface);
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS});
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS});
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI});
@@ -536,6 +538,8 @@ void Renderer::createTargets() {
   const VkExtent3D froxels{(R.width + 7) / 8, (R.height + 7) / 8, kFogSlices};
   for (auto& f : t_.fogInject) f = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
   t_.fogIntegrated = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
+  t_.sssA = rhi::createImage2D(ctx, R, kHdrFormat, storage);
+  t_.sssB = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   t_.postB = rhi::createImage2D(ctx, O, kHdrFormat, storage);
   VkExtent2D bloomExtent{std::max(1u, O.width / 2), std::max(1u, O.height / 2)};
@@ -559,7 +563,7 @@ void Renderer::createTargets() {
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                             &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
-                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated})
+                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.sssA, &t_.sssB})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   if (upscalerReady_) {
@@ -599,7 +603,7 @@ void Renderer::destroyTargets() {
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                           &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
-                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated})
+                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.sssA, &t_.sssB})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -863,6 +867,18 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     }
     specularFinal = src;
     profiler_.mark(cmd, "denoiser");
+  }
+
+  // ---- 5b. Espalhamento subsuperficial (pele): borra a irradiância difusa dos pixels com SSS ----
+  if (hasSubsurface_) {
+    const glm::ivec2 horizontal(1, 0), vertical(0, 1);
+    sssPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.visibility[cur]), tex(*diffuseFinal), storage(t_.sssA)}, R,
+                      &horizontal);
+    barrier();
+    sssPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.visibility[cur]), tex(t_.sssA), storage(t_.sssB)}, R,
+                      &vertical);
+    barrier();
+    diffuseFinal = &t_.sssB;
   }
 
   if (!showValidation) {
@@ -1195,7 +1211,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
-  for (rhi::ComputePass* p : {&cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&sssPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

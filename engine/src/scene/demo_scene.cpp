@@ -634,6 +634,33 @@ bool buildOcean(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Teste da pele: duas esferas do tamanho de uma cabeça com tom de pele sob luz lateral — sem e com espalhamento
+// subsuperficial (o terminador fica macio e avermelhado na da direita).
+bool buildSkinTest(Scene& s, Camera& camera) {
+  uint32_t sphere = s.addMesh(makeSphere(128, 64)), cube = s.addMesh(makeCube());
+  Material floor;
+  floor.baseColor = glm::vec4(glm::vec3(0.3f), 1.0f);
+  floor.roughness = 0.8f;
+  s.addObject(cube, trs({0.0f, -0.05f, 0.0f}, {3.0f, 0.05f, 3.0f}), s.addMaterial(floor));
+  Material skin;
+  skin.baseColor = glm::vec4(0.80f, 0.55f, 0.45f, 1.0f);
+  skin.roughness = 0.45f;
+  skin.specular = 0.7f;  // f0 ≈ 2,8%: pele
+  const uint32_t plain = s.addMaterial(skin);
+  skin.flags |= kMaterialSubsurface;
+  skin.subsurfaceRadius = glm::vec3(0.0040f, 0.0015f, 0.0007f);
+  const uint32_t sss = s.addMaterial(skin);
+  s.addObject(sphere, trs({-0.14f, 0.12f, 0.0f}, glm::vec3(0.1f)), plain);
+  s.addObject(sphere, trs({0.14f, 0.12f, 0.0f}, glm::vec3(0.1f)), sss);
+  s.sunDirection = sunFrom(20.0f, 95.0f);  // luz de lado: o terminador corta as esferas ao meio
+  s.sunIlluminance = 80000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 0.15f, 0.65f);
+  camera.lookAt(glm::vec3(0.0f, 0.12f, 0.0f));
+  camera.nearPlane = 0.01f;
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -672,6 +699,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "glass") return buildGlassTest(scene, camera);
   if (opt.name == "ocean") return buildOcean(scene, camera, opt);
   if (opt.name == "paint") return buildPaintTest(scene, camera);
+  if (opt.name == "skin") return buildSkinTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 

@@ -19,13 +19,14 @@ const uint MATERIAL_TRANSMISSIVE = 64u;     // vidro: sem sombra (por enquanto)
 const uint MATERIAL_CLEARCOAT = 128u;       // verniz (KHR_materials_clearcoat)
 const uint MATERIAL_WATER = 256u;           // mar (renderer/ocean.h)
 const uint MATERIAL_FOLIAGE = 512u;         // balança com o vento (gbuffer.vert)
+const uint MATERIAL_SUBSURFACE = 1024u;     // espalhamento subsuperficial (sss.comp)
 
 // Simulação do oceano (renderer/ocean.cpp): repete a cada OCEAN_PATCH metros.
 layout(set = 0, binding = 17) uniform sampler2D oceanDisplacement;  // xyz = deslocamento, w = Jacobiano
 layout(set = 0, binding = 18) uniform sampler2D oceanSlope;         // xy = inclinação, z = espuma
 const float OCEAN_PATCH = 256.0;
 
-struct Material {  // == scene::Material (128 bytes)
+struct Material {  // == scene::Material (144 bytes)
   vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
   vec3 emissive;
   float alphaCutoff;
@@ -51,6 +52,8 @@ struct Material {  // == scene::Material (128 bytes)
   int clearcoatRoughnessTex;
   float flakes;      // flocos metálicos (pintura de carro)
   float flakeScale;  // células por unidade de UV
+  vec3 subsurfaceRadius;  // espalhamento subsuperficial por canal (m)
+  float pad3;
 };
 
 struct InstanceData {  // == InstanceGpu em scene.cpp

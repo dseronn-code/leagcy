@@ -149,6 +149,7 @@ class Renderer {
     std::array<rhi::Image, 2> clouds;  // nuvens da vista principal em meia resolução (atual / anterior)
     std::array<rhi::Image, 2> fogInject;  // névoa volumétrica: células da grade 3D (atual / anterior)
     rhi::Image fogIntegrated;             // névoa acumulada ao longo das fatias
+    rhi::Image sssA, sssB;                // espalhamento subsuperficial: passadas horizontal e vertical
     rhi::Image postA, postB, bloom;
     std::vector<VkImageView> bloomMips;
     std::array<rhi::Buffer, 2> reservoirs;  // [0] = após reuso temporal, [1] = final (persistente)
@@ -173,6 +174,8 @@ class Renderer {
   rhi::ComputePass cloudSkyPass_, cloudShadowPass_, cloudScreenPass_, fogInjectPass_, fogIntegratePass_;
   Ocean ocean_;  // simulação FFT (só nas cenas com oceano)
   float prevSceneTime_ = 0.0f;
+  bool hasSubsurface_ = false;  // a cena tem material com espalhamento subsuperficial
+  rhi::ComputePass sssPass_;
   VkSampler oceanSampler_ = VK_NULL_HANDLE;  // linear, repete (o patch do oceano é periódico)
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;

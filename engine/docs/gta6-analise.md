@@ -58,7 +58,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Recurso | Legacy | Observação |
 |---|---|---|
 | Skinning (esqueleto) | ✅ | Skinning em compute + refit de BLAS (Dia 3) |
-| Pele com subsurface scattering, olhos | ❌ | |
+| Pele com subsurface scattering, olhos | 🟡 | Espalhamento subsuperficial separável (Jimenez 2015) com raio por canal em metros, seguindo a superfície (`--scene skin`); faltam transmissão em partes finas (orelhas contra a luz) e o shader de olhos |
 | Cabelo por fios | ❌ | |
 | Tecido simulado | ❌ | |
 | Multidões (centenas de NPCs animados) | ❌ | Instancing + LOD de animação + impostors |
