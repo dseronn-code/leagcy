@@ -425,7 +425,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorSetLayout g = globalLayout_;
   const bool rt = ctx.rayTracing;
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
-  clothPass_.init(ctx, "cloth.comp", g, {}, 48);
+  clothPass_.init(ctx, "cloth.comp", g, {}, 112);
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
   aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
   cloudSkyPass_.init(ctx, "clouds_sky.comp", g, {SI, CIS});
@@ -1382,9 +1382,11 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
       struct {
         VkDeviceAddress pos, prev, vertices;
         uint32_t width, height;
-        float spacing, dt, time, pad;
+        float spacing, dt, time;
+        uint32_t pinned;
+        glm::vec4 colliders[4];
       } cp{m.clothPos.address, m.clothPrev.address, m.vertices.address, m.clothWidth, m.clothHeight, m.clothSpacing, sceneDt,
-           s.time, 0.0f};
+           s.time, m.clothPinned ? 1u : 0u, {m.clothColliders[0], m.clothColliders[1], m.clothColliders[2], m.clothColliders[3]}};
       clothPass_.dispatchGroups(cmd, globalSets_[slot], {}, 1, 1, &cp);
     }
     for (const auto& m : s.meshes) {

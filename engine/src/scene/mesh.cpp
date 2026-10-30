@@ -213,6 +213,18 @@ MeshData makeClothGrid(uint32_t width, uint32_t height, float spacing) {
   return m;
 }
 
+MeshData makeClothSheet(uint32_t width, uint32_t height, float spacing) {
+  MeshData m = makeClothGrid(width, height, spacing);
+  m.clothPinned = false;
+  const glm::vec2 c(0.5f * float(width - 1) * spacing, 0.5f * float(height - 1) * spacing);
+  for (Vertex& v : m.vertices) {  // xy (pendurado) -> xz (deitado), centrado
+    v.position = glm::vec3(v.position.x - c.x, 0.0f, -v.position.y - c.y);
+    v.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+  }
+  for (size_t k = 0; k + 2 < m.indices.size(); k += 3) std::swap(m.indices[k + 1], m.indices[k + 2]);  // frente para cima
+  return m;
+}
+
 MeshData makeGrassClump(uint32_t blades, float height, uint32_t seed) {
   MeshData m;
   uint32_t st = seed * 747796405u + 2891336453u;

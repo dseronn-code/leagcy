@@ -252,6 +252,8 @@ struct GpuMesh {
   bool cloth = false;
   uint32_t clothWidth = 0, clothHeight = 0;
   float clothSpacing = 0.0f;
+  bool clothPinned = true;
+  glm::vec4 clothColliders[4] = {};
   rhi::Buffer clothPos, clothPrev;
   bool deformable() const { return skinned || cloth; }  // vértices reescritos na GPU a cada frame
   // Níveis de detalhe (só a rasterização; o ray tracing usa a malha completa): malhas simplificadas e a distância
