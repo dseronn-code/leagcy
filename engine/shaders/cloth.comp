@@ -15,8 +15,27 @@ layout(buffer_reference, scalar) buffer Vertices { float v[]; };  // 12 floats p
 layout(push_constant) uniform Push {
   uint64_t pos, prev, vertices;
   uint width, height;
-  float spacing, dt, time, pad;
+  float spacing, dt, time;
+  uint pinned;          // 1 = coluna 0 presa
+  vec4 colliders[4];    // esferas (espaço do pano): xyz centro, w raio
 } pc;
+
+bool fixedPoint(uint i) { return pc.pinned != 0u && i % pc.width == 0u; }
+// Empurra o ponto para fora das esferas (o chão é uma esfera enorme); `hit` = encostou em algo (atrito).
+vec3 collide(vec3 p, out bool hit) {
+  hit = false;
+  for (int k = 0; k < 4; ++k) {
+    vec4 s = pc.colliders[k];
+    if (s.w <= 0.0) continue;
+    vec3 d = p - s.xyz;
+    float r = s.w + 0.01, l = length(d);  // folga fixa de 1 cm (a esfera-chão tem 1 km de raio)
+    if (l < r) {
+      p = s.xyz + (l > 1e-6 ? d / l : vec3(0.0, 1.0, 0.0)) * r;
+      hit = true;
+    }
+  }
+  return p;
+}
 
 const uint MAX_POINTS = 1024u;
 shared vec3 P[MAX_POINTS], Q[MAX_POINTS];
@@ -35,12 +54,12 @@ void main() {
     for (int sub = 0; sub < SUBSTEPS; ++sub) {
       float time = pc.time + float(sub) * h;
       for (uint i = t; i < n; i += 256u) {
-        if (i % pc.width == 0u) continue;  // coluna presa
+        if (fixedPoint(i)) continue;  // coluna presa
         vec3 p = P[i], vel = (p - Q[i]) * 0.995;  // arrasto do ar
         // Vento: base na direção +z com rajadas e uma onda que corre pelo pano (o "tremular" da bandeira).
         float gust = 0.6 + 0.4 * sin(time * 0.9) + 0.25 * sin(time * 2.3 + 1.7);
         vec3 wind = vec3(0.6, 0.0, 6.0) * gust + vec3(0.0, 0.0, 2.0) * sin(time * 7.0 - p.x * 2.5);
-        vec3 acc = vec3(0.0, -9.81, 0.0) + wind * 1.4;
+        vec3 acc = vec3(0.0, -9.81, 0.0) + (pc.pinned != 0u ? wind * 1.4 : vec3(0.0));  // pano solto: sem vento
         Q[i] = p;
         P[i] = p + vel + acc * h * h;
       }
@@ -50,7 +69,7 @@ void main() {
         uint k = 0u;
         for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
           corr[k] = vec3(0.0);
-          if (i % pc.width == 0u) continue;
+          if (fixedPoint(i)) continue;
           ivec2 g = ivec2(i % pc.width, i / pc.width);
           vec3 sum = vec3(0.0);
           float cnt = 0.0;
@@ -68,7 +87,11 @@ void main() {
         }
         barrier();
         k = 0u;
-        for (uint i = t; i < n && k < 4u; i += 256u, ++k) P[i] += corr[k];
+        for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          bool hit;
+          P[i] = collide(P[i] + corr[k], hit);
+          if (hit) Q[i] = mix(Q[i], P[i], 0.3);  // atrito: o contato tira parte da velocidade
+        }
         barrier();
       }
     }

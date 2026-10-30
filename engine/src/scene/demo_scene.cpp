@@ -980,6 +980,32 @@ bool buildWorldTest(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Tecido com colisão: uma toalha de 1,6 m cai sobre uma bola e se acomoda no chão.
+bool buildClothTest(Scene& s, Camera& camera) {
+  uint32_t sphere = s.addMesh(makeSphere(64, 32)), cube = s.addMesh(makeCube());
+  auto mat = [&](glm::vec3 albedo, float rough, uint32_t flags = 0) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    m.flags = flags;
+    return s.addMaterial(m);
+  };
+  s.addObject(cube, trs({0.0f, -0.05f, 0.0f}, {3.0f, 0.05f, 3.0f}), mat(glm::vec3(0.4f), 0.8f));
+  s.addObject(sphere, trs({0.0f, 0.5f, 0.0f}, glm::vec3(0.5f)), mat({0.1f, 0.3f, 0.7f}, 0.3f));
+  MeshData sheet = makeClothSheet(32, 32, 0.05f);  // 1.024 pontos: o limite de um pano (shaders/cloth.comp)
+  const float top = 1.3f;
+  sheet.clothColliders[0] = glm::vec4(0.0f, 0.5f - top, 0.0f, 0.5f);          // a bola (espaço do pano)
+  sheet.clothColliders[1] = glm::vec4(0.0f, -1000.0f - top, 0.0f, 1000.0f);  // o chão, como uma esfera enorme
+  s.addObject(s.addMesh(std::move(sheet)), glm::translate(glm::mat4(1.0f), {0.0f, top, 0.0f}),
+              mat({0.75f, 0.1f, 0.12f}, 0.85f, kMaterialDoubleSided));
+  s.sunDirection = sunFrom(40.0f, 130.0f);
+  s.sunIlluminance = 100000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(1.8f, 1.4f, 2.4f);
+  camera.lookAt(glm::vec3(0.0f, 0.5f, 0.0f));
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -1026,6 +1052,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "hair") return buildHairTest(scene, camera);
   if (opt.name == "stream") return buildStreamTest(scene, camera, opt);
   if (opt.name == "world") return buildWorldTest(scene, camera, opt);
+  if (opt.name == "cloth") return buildClothTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 

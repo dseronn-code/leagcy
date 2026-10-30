@@ -27,6 +27,8 @@ struct MeshData {
   // coluna 0 fica presa (mastro, varal).
   uint32_t clothWidth = 0, clothHeight = 0;
   float clothSpacing = 0.0f;
+  bool clothPinned = true;               // coluna 0 presa (bandeira); falso = cai livre (toalha)
+  glm::vec4 clothColliders[4] = {};      // esferas de colisão no espaço do pano (xyz centro, w raio; w = 0 nenhuma)
 };
 
 // Versão simplificada (LOD) com ~`targetTriangles` triângulos: agrupamento de vértices numa grade com a posição de
@@ -43,6 +45,8 @@ MeshData makeHair(uint32_t strands, uint32_t segments, float scalpRadius, float 
 
 // Pano em grade vertical (plano xy, pendurado para −y a partir da origem), coluna x = 0 presa.
 MeshData makeClothGrid(uint32_t width, uint32_t height, float spacing);
+// Pano horizontal (plano xz, centrado na origem), solto: cai e se acomoda sobre os colisores.
+MeshData makeClothSheet(uint32_t width, uint32_t height, float spacing);
 
 MeshData makeSphere(uint32_t segments = 96, uint32_t rings = 48);
 MeshData makeCube();

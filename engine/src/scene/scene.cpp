@@ -571,10 +571,14 @@ void Scene::upload(rhi::Context& ctx) {
       ++skinnedCount;
     }
     if (cloth) {
+      // cloth.comp simula um pano num grupo de trabalho: até 1.024 pontos em memória compartilhada.
+      if (data.vertices.size() > 1024) FATAL("Tecido com %zu pontos (máximo 1.024 por pano)", data.vertices.size());
       gm.cloth = true;
       gm.clothWidth = data.clothWidth;
       gm.clothHeight = data.clothHeight;
       gm.clothSpacing = data.clothSpacing;
+      gm.clothPinned = data.clothPinned;
+      for (int k = 0; k < 4; ++k) gm.clothColliders[k] = data.clothColliders[k];
       std::vector<glm::vec4> p(data.vertices.size());
       for (size_t i = 0; i < p.size(); ++i) p[i] = glm::vec4(data.vertices[i].position, 0.0f);
       const VkBufferUsageFlags su = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
