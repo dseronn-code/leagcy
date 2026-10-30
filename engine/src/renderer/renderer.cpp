@@ -83,6 +83,11 @@ struct BloomPush {
   uint32_t karisOrPad;
   float radius;
 };
+struct ParticlePush {
+  uint32_t emitterCount, rayTracing;
+  float time;
+  uint32_t pad;
+};
 struct TonemapPush {
   float bloomStrength, bloomNorm;
   uint32_t manualSrgb;
@@ -357,6 +362,21 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   gb.dynamicCulling = true;  // por lote: de um lado só (padrão do glTF) ou dos dois (doubleSided: folhagem, tecidos)
   gbufferPipeline_ = rhi::createGraphicsPipeline(ctx, gb);
 
+  // Partículas: quadrados sobre a imagem composta, antes do TAA (mistura pré-multiplicada, sem depth: o fragment
+  // compara com a profundidade da cena).
+  particleLayout_.init(ctx, g, {SB, CIS}, sizeof(ParticlePush));
+  if (!scene.emitters.empty()) {
+    emitterBuffer_ = rhi::createBufferWithData(ctx, scene.emitters.data(), scene.emitters.size() * sizeof(scene::ParticleEmitter),
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    rhi::GraphicsPipelineDesc pd;
+    pd.vertexShader = ctx.rayTracing ? "particles_rt.vert" : "particles.vert";
+    pd.fragmentShader = "particles.frag";
+    pd.layout = particleLayout_.pipelineLayout;
+    pd.colorFormats = {kHdrFormat};
+    pd.blendPremultiplied = true;
+    particlePipeline_ = rhi::createGraphicsPipeline(ctx, pd);
+  }
+
   tonemapLayout_.init(ctx, g, {CIS, CIS, SB}, sizeof(TonemapPush));
   rhi::GraphicsPipelineDesc tm;
   tm.vertexShader = "fullscreen.vert";
@@ -500,7 +520,7 @@ void Renderer::createTargets() {
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
                           &t_.tmpB, &t_.tmpC})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
-  t_.sceneColor = rhi::createImage2D(ctx, R, kHdrFormat, storage | upscalerIo);
+  t_.sceneColor = rhi::createImage2D(ctx, R, kHdrFormat, storage | upscalerIo | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
   t_.viewZ = rhi::createImage2D(ctx, R, VK_FORMAT_R32_SFLOAT, storage);
   t_.nrdNormalRoughness = rhi::createImage2D(ctx, R, VK_FORMAT_A2B10G10R10_UNORM_PACK32, storage);
   t_.diffuseDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
@@ -849,6 +869,23 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                                     storage(t_.sceneColor), Binding::sampled(t_.clouds[cur].view, linear_),
                                     Binding::sampled(skyClear_.view, linear_), Binding::sampled(t_.fogIntegrated.view, linear_)}, R);
   barrier();
+  if (particlePipeline_ != VK_NULL_HANDLE) {
+    VkRenderingAttachmentInfo color = attachment(t_.sceneColor.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD);
+    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = {{0, 0}, R};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &color;
+    vkCmdBeginRendering(cmd, &ri);
+    setViewport(cmd, R);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, particlePipeline_);
+    const ParticlePush pp{uint32_t(scene_->emitters.size()), ctx_->rayTracing ? 1u : 0u, scene_->time, 0};
+    particleLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs,
+                         {Binding::storageBuffer(emitterBuffer_), Binding::sampled(t_.depth[cur].view, nearest_)}, &pp);
+    vkCmdDraw(cmd, 6, scene_->particleCount, 0, 0);
+    vkCmdEndRendering(cmd);
+    barrier();
+  }
   profiler_.mark(cmd, "composicao");
 
   // ---- 7. TAA + upscaling (do motor, ou DLSS / FSR) ----
@@ -1161,6 +1198,9 @@ void Renderer::destroy() {
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
   vkDestroyPipeline(ctx.device, gbufferPipeline_, nullptr);
+  if (particlePipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(ctx.device, particlePipeline_, nullptr);
+  rhi::destroyBuffer(ctx, emitterBuffer_);
+  particleLayout_.destroy(ctx);
   vkDestroyPipeline(ctx.device, tonemapPipeline_, nullptr);
   gbufferLayout_.destroy(ctx);
   tonemapLayout_.destroy(ctx);

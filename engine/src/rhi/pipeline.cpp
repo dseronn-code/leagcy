@@ -55,8 +55,15 @@ VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
   ds.depthCompareOp = d.depthCompare;
 
   std::vector<VkPipelineColorBlendAttachmentState> blends(d.colorFormats.size());
-  for (auto& b : blends)
+  for (auto& b : blends) {
     b.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    if (d.blendPremultiplied) {
+      b.blendEnable = VK_TRUE;
+      b.srcColorBlendFactor = b.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      b.dstColorBlendFactor = b.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+      b.colorBlendOp = b.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
+  }
   VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
   cb.attachmentCount = uint32_t(blends.size());
   cb.pAttachments = blends.data();

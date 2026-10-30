@@ -28,7 +28,7 @@ vec3 linearToSrgb(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)
 // Reflexo nas lentes ("pseudo lens flare", Chapman 2013 — como em muitos jogos): as reflexões entre os elementos da
 // objetiva projetam imagens "fantasmas" das fontes fortes espelhadas pelo centro da imagem, mais um halo em anel, com
 // dispersão cromática. Feito sobre o bloom (já borrado) e modulado por uma "sujeira" da lente procedural. Sem limiar,
-// como numa lente de verdade: toda a luz gera fantasmas com a mesma fração pequena (~0,8% cada, uma objetiva de vários elementos), e só as fontes muito
+// como numa lente de verdade: toda a luz gera fantasmas com a mesma fração pequena (~0,4% cada, objetiva com tratamento antirreflexo), e só as fontes muito
 // mais fortes que a cena (sol, faróis, lâmpadas) ficam visíveis.
 vec3 brightBloom(vec2 uv, float exposure) {
   return textureLod(bloomIn, clamp(uv, 0.0, 1.0), 0.0).rgb * pc.bloomNorm * exposure;
@@ -45,11 +45,11 @@ vec3 lensFlare(vec2 uv, float exposure) {
   for (int i = 0; i < 6; ++i) {
     vec2 p = fract(flipped + ghostVec * float(i));
     float w = pow(1.0 - clamp(length(vec2(0.5) - p) / 0.7071, 0.0, 1.0), 6.0);  // fantasmas fortes perto do centro
-    sum += chromatic(p, dir, exposure) * w * 0.008;
+    sum += chromatic(p, dir, exposure) * w * 0.004;
   }
   vec2 haloP = flipped + dir * 0.45;
   float hw = pow(1.0 - clamp(length(vec2(0.5) - fract(haloP)) / 0.7071, 0.0, 1.0), 5.0);
-  sum += chromatic(haloP, dir, exposure) * hw * 0.01;
+  sum += chromatic(haloP, dir, exposure) * hw * 0.003;
   // Sujeira da lente: manchas suaves que só aparecem contra a luz forte.
   float dirt = 0.35 + 0.65 * smoothstep(0.45, 0.75, fbm(uv * vec2(6.0, 3.5), 4));
   return sum * dirt * pc.lensFlare;

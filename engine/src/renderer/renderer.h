@@ -195,7 +195,9 @@ class Renderer {
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
   rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_, rrGuidesPass_, accumulatePass_;
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;
-  rhi::PassLayout gbufferLayout_, tonemapLayout_;
+  rhi::PassLayout gbufferLayout_, tonemapLayout_, particleLayout_;
+  VkPipeline particlePipeline_ = VK_NULL_HANDLE;
+  rhi::Buffer emitterBuffer_;  // scene::ParticleEmitter (só com partículas na cena)
   VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
 
   rhi::GpuProfiler profiler_;

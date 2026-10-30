@@ -120,6 +120,20 @@ rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
   return {&meshes[objects[i].mesh].blas, objects[i].transform, i, opaque, mask};
 }
 
+void Scene::addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count) {
+  emitters.push_back({position, uint32_t(type), radius, scale, particleCount, count});
+  particleCount += count;
+  if (type != kParticleFire) return;
+  // Chama ~1800 K: ~1000 cd por metro de altura, centro um pouco acima da base, tremulando.
+  const uint32_t light = addLight({position + glm::vec3(0.0f, 0.5f * scale, 0.0f), 0.3f * scale,
+                                   glm::vec3(1.0f, 0.55f, 0.2f) * 1000.0f * scale, 30.0f * scale});
+  const glm::vec3 base = lights[light].intensity;
+  addAnimator([light, base](Scene& s, float t, float) {
+    const float flicker = 0.85f + 0.1f * std::sin(t * 13.0f) + 0.05f * std::sin(t * 31.7f + 1.3f);
+    s.lights[light].intensity = base * flicker;
+  });
+}
+
 glm::vec3 lightCenter(const PointLight& l) {
   return l.type == kLightTriangle ? l.position + (l.direction + l.edge2) / 3.0f : l.position;
 }
