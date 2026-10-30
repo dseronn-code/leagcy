@@ -280,6 +280,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {16, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {17, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {18, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {19, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -296,7 +297,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (9 + kMaxTextures)},
-      {SB, kFramesInFlight * 7},
+      {SB, kFramesInFlight * 8},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -472,6 +473,8 @@ void Renderer::writeGlobalDescriptors() {
     VkDescriptorImageInfo ocean[2] = {{oceanSampler_, ocean_.ready() ? ocean_.displacement().view : cloudShadow_.view, VK_IMAGE_LAYOUT_GENERAL},
                                       {oceanSampler_, ocean_.ready() ? ocean_.slope().view : cloudShadow_.view, VK_IMAGE_LAYOUT_GENERAL}};
     for (uint32_t b = 0; b < 2; ++b) add(17 + b, CIS, 1).pImageInfo = &ocean[b];
+    VkDescriptorBufferInfo decals{s.decalBuffer.handle, 0, VK_WHOLE_SIZE};
+    add(19, SB, 1).pBufferInfo = &decals;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {

@@ -115,6 +115,24 @@ struct ParticleEmitter {
 };
 static_assert(sizeof(ParticleEmitter) == 32);
 
+// Decal procedural projetado por uma caixa (shaders/material.glsl): muda cor, rugosidade e brilho de qualquer
+// superfície dentro dela — no G-buffer e nos raios (aparece nos reflexos).
+enum DecalType : uint32_t {
+  kDecalCrosswalk = 0,  // faixas de pedestre (tinta branca)
+  kDecalLaneLine = 1,   // linha tracejada de pista (tinta)
+  kDecalDirt = 2,       // sujeira/encardido (escurece, fica mais áspero)
+  kDecalOil = 3,        // mancha de óleo (escura e lisa)
+  kDecalCracks = 4,     // rachaduras (linhas escuras finas)
+};
+struct Decal {
+  glm::mat4 worldToDecal{1.0f};  // leva o mundo ao cubo [-1, 1]³ da caixa
+  glm::vec4 color{1.0f};         // cor da tinta (a = opacidade)
+  uint32_t type = kDecalDirt;
+  float seed = 0.0f;
+  float pad0 = 0.0f, pad1 = 0.0f;
+};
+static_assert(sizeof(Decal) == 96);
+
 // Centro e caixa de uma luz (BVH de luzes).
 glm::vec3 lightCenter(const PointLight& l);
 void lightBounds(const PointLight& l, glm::vec3& lo, glm::vec3& hi);
@@ -246,6 +264,10 @@ class Scene {
   std::vector<Material> materials;
   std::vector<PointLight> lights;
   std::vector<ParticleEmitter> emitters;
+  std::vector<Decal> decals;
+  rhi::Buffer decalBuffer;
+  // Caixa do decal: centro, meias-medidas (x, y = espessura da projeção, z) e giro em torno do eixo vertical.
+  void addDecal(DecalType type, glm::vec3 center, glm::vec3 halfExtent, float yawRad, glm::vec4 color = glm::vec4(1.0f));
   uint32_t particleCount = 0;
   // Acrescenta um emissor com `count` partículas. Fogo também cria uma luz que tremula (a chama ilumina a cena).
   void addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count);
