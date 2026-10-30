@@ -34,6 +34,7 @@ enum MaterialFlags : uint32_t {
   kMaterialWater = 1u << 8,
   // Folhagem: balança com o vento no vertex shader (marcado no glTF para materiais de recorte por alfa e dois lados).
   kMaterialFoliage = 1u << 9,
+  kMaterialSubsurface = 1u << 10,  // espalhamento subsuperficial (shaders/sss.comp)
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
@@ -70,8 +71,12 @@ struct Material {
   // perto cada floco brilha sozinho; de longe viram rugosidade a mais (a média dos flocos num pixel).
   float flakes = 0.0f;
   float flakeScale = 2000.0f;
+  // Espalhamento subsuperficial (pele, cera, mármore): distância média que a luz anda dentro do material por canal
+  // (m). Pele: vermelho ~ 3x mais longe que o verde e ~ 6x mais que o azul. Zero = sem SSS.
+  glm::vec3 subsurfaceRadius{0.0f};
+  float pad3 = 0.0f;
 };
-static_assert(sizeof(Material) == 128);
+static_assert(sizeof(Material) == 144);
 
 enum LightType : uint32_t {
   kLightSphere = 0,    // esfera (pontual com tamanho) ou spot
