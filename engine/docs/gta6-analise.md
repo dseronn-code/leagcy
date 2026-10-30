@@ -50,7 +50,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Pintura de carro (clearcoat, flocos metálicos) | ✅ | `KHR_materials_clearcoat` (verniz com reflexo traçado próprio) + flocos metálicos que viram rugosidade à distância (sem cintilar) |
 | Vidro e transparência | 🟡 | Vidro de parede fina por ray tracing (janelas, vitrines, lanternas, vidro fosco e colorido, várias lâminas); faltam refração com volume, sombra colorida e transparência por mistura (BLEND) |
 | Decals (sujeira, marcas, pichação) | ❌ | |
-| Chuva, superfícies molhadas e poças | 🟡 | Molhado por porosidade, poças com reflexo por ray tracing, anéis dos pingos animados, céu fechado (`--rain`); faltam os pingos caindo (partículas) e a oclusão da chuva sob telhados |
+| Chuva, superfícies molhadas e poças | 🟡 | Molhado por porosidade, poças com reflexo por ray tracing, anéis dos pingos animados, céu fechado (`--rain`); pingos caindo (partículas); falta a oclusão da chuva sob telhados |
 | Água: oceano FFT, ondas, rios, espuma, cena subaquática | 🟡 | Oceano FFT de Tessendorf (256², Phillips com vento, ondas "choppy", espuma pelo Jacobiano, reflexo por ray tracing, `--scene ocean`); faltam espalhamento na crista (cor turquesa), refração/vista subaquática, rios e interação com objetos |
 
 ### Personagens
@@ -72,7 +72,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Renderização GPU-driven (culling em compute, oclusão, meshlets) | ❌ | Sem isso não dá para desenhar milhões de objetos |
 | Vegetação instanciada com vento | ❌ | |
 | Terreno grande (clipmaps) | 🟡 | Temos terreno procedural de tamanho fixo |
-| Partículas e VFX (fogo, fumaça, explosões) | ❌ | |
+| Partículas e VFX (fogo, fumaça, explosões) | 🟡 | Partículas sem estado na GPU (fogo de corpo negro com luz que tremula, fumaça iluminada por sol com sombra traçada e céu, faíscas, chuva), soft particles; faltam explosões, texturas animadas (flipbook), luz das lâmpadas na fumaça e máscara reativa para o DLSS/TAA |
 | Ray tracing com geometria dinâmica (carros e pessoas se movendo) | ✅ | TLAS por frame, BLAS deformáveis (Dia 3) |
 
 ## Além do RAGE: diferenciais planejados

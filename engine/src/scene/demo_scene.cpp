@@ -210,6 +210,13 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   s.cloudCoverage = 0.4f;  // céu com cúmulos
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
+  // Fogueira: chama, fumaça e faíscas (partículas) com a luz que tremula.
+  {
+    const glm::vec3 fire(-3.0f, terrainHeight(-3.0f, 11.0f), 11.0f);
+    s.addEmitter(kParticleFire, fire, 0.35f, 1.0f, 900);
+    s.addEmitter(kParticleSmoke, fire, 0.3f, 1.0f, 500);
+    s.addEmitter(kParticleSparks, fire, 0.2f, 1.0f, 150);
+  }
   camera.position = {2.0f, terrainHeight(2, 16) + 3.2f, 16.0f};
   camera.lookAt({0.0f, 1.0f, -6.0f});
   return true;
@@ -639,6 +646,7 @@ bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
     scene.rain = std::min(opt.rain, 1.0f);
     if (opt.clouds < 0.0f && scene.sunIlluminance > 0.0f)  // chuva vem com céu fechado
       scene.cloudCoverage = std::max(scene.cloudCoverage, 0.5f + 0.4f * scene.rain);
+    scene.addEmitter(kParticleRain, glm::vec3(0.0f), 0.0f, scene.rain, uint32_t(40000.0f * scene.rain));  // pingos
   }
   return true;
 }

@@ -97,6 +97,17 @@ struct PointLight {
 };
 static_assert(sizeof(PointLight) == 80);
 
+// Emissor de partículas (shaders/particles.glsl): fogo, fumaça, faíscas ou chuva (em volta da câmera).
+enum ParticleType : uint32_t { kParticleFire = 0, kParticleSmoke = 1, kParticleSparks = 2, kParticleRain = 3 };
+struct ParticleEmitter {
+  glm::vec3 position{0.0f};
+  uint32_t type = kParticleFire;
+  float radius = 0.3f;  // base do emissor (m)
+  float scale = 1.0f;   // tamanho (fogo/fumaça/faíscas) ou intensidade (chuva)
+  uint32_t first = 0, count = 0;
+};
+static_assert(sizeof(ParticleEmitter) == 32);
+
 // Centro e caixa de uma luz (BVH de luzes).
 glm::vec3 lightCenter(const PointLight& l);
 void lightBounds(const PointLight& l, glm::vec3& lo, glm::vec3& hi);
@@ -227,6 +238,10 @@ class Scene {
   std::vector<Object> objects;
   std::vector<Material> materials;
   std::vector<PointLight> lights;
+  std::vector<ParticleEmitter> emitters;
+  uint32_t particleCount = 0;
+  // Acrescenta um emissor com `count` partículas. Fogo também cria uma luz que tremula (a chama ilumina a cena).
+  void addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count);
   std::vector<Model> models;
   std::vector<GpuMesh> meshes;
   std::vector<rhi::Image> textures;
