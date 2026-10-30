@@ -217,6 +217,12 @@ struct GpuMesh {
   uint32_t jointOffset = 0, jointCount = 0;  // posição no buffer global de juntas
   VkDeviceSize updateScratchOffset = 0;
   glm::vec3 boundsMin{0.0f}, boundsMax{0.0f};  // caixa local (culling na GPU)
+  // Tecido simulado: posições atual e anterior da simulação (vec4 por vértice).
+  bool cloth = false;
+  uint32_t clothWidth = 0, clothHeight = 0;
+  float clothSpacing = 0.0f;
+  rhi::Buffer clothPos, clothPrev;
+  bool deformable() const { return skinned || cloth; }  // vértices reescritos na GPU a cada frame
 };
 
 class Scene {

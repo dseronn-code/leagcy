@@ -60,7 +60,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Skinning (esqueleto) | ✅ | Skinning em compute + refit de BLAS (Dia 3) |
 | Pele com subsurface scattering, olhos | 🟡 | Espalhamento subsuperficial separável (Jimenez 2015) com raio por canal em metros, seguindo a superfície (`--scene skin`); faltam transmissão em partes finas (orelhas contra a luz) e o shader de olhos |
 | Cabelo por fios | ❌ | |
-| Tecido simulado | ❌ | |
+| Tecido simulado | 🟡 | Tecido por Verlet com restrições (PBD) na GPU, num grupo de trabalho em memória compartilhada: gravidade, vento com rajadas, borda presa; sombras e reflexos acompanham (refit da BLAS). Bandeira na cena externa. Faltam colisão com corpos e roupas presas a esqueletos |
 | Multidões (centenas de NPCs animados) | ❌ | Instancing + LOD de animação + impostors |
 
 ### Mundo aberto

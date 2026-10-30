@@ -333,8 +333,9 @@ void Scene::upload(rhi::Context& ctx) {
   for (auto& data : cpuMeshes_) {
     GpuMesh gm;
     bool skinned = !data.joints.empty() && data.skinModel >= 0 && data.skin >= 0;
+    const bool cloth = data.clothWidth > 0;
     VkDeviceSize vbytes = data.vertices.size() * sizeof(Vertex);
-    VkBufferUsageFlags vusage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | geometryUsage | (skinned ? skinnedUsage : 0);
+    VkBufferUsageFlags vusage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | geometryUsage | ((skinned || cloth) ? skinnedUsage : 0);
     gm.vertices = rhi::createBufferWithData(ctx, data.vertices.data(), vbytes, vusage);
     gm.indices = rhi::createBufferWithData(ctx, data.indices.data(), data.indices.size() * sizeof(uint32_t),
                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | geometryUsage);
@@ -356,10 +357,22 @@ void Scene::upload(rhi::Context& ctx) {
       totalJoints += gm.jointCount;
       ++skinnedCount;
     }
+    if (cloth) {
+      gm.cloth = true;
+      gm.clothWidth = data.clothWidth;
+      gm.clothHeight = data.clothHeight;
+      gm.clothSpacing = data.clothSpacing;
+      std::vector<glm::vec4> p(data.vertices.size());
+      for (size_t i = 0; i < p.size(); ++i) p[i] = glm::vec4(data.vertices[i].position, 0.0f);
+      const VkBufferUsageFlags su = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+      gm.clothPos = rhi::createBufferWithData(ctx, p.data(), p.size() * sizeof(glm::vec4), su);
+      gm.clothPrev = rhi::createBufferWithData(ctx, p.data(), p.size() * sizeof(glm::vec4), su);
+      gm.prevVertices = rhi::createBufferWithData(ctx, data.vertices.data(), vbytes, vusage);
+    }
     if (ctx.rayTracing) {
       rhi::BlasInput in{gm.vertices.address, gm.vertexCount, sizeof(Vertex), gm.indices.address, gm.indexCount};
-      gm.blas = rhi::buildBlas(ctx, in, skinned);
-      if (skinned) {
+      gm.blas = rhi::buildBlas(ctx, in, skinned || cloth);
+      if (skinned || cloth) {
         gm.updateScratchOffset = scratchTotal;
         scratchTotal += rhi::blasUpdateScratchSize(ctx, in);
       }
@@ -463,7 +476,8 @@ void Scene::upload(rhi::Context& ctx) {
 void Scene::destroy(rhi::Context& ctx) {
   if (ctx.rayTracing) tlas.destroy();
   for (auto& m : meshes) {
-    for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices}) rhi::destroyBuffer(ctx, *b);
+    for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices, &m.clothPos, &m.clothPrev})
+      rhi::destroyBuffer(ctx, *b);
     if (ctx.rayTracing) rhi::destroyAccel(ctx, m.blas);
   }
   for (auto& t : textures) rhi::destroyImage(ctx, t);

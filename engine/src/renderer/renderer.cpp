@@ -276,7 +276,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     for (uint32_t b = 0; b < drawBatches_.size(); ++b) {
       const DrawBatch& db = drawBatches_[b];
       const scene::GpuMesh& gm = scene.meshes[db.mesh];
-      bool always = gm.skinned, foliage = false;
+      bool always = gm.deformable(), foliage = false;
       for (uint32_t k = db.first; k < db.first + db.count; ++k) {
         entryBatch[k] = b;
         const uint32_t flags = scene.materials[scene.objects[order[k]].material].flags;
@@ -377,6 +377,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorSetLayout g = globalLayout_;
   const bool rt = ctx.rayTracing;
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
+  clothPass_.init(ctx, "cloth.comp", g, {}, 48);
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
   aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
   cloudSkyPass_.init(ctx, "clouds_sky.comp", g, {SI, CIS});
@@ -888,7 +889,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       const auto& m = scene_->meshes[b.mesh];
       vkCmdSetCullMode(cmd, b.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
       vkCmdSetFrontFace(cmd, b.mirrored != kFrontFaceClockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
-      VkBuffer vbs[2] = {m.vertices.handle, m.skinned ? m.prevVertices.handle : m.vertices.handle};
+      VkBuffer vbs[2] = {m.vertices.handle, m.deformable() ? m.prevVertices.handle : m.vertices.handle};
       VkDeviceSize offsets[2] = {0, 0};
       vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
       vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
@@ -1258,8 +1259,9 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   auto* joints = static_cast<glm::mat4*>(jointBuffers_[slot].mapped);
   bool anySkinned = false;
   for (const auto& m : s.meshes) {
-    if (!m.skinned) continue;
+    if (!m.deformable()) continue;
     anySkinned = true;
+    if (!m.skinned) continue;
     const auto& src = s.models[size_t(m.skinModel)].jointMatrices[size_t(m.skin)];
     std::copy(src.begin(), src.end(), joints + m.jointOffset);
   }
@@ -1269,11 +1271,24 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
     // Guarda a pose anterior antes de sobrescrever (para os vetores de movimento da deformação).
     if (historyValid_) {
       for (const auto& m : s.meshes) {
-        if (!m.skinned) continue;
+        if (!m.deformable()) continue;
         VkBufferCopy region{0, 0, m.vertices.size};
         vkCmdCopyBuffer(cmd, m.vertices.handle, m.prevVertices.handle, 1, &region);
       }
       rhi::memoryBarrier(cmd);
+    }
+    // Tecido: simulação no intervalo de tempo da cena (zero com a cena pausada).
+    const float sceneDt = historyValid_ ? std::max(s.time - clothTime_, 0.0f) : 0.0f;
+    clothTime_ = s.time;
+    for (const auto& m : s.meshes) {
+      if (!m.cloth) continue;
+      struct {
+        VkDeviceAddress pos, prev, vertices;
+        uint32_t width, height;
+        float spacing, dt, time, pad;
+      } cp{m.clothPos.address, m.clothPrev.address, m.vertices.address, m.clothWidth, m.clothHeight, m.clothSpacing, sceneDt,
+           s.time, 0.0f};
+      clothPass_.dispatchGroups(cmd, globalSets_[slot], {}, 1, 1, &cp);
     }
     for (const auto& m : s.meshes) {
       if (!m.skinned) continue;
@@ -1285,14 +1300,14 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
     rhi::memoryBarrier(cmd);
     if (!historyValid_) {  // primeiro frame: anterior = atual
       for (const auto& m : s.meshes) {
-        if (!m.skinned) continue;
+        if (!m.deformable()) continue;
         VkBufferCopy region{0, 0, m.vertices.size};
         vkCmdCopyBuffer(cmd, m.vertices.handle, m.prevVertices.handle, 1, &region);
       }
     }
     if (ctx.rayTracing) {
       for (auto& m : s.meshes) {
-        if (!m.skinned) continue;
+        if (!m.deformable()) continue;
         rhi::BlasInput in{m.vertices.address, m.vertexCount, sizeof(scene::Vertex), m.indices.address, m.indexCount};
         rhi::recordBlasUpdate(ctx, cmd, m.blas, in, rhi::alignScratch(ctx, s.skinScratch.address + m.updateScratchOffset));
       }
@@ -1387,7 +1402,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
   for (rhi::Buffer* b : {&entryBatch_, &cullBatches_, &drawCommands_, &culledList_}) rhi::destroyBuffer(ctx, *b);
-  for (rhi::ComputePass* p : {&cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&clothPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
