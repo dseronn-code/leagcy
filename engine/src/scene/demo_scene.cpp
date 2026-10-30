@@ -706,6 +706,16 @@ bool buildSkinTest(Scene& s, Camera& camera, bool backlit) {
   const uint32_t sss = s.addMaterial(skin);
   s.addObject(sphere, trs({-0.14f, 0.12f, 0.0f}, glm::vec3(0.1f)), plain);
   s.addObject(sphere, trs({0.14f, 0.12f, 0.0f}, glm::vec3(0.1f)), sss);
+  // Olhos (12 mm de raio) entre as esferas, olhando para a câmera; córnea com reflexo.
+  {
+    Material eye;
+    eye.baseColor = glm::vec4(0.12f, 0.32f, 0.45f, 1.0f);  // íris azul-esverdeada
+    eye.flags = kMaterialEye | kMaterialClearcoat;
+    eye.clearcoat = 1.0f;
+    eye.clearcoatRoughness = 0.02f;
+    const uint32_t eyeMat = s.addMaterial(eye);
+    for (float x : {-0.02f, 0.02f}) s.addObject(sphere, trs({x, 0.22f, 0.05f}, glm::vec3(0.012f)), eyeMat);
+  }
   // "Orelhas": placas de 4 mm contra a luz (sem e com SSS) — a com SSS acende avermelhada por transmissão.
   s.addObject(cube, trs({-0.1f, 0.33f, -0.15f}, {0.05f, 0.06f, 0.002f}), plain);
   s.addObject(cube, trs({0.1f, 0.33f, -0.15f}, {0.05f, 0.06f, 0.002f}), sss);

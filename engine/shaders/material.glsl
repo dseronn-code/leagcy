@@ -227,6 +227,34 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
     s.normalVariance += m.flakes * 0.03 * (1.0 - resolved);  // ≈ variância da inclinação dos flocos
   }
 
+  if ((m.flags & MATERIAL_EYE) != 0u) {
+    // Direção no olho a partir das UVs latitude/longitude da esfera; ângulo até a frente (+z).
+    float th = uv.y * PI, ph = uv.x * TWO_PI;
+    vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
+    float ang = acos(clamp(n.z, -1.0, 1.0));
+    const float IRIS = 0.55, PUPIL = 0.2;  // rad (íris de ~12 mm num olho de ~24 mm)
+    float around = atan(n.y, n.x);
+    // Esclera: branco levemente quente com veias finas perto da íris e sombreado nas bordas.
+    vec3 sclera = vec3(0.86, 0.82, 0.78);
+    float veins = smoothstep(0.62, 0.7, fbm(vec2(around * 6.0, ang * 14.0), 4)) * smoothstep(1.6, 0.8, ang);
+    sclera = mix(sclera, vec3(0.75, 0.35, 0.3), veins * 0.5);
+    // Íris: fibras radiais (ruído no ângulo), escurece para a borda (anel límbico) e clareia perto da pupila.
+    float r = ang / IRIS;
+    float fibers = fbm(vec2(around * 10.0, r * 3.0), 5);
+    vec3 iris = base.rgb * (0.55 + 0.9 * fibers) * mix(1.15, 0.65, smoothstep(0.35, 1.0, r));
+    iris = mix(iris, base.rgb * 1.6 + 0.08, smoothstep(0.45, 0.25, r) * 0.35);  // colarinho claro
+    float limbal = smoothstep(0.82, 1.0, r);
+    iris *= 1.0 - 0.75 * limbal;
+    vec3 c = ang < PUPIL ? vec3(0.008) : ang < IRIS ? iris : sclera;
+    c = mix(c, iris * 0.25, smoothstep(IRIS * 1.08, IRIS, ang) * step(IRIS, ang));  // borda suave íris/esclera
+    s.diffuseColor = c;
+    s.f0 = vec3(0.02);
+    s.f90 = 1.0;
+    s.roughness = ang < IRIS ? 0.5 : 0.35;
+    s.clearcoat = 1.0;           // córnea/filme lacrimal: reflexo nítido por cima
+    s.clearcoatRoughness = 0.02;
+  }
+
   if ((m.flags & MATERIAL_TERRAIN) != 0u) {
     // Terreno procedural: grama, terra e rocha por inclinação e ruído.
     float slope = 1.0 - N.y;
