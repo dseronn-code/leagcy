@@ -125,7 +125,9 @@ void Scene::setTransform(uint32_t object, const glm::mat4& transform) {
 rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
   const uint32_t flags = materials[objects[i].material].flags;
   const bool opaque = !(flags & kMaterialAlphaMask);
-  const uint8_t mask = (flags & (kMaterialLightGeometry | kMaterialTransmissive)) ? 0x02 : 0xFF;  // sem sombra
+  // Máscaras (shaders/raytracing.glsl): 0x01 = faz sombra opaca, 0x02 = globo de lâmpada (sem sombra), 0x04 = vidro
+  // (sombra colorida, pela transmitância).
+  const uint8_t mask = (flags & kMaterialLightGeometry) ? 0x02 : (flags & kMaterialTransmissive) ? 0x04 : 0xFF;
   // Multidão: a BLAS da pose deste frame (cada pose assada tem a sua).
   const uint32_t mesh = objects[i].crowdClip != ~0u ? crowdClips[objects[i].crowdClip].firstMesh + objects[i].animFrame
                                                     : objects[i].mesh;

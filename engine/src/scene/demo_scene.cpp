@@ -569,6 +569,14 @@ bool buildGlassTest(Scene& s, Camera& camera) {
   s.addObject(cube, trs({-0.4f, 0.3f, 0.6f}, {0.1f, 0.3f, 0.1f}), wall);
   s.addObject(sphere, trs({-0.4f, 0.85f, 0.6f}, glm::vec3(0.25f)), clear);
   s.addObject(sphere, trs({-0.4f, 0.85f, 0.6f}, glm::vec3(0.05f)), mat(glm::vec3(1.0f), 0.5f, 0.0f, {60000.0f, 45000.0f, 25000.0f}));
+  // Bola de vidro maciço (KHR_materials_volume): refrata (a imagem atrás aparece invertida) e esverdeia por absorção.
+  {
+    const uint32_t solid = mat(glm::vec3(1.0f), 0.0f, 1.0f);
+    s.materials[solid].thickness = 1.0f;
+    s.materials[solid].attenuationColor = glm::vec3(0.75f, 0.95f, 0.85f);
+    s.materials[solid].attenuationDistance = 0.3f;
+    s.addObject(sphere, trs({0.9f, 0.45f, 0.4f}, glm::vec3(0.45f)), solid);
+  }
   s.sunDirection = sunFrom(25.0f, 10.0f);  // entra pela janela do fundo
   s.sunIlluminance = 100000.0f;
   s.fogDensity = 0.0f;

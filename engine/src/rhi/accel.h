@@ -28,7 +28,7 @@ struct TlasInstance {
   uint32_t customIndex = 0;  // gl_InstanceCustomIndexEXT no shader
   bool opaque = true;        // false => o shader testa o alfa da textura (folhagem, grades)
   // Máscara de raios (shaders/raytracing.glsl): os raios de sombra usam RAY_MASK_SHADOW = 0x01; instâncias sem esse
-  // bit (globo de lâmpada, vidro) não fazem sombra.
+  // bit (globo de lâmpada 0x02, vidro 0x04) não fazem sombra opaca — o vidro tinge a sombra (RAY_MASK_GLASS).
   uint8_t mask = 0xFF;
 };
 

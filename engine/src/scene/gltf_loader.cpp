@@ -163,6 +163,11 @@ struct Loader {
         m.clearcoatTex = texture(src.clearcoat.clearcoat_texture, false);
         m.clearcoatRoughnessTex = texture(src.clearcoat.clearcoat_roughness_texture, false);
       }
+      if (src.has_volume && src.volume.thickness_factor > 0.0f) {
+        m.thickness = src.volume.thickness_factor;
+        m.attenuationColor = glm::make_vec3(src.volume.attenuation_color);
+        m.attenuationDistance = std::isfinite(src.volume.attenuation_distance) ? src.volume.attenuation_distance : 0.0f;
+      }
       if (src.has_transmission && src.transmission.transmission_factor > 0.0f) {
         m.flags |= kMaterialTransmissive;
         m.transmission = src.transmission.transmission_factor;

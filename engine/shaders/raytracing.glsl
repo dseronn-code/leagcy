@@ -49,13 +49,25 @@ bool alphaTestPasses(uint inst, uint prim, vec2 bary) {
   }
 
 // Raios de sombra veem só instâncias com este bit (rhi::TlasInstance::mask): globos de lâmpada e vidro não bloqueiam.
-const uint RAY_MASK_SHADOW = 0x01u;
+const uint RAY_MASK_SHADOW = 0x01u, RAY_MASK_GLASS = 0x04u;
 
 float traceVisibility(vec3 origin, vec3 dir, float tMax) {
   rayQueryEXT rq;
   rayQueryInitializeEXT(rq, tlas, gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SHADOW, origin, 0.0, dir, tMax);
   RESOLVE_CANDIDATES(rq)
   return rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
+}
+
+// Sombra colorida: depois do teste opaco, um raio que só vê vidro (RAY_MASK_GLASS) percorre as lâminas acumulando a
+// transmitância (transmissão × cor × (1 − Fresnel) e a absorção dos volumes). Cenas sem vidro: só o teste opaco.
+vec3 glassTransmittanceAlong(vec3 origin, vec3 dir, float tMax);  // lighting.glsl (precisa do material)
+vec3 traceTransmittance(vec3 origin, vec3 dir, float tMax) {
+  if (traceVisibility(origin, dir, tMax) == 0.0) return vec3(0.0);
+#ifdef GLASS_SHADOWS
+  return glassTransmittanceAlong(origin, dir, tMax);
+#else
+  return vec3(1.0);
+#endif
 }
 
 #ifdef SURFACE_GLSL

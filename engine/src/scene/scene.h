@@ -74,9 +74,13 @@ struct Material {
   // Espalhamento subsuperficial (pele, cera, mármore): distância média que a luz anda dentro do material por canal
   // (m). Pele: vermelho ~ 3x mais longe que o verde e ~ 6x mais que o azul. Zero = sem SSS.
   glm::vec3 subsurfaceRadius{0.0f};
-  float pad3 = 0.0f;
+  // KHR_materials_volume: vidro com volume (garrafa, bola de vidro). > 0 = refrata na entrada e na saída pelo IOR e
+  // absorve pela lei de Beer: transmitância attenuationColor a cada attenuationDistance metros dentro do material.
+  float thickness = 0.0f;
+  glm::vec3 attenuationColor{1.0f};
+  float attenuationDistance = 0.0f;  // 0 = sem absorção
 };
-static_assert(sizeof(Material) == 144);
+static_assert(sizeof(Material) == 160);
 
 enum LightType : uint32_t {
   kLightSphere = 0,    // esfera (pontual com tamanho) ou spot
