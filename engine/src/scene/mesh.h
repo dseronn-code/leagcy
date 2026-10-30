@@ -29,6 +29,12 @@ struct MeshData {
   float clothSpacing = 0.0f;
 };
 
+// Versão simplificada (LOD) com ~`targetTriangles` triângulos: agrupamento de vértices numa grade com a posição de
+// cada grupo pela minimização do erro quádrico dos triângulos que tocam o grupo (Lindstrom 2000, "Out-of-Core
+// Simplification of Large Polygonal Models") — preserva quinas e silhuetas melhor que a média simples. Normais e UVs
+// pela média do grupo, separados por lado da normal (não junta frente com verso de uma parede fina).
+MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles);
+
 // Pano em grade vertical (plano xy, pendurado para −y a partir da origem), coluna x = 0 presa.
 MeshData makeClothGrid(uint32_t width, uint32_t height, float spacing);
 

@@ -1,6 +1,9 @@
 #include "scene/mesh.h"
 
+#include <algorithm>
 #include <cmath>
+#include <unordered_map>
+#include <unordered_set>
 
 #include <glm/gtc/constants.hpp>
 
@@ -24,6 +27,121 @@ MeshData makeSphere(uint32_t segments, uint32_t rings) {
   }
   computeTangents(m);
   return m;
+}
+
+namespace {
+struct Quadric {  // erro quádrico: soma de (n·p + d)² dos planos dos triângulos (matriz simétrica 4x4)
+  double a[10] = {};
+  void addPlane(glm::dvec3 n, double d, double w) {
+    const double q[4] = {n.x, n.y, n.z, d};
+    int k = 0;
+    for (int r = 0; r < 4; ++r)
+      for (int c = r; c < 4; ++c) a[k++] += w * q[r] * q[c];
+  }
+  // Ponto que minimiza o erro; falso se o sistema é mal condicionado (grupo plano ou numa aresta reta).
+  bool solve(glm::dvec3& p) const {
+    glm::dmat3 A(a[0], a[1], a[2], a[1], a[4], a[5], a[2], a[5], a[7]);
+    const glm::dvec3 b(-a[3], -a[6], -a[8]);
+    const double det = glm::determinant(A);
+    if (std::abs(det) < 1e-12) return false;
+    p = glm::inverse(A) * b;
+    return true;
+  }
+};
+}  // namespace
+
+MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles) {
+  glm::vec3 lo(1e30f), hi(-1e30f);
+  for (const Vertex& v : mesh.vertices) {
+    lo = glm::min(lo, v.position);
+    hi = glm::max(hi, v.position);
+  }
+  const glm::vec3 ext = glm::max(hi - lo, glm::vec3(1e-6f));
+  const uint32_t tris = uint32_t(mesh.indices.size() / 3);
+  MeshData best;
+  // A resolução da grade que dá ~targetTriangles: busca nas resoluções (triângulos sobreviventes crescem com ela).
+  float cellsPerAxis = std::sqrt(float(targetTriangles)) * 0.9f;
+  for (int attempt = 0; attempt < 6; ++attempt) {
+    const float cell = std::max(std::max(ext.x, ext.y), ext.z) / std::max(cellsPerAxis, 1.0f);
+    struct Group {
+      Quadric q;
+      glm::dvec3 sumP{0.0}, sumN{0.0};
+      glm::dvec2 sumUv{0.0};
+      glm::dvec4 sumT{0.0};
+      double count = 0.0;
+    };
+    std::unordered_map<uint64_t, uint32_t> groupOf;
+    std::vector<Group> groups;
+    std::vector<uint32_t> vgroup(mesh.vertices.size());
+    for (size_t v = 0; v < mesh.vertices.size(); ++v) {
+      const Vertex& vx = mesh.vertices[v];
+      const glm::ivec3 c = glm::ivec3(glm::floor((vx.position - lo) / cell));
+      // Lado da normal (octante): frente e verso de uma parede fina ficam em grupos diferentes.
+      const uint32_t side = (vx.normal.x > 0 ? 1u : 0u) | (vx.normal.y > 0 ? 2u : 0u) | (vx.normal.z > 0 ? 4u : 0u);
+      const uint64_t key = (uint64_t(uint32_t(c.x) & 0xFFFFF) << 40) | (uint64_t(uint32_t(c.y) & 0xFFFFF) << 20) |
+                           uint64_t(uint32_t(c.z) & 0xFFFFF);
+      const uint64_t k2 = key * 8u + side;
+      auto it = groupOf.find(k2);
+      if (it == groupOf.end()) {
+        it = groupOf.emplace(k2, uint32_t(groups.size())).first;
+        groups.emplace_back();
+      }
+      vgroup[v] = it->second;
+      Group& g = groups[it->second];
+      g.sumP += glm::dvec3(vx.position);
+      g.sumN += glm::dvec3(vx.normal);
+      g.sumUv += glm::dvec2(vx.uv);
+      g.sumT += glm::dvec4(vx.tangent);
+      g.count += 1.0;
+    }
+    for (uint32_t t = 0; t < tris; ++t) {
+      const glm::dvec3 a = mesh.vertices[mesh.indices[3 * t]].position, b = mesh.vertices[mesh.indices[3 * t + 1]].position,
+                       c = mesh.vertices[mesh.indices[3 * t + 2]].position;
+      glm::dvec3 n = glm::cross(b - a, c - a);
+      const double area2 = glm::length(n);
+      if (area2 <= 0.0) continue;
+      n /= area2;
+      for (int k = 0; k < 3; ++k) groups[vgroup[mesh.indices[3 * t + k]]].q.addPlane(n, -glm::dot(n, a), area2);
+    }
+    MeshData out;
+    out.vertices.resize(groups.size());
+    for (size_t gi = 0; gi < groups.size(); ++gi) {
+      const Group& g = groups[gi];
+      const glm::dvec3 mean = g.sumP / g.count;
+      glm::dvec3 p;
+      // O ponto ótimo só vale se ficar perto da célula (senão o sistema era quase singular): fica a média.
+      if (!g.q.solve(p) || glm::length(p - mean) > double(cell)) p = mean;
+      Vertex& v = out.vertices[gi];
+      v.position = glm::vec3(p);
+      v.normal = glm::length(g.sumN) > 1e-9 ? glm::vec3(glm::normalize(g.sumN)) : glm::vec3(0, 1, 0);
+      v.uv = glm::vec2(g.sumUv / g.count);
+      const glm::dvec3 tt(g.sumT);
+      v.tangent = glm::vec4(glm::length(tt) > 1e-9 ? glm::vec3(glm::normalize(tt)) : glm::vec3(1, 0, 0), g.sumT.w >= 0.0 ? 1.0f : -1.0f);
+    }
+    std::unordered_set<uint64_t> seen;
+    for (uint32_t t = 0; t < tris; ++t) {
+      uint32_t a = vgroup[mesh.indices[3 * t]], b = vgroup[mesh.indices[3 * t + 1]], c = vgroup[mesh.indices[3 * t + 2]];
+      if (a == b || b == c || a == c) continue;  // triângulo colapsou
+      {  // virou do avesso no colapso: a normal geométrica contraria as dos vértices
+        const glm::vec3 &pa = out.vertices[a].position, &pb = out.vertices[b].position, &pc = out.vertices[c].position;
+        const glm::vec3 vn = out.vertices[a].normal + out.vertices[b].normal + out.vertices[c].normal;
+        if (glm::dot(glm::cross(pb - pa, pc - pa), vn) <= 0.0f) continue;
+      }
+      // Mesmo triângulo duas vezes (mesma orientação): uma basta.
+      uint32_t r[3] = {a, b, c};
+      const int m0 = int(std::min_element(r, r + 3) - r);
+      const uint64_t key = (uint64_t(r[m0]) << 42) ^ (uint64_t(r[(m0 + 1) % 3]) << 21) ^ uint64_t(r[(m0 + 2) % 3]);
+      if (!seen.insert(key).second) continue;
+      out.indices.insert(out.indices.end(), {a, b, c});
+    }
+    const uint32_t got = uint32_t(out.indices.size() / 3);
+    if (best.indices.empty() || std::abs(int(got) - int(targetTriangles)) < std::abs(int(best.indices.size() / 3) - int(targetTriangles)))
+      best = std::move(out);
+    if (got > targetTriangles * 1.25f) cellsPerAxis *= 0.75f;
+    else if (got < targetTriangles * 0.75f) cellsPerAxis *= 1.3f;
+    else break;
+  }
+  return best;
 }
 
 MeshData makeClothGrid(uint32_t width, uint32_t height, float spacing) {

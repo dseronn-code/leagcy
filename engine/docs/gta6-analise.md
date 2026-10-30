@@ -68,7 +68,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Recurso | Legacy | Observação |
 |---|---|---|
 | Streaming do mundo | ❌ | O item mais difícil: carregar e descarregar o mapa enquanto o jogador anda |
-| LOD e HLOD de cidade inteira | ❌ | |
+| LOD e HLOD de cidade inteira | 🟡 | LOD automático: malhas com mais de 3 mil triângulos ganham 2 níveis (1/4 e 1/16) por agrupamento com erro quádrico (Lindstrom), trocados por distância no culling da GPU (ray tracing segue com a malha completa); Bistro: 122 malhas, imagem praticamente igual (0,3% dos pixels). Faltam HLOD (juntar quarteirões distantes num objeto só), transição suave e o ganho medido na RTX |
 | Renderização GPU-driven (culling em compute, oclusão, meshlets) | 🟡 | Culling por frustum em compute (uma invocação por instância, caixa transformada) com desenho indireto por malha; imagem idêntica com e sem (conferido na Sponza e na cidade). Faltam oclusão (HiZ em duas fases), meshlets e o ganho medido numa GPU de verdade (no llvmpipe o custo é quase todo de pixel) |
 | Vegetação instanciada com vento | ✅ | Grama procedural (tufos de lâminas curvas) instanciada aos milhares (uma chamada e uma BLAS por variação), folhagem dos assets e grama balançam com rajadas, curvatura pela altura e tremor das folhas, com vetores de movimento certos. Falta a sombra traçada seguir o balanço (BLAS parada) |
 | Terreno grande (clipmaps) | 🟡 | Temos terreno procedural de tamanho fixo |

@@ -11,7 +11,9 @@ struct CullBatch {  // == CullBatch em renderer.cpp
   vec3 boundsMin;
   uint first;
   vec3 boundsMax;
-  uint alwaysVisible;  // malha que se deforma (esqueleto, mar): sem teste
+  uint alwaysVisible;  // malha que se deforma (esqueleto, mar): sem teste de frustum
+  float lodNear, lodFar;  // faixa de distância em que este nível de detalhe desenha o objeto
+  uint lod, pad;
 };
 struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
 layout(set = 1, binding = 0, std430) readonly buffer DrawList { uint drawList[]; };
@@ -45,7 +47,14 @@ void main() {
   if (k >= pc.entryCount) return;
   uint object = drawList[k];
   uint b = entryBatch[k];
-  if (!visible(batches[b], objects[object].model)) return;
+  CullBatch cb = batches[b];
+  // Nível de detalhe: distância da câmera ao centro da caixa do objeto (cada objeto cai em exatamente um nível).
+  mat4 model = objects[object].model;
+  // Em unidades da malha (as distâncias de troca vêm do raio dela): divide pela escala do objeto.
+  float scale = max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz)));
+  float d = distance((model * vec4(0.5 * (cb.boundsMin + cb.boundsMax), 1.0)).xyz, frame.cameraPos.xyz) / max(scale, 1e-6);
+  if (d < cb.lodNear || d >= cb.lodFar) return;
+  if (!visible(cb, model)) return;
   uint slot = atomicAdd(commands[b].instanceCount, 1u);
-  culled[batches[b].first + slot] = object;
+  culled[cb.first + slot] = object | (cb.lod << 30);  // nível nos 2 bits de cima (gbuffer.vert)
 }
