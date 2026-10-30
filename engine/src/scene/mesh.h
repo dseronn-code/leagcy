@@ -35,6 +35,12 @@ struct MeshData {
 // pela média do grupo, separados por lado da normal (não junta frente com verso de uma parede fina).
 MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles);
 
+// Cabelo por fios: `strands` fios com `segments` segmentos nascendo na calota de cima de uma esfera de raio
+// `scalpRadius` (origem no centro), comprimento `length` (m), curvados pela gravidade. Cada segmento é uma fita: os
+// vértices guardam a linha central ± halfWidth × normal (a fita parada que o ray tracing vê; o raster a vira para a
+// câmera — gbuffer.vert), uv = (lado 0/1, posição no fio 0..1), tangente = direção do fio, tangent.w = meia largura.
+MeshData makeHair(uint32_t strands, uint32_t segments, float scalpRadius, float length, float halfWidth, uint32_t seed);
+
 // Pano em grade vertical (plano xy, pendurado para −y a partir da origem), coluna x = 0 presa.
 MeshData makeClothGrid(uint32_t width, uint32_t height, float spacing);
 

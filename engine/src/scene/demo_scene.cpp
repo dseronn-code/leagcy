@@ -794,6 +794,44 @@ bool buildCrowd(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Cabelo por fios: cabeça (esfera com pele e SSS), olhos e 12 mil fios de 25 cm, castanhos, ao sol de lado.
+bool buildHairTest(Scene& s, Camera& camera) {
+  uint32_t sphere = s.addMesh(makeSphere(96, 48)), cube = s.addMesh(makeCube());
+  Material floor;
+  floor.baseColor = glm::vec4(glm::vec3(0.3f), 1.0f);
+  floor.roughness = 0.8f;
+  s.addObject(cube, trs({0.0f, -0.05f, 0.0f}, {2.0f, 0.05f, 2.0f}), s.addMaterial(floor));
+  Material skin;
+  skin.baseColor = glm::vec4(0.80f, 0.56f, 0.46f, 1.0f);
+  skin.roughness = 0.45f;
+  skin.specular = 0.7f;
+  skin.flags = kMaterialSubsurface;
+  skin.subsurfaceRadius = glm::vec3(0.0040f, 0.0015f, 0.0007f);
+  const glm::vec3 head(0.0f, 0.35f, 0.0f);
+  s.addObject(sphere, trs(head, glm::vec3(0.09f, 0.11f, 0.095f)), s.addMaterial(skin));
+  Material eye;
+  eye.baseColor = glm::vec4(0.25f, 0.16f, 0.08f, 1.0f);  // castanho
+  eye.flags = kMaterialEye | kMaterialClearcoat;
+  eye.clearcoat = 1.0f;
+  eye.clearcoatRoughness = 0.02f;
+  const uint32_t eyeMat = s.addMaterial(eye);
+  for (float x : {-0.032f, 0.032f}) s.addObject(sphere, trs(head + glm::vec3(x, 0.015f, 0.08f), glm::vec3(0.011f)), eyeMat);
+  Material hair;
+  hair.baseColor = glm::vec4(0.28f, 0.14f, 0.06f, 1.0f);  // castanho
+  hair.roughness = 0.35f;
+  hair.flags = kMaterialHair | kMaterialDoubleSided;
+  // Fios na esfera de raio 1 escalada para a cabeça (o couro fica 3% para fora da pele).
+  glm::mat4 t = glm::scale(glm::translate(glm::mat4(1.0f), head), glm::vec3(0.093f, 0.113f, 0.098f));
+  s.addObject(s.addMesh(makeHair(14000, 14, 1.0f, 2.6f, 0.0012f, 7)), t, s.addMaterial(hair));
+  s.sunDirection = sunFrom(30.0f, 60.0f);
+  s.sunIlluminance = 90000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = head + glm::vec3(0.25f, 0.03f, 0.45f);
+  camera.lookAt(head);
+  camera.nearPlane = 0.01f;
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -837,6 +875,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "skin-backlit") return buildSkinTest(scene, camera, true);
   if (opt.name == "vfx") return buildVfx(scene, camera, opt);
   if (opt.name == "crowd") return buildCrowd(scene, camera, opt);
+  if (opt.name == "hair") return buildHairTest(scene, camera);
   return buildSponza(scene, camera, opt);
 }
 

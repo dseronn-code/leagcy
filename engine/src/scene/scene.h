@@ -41,6 +41,9 @@ enum MaterialFlags : uint32_t {
   // Olho procedural numa esfera de UV latitude/longitude (makeSphere): frente em +z; íris com a cor base, pupila,
   // anel límbico, esclera; córnea por verniz (clearcoat).
   kMaterialEye = 1u << 12,
+  // Cabelo (makeHair): fitas viradas para a câmera no raster, transparência estocástica abaixo de um pixel,
+  // sombreamento anisotrópico (Kajiya-Kay com as duas lobas de Scheuermann) pela tangente do fio.
+  kMaterialHair = 1u << 13,
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,

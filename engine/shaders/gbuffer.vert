@@ -23,6 +23,7 @@ layout(location = 5) out vec4 vPrevClip;
 layout(location = 6) flat out uint vObject;
 layout(location = 7) flat out uint vMaterial;
 layout(location = 8) flat out uint vLod;
+layout(location = 9) out float vCoverage;  // cabelo: fração do pixel que o fio cobre (transparência estocástica)
 
 // Vento na folhagem: rajadas que viajam pelo espaço (ondas lentas na direção do vento), curvatura que cresce com a
 // altura acima da base do objeto (o tronco quase não mexe, a copa sim) e tremor rápido das folhas.
@@ -67,6 +68,31 @@ void main() {
     normal = fetchVertexNormal(cur, vi);
     tangent = vec4(cur.v[vi * 12u + 8u], cur.v[vi * 12u + 9u], cur.v[vi * 12u + 10u], cur.v[vi * 12u + 11u]);
     prevPosition = fetchVertexPosition(prv, vi);
+  }
+  vCoverage = 1.0;
+  if ((materials[vMaterial].flags & MATERIAL_HAIR) != 0u) {
+    // Fita do fio virada para a câmera: volta à linha central (a fita guardada é a do ray tracing) e abre na direção
+    // perpendicular ao fio e à vista, com pelo menos meio pixel de largura; o que sobra vira cobertura < 1.
+    float side = aUV.x * 2.0 - 1.0, w = aTangent.w;
+    vec3 c = position - side * w * cross(normal, aTangent.xyz);  // linha central (lado = normal × tangente)
+    vec3 cw = (o.model * vec4(c, 1.0)).xyz, tw = normalize(mat3(o.model) * aTangent.xyz);
+    vec3 toCam = normalize(frame.cameraPos.xyz - cw);
+    vec3 across = normalize(cross(tw, toCam) + vec3(1e-6));
+    float dist = distance(frame.cameraPos.xyz, cw);
+    float pixel = 2.0 * dist / (abs(frame.proj[1][1]) * frame.renderSize.y);  // tamanho de um pixel nessa distância
+    float half_ = max(w * length(o.model[0].xyz), 0.5 * pixel);
+    vCoverage = clamp(2.0 * w * length(o.model[0].xyz) / pixel, 0.0, 1.0);
+    vec3 worldPos = cw + across * side * half_;
+    vec3 facing = normalize(toCam - tw * dot(toCam, tw));
+    vWorldPos = worldPos;
+    vNormal = facing;
+    vTangent = vec4(tw, 1.0);
+    vUV = aUV;
+    vCurClip = frame.viewProjNoJitter * vec4(worldPos, 1.0);
+    vec3 cp = (o.prevModel * vec4(c, 1.0)).xyz;
+    vPrevClip = frame.prevViewProjNoJitter * vec4(cp + across * side * half_, 1.0);
+    gl_Position = frame.proj * vec4(mat3(frame.view) * (worldPos - frame.cameraPos.xyz), 1.0);
+    return;
   }
   vec4 world = o.model * vec4(position, 1.0);
   vec4 prevWorld = o.prevModel * vec4(prevPosition, 1.0);

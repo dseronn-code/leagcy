@@ -23,6 +23,7 @@ layout(location = 5) out uvec2 outVisibility;  // objeto + 1, triângulo (superf
 layout(location = 6) flat in uint vObject;
 layout(location = 7) flat in uint vMaterial;
 layout(location = 8) flat in uint vLod;
+layout(location = 9) in float vCoverage;
 
 // Anti-aliasing especular geométrico (Tokuyoshi & Kaplanyan, "Improved Geometric Specular
 // Antialiasing", I3D 2019): a variação da normal dentro do pixel alarga o lóbulo GGX, então
@@ -44,6 +45,12 @@ void main() {
   Surface s = evalMaterial(m, vWorldPos, N, vTangent, vUV);
   // Misturados (decals BLEND): sem recorte, o alfa vai para a mistura (pipeline de decals: .a de cada anexo).
   bool blend = (m.flags & MATERIAL_BLEND) != 0u;
+  // Cabelo mais fino que o pixel: transparência estocástica (o TAA/DLSS faz a média entre frames).
+  if ((m.flags & MATERIAL_HAIR) != 0u &&
+      // Sorteio independente por fio (índice do triângulo) e por frame: as camadas de fios se somam em vez de sumirem
+      // juntas.
+      float(pcg3d(uvec3(uvec2(gl_FragCoord.xy), uint(gl_PrimitiveID) * 64u + frame.frameInfo.x % 64u)).x) * (1.0 / 4294967296.0) > vCoverage)
+    discard;
   if (!blend && (m.flags & MATERIAL_ALPHA_MASK) != 0u && s.alpha < m.alphaCutoff) discard;
   if (blend && s.alpha <= 0.002) discard;
 
