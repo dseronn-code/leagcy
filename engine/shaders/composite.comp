@@ -32,12 +32,45 @@ vec3 applyFog(vec3 color, vec2 uv, vec3 v, float dist) {
   return color * fog.a + fog.rgb;
 }
 
+// Debaixo d'água: luz espalhada pela própria água (sol que chegou até a câmera, mais o céu filtrado), por pixel.
+vec3 waterInscatter() {
+  vec3 sun = sunIrradianceAt(frame.cameraPos.xyz) / PI;
+  vec3 sky = sampleSky(vec3(0.0, 1.0, 0.0)) * exp(-SEA_EXTINCTION * max(frame.water.x - frame.cameraPos.y, 0.0));
+  return (sun * 0.35 + sky) * SEA_SCATTER_ALBEDO;
+}
+// Trecho de `dist` metros dentro d'água: absorção de Beer por canal e a luz espalhada no caminho.
+vec3 applyWater(vec3 color, float dist) {
+  vec3 T = exp(-SEA_EXTINCTION * dist);
+  return color * T + waterInscatter() * (1.0 - T);
+}
+
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (!insideRender(id)) return;
   float depth = texelFetch(gDepth, id, 0).r;
   vec2 uv = (vec2(id) + 0.5) * frame.renderSize.zw;
   vec3 color;
+  bool camUnder = underwater(frame.cameraPos.xyz);
+  if (depth <= 0.0 && camUnder) {
+    // Sem geometria vista de baixo: a superfície do mar (o mar só é desenhado por cima). Janela de Snell: dentro do
+    // cone crítico (48,6°) o céu refratado; fora, reflexão interna total (o azul da própria água).
+    vec3 dir = viewDirFromUv(uv);
+    vec3 below = waterInscatter();
+    if (dir.y > 0.0) {
+      float t = (frame.water.x - frame.cameraPos.y) / dir.y;
+      vec3 out_ = refract(dir, vec3(0.0, -1.0, 0.0), 1.333);
+      vec3 surface = below;
+      if (dot(out_, out_) > 0.0) {
+        float F = 0.02 + 0.98 * pow(1.0 - clamp(dir.y, 0.0, 1.0), 5.0);
+        surface = mix(sampleSky(normalize(out_)) + sunDisk(normalize(out_)), below, F);
+      }
+      color = applyWater(surface, t);
+    } else {
+      color = below;  // olhando para o fundo sem fim
+    }
+    imageStore(sceneOut, id, vec4(clampHalf(color), 1.0));
+    return;
+  }
   if (depth <= 0.0) {
     vec3 dir = viewDirFromUv(uv);
     if (frame.night.z > 0.0) {  // nuvens em meia resolução na frente do céu limpo, do sol e das estrelas
@@ -57,8 +90,16 @@ void main() {
     }
     color = dIn * g.diffuseColor + sIn * specularDemodulation(bc) +
             texelFetch(gEmissive, id, 0).rgb;
-    color = applyAerialPerspective(color, uv, g.P);
-    color = applyFog(color, uv, normalize(g.P - frame.cameraPos.xyz), distance(g.P, frame.cameraPos.xyz));
+    if (camUnder) {
+      color = applyWater(color, distance(g.P, frame.cameraPos.xyz));  // água em vez de ar entre câmera e ponto
+    } else {
+      color = applyAerialPerspective(color, uv, g.P);
+      color = applyFog(color, uv, normalize(g.P - frame.cameraPos.xyz), distance(g.P, frame.cameraPos.xyz));
+      if (underwater(g.P) && frame.water.y > 0.5) {  // ponto submerso visto de cima (raso): a água sobre ele
+        vec3 v = normalize(g.P - frame.cameraPos.xyz);
+        color = applyWater(color, (frame.water.x - g.P.y) / max(-v.y, 0.1));
+      }
+    }
   }
   imageStore(sceneOut, id, vec4(clampHalf(color), 1.0));
 }

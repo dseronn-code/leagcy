@@ -51,8 +51,9 @@ struct FrameUniforms {
   glm::mat4 shadowMatrices[4];  // shadow maps em cascata: mundo -> clip de cada cascata
   glm::vec4 shadowSplits;       // fim de cada cascata (m); w = 0: desligado
   glm::vec4 shadowParams;       // x = m por texel da cascata 0, y = 1: shadow maps mesmo com ray tracing
+  glm::vec4 water;              // x = nível do mar (m), y = 1: há oceano (vista subaquática e cáusticas)
 };
-static_assert(sizeof(FrameUniforms) == 960);
+static_assert(sizeof(FrameUniforms) == 976);
 constexpr uint32_t kShadowMapSize = 2048;
 
 // Frente dos triângulos: anti-horário, como no glTF (a projeção inverte o Y e o viewport do Vulkan também: as duas
@@ -802,6 +803,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.weather = glm::vec4(scene_->wetness, scene_->puddles, rainMap ? scene_->rain : -1.0f - scene_->rain,
                         historyValid_ ? prevSceneTime_ : scene_->time);
   prevSceneTime_ = scene_->time;
+  u.water = glm::vec4(scene_->seaLevel, scene_->ocean ? 1.0f : 0.0f, 0.0f, 0.0f);
   if (scene_->sunIlluminance <= 0.0f) {
     u.night.y = 2.5e-6f;
     if (scene_->moonIlluminance > 0.0f) {
