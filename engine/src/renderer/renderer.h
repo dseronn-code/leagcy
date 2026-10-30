@@ -62,6 +62,7 @@ struct Settings {
   bool motionBlur = true;
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
+  float lensFlare = 1.0f;  // reflexos fantasmas e halo das lentes (0 = desligado)
   // Nitidez RCAS (AMD FidelityFX) na saída: 0 = desligada, 1 = máxima; < 0 = automática (0,5 com o TAA do motor e o
   // FSR; 0 com o DLSS, que já sai nítido — medido na RTX 3070 Ti: 1,10x a referência com RCAS 0,5).
   float sharpness = -1.0f;

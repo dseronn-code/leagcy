@@ -38,7 +38,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Denoiser | ✅ | DLSS Ray Reconstruction (padrão na RTX; o mesmo do Cyberpunk 2077 path traced): medido na RTX 3070 Ti contra a referência verdadeira, erro 0,108 andando (SVGF 0,163, ReLAX 0,211), cintilação 2,3x menor; SVGF/NRD do motor sem RTX |
 | TAA | ✅ | Reconstrução gaussiana medida contra referência 4x (nitidez 0,83 → 0,95) + nitidez RCAS da AMD |
 | Upscaling (FSR, DLSS, XeSS) | ✅ | DLSS 4 (padrão em RTX) e FSR 3 integrados, com volta automática ao TAAU próprio. Medido na RTX 3070 Ti: DLSS em 67% erra 20% menos que o TAAU contra a referência; XeSS no Vulkan não existe (só D3D12) |
-| Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | 🟡 | Tudo menos lens flare (Dia 2) |
+| Pós-processamento: bloom, profundidade de campo, motion blur, auto-exposição, lens flare | ✅ | Bloom físico, DOF com autofoco, motion blur, auto-exposição por histograma, ACES; reflexo nas lentes (fantasmas espelhados, halo, dispersão cromática, sujeira na lente, `--no-lens-flare`) |
 
 ### Materiais e superfícies
 
