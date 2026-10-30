@@ -232,6 +232,17 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   s.cloudCoverage = 0.4f;  // céu com cúmulos
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;  // lua cheia
+  // Bandeira de tecido simulado num mastro (3 x 2 m, 30 x 20 vértices).
+  {
+    const float fx = 6.0f, fz = 9.0f, fy = terrainHeight(fx, fz);
+    s.addObject(cube, trs({fx, fy + 3.5f, fz}, {0.05f, 3.5f, 0.05f}), mat({0.6f, 0.6f, 0.62f}, 0.3f, 1.0f));
+    Material cloth;
+    cloth.baseColor = glm::vec4(0.7f, 0.08f, 0.06f, 1.0f);
+    cloth.roughness = 0.85f;
+    cloth.flags = kMaterialDoubleSided;
+    s.addObject(s.addMesh(makeClothGrid(30, 20, 0.1f)), glm::translate(glm::mat4(1.0f), {fx + 0.06f, fy + 6.8f, fz}),
+                s.addMaterial(cloth));
+  }
   // Fogueira: chama, fumaça e faíscas (partículas) com a luz que tremula.
   {
     const glm::vec3 fire(-3.0f, terrainHeight(-3.0f, 11.0f), 11.0f);

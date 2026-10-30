@@ -26,6 +26,24 @@ MeshData makeSphere(uint32_t segments, uint32_t rings) {
   return m;
 }
 
+MeshData makeClothGrid(uint32_t width, uint32_t height, float spacing) {
+  MeshData m;
+  m.clothWidth = width;
+  m.clothHeight = height;
+  m.clothSpacing = spacing;
+  for (uint32_t y = 0; y < height; ++y)
+    for (uint32_t x = 0; x < width; ++x) {
+      const glm::vec3 p(float(x) * spacing, -float(y) * spacing, 0.0f);
+      m.vertices.push_back({p, {0.0f, 0.0f, 1.0f}, {float(x) / float(width - 1), float(y) / float(height - 1)}, {1.0f, 0.0f, 0.0f, 1.0f}});
+    }
+  for (uint32_t y = 0; y + 1 < height; ++y)
+    for (uint32_t x = 0; x + 1 < width; ++x) {
+      const uint32_t a = y * width + x, b = a + 1, c = a + width, d = c + 1;
+      m.indices.insert(m.indices.end(), {a, c, b, b, c, d});
+    }
+  return m;
+}
+
 MeshData makeGrassClump(uint32_t blades, float height, uint32_t seed) {
   MeshData m;
   uint32_t st = seed * 747796405u + 2891336453u;

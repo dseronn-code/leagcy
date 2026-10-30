@@ -23,7 +23,14 @@ struct MeshData {
   std::vector<glm::vec4> weights;
   int skinModel = -1;  // índice em Scene::models
   int skin = -1;       // índice em Model::skins
+  // Tecido simulado (shaders/cloth.comp): grade de clothWidth x clothHeight vértices com espaçamento clothSpacing; a
+  // coluna 0 fica presa (mastro, varal).
+  uint32_t clothWidth = 0, clothHeight = 0;
+  float clothSpacing = 0.0f;
 };
+
+// Pano em grade vertical (plano xy, pendurado para −y a partir da origem), coluna x = 0 presa.
+MeshData makeClothGrid(uint32_t width, uint32_t height, float spacing);
 
 MeshData makeSphere(uint32_t segments = 96, uint32_t rings = 48);
 MeshData makeCube();
