@@ -22,6 +22,7 @@ layout(location = 5) out uvec2 outVisibility;  // objeto + 1, triângulo (superf
 
 layout(location = 6) flat in uint vObject;
 layout(location = 7) flat in uint vMaterial;
+layout(location = 8) flat in uint vLod;
 
 // Anti-aliasing especular geométrico (Tokuyoshi & Kaplanyan, "Improved Geometric Specular
 // Antialiasing", I3D 2019): a variação da normal dentro do pixel alarga o lóbulo GGX, então
@@ -55,5 +56,6 @@ void main() {
   outSpecular = vec4(s.f0, s.f90);
   // Mar: a superfície deslocada não é o triângulo guardado (plano parado nos raios): os passes de RT reconstroem o
   // ponto pela profundidade (0 = sem triângulo exato).
-  outVisibility = (m.flags & MATERIAL_WATER) != 0u ? uvec2(0u) : uvec2(vObject + 1u, uint(gl_PrimitiveID));
+  // O mesmo vale para os LODs (o triângulo é da malha simplificada, não da guardada no objeto).
+  outVisibility = ((m.flags & MATERIAL_WATER) != 0u || vLod != 0u) ? uvec2(0u) : uvec2(vObject + 1u, uint(gl_PrimitiveID));
 }

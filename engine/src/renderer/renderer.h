@@ -199,11 +199,13 @@ class Renderer {
   struct DrawBatch {
     uint32_t mesh, first, count;
     bool doubleSided, mirrored;  // glTF doubleSided: sem culling | transformação espelhada: frente invertida
+    uint32_t lod = 0, lodBase = 0;  // nível de detalhe (0 = completo) e o lote completo de origem
   };
   std::vector<DrawBatch> drawBatches_;
   rhi::Buffer drawList_;
   // Culling na GPU: lote de cada entrada, caixas por lote, comandos indiretos e a lista visível compactada.
   rhi::Buffer entryBatch_, cullBatches_, drawCommands_, culledList_;
+  uint32_t drawEntries_ = 0;
   rhi::ComputePass cullPass_, cullResetPass_, clothPass_;
   // Multidões: endereços dos vértices de cada pose assada (set 0, binding 22) e onde começa cada clipe.
   rhi::Buffer crowdFrames_;

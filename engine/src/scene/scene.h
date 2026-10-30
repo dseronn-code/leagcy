@@ -235,6 +235,10 @@ struct GpuMesh {
   float clothSpacing = 0.0f;
   rhi::Buffer clothPos, clothPrev;
   bool deformable() const { return skinned || cloth; }  // vértices reescritos na GPU a cada frame
+  // Níveis de detalhe (só a rasterização; o ray tracing usa a malha completa): malhas simplificadas e a distância
+  // (m) a partir da qual cada uma é usada. -1 = sem esse nível.
+  int lod[2] = {-1, -1};
+  float lodDistance[2] = {0.0f, 0.0f};
 };
 
 class Scene {
@@ -244,6 +248,7 @@ class Scene {
   // Texturas em BC7 (4x menos memória de vídeo; ver texture_compress.h). false = RGBA8 com mips na GPU.
   bool compressTextures = true;
   bool meshLights = true;  // triângulos emissivos viram luzes no upload
+  bool meshLods = true;    // gera LODs das malhas grandes no upload
   std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
 
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }

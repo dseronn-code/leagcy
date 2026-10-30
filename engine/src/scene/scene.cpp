@@ -5,6 +5,7 @@
 #include "scene/texture_compress.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace scene {
@@ -383,6 +384,33 @@ void Scene::upload(rhi::Context& ctx) {
   for (auto& m : models) animateModel(m, 0.0f);  // pose inicial
   for (auto& o : objects) o.prevTransform = o.transform;
   if (meshLights) buildMeshLights();
+  // LODs: malhas estáticas com mais de 3 mil triângulos ganham versões com 1/4 e 1/16 dos triângulos.
+  std::vector<std::array<int, 2>> lodOf(cpuMeshes_.size(), {-1, -1});
+  std::vector<float> meshRadius(cpuMeshes_.size(), 0.0f);
+  if (meshLods) {
+    const size_t original = cpuMeshes_.size();
+    std::vector<uint8_t> excluded(original, 0);
+    for (const Object& o : objects)
+      if (o.crowdClip != ~0u || (materials[o.material].flags & kMaterialWater)) excluded[o.mesh] = 1;
+    size_t made = 0;
+    for (size_t i = 0; i < original; ++i) {
+      const MeshData& md = cpuMeshes_[i];
+      const uint32_t tris = uint32_t(md.indices.size() / 3);
+      if (excluded[i] || tris < 3000 || md.skinModel >= 0 || md.clothWidth > 0) continue;
+      glm::vec3 lo(1e30f), hi(-1e30f);
+      for (const Vertex& v : md.vertices) {
+        lo = glm::min(lo, v.position);
+        hi = glm::max(hi, v.position);
+      }
+      meshRadius[i] = 0.5f * glm::length(hi - lo);
+      MeshData l1 = simplifyMesh(md, tris / 4);
+      MeshData l2 = simplifyMesh(md, tris / 16);  // antes de addMesh: ele faz cpuMeshes_ crescer e invalida `md`
+      lodOf[i][0] = int(addMesh(std::move(l1)));
+      lodOf[i][1] = int(addMesh(std::move(l2)));
+      ++made;
+    }
+    if (made) LOG_INFO("LODs: %zu malhas com 2 níveis simplificados", made);
+  }
 
   VkBufferUsageFlags geometryUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   if (ctx.rayTracing) geometryUsage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
@@ -443,6 +471,15 @@ void Scene::upload(rhi::Context& ctx) {
     for (const auto& v : data.vertices) {
       gm.boundsMin = glm::min(gm.boundsMin, v.position);
       gm.boundsMax = glm::max(gm.boundsMax, v.position);
+    }
+    const size_t mi = meshes.size();
+    if (mi < lodOf.size() && lodOf[mi][0] >= 0) {
+      // Troca quando a malha ocupa pouco da tela: o nível 1 a 25 raios de distância, o 2 a 70 (com ~60° de campo de
+      // visão, o objeto cobre ~4% e ~1,5% da altura da imagem).
+      for (int k = 0; k < 2; ++k) {
+        gm.lod[k] = lodOf[mi][k];
+        gm.lodDistance[k] = meshRadius[mi] * (k == 0 ? 25.0f : 70.0f);
+      }
     }
     meshes.push_back(gm);
   }

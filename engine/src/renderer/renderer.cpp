@@ -65,6 +65,8 @@ struct CullBatch {
   uint32_t first;
   glm::vec3 boundsMax;
   uint32_t alwaysVisible;
+  float lodNear, lodFar;  // distância (m) da câmera ao objeto em que este lote desenha
+  uint32_t lod, pad;
 };
 
 struct GBufferPush {
@@ -271,6 +273,25 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     }
     // Culling na GPU (cull.comp): lote de cada entrada, caixa local da malha por lote e um comando de desenho
     // indireto por lote (o compute preenche o número de instâncias visíveis).
+    // LODs: cada lote de malha com níveis simplificados ganha lotes extras com as mesmas entradas e a malha do nível;
+    // o culling escolhe, por distância, qual dos lotes desenha cada objeto.
+    const size_t baseBatches = drawBatches_.size();
+    for (size_t b = 0; b < baseBatches; ++b) {
+      const DrawBatch base = drawBatches_[b];
+      const scene::GpuMesh& gm = scene.meshes[base.mesh];
+      for (int k = 0; k < 2; ++k) {
+        if (gm.lod[k] < 0) continue;
+        DrawBatch l = base;
+        l.mesh = uint32_t(gm.lod[k]);
+        l.first = uint32_t(order.size());
+        l.lod = uint32_t(k + 1);
+        l.lodBase = uint32_t(b);
+        // Cópia antes: inserir um trecho do próprio vetor nele mesmo invalida os iteradores quando ele cresce.
+        const std::vector<uint32_t> entries(order.begin() + base.first, order.begin() + base.first + base.count);
+        order.insert(order.end(), entries.begin(), entries.end());
+        drawBatches_.push_back(l);
+      }
+    }
     std::vector<uint32_t> entryBatch(order.size(), 0);
     std::vector<CullBatch> cullBatches;
     std::vector<VkDrawIndexedIndirectCommand> commands;
@@ -287,7 +308,15 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       }
       // O vento empurra a folhagem para fora da caixa; as poses da multidão saem da caixa da pose 0.
       const glm::vec3 margin(foliage ? 0.6f : crowd ? 0.4f : 0.0f);
-      cullBatches.push_back({gm.boundsMin - margin, db.first, gm.boundsMax + margin, always ? 1u : 0u});
+      // Faixa de distância deste nível (a malha base dá a caixa e as distâncias de troca).
+      const scene::GpuMesh& baseMesh = db.lod == 0 ? gm : scene.meshes[drawBatches_[db.lodBase].mesh];
+      float lodNear = 0.0f, lodFar = 1e30f;
+      if (baseMesh.lod[0] >= 0) {
+        lodNear = db.lod == 0 ? 0.0f : baseMesh.lodDistance[db.lod - 1];
+        lodFar = db.lod == 0 ? baseMesh.lodDistance[0] : db.lod == 1 ? baseMesh.lodDistance[1] : 1e30f;
+      }
+      cullBatches.push_back({baseMesh.boundsMin - margin, db.first, baseMesh.boundsMax + margin, always ? 1u : 0u, lodNear,
+                             lodFar, db.lod, 0});
       commands.push_back({gm.indexCount, 0, 0, 0, db.first});
     }
     if (order.empty()) order.push_back(0);
@@ -295,6 +324,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       cullBatches.push_back({});
       commands.push_back({});
     }
+    drawEntries_ = uint32_t(scene.objects.empty() ? 0 : order.size());
     drawList_ = rhi::createBufferWithData(ctx, order.data(), order.size() * sizeof(uint32_t),
                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     entryBatch_ = rhi::createBufferWithData(ctx, entryBatch.data(), entryBatch.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -864,7 +894,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- 2. G-buffer (culling por frustum na GPU, depois desenho indireto) ----
   {
-    const uint32_t batchCount = uint32_t(drawBatches_.size()), entries = uint32_t(scene_->objects.size());
+    // Entradas = objetos + as cópias dos lotes de LOD (cada objeto com LOD aparece uma vez por nível).
+    const uint32_t batchCount = uint32_t(drawBatches_.size()), entries = drawEntries_;
     cullResetPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(drawCommands_)}, (batchCount + 63) / 64 + 1, 1, &batchCount);
     barrier();
     const uint32_t cp[2] = {entries, settings.gpuCulling ? 1u : 0u};
@@ -938,6 +969,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       struct { VkDeviceAddress drawList; uint32_t cascade, pad; } sp{drawList_.address, c, 0};
       vkCmdPushConstants(cmd, shadowLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(sp), &sp);
       for (const DrawBatch& b : drawBatches_) {
+        if (b.lod != 0) continue;  // sombra com a malha completa (os lotes de LOD repetem os objetos)
         const auto& m = scene_->meshes[b.mesh];
         VkBuffer vbs[2] = {m.vertices.handle, m.vertices.handle};
         VkDeviceSize offsets[2] = {0, 0};

@@ -39,6 +39,7 @@ struct Options {
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
   bool compressTextures = true;  // texturas em BC7 (--no-texture-compression = RGBA8)
   bool meshLights = true;        // triângulos emissivos como luzes (--no-mesh-lights: só pelos raios de GI)
+  bool meshLods = true;          // níveis de detalhe das malhas grandes (--no-lod)
   uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
   float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
   scene::DemoOptions scene;
@@ -67,6 +68,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
     else if (a == "--no-mesh-lights") o.meshLights = false;
+    else if (a == "--no-lod") o.meshLods = false;
     else if (a == "--no-firefly-clamp") noFireflyClamp = true;
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
@@ -209,6 +211,7 @@ int runAtmosphereTest(const Options& opt) {
   scene::buildDemoScene(scene, camera, {"furnace", false, 0});
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
+  scene.meshLods = opt.meshLods;
   scene.upload(ctx);
   renderer::Renderer r;
   r.init(ctx, scene, {64, 64}, VK_FORMAT_R8G8B8A8_SRGB, opt.render);
@@ -234,6 +237,7 @@ int runHeadless(const Options& opt) {
   applySunOverride(opt, scene);
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
+  scene.meshLods = opt.meshLods;
   scene.upload(ctx);
 
   VkExtent2D extent{opt.width, opt.height};
@@ -348,6 +352,7 @@ int runWindowed(const Options& opt) {
   applySunOverride(opt, scene);
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
+  scene.meshLods = opt.meshLods;
   scene.upload(ctx);
 
   int fbw, fbh;
