@@ -352,7 +352,7 @@ void main() {
   px.transmission = 0.0;
   px.clearcoat = 0.0;
   uint pxFlags = sf.material != NO_MATERIAL ? materials[sf.material].flags : 0u;
-  if ((pxFlags & (MATERIAL_TRANSMISSIVE | MATERIAL_CLEARCOAT)) != 0u)
+  if ((pxFlags & (MATERIAL_TRANSMISSIVE | MATERIAL_CLEARCOAT)) != 0u)  // (SSS só lê o raio do material)
     px = evalMaterial(materials[sf.material], g.P, g.N, vec4(0.0), sf.uv);
   // A demodulação do especular usa o contexto do G-buffer: a composição remultiplica pelo mesmo valor.
   BrdfContext bcDemod = brdfContextFor(g);
@@ -420,6 +420,25 @@ void main() {
       diffuse += sunKd * sunE * vis;
       specular += sunKs * sunE * vis;
       coatSpec += coatSunKs * sunE * vis;
+#ifdef RAY_TRACING
+      // Transmissão em partes finas de material com espalhamento subsuperficial (orelha, nariz, folha contra a luz;
+      // Jimenez 2010): um raio para dentro mede a espessura até a outra face, um raio de sombra de lá para o sol, e a
+      // luz atravessa atenuada por canal (o vermelho, que anda mais na pele, passa mais).
+      if ((pxFlags & MATERIAL_SUBSURFACE) != 0u && dot(sf.Nb, frame.sunDir.xyz) < 0.2) {
+        HitInfo back;
+        vec3 inward = -sf.Nb;
+        if (traceHit(offsetRayOrigin(g.P, -g.Ng, sf.rayBias), inward, 0.05, back)) {
+          vec3 radius = max(materials[sf.material].subsurfaceRadius, vec3(1e-5));
+          vec3 Tr = exp(-back.t / (radius * 3.0));
+          float lightSide = clamp(-dot(sf.Nb, frame.sunDir.xyz) * 0.5 + 0.5, 0.0, 1.0);  // envolve o terminador
+          if (max(Tr.r, max(Tr.g, Tr.b)) > 1e-3) {
+            // A normal do acerto aponta contra o raio (para dentro): sai para o outro lado, fora do material.
+            vec3 exitP = offsetRayOrigin(back.P, -back.Ng, RAY_BIAS_EXACT * back.t);
+            diffuse += Tr * sunE * lightSide * (1.0 / PI) * traceTransmittance(exitP, frame.sunDir.xyz, 1e4);
+          }
+        }
+      }
+#endif
     }
 
 #ifdef RAY_TRACING

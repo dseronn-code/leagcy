@@ -690,7 +690,7 @@ bool buildOcean(Scene& s, Camera& camera, const DemoOptions& opt) {
 
 // Teste da pele: duas esferas do tamanho de uma cabeça com tom de pele sob luz lateral — sem e com espalhamento
 // subsuperficial (o terminador fica macio e avermelhado na da direita).
-bool buildSkinTest(Scene& s, Camera& camera) {
+bool buildSkinTest(Scene& s, Camera& camera, bool backlit) {
   uint32_t sphere = s.addMesh(makeSphere(128, 64)), cube = s.addMesh(makeCube());
   Material floor;
   floor.baseColor = glm::vec4(glm::vec3(0.3f), 1.0f);
@@ -706,11 +706,15 @@ bool buildSkinTest(Scene& s, Camera& camera) {
   const uint32_t sss = s.addMaterial(skin);
   s.addObject(sphere, trs({-0.14f, 0.12f, 0.0f}, glm::vec3(0.1f)), plain);
   s.addObject(sphere, trs({0.14f, 0.12f, 0.0f}, glm::vec3(0.1f)), sss);
+  // "Orelhas": placas de 4 mm contra a luz (sem e com SSS) — a com SSS acende avermelhada por transmissão.
+  s.addObject(cube, trs({-0.1f, 0.33f, -0.15f}, {0.05f, 0.06f, 0.002f}), plain);
+  s.addObject(cube, trs({0.1f, 0.33f, -0.15f}, {0.05f, 0.06f, 0.002f}), sss);
   s.sunDirection = sunFrom(20.0f, 95.0f);  // luz de lado: o terminador corta as esferas ao meio
+  if (backlit) s.sunDirection = sunFrom(12.0f, 0.0f);  // sol atrás das placas, de frente para a câmera
   s.sunIlluminance = 80000.0f;
   s.fogDensity = 0.0f;
-  camera.position = glm::vec3(0.0f, 0.15f, 0.65f);
-  camera.lookAt(glm::vec3(0.0f, 0.12f, 0.0f));
+  camera.position = glm::vec3(0.0f, backlit ? 0.3f : 0.15f, 0.65f);
+  camera.lookAt(glm::vec3(0.0f, backlit ? 0.3f : 0.12f, 0.0f));
   camera.nearPlane = 0.01f;
   return true;
 }
@@ -819,7 +823,8 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "glass") return buildGlassTest(scene, camera);
   if (opt.name == "ocean") return buildOcean(scene, camera, opt);
   if (opt.name == "paint") return buildPaintTest(scene, camera);
-  if (opt.name == "skin") return buildSkinTest(scene, camera);
+  if (opt.name == "skin") return buildSkinTest(scene, camera, false);
+  if (opt.name == "skin-backlit") return buildSkinTest(scene, camera, true);
   if (opt.name == "vfx") return buildVfx(scene, camera, opt);
   if (opt.name == "crowd") return buildCrowd(scene, camera, opt);
   return buildSponza(scene, camera, opt);
