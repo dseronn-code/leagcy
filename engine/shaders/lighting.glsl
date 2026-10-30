@@ -39,22 +39,40 @@ vec4 packNrdNormalRoughness(vec3 n, float roughness) {
   return vec4(r, 0.0);  // material 0
 }
 
-// Cabelo (Kajiya & Kay 1989 com as duas lobas deslocadas de Scheuermann 2004): reflexo da cutícula (branco,
-// deslocado para a raiz) e reflexo que passa pelo fio e volta (cor do cabelo, deslocado para a ponta, mais largo);
-// difuso com "wrap" (o cabelo espalha luz para todo lado). kd sem o albedo (demodulado), ks já colorido.
+// Cabelo: modelo de Marschner (2003) com as aproximações de Karis ("Physically Based Hair Shading in Unreal", 2016) —
+// três caminhos da luz no fio: R (reflete na cutícula, branco, deslocado para a raiz), TT (atravessa o fio: brilho
+// colorido contra a luz) e TRT (entra, reflete dentro e sai: o segundo reflexo colorido). Termo longitudinal por
+// gaussiana em θ, azimutal por aproximações em φ, Fresnel da cutícula (IOR 1,55) e absorção pela cor do cabelo.
+// Difuso (espalhamento múltiplo entre fios) por um termo envolvente. kd sem o albedo (demodulado), ks já colorido.
+float hairG(float B, float theta) { return exp(-0.5 * theta * theta / (B * B)) / (2.5066283 * B); }
+float hairF(float cosTheta) { return 0.0465 + 0.9535 * pow(1.0 - cosTheta, 5.0); }
 void hairBSDF(vec3 T, vec3 N, vec3 V, vec3 L, vec3 color, float roughness, out vec3 kd, out vec3 ks) {
-  float TL = dot(T, L);
-  float sinTL = sqrt(max(1.0 - TL * TL, 0.0));
-  kd = vec3(mix(0.25, 1.0, clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0)) * sinTL / PI);
-  vec3 H = normalize(L + V);
-  float e1 = mix(400.0, 25.0, roughness), e2 = e1 * 0.3;
-  vec3 T1 = normalize(T - N * 0.08), T2 = normalize(T + N * 0.12);
-  float th1 = dot(T1, H), th2 = dot(T2, H);
-  float s1 = pow(sqrt(max(1.0 - th1 * th1, 0.0)), e1) * smoothstep(-1.0, 0.0, th1);
-  float s2 = pow(sqrt(max(1.0 - th2 * th2, 0.0)), e2) * smoothstep(-1.0, 0.0, th2);
-  float F = 0.046 + 0.954 * pow(1.0 - max(dot(V, H), 0.0), 5.0);  // cutícula, IOR 1,55
-  // Normalização das lobas (e + 2)/(2π) × sin(T,L): a energia não explode com expoentes altos.
-  ks = (F * s1 * (e1 + 2.0) + 0.6 * color * s2 * (e2 + 2.0)) / TWO_PI * sinTL * 0.25;
+  float VoL = dot(V, L);
+  float sinL = clamp(dot(T, L), -1.0, 1.0), sinV = clamp(dot(T, V), -1.0, 1.0);
+  float cosD = cos(0.5 * abs(asin(sinV) - asin(sinL)));
+  vec3 Lp = L - sinL * T, Vp = V - sinV * T;
+  float cosPhi = dot(Lp, Vp) * inversesqrt(dot(Lp, Lp) * dot(Vp, Vp) + 1e-4);
+  float cosHalfPhi = sqrt(clamp(0.5 + 0.5 * cosPhi, 0.0, 1.0));
+  float nPrime = 1.19 / cosD + 0.36 * cosD;
+  const float SHIFT = 0.035;
+  float r2 = roughness * roughness;
+  float B0 = max(r2, 0.02), B1 = max(r2 * 0.5, 0.01), B2 = max(r2 * 2.0, 0.04);
+  vec3 S = vec3(0.0);
+  // R
+  S += vec3(hairG(B0 * 1.41421 * cosD, sinL + sinV + 2.0 * SHIFT) * 0.25 * cosHalfPhi * hairF(sqrt(clamp(0.5 + 0.5 * VoL, 0.0, 1.0))));
+  // TT
+  float a = 1.0 / nPrime;
+  float h = cosHalfPhi * (1.0 + a * (0.6 - 0.8 * cosPhi));
+  float f = hairF(cosD * sqrt(clamp(1.0 - h * h, 0.0, 1.0)));
+  vec3 Tp = pow(max(color, vec3(1e-4)), vec3(0.5 * sqrt(max(1.0 - h * h * a * a, 0.0)) / cosD));
+  S += hairG(B1, sinL + sinV - SHIFT) * exp(-3.65 * cosPhi - 3.98) * (1.0 - f) * (1.0 - f) * Tp;
+  // TRT
+  f = hairF(cosD * 0.5);
+  Tp = pow(max(color, vec3(1e-4)), vec3(0.8 / cosD));
+  S += hairG(B2, sinL + sinV - 4.0 * SHIFT) * exp(17.0 * cosPhi - 16.78) * (1.0 - f) * (1.0 - f) * f * Tp;
+  float cosL = sqrt(max(1.0 - sinL * sinL, 0.0));
+  ks = S * cosL;  // irradiância no fio: cos em relação à seção (Karis)
+  kd = vec3(mix(0.25, 1.0, clamp(dot(N, L) * 0.5 + 0.5, 0.0, 1.0)) * cosL / PI);
 }
 
 // Tangente do fio de cabelo no pixel (triângulo do visibility buffer, média das tangentes dos 3 vértices).
