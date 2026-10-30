@@ -40,6 +40,22 @@ layout(set = 0, binding = 0) uniform FrameData {
 layout(set = 0, binding = 16) uniform sampler2D cloudShadowMap;
 const float CLOUD_SHADOW_EXTENT = 40000.0;  // m
 
+// Oclusão da chuva (rain_occlusion.comp): altura da superfície exposta ao céu, num quadrado em volta da câmera.
+layout(set = 0, binding = 20) uniform sampler2D rainOcclusionMap;
+const float RAIN_EXTENT = 160.0;  // m
+// Centro do mapa preso a uma grade de 1 m (o mapa não "nada" quando a câmera anda).
+vec2 rainMapCenter() { return floor(frame.cameraPos.xz); }
+// Chuva caindo (0..1). weather.z < 0 codifica "sem mapa de oclusão" (sem ray tracing): −1 − chuva.
+float rainIntensity() { return frame.weather.z < 0.0 ? -frame.weather.z - 1.0 : frame.weather.z; }
+// 1 = exposto à chuva, 0 = abrigado. Fora do mapa (longe) ou sem mapa: exposto.
+float rainExposure(vec3 p) {
+  if (frame.weather.z < 0.0) return 1.0;
+  vec2 uv = (p.xz - rainMapCenter()) / RAIN_EXTENT + 0.5;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 1.0;
+  // Rampa de 30 cm: a borda do abrigo não fica serrilhada pelas células de 60 cm.
+  return smoothstep(-0.3, 0.0, p.y - textureLod(rainOcclusionMap, uv, 0.0).r);
+}
+
 bool energyCompensationEnabled() { return frame.quality1.w > 0.5; }
 bool reblurSignal() { return frame.quality2.y != 0u; }
 float textureMipBias() { return uintBitsToFloat(frame.quality2.z); }

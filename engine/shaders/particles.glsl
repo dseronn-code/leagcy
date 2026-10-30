@@ -6,7 +6,7 @@
 
 #include "frame.glsl"
 
-const uint PARTICLE_FIRE = 0u, PARTICLE_SMOKE = 1u, PARTICLE_SPARKS = 2u, PARTICLE_RAIN = 3u;
+const uint PARTICLE_FIRE = 0u, PARTICLE_SMOKE = 1u, PARTICLE_SPARKS = 2u, PARTICLE_RAIN = 3u, PARTICLE_SPLASH = 4u;
 
 struct ParticleEmitter {  // == scene::ParticleEmitter
   vec3 position;
@@ -53,9 +53,27 @@ ParticleState particleState(ParticleEmitter e, uint i, float time) {
     p.position = frame.cameraPos.xyz + rel;
     p.velocity = v;
     p.size = 0.012;
-    p.alpha = 0.22 * e.scale;  // scale = intensidade da chuva
+    p.alpha = 0.22 * e.scale * rainExposure(p.position);  // scale = intensidade da chuva; sob telhado não cai
     p.albedo = vec3(1.0);
     p.streak = true;
+    return p;
+  }
+  if (e.type == PARTICLE_SPLASH) {
+    // Respingo do pingo no chão: nasce na superfície exposta ao céu (mapa de oclusão da chuva), abre e some em 0,25 s.
+    // Sem o mapa (sem ray tracing) não há como achar o chão: nenhum respingo.
+    const float LIFE = 0.25, AREA = 24.0;
+    float cycle = time / LIFE + g.x;
+    uvec3 hh = pcg3d(uvec3(i, uint(floor(cycle)), 0x7a3bu));  // posição nova a cada ciclo
+    vec2 r = vec2(hh.xy) * (1.0 / 4294967296.0);
+    vec2 xz = frame.cameraPos.xz + (r - 0.5) * AREA;
+    vec2 uv = (xz - rainMapCenter()) / RAIN_EXTENT + 0.5;
+    float ground = frame.weather.z < 0.0 ? -1e4 : textureLod(rainOcclusionMap, uv, 0.0).r;
+    float age01 = fract(cycle);
+    p.position = vec3(xz.x, ground + 0.02 + 0.05 * age01, xz.y);
+    p.velocity = vec3(0.0);
+    p.size = 0.015 + 0.06 * age01;
+    p.alpha = ground > -1e3 ? 0.35 * e.scale * (1.0 - age01) : 0.0;
+    p.albedo = vec3(1.0);
     return p;
   }
   float life = e.type == PARTICLE_SMOKE ? 6.0 : e.type == PARTICLE_SPARKS ? 1.4 : 1.1;

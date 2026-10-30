@@ -1,0 +1,26 @@
+#version 460
+// Oclusão da chuva: altura da primeira superfície vista de cima, num quadrado de RAIN_EXTENT metros em volta da câmera
+// (um raio para baixo por célula). Só molha o que está nessa altura — exposto ao céu; sob telhados, marquises e
+// árvores fica seco, e os pingos somem. Sem ray tracing a chuva molha tudo.
+#extension GL_GOOGLE_include_directive : require
+#define RAY_TRACING 1
+#include "frame.glsl"
+#include "raytracing.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D occlusionOut;
+
+void main() {
+  ivec2 size = imageSize(occlusionOut);
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, size))) return;
+  vec2 xz = rainMapCenter() + ((vec2(id) + 0.5) / vec2(size) - 0.5) * RAIN_EXTENT;
+  const float TOP = 400.0;  // m acima da câmera
+  vec3 origin = vec3(xz.x, frame.cameraPos.y + TOP, xz.y);
+  HitInfo hit;
+  // Inclinado como a chuva (vento), para a "sombra" de chuva cair do lado certo dos prédios.
+  vec3 dir = normalize(vec3(0.6, -9.0, 0.25));
+  float h = -1e4;
+  if (traceHit(origin, dir, 2.0 * TOP + 1e3, hit)) h = hit.P.y;
+  imageStore(occlusionOut, id, vec4(h, 0.0, 0.0, 1.0));
+}
