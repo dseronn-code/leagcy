@@ -137,7 +137,9 @@ def teste_restir(binario, tmp, rapido):
     import restir
     linhas, ok = [], True
     for cena in ('sponza',) if rapido else ('sponza', 'externa'):
-        relmse, vies = restir.medir(binario, cena, tmp, ['--quality', 'ultra'])
+        # Só as luzes pontuais: a força bruta percorre todas as luzes, e os ~15 mil triângulos emissivos do capacete
+        # (luzes de malha) a tornariam horas mais lenta sem GPU. As luzes de malha têm a própria prova (tools/luzes.py).
+        relmse, vies = restir.medir(binario, cena, tmp, ['--quality', 'ultra', '--no-mesh-lights'])
         ok &= abs(vies) < 3.0
         linhas.append(f'{cena}: viés {vies:+.2f}%, relMSE {relmse:.2f}')
     return ok, '; '.join(linhas)
