@@ -72,7 +72,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Renderização GPU-driven (culling em compute, oclusão, meshlets) | ❌ | Sem isso não dá para desenhar milhões de objetos |
 | Vegetação instanciada com vento | ✅ | Grama procedural (tufos de lâminas curvas) instanciada aos milhares (uma chamada e uma BLAS por variação), folhagem dos assets e grama balançam com rajadas, curvatura pela altura e tremor das folhas, com vetores de movimento certos. Falta a sombra traçada seguir o balanço (BLAS parada) |
 | Terreno grande (clipmaps) | 🟡 | Temos terreno procedural de tamanho fixo |
-| Partículas e VFX (fogo, fumaça, explosões) | 🟡 | Partículas sem estado na GPU (fogo de corpo negro com luz que tremula, fumaça iluminada por sol com sombra traçada e céu, faíscas, chuva), soft particles; faltam explosões, texturas animadas (flipbook), luz das lâmpadas na fumaça e máscara reativa para o DLSS/TAA |
+| Partículas e VFX (fogo, fumaça, explosões) | ✅ | Partículas sem estado na GPU: fogo de corpo negro com luz que tremula, fumaça iluminada (sol com sombra traçada, céu), faíscas, explosões (bola de fogo que esfria, fuligem, fragmentos, clarão de luz), chuva e respingos; soft particles (`--scene vfx`). Limite: sem máscara reativa para o DLSS/TAA (rastro leve em partículas rápidas) |
 | Ray tracing com geometria dinâmica (carros e pessoas se movendo) | ✅ | TLAS por frame, BLAS deformáveis (Dia 3) |
 
 ## Além do RAGE: diferenciais planejados

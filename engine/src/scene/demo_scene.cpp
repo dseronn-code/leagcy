@@ -696,6 +696,32 @@ bool buildSkinTest(Scene& s, Camera& camera) {
   return true;
 }
 
+// Efeitos (partículas): fogueira, explosão que se repete a cada 5 s e faíscas, num pátio com caixas — à noite.
+bool buildVfx(Scene& s, Camera& camera, const DemoOptions& opt) {
+  uint32_t cube = s.addMesh(makeCube());
+  auto mat = [&](glm::vec3 albedo, float rough) {
+    Material m;
+    m.baseColor = glm::vec4(albedo, 1.0f);
+    m.roughness = rough;
+    return s.addMaterial(m);
+  };
+  s.addObject(cube, trs({0.0f, -0.1f, 0.0f}, {40.0f, 0.1f, 40.0f}), mat(glm::vec3(0.3f, 0.28f, 0.25f), 0.9f));
+  const uint32_t crate = mat({0.4f, 0.28f, 0.16f}, 0.8f), concrete = mat(glm::vec3(0.5f), 0.85f);
+  for (int i = 0; i < 6; ++i) s.addObject(cube, trs({-8.0f + 3.2f * float(i), 0.6f, -10.0f}, glm::vec3(0.6f)), crate);
+  s.addObject(cube, trs({0.0f, 3.0f, -16.0f}, {14.0f, 3.0f, 0.4f}), concrete);
+  s.addEmitter(kParticleFire, {-5.0f, 0.0f, -4.0f}, 0.35f, 1.0f, 900);
+  s.addEmitter(kParticleSmoke, {-5.0f, 0.0f, -4.0f}, 0.3f, 1.0f, 500);
+  s.addEmitter(kParticleSparks, {-5.0f, 0.0f, -4.0f}, 0.2f, 1.0f, 150);
+  s.addEmitter(kParticleExplosion, {4.0f, 0.5f, -8.0f}, 0.0f, 1.0f, 2500);
+  s.sunIlluminance = opt.night ? 0.0f : 100000.0f;
+  s.sunDirection = sunFrom(40.0f, 120.0f);
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 2.0f, 8.0f);
+  camera.lookAt(glm::vec3(0.0f, 2.0f, -8.0f));
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -736,6 +762,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "ocean") return buildOcean(scene, camera, opt);
   if (opt.name == "paint") return buildPaintTest(scene, camera);
   if (opt.name == "skin") return buildSkinTest(scene, camera);
+  if (opt.name == "vfx") return buildVfx(scene, camera, opt);
   return buildSponza(scene, camera, opt);
 }
 
