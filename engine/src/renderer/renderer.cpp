@@ -46,7 +46,8 @@ struct FrameUniforms {
   glm::vec4 environment;  // x = céu uniforme (nits), y = modo de depuração, z = exposição da depuração,
                           // w = reusos do ReSTIR desligados (bit 0 temporal, bit 1 espacial)
   glm::vec4 night;        // x = 1: a luz direcional é a lua; y = iluminância de uma estrela de magnitude 0 (lux)
-  glm::vec4 weather;      // x = superfícies molhadas (0..1), y = poças (0..1), z = chuva caindo (respingos), w = tempo
+  glm::vec4 weather;      // x = superfícies molhadas (0..1), y = poças (0..1), z = chuva caindo (respingos),
+                          // w = tempo da cena no frame anterior (movimento de vento/ondas para os vetores de movimento)
 };
 static_assert(sizeof(FrameUniforms) == 672);
 
@@ -642,7 +643,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // Noite: a lua faz o papel do sol (mesmo disco, sombra e céu espalhado, com a iluminância dela) e as estrelas
   // aparecem no céu. Iluminância de magnitude 0 no topo da atmosfera: 2,5 µlux.
   u.night = glm::vec4(0.0f, 0.0f, scene_->cloudCoverage, scene_->time);
-  u.weather = glm::vec4(scene_->wetness, scene_->puddles, scene_->rain, scene_->time);
+  u.weather = glm::vec4(scene_->wetness, scene_->puddles, scene_->rain, historyValid_ ? prevSceneTime_ : scene_->time);
+  prevSceneTime_ = scene_->time;
   if (scene_->sunIlluminance <= 0.0f) {
     u.night.y = 2.5e-6f;
     if (scene_->moonIlluminance > 0.0f) {

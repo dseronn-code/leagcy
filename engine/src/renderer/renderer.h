@@ -172,6 +172,7 @@ class Renderer {
   VkSampler cloudSampler_ = VK_NULL_HANDLE;  // linear, repete nas três direções (o ruído é periódico)
   rhi::ComputePass cloudSkyPass_, cloudShadowPass_, cloudScreenPass_, fogInjectPass_, fogIntegratePass_;
   Ocean ocean_;  // simulação FFT (só nas cenas com oceano)
+  float prevSceneTime_ = 0.0f;
   VkSampler oceanSampler_ = VK_NULL_HANDLE;  // linear, repete (o patch do oceano é periódico)
   VkExtent2D skyLutExtent_{};
   VkSampler nearest_ = VK_NULL_HANDLE, linear_ = VK_NULL_HANDLE, skySampler_ = VK_NULL_HANDLE, textureSampler_ = VK_NULL_HANDLE;

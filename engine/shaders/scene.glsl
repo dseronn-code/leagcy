@@ -18,6 +18,7 @@ const uint MATERIAL_DOUBLE_SIDED = 32u;
 const uint MATERIAL_TRANSMISSIVE = 64u;     // vidro: sem sombra (por enquanto)
 const uint MATERIAL_CLEARCOAT = 128u;       // verniz (KHR_materials_clearcoat)
 const uint MATERIAL_WATER = 256u;           // mar (renderer/ocean.h)
+const uint MATERIAL_FOLIAGE = 512u;         // balança com o vento (gbuffer.vert)
 
 // Simulação do oceano (renderer/ocean.cpp): repete a cada OCEAN_PATCH metros.
 layout(set = 0, binding = 17) uniform sampler2D oceanDisplacement;  // xyz = deslocamento, w = Jacobiano

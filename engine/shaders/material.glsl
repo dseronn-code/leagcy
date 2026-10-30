@@ -63,7 +63,7 @@ void applyWetness(inout Surface s, vec3 P, vec3 N) {
   s.f90 = mix(s.f90, 1.0, puddle);
   s.roughness = mix(s.roughness, 0.02, puddle);
   vec3 flatN = vec3(0.0, 1.0, 0.0);
-  if (frame.weather.z > 0.0) flatN = normalize(flatN + rainRipples(P.xz * 3.0, frame.weather.w) * frame.weather.z);
+  if (frame.weather.z > 0.0) flatN = normalize(flatN + rainRipples(P.xz * 3.0, frame.night.w) * frame.weather.z);
   s.normal = normalize(mix(s.normal, flatN, puddle));
   s.normalVariance *= 1.0 - puddle;
 }

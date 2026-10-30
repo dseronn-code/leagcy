@@ -184,6 +184,8 @@ struct Loader {
         m.alphaCutoff = 0.5f;
       }
       if (m.flags & kMaterialAlphaMask) scene.setTextureAlphaCutoff(m.baseColorTex, m.alphaCutoff);
+      // Recorte por alfa + dois lados: folhas, galhos, cortinas — balançam com o vento.
+      if ((m.flags & kMaterialAlphaMask) && (m.flags & kMaterialDoubleSided)) m.flags |= kMaterialFoliage;
       materialMap.push_back(scene.addMaterial(m));
     }
     defaultMaterial = scene.addMaterial({});
