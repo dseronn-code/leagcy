@@ -678,6 +678,11 @@ bool buildOcean(Scene& s, Camera& camera, const DemoOptions& opt) {
     for (float x : {-1.8f, 1.8f}) s.addObject(cube, trs({x, -2.0f, -1.0f + 4.0f * float(i)}, {0.15f, 3.2f, 0.15f}), wood);
   for (int i = 0; i < 5; ++i)
     s.addObject(sphere, trs({-12.0f + 6.0f * float(i), 0.2f, -25.0f - 7.0f * float(i % 2)}, glm::vec3(0.6f)), i % 2 ? red : yellow);
+  // Fundo de areia a 6 m (com pedras), para a vista subaquática e as cáusticas.
+  const uint32_t sand = mat({0.62f, 0.55f, 0.42f}, 0.9f), rock = mat({0.25f, 0.24f, 0.22f}, 0.8f);
+  s.addObject(cube, trs({0.0f, -6.5f, 0.0f}, {80.0f, 0.5f, 80.0f}), sand);
+  for (int i = 0; i < 8; ++i)
+    s.addObject(sphere, trs({-10.0f + 3.0f * float(i), -6.0f, -6.0f - 2.0f * float(i % 3)}, glm::vec3(0.8f, 0.6f, 0.9f)), rock);
   s.sunDirection = sunFrom(opt.night ? -10.0f : 22.0f, 200.0f);
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;

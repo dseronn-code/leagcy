@@ -24,10 +24,7 @@ const uint MATERIAL_BLEND = 2048u;          // misturado no G-buffer (decals BLE
 const uint MATERIAL_EYE = 4096u;            // olho procedural (material.glsl)
 const uint MATERIAL_HAIR = 8192u;           // cabelo por fios (gbuffer.vert, lighting.glsl)
 
-// Simulação do oceano (renderer/ocean.cpp): repete a cada OCEAN_PATCH metros.
-layout(set = 0, binding = 17) uniform sampler2D oceanDisplacement;  // xyz = deslocamento, w = Jacobiano
-layout(set = 0, binding = 18) uniform sampler2D oceanSlope;         // xy = inclinação, z = espuma
-const float OCEAN_PATCH = 256.0;
+// Simulação do oceano: oceanDisplacement / oceanSlope / OCEAN_PATCH ficam em frame.glsl (o sol debaixo d'água usa).
 
 // Multidões: endereço dos vértices de cada pose assada (Scene::bakeCrowdClip).
 layout(set = 0, binding = 22, std430) readonly buffer CrowdFrames { uint64_t crowdFrames[]; };

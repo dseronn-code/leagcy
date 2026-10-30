@@ -37,7 +37,29 @@ layout(set = 0, binding = 0) uniform FrameData {
   mat4 shadowMatrices[4];     // shadow maps em cascata: mundo -> clip de cada cascata (vista do sol)
   vec4 shadowSplits;          // xyz = fim das cascatas 0..2 (m da câmera), w = fim da última; 0 = desligado
   vec4 shadowParams;          // x = metros por texel da cascata 0, y = 1: usa os shadow maps mesmo com ray tracing
+  vec4 water;                 // x = nível do mar (m), y = 1: há oceano
 } frame;
+
+// Água do mar (Jerlov tipo I, oceano claro): absorção + espalhamento por metro; o vermelho some em poucos metros.
+const vec3 SEA_EXTINCTION = vec3(0.45, 0.065, 0.045);
+const vec3 SEA_SCATTER_ALBEDO = vec3(0.05, 0.55, 0.6);
+bool underwater(vec3 p) { return frame.water.y > 0.5 && p.y < frame.water.x; }
+
+// Simulação do oceano (renderer/ocean.cpp): repete a cada OCEAN_PATCH metros.
+layout(set = 0, binding = 17) uniform sampler2D oceanDisplacement;  // xyz = deslocamento, w = Jacobiano
+layout(set = 0, binding = 18) uniform sampler2D oceanSlope;         // xy = inclinação, z = espuma
+const float OCEAN_PATCH = 256.0;
+
+// Cáusticas no fundo: as ondas da FFT focam a luz onde a superfície se comprime (Jacobiano < 1). A luz que chega a
+// um ponto a d metros de profundidade passou pela superfície no ponto acima dele, deslocado na direção do sol.
+float seaCaustics(vec3 p) {
+  float depth = frame.water.x - p.y;
+  vec2 s = p.xz + frame.sunDir.xz / max(frame.sunDir.y, 0.2) * depth;  // onde o raio de sol cruzou a superfície
+  float J = textureLod(oceanDisplacement, s / OCEAN_PATCH, 0.0).w;
+  // Foco cresce com a profundidade até ~10 m e depois se desfaz (as cáusticas borram com a distância).
+  float focus = clamp(depth / 6.0, 0.0, 1.0) * exp(-depth / 30.0);
+  return clamp(1.0 + (1.0 / max(J, 0.25) - 1.0) * 1.8 * focus, 0.2, 4.0);
+}
 
 // Shadow maps em cascata (sem ray tracing, ou --shadow-maps): visibilidade do sol num ponto, com PCF.
 layout(set = 0, binding = 21) uniform sampler2DArrayShadow shadowCascades;
@@ -158,10 +180,16 @@ float cloudShadow(vec3 worldPos) {
   return textureLod(cloudShadowMap, uv, 0.0).r;
 }
 
-// Iluminância do sol (lux) chegando ao ponto, já pré-exposta (atmosfera e nuvens).
+// Iluminância do sol (lux) chegando ao ponto, já pré-exposta (atmosfera, nuvens e, debaixo d'água, a absorção no
+// caminho até a superfície e as cáusticas).
 vec3 sunIrradianceAt(vec3 worldPos) {
   if (frame.sunDir.w <= 0.0) return vec3(0.0);
-  return frame.sunDir.w * preExposure() * transmittanceToSun(planetPos(worldPos), frame.sunDir.xyz) * cloudShadow(worldPos);
+  vec3 E = frame.sunDir.w * preExposure() * transmittanceToSun(planetPos(worldPos), frame.sunDir.xyz) * cloudShadow(worldPos);
+  if (underwater(worldPos)) {
+    float path = (frame.water.x - worldPos.y) / max(frame.sunDir.y, 0.1);
+    E *= 0.98 * exp(-SEA_EXTINCTION * path) * seaCaustics(worldPos);  // 2% refletidos na superfície
+  }
+  return E;
 }
 
 vec3 sunDisk(vec3 dir) {

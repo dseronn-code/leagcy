@@ -389,6 +389,7 @@ class Scene {
   float wetness = 0.0f, puddles = 0.0f, rain = 0.0f;
   // Oceano (simulação FFT): objetos com material kMaterialWater viram a superfície do mar, que segue a câmera.
   bool ocean = false;
+  float seaLevel = 0.0f;  // altura da superfície do mar (m)
   float windSpeed = 9.0f;       // m/s
   float windDirection = 0.6f;   // rad
   float waveHeight = 1.4f;      // altura significativa (m)
