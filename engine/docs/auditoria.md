@@ -539,3 +539,33 @@ cordões.
   exposição) e estrelas (magnitudes −1 a 6, apagadas no horizonte pela atmosfera).
 - Pendente: MikkTSpace de referência (o download da biblioteca foi bloqueado pela política de permissões do ambiente;
   a versão pronta está guardada para quando for aprovada).
+
+### Noite de 29 para 30/10 — da tabela do GTA 6: 11 ✅ / 4 🟡 / 16 ❌ → 23 ✅ / 9 🟡 / 0 ❌
+
+Tudo verificado aqui (llvmpipe, sem GPU de verdade): camadas de validação do Vulkan limpas em cada recurso novo e
+suíte 7/7 no binário com todos eles até o streaming. Os números de desempenho e a aparência final dependem da
+bateria na RTX (`python tools\teste_pc.py`, com a nova seção "galeria").
+
+| Recurso | O que foi feito | Como foi conferido |
+|---|---|---|
+| Vidro | parede fina e com volume (Snell, reflexão interna total, Beer), sombra colorida, BLEND como decal no G-buffer | cena `glass`: imagem invertida na bola maciça, sombra azul do painel |
+| Pintura de carro | verniz (clearcoat) + flocos metálicos | cena `paint` |
+| Nuvens e raios de luz | nuvens Nubis/Hillaire no céu, reflexos e sombra no chão; névoa volumétrica em froxels com sombra traçada | cenas externas, `--fog 0.02` na Sponza |
+| Chuva | molhado, poças com reflexo e anéis, pingos, respingos, abrigo sob telhados | cidade `--rain 0.8` |
+| Oceano | FFT de Tessendorf (IFFT conferida contra numpy: erro 2e-14), espuma, crista translúcida | cena `ocean` |
+| Lens flare | fantasmas, halo, dispersão cromática, sujeira na lente | diferença com/sem `--no-lens-flare` |
+| Partículas | fogo, fumaça, faíscas, explosões, chuva, respingos (sem estado, na GPU) | cena `vfx`; achado: estouro do float16 à noite, corrigido |
+| Vegetação | vento na folhagem (com vetores de movimento) e grama instanciada | Sponza: diferença só nas plantas |
+| Pele e olhos | SSS separável, transmissão em partes finas, olho procedural | cenas `skin`, `skin-backlit` |
+| Cabelo | fios com fita virada para a câmera, transparência estocástica, Kajiya-Kay/Scheuermann | cena `hair`; achado: sorteio igual para todos os fios, corrigido |
+| Tecido | Verlet/PBD na GPU | bandeira na cena externa |
+| Multidão | animação assada por pose, BLAS da pose | cena `crowd`: 300 pessoas, 1,6 ms de CPU |
+| Sombra sem RT | cascatas 2048² com PCF | Sponza `--shadow-maps` ≈ sombra traçada |
+| GPU-driven | culling por frustum em compute + desenho indireto | imagem idêntica com/sem |
+| LOD | simplificação por erro quádrico, troca por distância no culling | Bistro: 0,3% dos pixels; achado: dois bugs de índice, corrigidos |
+| Streaming | células de malhas + BLAS, TLAS compacto | cena `stream`: 1.600 torres únicas, ~126 residentes; achados: travamento do llvmpipe com instâncias inativas e objetos que não reapareciam, corrigidos |
+| Assets | KHR_texture_transform, decals procedurais | — |
+
+Pendências conhecidas: MikkTSpace de referência (o download da biblioteca foi barrado pela política de permissões do
+ambiente — precisa de aprovação), COLOR_0, HLOD, oclusão HiZ, terreno por clipmaps, carregamento assíncrono do
+disco, streaming de texturas, Marschner completo e física dos fios, vista subaquática.

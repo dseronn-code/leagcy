@@ -128,11 +128,19 @@ Surface evalWater(vec3 P) {
   float foam = clamp(a.z, 0.0, 1.0);
   s.normal = normalize(vec3(-(a.x + b.x), 1.0, -(a.y + b.y)));
   s.diffuseColor = mix(vec3(0.004, 0.018, 0.022), vec3(0.7), foam);
+  // Luz que atravessa a crista fina das ondas (turquesa), forte olhando contra o sol: emissão aproximada pela
+  // iluminância do sol × altura da onda × espalhamento para a frente (Henyey-Greenstein).
+  float height = textureLod(oceanDisplacement, uv0, 0.0).y;
+  float crest = clamp(height * 0.6 + 0.2, 0.0, 1.0) * (1.0 - foam);
+  vec3 V = normalize(frame.cameraPos.xyz - P);
+  float forward = henyeyGreenstein(dot(-V, frame.sunDir.xyz), 0.5) * 4.0 * PI;  // ~1 isotrópico, até ~9 contra o sol
+  vec3 sunE = sunIrradianceAt(P) / max(preExposure(), 1e-20);
+  vec3 crestLight = vec3(0.1, 0.55, 0.5) * 0.5 * crest * forward * sunE / PI;  // ~1000 nits contra o sol
   s.f0 = vec3(0.02);
   s.f90 = 1.0;
   s.alpha = 1.0;
   s.roughness = mix(0.02, 0.55, foam);
-  s.emissive = vec3(0.0);
+  s.emissive = crestLight;
   s.normalVariance = 0.0;
   s.occlusion = 1.0;
   s.transmission = 0.0;
