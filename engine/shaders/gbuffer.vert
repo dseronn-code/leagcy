@@ -23,6 +23,17 @@ layout(location = 5) out vec4 vPrevClip;
 layout(location = 6) flat out uint vObject;
 layout(location = 7) flat out uint vMaterial;
 
+// Vento na folhagem: rajadas que viajam pelo espaço (ondas lentas na direção do vento), curvatura que cresce com a
+// altura acima da base do objeto (o tronco quase não mexe, a copa sim) e tremor rápido das folhas.
+vec3 windSway(vec3 p, float height, float t) {
+  const vec3 WIND = vec3(0.94, 0.0, 0.34);
+  float gust = 0.6 + 0.4 * sin(t * 0.7 - dot(p.xz, WIND.xz) * 0.08);
+  float sway = (sin(t * 1.4 - dot(p.xz, WIND.xz) * 0.25) * 0.7 + sin(t * 2.9 + p.x * 0.6 + p.z * 0.4) * 0.3) * gust;
+  float bend = 0.02 * pow(min(height, 12.0), 1.4);
+  float flutter = 0.015 * sin(t * 11.0 + dot(p, vec3(13.1, 7.7, 9.3)));
+  return WIND * (bend * (0.6 + sway)) + vec3(flutter, flutter * 0.6, -flutter * 0.4) * min(height, 2.0);
+}
+
 void main() {
   vObject = DrawList(pc.drawList).objects[gl_InstanceIndex];
   vMaterial = instances[vObject].material;
@@ -44,15 +55,23 @@ void main() {
     return;
   }
   vec4 world = o.model * vec4(aPosition, 1.0);
+  vec4 prevWorld = o.prevModel * vec4(aPrevPosition, 1.0);
+  vec3 wind = vec3(0.0);
+  if ((materials[vMaterial].flags & MATERIAL_FOLIAGE) != 0u) {
+    float height = max(world.y - o.model[3].y, 0.0);
+    wind = windSway(world.xyz, height, frame.night.w);
+    world.xyz += wind;
+    prevWorld.xyz += windSway(prevWorld.xyz, height, frame.weather.w);  // tempo da cena no frame anterior
+  }
   mat3 normalMatrix = transpose(inverse(mat3(o.model)));
   vWorldPos = world.xyz;
   vNormal = normalMatrix * aNormal;
   vTangent = vec4(mat3(o.model) * aTangent.xyz, aTangent.w);
   vUV = aUV;
   vCurClip = frame.viewProjNoJitter * world;
-  vPrevClip = frame.prevViewProjNoJitter * (o.prevModel * vec4(aPrevPosition, 1.0));
+  vPrevClip = frame.prevViewProjNoJitter * prevWorld;
   // Relativo à câmera (mundo aberto): a translação do objeto menos a da câmera é exata para valores próximos
   // (Sterbenz), então a projeção não multiplica coordenadas de 4 km. Mesma conta que viewProj * world.
-  vec3 rel = mat3(o.model) * aPosition + (o.model[3].xyz - frame.cameraPos.xyz);
+  vec3 rel = mat3(o.model) * aPosition + (o.model[3].xyz - frame.cameraPos.xyz) + wind;
   gl_Position = frame.proj * vec4(mat3(frame.view) * rel, 1.0);
 }

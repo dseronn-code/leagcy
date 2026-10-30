@@ -32,6 +32,8 @@ enum MaterialFlags : uint32_t {
   // Superfície do mar: no G-buffer a malha segue a câmera e é deslocada pelas ondas da FFT; nos raios é o plano parado,
   // com a normal e a espuma lidas da simulação. Ver renderer/ocean.h.
   kMaterialWater = 1u << 8,
+  // Folhagem: balança com o vento no vertex shader (marcado no glTF para materiais de recorte por alfa e dois lados).
+  kMaterialFoliage = 1u << 9,
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
