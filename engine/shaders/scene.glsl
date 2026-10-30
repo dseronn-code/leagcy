@@ -32,7 +32,7 @@ const float OCEAN_PATCH = 256.0;
 // Multidões: endereço dos vértices de cada pose assada (Scene::bakeCrowdClip).
 layout(set = 0, binding = 22, std430) readonly buffer CrowdFrames { uint64_t crowdFrames[]; };
 
-struct Material {  // == scene::Material (160 bytes)
+struct Material {  // == scene::Material (192 bytes)
   vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
   vec3 emissive;
   float alphaCutoff;
@@ -62,6 +62,10 @@ struct Material {  // == scene::Material (160 bytes)
   float thickness;        // KHR_materials_volume: > 0 = vidro com volume (refração + absorção)
   vec3 attenuationColor;
   float attenuationDistance;  // 0 = sem absorção
+  vec2 uvOffset;          // KHR_texture_transform
+  vec2 uvScale;
+  float uvRotation;
+  float pad4a, pad4b, pad4c;
 };
 
 struct InstanceData {  // == InstanceGpu em scene.cpp

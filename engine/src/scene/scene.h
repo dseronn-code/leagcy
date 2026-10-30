@@ -88,8 +88,14 @@ struct Material {
   float thickness = 0.0f;
   glm::vec3 attenuationColor{1.0f};
   float attenuationDistance = 0.0f;  // 0 = sem absorção
+  // KHR_texture_transform (da textura de cor base, aplicado a todas as do material — o caso dos exportadores):
+  // uv' = R(rotation) × (uv × scale) + offset.
+  glm::vec2 uvOffset{0.0f};
+  glm::vec2 uvScale{1.0f};
+  float uvRotation = 0.0f;
+  float pad4[3] = {};
 };
-static_assert(sizeof(Material) == 160);
+static_assert(sizeof(Material) == 192);
 
 enum LightType : uint32_t {
   kLightSphere = 0,    // esfera (pontual com tamanho) ou spot

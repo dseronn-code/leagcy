@@ -163,6 +163,17 @@ struct Loader {
         m.clearcoatTex = texture(src.clearcoat.clearcoat_texture, false);
         m.clearcoatRoughnessTex = texture(src.clearcoat.clearcoat_roughness_texture, false);
       }
+      {  // KHR_texture_transform da cor base (ou, sem ela, da primeira textura com transformação)
+        const cgltf_texture_view* views[] = {&src.pbr_metallic_roughness.base_color_texture, &src.pbr_specular_glossiness.diffuse_texture,
+                                             &src.normal_texture, &src.emissive_texture};
+        for (const cgltf_texture_view* v : views)
+          if (v->texture && v->has_transform) {
+            m.uvOffset = glm::make_vec2(v->transform.offset);
+            m.uvScale = glm::make_vec2(v->transform.scale);
+            m.uvRotation = v->transform.rotation;
+            break;
+          }
+      }
       if (src.has_volume && src.volume.thickness_factor > 0.0f) {
         m.thickness = src.volume.thickness_factor;
         m.attenuationColor = glm::make_vec3(src.volume.attenuation_color);
