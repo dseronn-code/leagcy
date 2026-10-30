@@ -73,6 +73,7 @@ struct GBufferPush {
 // Espelha ObjectData em shaders/scene.glsl.
 struct ObjectGpu {
   glm::mat4 model, prevModel;
+  glm::uvec4 anim;  // multidão: x = 1ª posição do clipe em crowdFrames (~0 = comum), y = pose atual, z = anterior
 };
 struct SkinningPush {
   uint64_t rest, skin, joints, out;
@@ -276,14 +277,16 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     for (uint32_t b = 0; b < drawBatches_.size(); ++b) {
       const DrawBatch& db = drawBatches_[b];
       const scene::GpuMesh& gm = scene.meshes[db.mesh];
-      bool always = gm.deformable(), foliage = false;
+      bool always = gm.deformable(), foliage = false, crowd = false;
       for (uint32_t k = db.first; k < db.first + db.count; ++k) {
         entryBatch[k] = b;
         const uint32_t flags = scene.materials[scene.objects[order[k]].material].flags;
         always = always || (flags & scene::kMaterialWater);  // o mar segue a câmera no vertex shader
         foliage = foliage || (flags & scene::kMaterialFoliage);
+        crowd = crowd || scene.objects[order[k]].crowdClip != ~0u;
       }
-      const glm::vec3 margin(foliage ? 0.6f : 0.0f);  // o vento empurra a folhagem para fora da caixa
+      // O vento empurra a folhagem para fora da caixa; as poses da multidão saem da caixa da pose 0.
+      const glm::vec3 margin(foliage ? 0.6f : crowd ? 0.4f : 0.0f);
       cullBatches.push_back({gm.boundsMin - margin, db.first, gm.boundsMax + margin, always ? 1u : 0u});
       commands.push_back({gm.indexCount, 0, 0, 0, db.first});
     }
@@ -339,6 +342,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {19, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {20, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {21, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {22, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -355,7 +359,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (11 + kMaxTextures)},
-      {SB, kFramesInFlight * 8},
+      {SB, kFramesInFlight * 9},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -371,6 +375,16 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   ai.pSetLayouts = layouts.data();
   VK_CHECK(vkAllocateDescriptorSets(dev, &ai, globalSets_.data()));
   if (scene.ocean) ocean_.init(ctx, globalLayout_, scene.windSpeed, scene.windDirection, scene.waveHeight);
+  {  // multidões: endereço dos vértices de cada pose assada
+    std::vector<VkDeviceAddress> addresses;
+    for (const scene::CrowdClip& c : scene.crowdClips) {
+      crowdFrameBase_.push_back(uint32_t(addresses.size()));
+      for (uint32_t k = 0; k < c.frames; ++k) addresses.push_back(scene.meshes[c.firstMesh + k].vertices.address);
+    }
+    if (addresses.empty()) addresses.push_back(0);
+    crowdFrames_ = rhi::createBufferWithData(ctx, addresses.data(), addresses.size() * sizeof(VkDeviceAddress),
+                                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  }
   writeGlobalDescriptors();
 
   // ---- Passes ----
@@ -556,6 +570,8 @@ void Renderer::writeGlobalDescriptors() {
     add(20, CIS, 1).pImageInfo = &rainOcc;
     VkDescriptorImageInfo cascades{shadowSampler_, shadowMap_.view, VK_IMAGE_LAYOUT_GENERAL};
     add(21, CIS, 1).pImageInfo = &cascades;
+    VkDescriptorBufferInfo crowd{crowdFrames_.handle, 0, VK_WHOLE_SIZE};
+    add(22, SB, 1).pBufferInfo = &crowd;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -1221,7 +1237,11 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   if (!historyValid_) objectsFull_.fill(true);  // reinício: anterior = atual em todos os buffers
   auto* objs = static_cast<ObjectGpu*>(objectBuffers_[slot].mapped);
   auto writeObject = [&](uint32_t i) {
-    objs[i] = {s.objects[i].transform, historyValid_ ? s.objects[i].prevTransform : s.objects[i].transform};
+    const auto& ob = s.objects[i];
+    const glm::uvec4 anim = ob.crowdClip != ~0u
+                                ? glm::uvec4(crowdFrameBase_[ob.crowdClip], ob.animFrame, historyValid_ ? ob.prevAnimFrame : ob.animFrame, 0)
+                                : glm::uvec4(~0u, 0, 0, 0);
+    objs[i] = {ob.transform, historyValid_ ? ob.prevTransform : ob.transform, anim};
     if (ctx.rayTracing) s.tlas.writeInstance(slot, i, s.tlasInstance(i));
   };
   const bool full = objectsFull_[slot];
@@ -1401,7 +1421,7 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
-  for (rhi::Buffer* b : {&entryBatch_, &cullBatches_, &drawCommands_, &culledList_}) rhi::destroyBuffer(ctx, *b);
+  for (rhi::Buffer* b : {&entryBatch_, &cullBatches_, &drawCommands_, &culledList_, &crowdFrames_}) rhi::destroyBuffer(ctx, *b);
   for (rhi::ComputePass* p : {&clothPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})

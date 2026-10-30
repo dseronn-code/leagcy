@@ -205,6 +205,9 @@ class Renderer {
   // Culling na GPU: lote de cada entrada, caixas por lote, comandos indiretos e a lista visível compactada.
   rhi::Buffer entryBatch_, cullBatches_, drawCommands_, culledList_;
   rhi::ComputePass cullPass_, cullResetPass_, clothPass_;
+  // Multidões: endereços dos vértices de cada pose assada (set 0, binding 22) e onde começa cada clipe.
+  rhi::Buffer crowdFrames_;
+  std::vector<uint32_t> crowdFrameBase_;
   float clothTime_ = 0.0f;  // tempo da cena na última simulação de tecido
   rhi::Buffer radianceCache_;  // cache de radiância no espaço do mundo (shaders/radiance_cache.glsl)
 

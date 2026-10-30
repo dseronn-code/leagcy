@@ -158,6 +158,18 @@ struct Object {
   glm::mat4 transform{1.0f};
   uint32_t material = 0;
   glm::mat4 prevTransform{1.0f};  // do frame anterior: vetores de movimento por objeto
+  // Multidão (animação assada): clipe em Scene::crowdClips e pose deste frame / do anterior. ~0 = objeto comum.
+  uint32_t crowdClip = ~0u, animFrame = 0, prevAnimFrame = 0;
+  float animPhase = 0.0f;  // s somados ao tempo (cada pessoa num ponto diferente do passo)
+};
+
+// Clipe de animação "assado" para multidões: K poses do ciclo como malhas estáticas consecutivas (firstMesh ..
+// firstMesh + frames − 1). Cada pessoa da multidão lê a pose do seu instante no vertex shader (sem skinning por
+// pessoa) e, no ray tracing, aponta para a BLAS dessa pose.
+struct CrowdClip {
+  uint32_t firstMesh = 0, frames = 0;
+  float duration = 1.0f;  // s do ciclo
+  uint32_t material = 0;
 };
 
 // ---- Animação (glTF): hierarquia de nós, clipes e esqueletos ----
@@ -273,6 +285,12 @@ class Scene {
   std::vector<Material> materials;
   std::vector<PointLight> lights;
   std::vector<ParticleEmitter> emitters;
+  std::vector<CrowdClip> crowdClips;
+  // Assa `frames` poses do clipe ativo da malha com esqueleto do modelo (pele feita na CPU) e devolve o índice do
+  // clipe. Chame antes do upload.
+  uint32_t bakeCrowdClip(int model, uint32_t frames);
+  // Põe uma pessoa da multidão: objeto com a pose 0 do clipe; o instante da animação vem de `phase` (s).
+  uint32_t addCrowdAgent(uint32_t clip, const glm::mat4& transform, float phase);
   std::vector<Decal> decals;
   rhi::Buffer decalBuffer;
   // Caixa do decal: centro, meias-medidas (x, y = espessura da projeção, z) e giro em torno do eixo vertical.
@@ -332,6 +350,7 @@ class Scene {
   std::vector<int32_t> meshLightSourceOf_;  // objeto -> índice em meshLightSources_ (-1 = nenhum)
 
   std::vector<MeshData> cpuMeshes_;
+  std::vector<uint32_t> crowdObjects_;
   std::vector<uint32_t> changed_, movedNow_, movedLast_;
   std::vector<uint8_t> movedMark_;
   std::vector<TextureData> cpuTextures_;

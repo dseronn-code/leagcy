@@ -733,6 +733,45 @@ bool buildVfx(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Multidão: 300 pessoas (CesiumMan) andando em círculos numa praça, com animação assada (32 poses do ciclo): sem
+// skinning por pessoa; sombras e reflexos pela BLAS da pose de cada uma.
+bool buildCrowd(Scene& s, Camera& camera, const DemoOptions& opt) {
+  uint32_t cube = s.addMesh(makeCube());
+  Material ground;
+  ground.baseColor = glm::vec4(0.45f, 0.43f, 0.40f, 1.0f);
+  ground.roughness = 0.8f;
+  s.addObject(cube, trs({0.0f, -0.1f, 0.0f}, {60.0f, 0.1f, 60.0f}), s.addMaterial(ground));
+  float foot = 0.0f;
+  const int man = loadCharacter(s, "CesiumMan/CesiumMan.gltf", 1.0f, "", foot);
+  if (man < 0) return false;
+  s.models[size_t(man)].root = glm::translate(glm::mat4(1.0f), {0.0f, -100.0f, 0.0f});  // o original fica escondido
+  const uint32_t clip = s.bakeCrowdClip(man, 32);
+  std::mt19937 rng(5);
+  std::uniform_real_distribution<float> u(0.0f, 1.0f);
+  const uint32_t count = opt.lightCount ? opt.lightCount : 300;  // --lights N reaproveitado como tamanho da multidão
+  for (uint32_t i = 0; i < count; ++i) {
+    const float radius = 4.0f + 26.0f * std::sqrt(u(rng)), phase = glm::two_pi<float>() * u(rng);
+    const float speed = (1.1f + 0.5f * u(rng)) * (u(rng) < 0.5f ? 1.0f : -1.0f);  // m/s, metade em cada sentido
+    const float scale = 0.9f + 0.2f * u(rng);
+    const uint32_t agent = s.addCrowdAgent(clip, glm::mat4(1.0f), 3.0f * u(rng));
+    s.addAnimator([=](Scene& sc, float t, float) {
+      const float th = phase + speed / radius * t;
+      const glm::vec3 p(radius * std::cos(th), foot * scale, radius * std::sin(th));
+      const glm::vec3 v = glm::vec3(-std::sin(th), 0.0f, std::cos(th)) * (speed > 0.0f ? 1.0f : -1.0f);
+      glm::mat4 m = glm::translate(glm::mat4(1.0f), p);
+      m = glm::rotate(m, std::atan2(v.x, v.z) + kCesiumManFacing, glm::vec3(0, 1, 0));
+      sc.setTransform(agent, glm::scale(m, glm::vec3(scale)));
+    });
+  }
+  s.sunDirection = sunFrom(opt.night ? -10.0f : 40.0f, 140.0f);
+  s.sunIlluminance = opt.night ? 0.0f : 110000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 6.0f, 38.0f);
+  camera.lookAt(glm::vec3(0.0f, 0.5f, 0.0f));
+  return true;
+}
+
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -774,6 +813,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "paint") return buildPaintTest(scene, camera);
   if (opt.name == "skin") return buildSkinTest(scene, camera);
   if (opt.name == "vfx") return buildVfx(scene, camera, opt);
+  if (opt.name == "crowd") return buildCrowd(scene, camera, opt);
   return buildSponza(scene, camera, opt);
 }
 

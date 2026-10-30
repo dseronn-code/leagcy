@@ -96,6 +96,14 @@ void Scene::update(float dt) {
   movedMark_.resize(objects.size(), 0);
   for (auto& a : animators_) a(*this, time, dt);
   for (auto& m : models) animateModel(m, dt);
+  for (uint32_t i : crowdObjects_) {  // multidão: avança a pose (e reenvia o objeto: a pose mudou)
+    Object& o = objects[i];
+    const CrowdClip& c = crowdClips[o.crowdClip];
+    const float t = std::fmod(time + o.animPhase, c.duration);
+    o.prevAnimFrame = o.animFrame;
+    o.animFrame = uint32_t(std::floor(t / c.duration * float(c.frames))) % c.frames;
+    if (o.animFrame != o.prevAnimFrame || dt > 0.0f) setTransform(i, o.transform);
+  }
   for (uint32_t i : movedNow_)  // luzes de malha acompanham o objeto
     if (i < meshLightSourceOf_.size() && meshLightSourceOf_[i] >= 0) writeMeshLights(meshLightSources_[size_t(meshLightSourceOf_[i])]);
   changed_ = movedLast_;
@@ -117,7 +125,59 @@ rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
   const uint32_t flags = materials[objects[i].material].flags;
   const bool opaque = !(flags & kMaterialAlphaMask);
   const uint8_t mask = (flags & (kMaterialLightGeometry | kMaterialTransmissive)) ? 0x02 : 0xFF;  // sem sombra
-  return {&meshes[objects[i].mesh].blas, objects[i].transform, i, opaque, mask};
+  // Multidão: a BLAS da pose deste frame (cada pose assada tem a sua).
+  const uint32_t mesh = objects[i].crowdClip != ~0u ? crowdClips[objects[i].crowdClip].firstMesh + objects[i].animFrame
+                                                    : objects[i].mesh;
+  return {&meshes[mesh].blas, objects[i].transform, i, opaque, mask};
+}
+
+uint32_t Scene::bakeCrowdClip(int modelIndex, uint32_t frames) {
+  Model& m = models[size_t(modelIndex)];
+  if (m.skinnedObjects.empty()) FATAL("bakeCrowdClip: o modelo não tem malha com esqueleto");
+  const uint32_t object = m.skinnedObjects[0];
+  const MeshData src = cpuMeshes_[objects[object].mesh];
+  const Animation* a = (m.animation >= 0 && size_t(m.animation) < m.animations.size()) ? &m.animations[size_t(m.animation)] : nullptr;
+  CrowdClip clip;
+  clip.frames = frames;
+  clip.duration = a && a->duration > 0.0f ? a->duration : 1.0f;
+  clip.material = objects[object].material;
+  clip.firstMesh = uint32_t(cpuMeshes_.size());  // as poses entram em seguida
+  const glm::mat4 savedRoot = m.root;
+  const float savedTime = m.time;
+  m.root = glm::mat4(1.0f);
+  for (uint32_t k = 0; k < frames; ++k) {
+    m.time = clip.duration * float(k) / float(frames);
+    animateModel(m, 0.0f);
+    const auto& J = m.jointMatrices[size_t(src.skin)];
+    MeshData pose;
+    pose.indices = src.indices;
+    pose.vertices = src.vertices;
+    for (size_t v = 0; v < src.vertices.size(); ++v) {  // pele linear (a mesma conta de shaders/skinning.comp)
+      glm::mat4 S(0.0f);
+      for (int j = 0; j < 4; ++j) S += J[src.joints[v][j]] * src.weights[v][j];
+      Vertex& out = pose.vertices[v];
+      out.position = glm::vec3(S * glm::vec4(src.vertices[v].position, 1.0f));
+      out.normal = glm::normalize(glm::mat3(S) * src.vertices[v].normal);
+      out.tangent = glm::vec4(glm::normalize(glm::mat3(S) * glm::vec3(src.vertices[v].tangent)), src.vertices[v].tangent.w);
+    }
+    addMesh(std::move(pose));
+  }
+  m.root = savedRoot;
+  m.time = savedTime;
+  animateModel(m, 0.0f);
+  crowdClips.push_back(clip);
+  return uint32_t(crowdClips.size() - 1);
+}
+
+uint32_t Scene::addCrowdAgent(uint32_t clip, const glm::mat4& transform, float phase) {
+  const CrowdClip& c = crowdClips[clip];
+  const uint32_t o = addObject(c.firstMesh, transform, c.material);
+  objects[o].crowdClip = clip;
+  objects[o].animPhase = phase;
+  const uint32_t frame = uint32_t(std::floor(std::fmod(phase, c.duration) / c.duration * float(c.frames))) % c.frames;
+  objects[o].animFrame = objects[o].prevAnimFrame = frame;
+  crowdObjects_.push_back(o);
+  return o;
 }
 
 void Scene::addDecal(DecalType type, glm::vec3 center, glm::vec3 halfExtent, float yawRad, glm::vec4 color) {

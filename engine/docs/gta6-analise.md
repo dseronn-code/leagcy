@@ -61,7 +61,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Pele com subsurface scattering, olhos | 🟡 | Espalhamento subsuperficial separável (Jimenez 2015) com raio por canal em metros, seguindo a superfície (`--scene skin`); faltam transmissão em partes finas (orelhas contra a luz) e o shader de olhos |
 | Cabelo por fios | ❌ | |
 | Tecido simulado | 🟡 | Tecido por Verlet com restrições (PBD) na GPU, num grupo de trabalho em memória compartilhada: gravidade, vento com rajadas, borda presa; sombras e reflexos acompanham (refit da BLAS). Bandeira na cena externa. Faltam colisão com corpos e roupas presas a esqueletos |
-| Multidões (centenas de NPCs animados) | ❌ | Instancing + LOD de animação + impostors |
+| Multidões (centenas de NPCs animados) | ✅ | Animação assada (32 poses do ciclo) lida no vertex shader por pessoa, sem skinning individual; no ray tracing cada pessoa aponta para a BLAS da sua pose (sombras e reflexos certos); culling na GPU. 300 pessoas: 1,6 ms de CPU por quadro (`--scene crowd`). Falta LOD/impostores para milhares ao longe |
 
 ### Mundo aberto
 

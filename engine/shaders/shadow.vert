@@ -29,7 +29,9 @@ void main() {
     return;
   }
   ObjectData o = objects[object];
-  vec4 world = o.model * vec4(aPosition, 1.0);
+  vec3 position = aPosition;
+  if (o.anim.x != 0xFFFFFFFFu) position = fetchVertexPosition(VertexData(crowdFrames[o.anim.x + o.anim.y]), uint(gl_VertexIndex));
+  vec4 world = o.model * vec4(position, 1.0);
   if ((m.flags & MATERIAL_FOLIAGE) != 0u) world.xyz += windSway(world.xyz, max(world.y - o.model[3].y, 0.0), frame.night.w);
   gl_Position = frame.shadowMatrices[pc.cascade] * world;
 }
