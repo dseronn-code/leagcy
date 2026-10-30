@@ -29,18 +29,31 @@ struct Decal {
   mat4 worldToDecal;
   vec4 color;
   uint type;
-  float seed, pad0, pad1;
+  float seed;
+  int texture;
+  float roughness;
 };
 layout(set = 0, binding = 19, std430) readonly buffer Decals { Decal decals[]; };
-const uint DECAL_CROSSWALK = 0u, DECAL_LANE = 1u, DECAL_DIRT = 2u, DECAL_OIL = 3u, DECAL_CRACKS = 4u;
+const uint DECAL_CROSSWALK = 0u, DECAL_LANE = 1u, DECAL_DIRT = 2u, DECAL_OIL = 3u, DECAL_CRACKS = 4u, DECAL_TEXTURE = 5u;
 
 void applyDecals(inout Surface s, vec3 P, vec3 N) {
-  if (N.y < 0.5) return;
   for (int i = 0; i < decals.length(); ++i) {
     Decal d = decals[i];
     if (d.type == 0xFFFFFFFFu) break;
     vec3 q = (d.worldToDecal * vec4(P, 1.0)).xyz;
     if (any(greaterThan(abs(q), vec3(1.0)))) continue;
+    if (d.type == DECAL_TEXTURE) {
+      // Projeção pelo eixo z da caixa: só nas superfícies viradas para ele (não vaza para o lado de trás da parede).
+      vec3 axis = normalize(inverse(mat3(d.worldToDecal))[2]);
+      if (dot(N, axis) < 0.3 || d.texture < 0) continue;
+      vec4 img = MATERIAL_SAMPLE(d.texture, q.xy * vec2(0.5, -0.5) + 0.5);
+      float a = img.a * d.color.a * smoothstep(1.0, 0.7, abs(q.z));
+      s.diffuseColor = mix(s.diffuseColor, img.rgb * d.color.rgb, a);
+      s.f0 = mix(s.f0, vec3(0.04), a);
+      s.roughness = mix(s.roughness, d.roughness, a);
+      continue;
+    }
+    if (N.y < 0.5) continue;  // os procedurais são de chão
     // Medidas reais da caixa (m): o padrão tem tamanho fixo no mundo.
     vec2 halfSize = vec2(1.0 / length(d.worldToDecal[0].xyz), 1.0 / length(d.worldToDecal[2].xyz));
     vec2 m = q.xz * halfSize;  // metros a partir do centro

@@ -373,6 +373,63 @@ bool buildShadowTest(Scene& s, Camera& camera, glm::vec3 origin) {
 // Cidade procedural para medir escala (Fase 2): grade de quarteirões de 60 m com prédios de altura aleatória (concreto
 // ou vidro), calçada, postes com luz de verdade a cada ~20 m e carros estacionados. Poucas malhas, muitas instâncias
 // (como uma cidade de jogo): o custo de objetos, BLAS/TLAS, culling e luzes cresce com `cityBlocks`².
+// Imagens geradas na CPU para decals: "pichação" (palavra em blocos grossos com contorno e respingos) e "cartaz"
+// (retângulo com faixas e um círculo). RGBA com alfa recortado; 256 x 128.
+TextureData makeGraffiti(uint32_t seed) {
+  const uint32_t W = 256, H = 128;
+  TextureData t;
+  t.width = W;
+  t.height = H;
+  t.srgb = true;
+  t.name = "pichacao";
+  t.rgba.assign(size_t(W) * H * 4, 0);
+  std::mt19937 rng(seed);
+  std::uniform_real_distribution<float> u(0.0f, 1.0f);
+  const glm::vec3 fill = hue(u(rng)) * 0.9f + 0.05f, outline(0.05f), shade = fill * 0.55f;
+  // Letras: 5 blocos com "furos", tortos e com alturas diferentes (estilo bloco de pichação).
+  auto inLetters = [&](float x, float y, float grow) {
+    for (int k = 0; k < 5; ++k) {
+      const float cx = 30.0f + float(k) * 48.0f, cy = 64.0f + 10.0f * std::sin(float(k) * 1.7f + float(seed));
+      const float w = 18.0f + grow, h = 34.0f + grow + 6.0f * std::sin(float(k) * 2.3f);
+      const float dx = (x - cx) - 0.25f * (y - cy), dy = y - cy;
+      if (std::abs(dx) < w && std::abs(dy) < h && !(std::abs(dx) < 6.0f - grow && std::abs(dy) < 12.0f - grow)) return true;
+    }
+    return false;
+  };
+  for (uint32_t y = 0; y < H; ++y)
+    for (uint32_t x = 0; x < W; ++x) {
+      glm::vec4 c(0.0f);
+      if (inLetters(float(x), float(y), 4.0f)) c = glm::vec4(outline, 1.0f);           // contorno
+      if (inLetters(float(x), float(y), 0.0f)) c = glm::vec4(y > 64 ? shade : fill, 1.0f);  // preenchimento com sombra
+      if (c.a == 0.0f && u(rng) < 0.004f) c = glm::vec4(fill, 1.0f);                  // respingos de spray
+      uint8_t* p = &t.rgba[(size_t(y) * W + x) * 4];
+      for (int k = 0; k < 3; ++k) p[k] = uint8_t(std::pow(glm::clamp(c[k], 0.0f, 1.0f), 1.0f / 2.2f) * 255.0f);
+      p[3] = uint8_t(c.a * 255.0f);
+    }
+  return t;
+}
+TextureData makePoster(uint32_t seed) {
+  const uint32_t W = 128, H = 192;
+  TextureData t;
+  t.width = W;
+  t.height = H;
+  t.srgb = true;
+  t.name = "cartaz";
+  t.rgba.assign(size_t(W) * H * 4, 255);
+  const glm::vec3 a = hue(float(seed) * 0.37f), b = hue(float(seed) * 0.37f + 0.5f);
+  for (uint32_t y = 0; y < H; ++y)
+    for (uint32_t x = 0; x < W; ++x) {
+      glm::vec3 c = y < 40 ? a : (y > 170 ? glm::vec3(0.1f) : glm::vec3(0.92f, 0.9f, 0.85f));
+      const float dx = float(x) - 64.0f, dy = float(y) - 105.0f;
+      if (dx * dx + dy * dy < 40.0f * 40.0f) c = b;
+      if (y > 172 && y < 186 && (x / 6) % 2 == 0 && x > 16 && x < 112) c = glm::vec3(0.9f);  // "texto"
+      uint8_t* p = &t.rgba[(size_t(y) * W + x) * 4];
+      for (int k = 0; k < 3; ++k) p[k] = uint8_t(std::pow(glm::clamp(c[k], 0.0f, 1.0f), 1.0f / 2.2f) * 255.0f);
+      p[3] = 255;
+    }
+  return t;
+}
+
 bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
   const uint32_t cube = s.addMesh(makeCube()), sphere = s.addMesh(makeSphere(12, 8));
   auto mat = [&](glm::vec3 albedo, float rough, float metal, glm::vec3 emissive = glm::vec3(0.0f)) {
@@ -400,6 +457,11 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
     s.materials[paint[i]].clearcoatRoughness = 0.03f;
   }
 
+  uint32_t graffiti[3], poster[3];
+  for (uint32_t k = 0; k < 3; ++k) {
+    graffiti[k] = s.addTexture(makeGraffiti(k + 1));
+    poster[k] = s.addTexture(makePoster(k + 3));
+  }
   const uint32_t n = std::max(1u, opt.cityBlocks);
   const float block = 60.0f, street = 14.0f, pitch = block + street, half = 0.5f * float(n) * pitch;
   s.addObject(cube, trs({0.0f, -0.5f, 0.0f}, {half + 50.0f, 0.5f, half + 50.0f}), asphalt);  // ruas, topo em y = 0
@@ -421,6 +483,13 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
         s.addDecal(kDecalDirt, {cx, 0.16f, cz}, {0.5f * block, 0.5f, 0.5f * block}, 0.0f, glm::vec4(1.0f));
         const float jitter = std::fmod(std::abs(std::sin(float(bx) * 12.9898f + float(bz) * 78.233f)) * 43758.55f, 1.0f);  // não mexe no rng
         s.addDecal(kDecalOil, {ex - 3.5f, 0.0f, cz + 10.0f * (jitter - 0.5f)}, {0.9f, 0.5f, 1.4f}, jitter * 3.0f, glm::vec4(1.0f));
+        // Pichação e cartazes nas fachadas voltadas para a rua leste (a face de +x dos prédios do lote da direita).
+        // Muro na beira da calçada (lado da rua leste) com pichação e cartazes.
+        const float wallX = cx + 0.5f * block - 0.4f;
+        s.addObject(cube, trs({wallX, 1.6f, cz}, {0.15f, 1.45f, 12.0f}), concrete[1]);
+        s.addWallDecal(int32_t(graffiti[(bx + bz) % 3]), {wallX + 0.15f, 1.6f, cz + 5.0f}, {1.0f, 0.0f, 0.0f}, 5.0f, 2.5f, 0.7f);
+        s.addWallDecal(int32_t(poster[(bx * 3 + bz) % 3]), {wallX + 0.15f, 1.7f, cz - 3.0f}, {1.0f, 0.0f, 0.0f}, 1.2f, 1.8f, 0.5f);
+        s.addWallDecal(int32_t(poster[(bx * 3 + bz + 1) % 3]), {wallX + 0.15f, 1.7f, cz - 4.4f}, {1.0f, 0.0f, 0.0f}, 1.2f, 1.8f, 0.5f);
       }
       // Prédios: 2x3 lotes por quarteirão, alturas de 8 a 90 m (mais altos perto do centro da cidade).
       const float centrality = 1.0f - glm::length(glm::vec2(cx, cz)) / (half * 1.42f);
