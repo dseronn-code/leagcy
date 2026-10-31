@@ -37,7 +37,7 @@ Buffer createBufferWithData(Context& ctx, const void* data, VkDeviceSize size, V
     VkBufferCopy region{0, 0, size};
     vkCmdCopyBuffer(cmd, staging.handle, dst.handle, 1, &region);
   });
-  destroyBuffer(ctx, staging);
+  ctx.retire([&ctx, staging]() mutable { destroyBuffer(ctx, staging); });
   return dst;
 }
 
@@ -213,7 +213,7 @@ Image createTexture(Context& ctx, const uint8_t* rgba, uint32_t w, uint32_t h, b
                VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
   });
-  destroyBuffer(ctx, staging);
+  ctx.retire([&ctx, staging]() mutable { destroyBuffer(ctx, staging); });
   return img;
 }
 
@@ -249,7 +249,7 @@ Image createCompressedTexture(Context& ctx, VkFormat format, uint32_t w, uint32_
                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                  VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
   });
-  destroyBuffer(ctx, staging);
+  ctx.retire([&ctx, staging]() mutable { destroyBuffer(ctx, staging); });
   return img;
 }
 

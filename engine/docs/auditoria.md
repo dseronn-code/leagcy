@@ -705,3 +705,14 @@ Troca ao dobro da distância das malhas comuns (~45 e ~125 m): a 25 raios a silh
   a malha completa (o mesmo efeito de qualquer LOD aqui), não da agressividade do nível. Validação limpa.
 - As outras 31 poses ganhavam o LOD genérico à toa (memória): agora ficam fora dele.
 
+### Cópia para a GPU sem parar a thread principal (1/11)
+
+`Context::beginDeferred/endDeferred`: no meio, cada `immediateSubmit` grava num lote único (com uma barreira de
+memória entre gravações) que é enviado com uma fence própria, sem esperar; staging e scratch vão em `retire()` e são
+liberados quando aquela fence sinaliza (`collectFinished`, a cada frame). O frame seguinte começa com uma barreira de
+todos os comandos, cujo escopo inclui os envios anteriores na mesma fila. Usado no streaming de células (cópias +
+BLAS) e no de texturas. Medido (cena stream, 40 frames a 200 m/s, `--stream-sync`): tempo da thread principal em
+`stream()` 2.709 → 50 ms (pior frame 1.366 → 29 ms), imagem idêntica (diferença 0) ao modo imediato; validação limpa
+(stream e Bistro). No llvmpipe a "GPU" é a própria CPU, então o lote adiado disputa núcleos com a gravação do frame
+seguinte (o tempo de gravação desses frames sobe); o tempo total caiu 4%.
+

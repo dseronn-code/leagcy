@@ -29,8 +29,16 @@ class Context {
   void createDevice(VkSurfaceKHR surface);
   void destroy();
 
-  // Grava e executa um command buffer de uso único, esperando terminar.
+  // Grava e executa um command buffer de uso único, esperando terminar — ou, entre beginDeferred() e endDeferred(),
+  // grava no lote adiado (uma barreira de memória entre cada gravação) que endDeferred() envia SEM esperar.
   void immediateSubmit(const std::function<void(VkCommandBuffer)>& record);
+  // Envio adiado (streaming: a thread principal não espera a GPU copiar). O que precisa viver até a GPU terminar
+  // (staging, scratch) vai em retire(): liberado quando o envio daquele lote termina (collectFinished, por frame).
+  // Fora do modo adiado, retire() roda na hora.
+  void beginDeferred();
+  void endDeferred();
+  void retire(std::function<void()> fn);
+  void collectFinished(bool wait = false);
 
   VkInstance instance = VK_NULL_HANDLE;
   VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -57,6 +65,14 @@ class Context {
   VkDebugUtilsMessengerEXT messenger_ = VK_NULL_HANDLE;
   VkCommandPool uploadPool_ = VK_NULL_HANDLE;
   VkFence uploadFence_ = VK_NULL_HANDLE;
+  VkCommandBuffer deferredCmd_ = VK_NULL_HANDLE;
+  std::vector<std::function<void()>> deferredRetire_;
+  struct DeferredBatch {
+    VkFence fence;
+    VkCommandBuffer cmd;
+    std::vector<std::function<void()>> retire;
+  };
+  std::vector<DeferredBatch> inFlight_;
 };
 
 }  // namespace rhi
