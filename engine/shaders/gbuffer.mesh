@@ -1,0 +1,60 @@
+#version 460
+// Mesh shader do G-buffer: um grupo por meshlet. Mesmas saídas e mesmas contas de gbuffer.vert no caminho de malha
+// rígida (os bits do resultado batem: a imagem é idêntica à do desenho indexado), e o gl_PrimitiveID do triângulo
+// original (o visibility buffer e o ray tracing usam esse número).
+#extension GL_EXT_mesh_shader : require
+#extension GL_GOOGLE_include_directive : require
+#include "meshlet.glsl"
+
+layout(local_size_x = 32) in;
+layout(triangles, max_vertices = 64, max_primitives = 124) out;
+taskPayloadSharedEXT MeshletTask task;
+
+layout(location = 0) out vec3 vWorldPos[];
+layout(location = 1) out vec3 vNormal[];
+layout(location = 2) out vec2 vUV[];
+layout(location = 3) out vec4 vTangent[];
+layout(location = 4) out vec4 vCurClip[];
+layout(location = 5) out vec4 vPrevClip[];
+layout(location = 6) flat out uint vObject[];
+layout(location = 7) flat out uint vMaterial[];
+layout(location = 8) flat out uint vLod[];
+layout(location = 9) out float vCoverage[];
+layout(location = 10) out vec4 vColor[];
+
+void main() {
+  Meshlet ml = MeshletList(pc.meshlets).m[task.meshlets[gl_WorkGroupID.x]];
+  uint vertexCount = ml.counts & 0xFFu, triangleCount = ml.counts >> 8;
+  SetMeshOutputsEXT(vertexCount, triangleCount);
+  uint object = task.entry & 0x3FFFFFFFu, lod = task.entry >> 30, material = instances[object].material;
+  ObjectData o = objects[object];
+  mat3 normalMatrix = transpose(inverse(mat3(o.model)));
+  VertexData vb = VertexData(pc.vertices);
+  MeshletWords words = MeshletWords(pc.meshlets);
+  for (uint i = gl_LocalInvocationIndex; i < vertexCount; i += 32u) {
+    uint vi = words.w[pc.vertexBase + ml.vertexOffset + i];
+    vec3 position = fetchVertexPosition(vb, vi), normal = fetchVertexNormal(vb, vi);
+    vec2 uv = vec2(vb.v[vi * 12u + 6u], vb.v[vi * 12u + 7u]);
+    vec4 tangent = vec4(vb.v[vi * 12u + 8u], vb.v[vi * 12u + 9u], vb.v[vi * 12u + 10u], vb.v[vi * 12u + 11u]);
+    vec4 world = o.model * vec4(position, 1.0);
+    vec4 prevWorld = o.prevModel * vec4(position, 1.0);
+    vWorldPos[i] = world.xyz;
+    vNormal[i] = normalMatrix * normal;
+    vTangent[i] = vec4(mat3(o.model) * tangent.xyz, tangent.w);
+    vUV[i] = uv;
+    vCurClip[i] = frame.viewProjNoJitter * world;
+    vPrevClip[i] = frame.prevViewProjNoJitter * prevWorld;
+    vObject[i] = object;
+    vMaterial[i] = material;
+    vLod[i] = lod;
+    vCoverage[i] = 1.0;
+    vColor[i] = fetchVertexColor(instances[object], vi);
+    vec3 rel = mat3(o.model) * position + (o.model[3].xyz - frame.cameraPos.xyz);
+    gl_MeshVerticesEXT[i].gl_Position = frame.proj * vec4(mat3(frame.view) * rel, 1.0);
+  }
+  for (uint i = gl_LocalInvocationIndex; i < triangleCount; i += 32u) {
+    uint t = words.w[pc.triangleBase + ml.triangleOffset + i];
+    gl_PrimitiveTriangleIndicesEXT[i] = uvec3(t & 0xFFu, (t >> 8) & 0xFFu, (t >> 16) & 0xFFu);
+    gl_MeshPrimitivesEXT[i].gl_PrimitiveID = int(ml.firstTriangle + i);
+  }
+}

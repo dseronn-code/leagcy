@@ -16,6 +16,7 @@ layout(push_constant) uniform Push { uint64_t drawList; uint cascade; uint pad; 
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) flat out uint vMaterial;
+layout(location = 2) out float vAlpha;  // alfa da cor por vértice (COLOR_0)
 
 vec3 windSway(vec3 p, float height, float t);  // gbuffer.vert (mesma fórmula, copiada abaixo)
 
@@ -23,6 +24,7 @@ void main() {
   uint object = DrawList(pc.drawList).objects[gl_InstanceIndex];
   vMaterial = instances[object].material;
   vUV = aUV;
+  vAlpha = fetchVertexColor(instances[object], uint(gl_VertexIndex)).a;
   Material m = materials[vMaterial];
   if ((m.flags & MATERIAL_WATER) != 0u) {  // fora do volume de recorte: não desenha
     gl_Position = vec4(0.0, 0.0, -2.0, 1.0);

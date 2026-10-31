@@ -67,11 +67,17 @@ struct CullBatch {
   glm::vec3 boundsMax;
   uint32_t alwaysVisible;
   float lodNear, lodFar;  // distância (m) da câmera ao objeto em que este lote desenha
-  uint32_t lod, pad;
+  uint32_t lod;
+  float worldMargin;  // folga em metros do mundo (vento da folhagem), somada à caixa já dividida pela escala do objeto
 };
 
+// Constantes do G-buffer, as mesmas para os dois caminhos (um layout só): gbuffer.vert lê só drawList; gbuffer.task
+// e gbuffer.mesh leem tudo (== Push em shaders/meshlet.glsl).
 struct GBufferPush {
   VkDeviceAddress drawList;  // lista de objetos ordenada por malha (shaders/gbuffer.vert)
+  VkDeviceAddress commands, meshlets, vertices;
+  uint32_t batch, meshletCount, vertexBase, triangleBase;
+  uint32_t flags, pad;
 };
 // Espelha ObjectData em shaders/scene.glsl.
 struct ObjectGpu {
@@ -300,19 +306,29 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     std::vector<uint32_t> entryBatch(order.size(), 0);
     std::vector<CullBatch> cullBatches;
     std::vector<VkDrawIndexedIndirectCommand> commands;
+    std::vector<uint32_t> meshletGroups;
     for (uint32_t b = 0; b < drawBatches_.size(); ++b) {
       const DrawBatch& db = drawBatches_[b];
       const scene::GpuMesh& gm = scene.meshes[db.mesh];
-      bool always = gm.deformable(), foliage = false, crowd = false;
+      bool always = gm.deformable(), foliage = false, crowd = false, special = false;
       for (uint32_t k = db.first; k < db.first + db.count; ++k) {
         entryBatch[k] = b;
         const uint32_t flags = scene.materials[scene.objects[order[k]].material].flags;
         always = always || (flags & scene::kMaterialWater);  // o mar segue a câmera no vertex shader
         foliage = foliage || (flags & scene::kMaterialFoliage);
         crowd = crowd || scene.objects[order[k]].crowdClip != ~0u;
+        special = special || (flags & (scene::kMaterialWater | scene::kMaterialFoliage | scene::kMaterialHair));
       }
-      // O vento empurra a folhagem para fora da caixa; as poses da multidão saem da caixa da pose 0.
-      const glm::vec3 margin(foliage ? 0.6f : crowd ? 0.4f : 0.0f);
+      // Meshlets só no caminho rígido de gbuffer.vert (sem vento, cabelo, mar, multidão, esqueleto nem tecido) e em
+      // malhas grandes o bastante (≥ 8 meshlets, ~1.000 triângulos) para o descarte por pedaço pagar o grupo do task
+      // shader por instância: medido no llvmpipe, malhas pequenas repetidas (cidade, mundo) ficavam mais lentas.
+      drawBatches_[b].meshlets = gm.meshletCount >= 8 && !gm.deformable() && !special && !crowd && !db.blend;
+      meshletGroups.push_back(drawBatches_[b].meshlets ? (gm.meshletCount + 31) / 32 : 0);
+      // As poses da multidão saem da caixa da pose 0 (em unidades da malha). O vento empurra a folhagem até ~1,1 m para
+      // fora da caixa, em metros do mundo (gbuffer.vert: curvatura máx. 0,02·12^1,4·1,6 + tremor): essa folga vai à
+      // parte, porque a escala do objeto varia (no Sponza, 0,008: 0,6 "da malha" seriam 5 mm e a oclusão escondia vasos).
+      const glm::vec3 margin(crowd ? 0.4f : 0.0f);
+      const float worldMargin = foliage ? 1.1f : 0.0f;
       // Faixa de distância deste nível (a malha base dá a caixa e as distâncias de troca).
       const scene::GpuMesh& baseMesh = db.lod == 0 ? gm : scene.meshes[drawBatches_[db.lodBase].mesh];
       float lodNear = 0.0f, lodFar = 1e30f;
@@ -321,7 +337,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
         lodFar = db.lod == 0 ? baseMesh.lodDistance[0] : db.lod == 1 ? baseMesh.lodDistance[1] : 1e30f;
       }
       cullBatches.push_back({baseMesh.boundsMin - margin, db.first, baseMesh.boundsMax + margin, always ? 1u : 0u, lodNear,
-                             lodFar, db.lod, 0});
+                             lodFar, db.lod, worldMargin});
       commands.push_back({gm.indexCount, 0, 0, 0, db.first});
     }
     if (order.empty()) order.push_back(0);
@@ -329,16 +345,29 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       cullBatches.push_back({});
       commands.push_back({});
     }
+    meshletGroups.resize(commands.size(), 0);
+    meshletGroups_ = rhi::createBufferWithData(ctx, meshletGroups.data(), meshletGroups.size() * sizeof(uint32_t),
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    for (rhi::Buffer& a : meshletArgs_)
+      a = rhi::createBuffer(ctx, commands.size() * 3 * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+                            rhi::MemoryUsage::GpuOnly);
     drawEntries_ = uint32_t(scene.objects.empty() ? 0 : order.size());
     drawList_ = rhi::createBufferWithData(ctx, order.data(), order.size() * sizeof(uint32_t),
                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     entryBatch_ = rhi::createBufferWithData(ctx, entryBatch.data(), entryBatch.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     cullBatches_ = rhi::createBufferWithData(ctx, cullBatches.data(), cullBatches.size() * sizeof(CullBatch), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     drawCommands_ = rhi::createBufferWithData(ctx, commands.data(), commands.size() * sizeof(VkDrawIndexedIndirectCommand),
-                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     culledList_ = rhi::createBuffer(ctx, order.size() * sizeof(uint32_t),
                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                     rhi::MemoryUsage::GpuOnly);
+    culledList2_ = rhi::createBuffer(ctx, order.size() * sizeof(uint32_t),
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                     rhi::MemoryUsage::GpuOnly);
+    drawCommands2_ = rhi::createBufferWithData(ctx, commands.data(), commands.size() * sizeof(VkDrawIndexedIndirectCommand),
+                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    const std::vector<uint32_t> none(order.size(), 0);
+    visibleLast_ = rhi::createBufferWithData(ctx, none.data(), none.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
   }
   std::vector<uint32_t> zeros(kHistogramBins, 0);
   histogram_ = rhi::createBufferWithData(ctx, zeros.data(), zeros.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
@@ -434,7 +463,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   cloudScreenPass_.init(ctx, "clouds_screen.comp", g, {SI, CIS, CIS});
   fogInjectPass_.init(ctx, rt ? "fog_inject_rt.comp" : "fog_inject.comp", g, {SI, CIS});
   fogIntegratePass_.init(ctx, "fog_integrate.comp", g, {CIS, SI});
-  cullPass_.init(ctx, "cull.comp", g, {SB, SB, SB, SB, SB}, 2 * sizeof(uint32_t));
+  cullPass_.init(ctx, "cull.comp", g, {SB, SB, SB, SB, SB, SB, CIS}, 4 * sizeof(uint32_t));
+  hiZBuildPass_.init(ctx, "hiz_build.comp", g, {CIS, SI}, sizeof(uint32_t));
+  meshletArgsPass_.init(ctx, "meshlet_args.comp", g, {SB, SB, SB}, 2 * sizeof(uint32_t));
   cullResetPass_.init(ctx, "cull_reset.comp", g, {SB}, sizeof(uint32_t));
   sssPass_.init(ctx, "sss.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SI}, sizeof(glm::ivec2));
   if (rt) rainOcclusionPass_.init(ctx, "rain_occlusion.comp", g, {SI});
@@ -476,6 +507,14 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   gb.depthTest = gb.depthWrite = true;
   gb.dynamicCulling = true;  // por lote: de um lado só (padrão do glTF) ou dos dois (doubleSided: folhagem, tecidos)
   gbufferPipeline_ = rhi::createGraphicsPipeline(ctx, gb);
+  if (ctx.meshShaders) {  // mesmo fragment shader, mesmas saídas; task + mesh no lugar do vertex shader
+    rhi::GraphicsPipelineDesc md = gb;
+    md.taskShader = "gbuffer.task";
+    md.meshShader = "gbuffer.mesh";
+    md.vertexBindings.clear();
+    md.vertexAttributes.clear();
+    gbufferMeshPipeline_ = rhi::createGraphicsPipeline(ctx, md);
+  }
   {  // decals BLEND: sem escrever profundidade; mistura por alfa na cor difusa, normal e f0 (o .a de cada anexo,
      // que guarda outra coisa — oclusão, rugosidade, f90 —, fica como estava); movimento, emissão e visibilidade não
     rhi::GraphicsPipelineDesc bd = gb;
@@ -690,6 +729,8 @@ void Renderer::createTargets() {
   const VkExtent3D froxels{(R.width + 7) / 8, (R.height + 7) / 8, kFogSlices};
   for (auto& f : t_.fogInject) f = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
   t_.fogIntegrated = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
+  hiZ_ = rhi::createImage2D(ctx, R, VK_FORMAT_R32_SFLOAT, storage, rhi::mipCount(R));
+  for (uint32_t m = 0; m < hiZ_.mipLevels; ++m) hiZMips_.push_back(rhi::createMipView(ctx, hiZ_, m));
   t_.sssA = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.sssB = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.postA = rhi::createImage2D(ctx, O, kHdrFormat, storage);
@@ -715,7 +756,7 @@ void Renderer::createTargets() {
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                             &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
-                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.sssA, &t_.sssB})
+                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.sssA, &t_.sssB, &hiZ_})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   if (upscalerReady_) {
@@ -759,6 +800,9 @@ void Renderer::destroyTargets() {
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
+  for (VkImageView v : hiZMips_) vkDestroyImageView(ctx.device, v, nullptr);
+  hiZMips_.clear();
+  rhi::destroyImage(ctx, hiZ_);
 }
 
 void Renderer::resize(VkExtent2D outputExtent) {
@@ -915,67 +959,114 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
   profiler_.mark(cmd, "ceu");
 
-  // ---- 2. G-buffer (culling por frustum na GPU, depois desenho indireto) ----
+  // ---- 2. G-buffer: culling na GPU (frustum + oclusão em duas fases) e desenho indireto ----
+  // Fase 0: desenha o que estava visível no frame anterior. Monta a pirâmide de profundidade (HiZ) dessa passada.
+  // Fase 1: testa tudo contra ela; desenha (por cima, carregando o G-buffer) o que apareceu. Sem oclusão desligada.
   {
-    // Entradas = objetos + as cópias dos lotes de LOD (cada objeto com LOD aparece uma vez por nível).
     const uint32_t batchCount = uint32_t(drawBatches_.size()), entries = drawEntries_;
-    cullResetPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(drawCommands_)}, (batchCount + 63) / 64 + 1, 1, &batchCount);
-    barrier();
-    const uint32_t cp[2] = {entries, settings.gpuCulling ? 1u : 0u};
-    cullPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(drawList_), Binding::storageBuffer(entryBatch_),
-                                       Binding::storageBuffer(cullBatches_), Binding::storageBuffer(drawCommands_),
-                                       Binding::storageBuffer(culledList_)},
-                             (entries + 63) / 64 + 1, 1, cp);
-    barrier();
-    profiler_.mark(cmd, "culling");
-  }
-  {
-    VkRenderingAttachmentInfo colors[6] = {
-        attachment(t_.diffuse.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
-        attachment(t_.normal[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
-        attachment(t_.motion.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
-        attachment(t_.emissive.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
-        attachment(t_.specular.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),
-        attachment(t_.visibility[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR),  // 0 = sem objeto
-    };
-    VkRenderingAttachmentInfo depth = attachment(t_.depth[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR);
-    depth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = infinito
-    VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
-    ri.renderArea = {{0, 0}, R};
-    ri.layerCount = 1;
-    ri.colorAttachmentCount = 6;
-    ri.pColorAttachments = colors;
-    ri.pDepthAttachment = &depth;
-    vkCmdBeginRendering(cmd, &ri);
-    setViewport(cmd, R);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferPipeline_);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
-    // Uma chamada por malha com todas as suas instâncias (medido na cidade: 98 mil chamadas, uma por objeto, custavam
-    // ~25 ms de CPU por frame).
-    bool blendBound = false;
-    GBufferPush p{culledList_.address};
-    vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
-    // Dois passes: opacos, depois os misturados (decals) por cima, com o pipeline de mistura.
-    for (uint32_t pass = 0; pass < 2; ++pass)
-    for (uint32_t bi = 0; bi < drawBatches_.size(); ++bi) {
-      const DrawBatch& b = drawBatches_[bi];
-      if (b.blend != (pass == 1)) continue;
-      if (!scene_->meshes[b.mesh].resident) continue;  // streaming: fora da memória (o culling já não pôs ninguém)
-      if (pass == 1 && (bi == 0 || drawBatches_[bi - 1].blend != b.blend || !blendBound)) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferBlendPipeline_);
-        blendBound = true;
+    const bool occlusion = settings.gpuCulling && settings.occlusionCulling && historyValid_;
+    const bool meshlets = settings.meshlets && gbufferMeshPipeline_ != VK_NULL_HANDLE;
+    auto cull = [&](uint32_t phase, const rhi::Buffer& commands, const rhi::Buffer& culled) {
+      cullResetPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(commands)}, (batchCount + 63) / 64 + 1, 1, &batchCount);
+      barrier();
+      const uint32_t cp[4] = {entries, settings.gpuCulling ? 1u : 0u, phase, occlusion ? 1u : 0u};
+      cullPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(drawList_), Binding::storageBuffer(entryBatch_),
+                                         Binding::storageBuffer(cullBatches_), Binding::storageBuffer(commands),
+                                         Binding::storageBuffer(culled), Binding::storageBuffer(visibleLast_),
+                                         Binding::sampled(hiZ_.view, nearest_)},
+                               (entries + 63) / 64 + 1, 1, cp);
+      barrier();
+      if (meshlets) {  // grupos do task shader de cada lote a partir das instâncias visíveis
+        const uint32_t ap[2] = {batchCount, ctx_->meshShaderProperties.maxTaskWorkGroupTotalCount};
+        meshletArgsPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(commands), Binding::storageBuffer(meshletGroups_),
+                                                  Binding::storageBuffer(meshletArgs_[phase])},
+                                        (batchCount + 63) / 64 + 1, 1, ap);
+        barrier();
       }
-      const auto& m = scene_->meshes[b.mesh];
-      vkCmdSetCullMode(cmd, b.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
-      vkCmdSetFrontFace(cmd, b.mirrored != kFrontFaceClockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
-      VkBuffer vbs[2] = {m.vertices.handle, m.deformable() ? m.prevVertices.handle : m.vertices.handle};
-      VkDeviceSize offsets[2] = {0, 0};
-      vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
-      vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexedIndirect(cmd, drawCommands_.handle, VkDeviceSize(bi) * sizeof(VkDrawIndexedIndirectCommand), 1,
-                               sizeof(VkDrawIndexedIndirectCommand));
+    };
+    auto draw = [&](bool first, const rhi::Buffer& commands, const rhi::Buffer& culled, const rhi::Buffer& meshArgs) {
+      const VkAttachmentLoadOp op = first ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+      VkRenderingAttachmentInfo colors[6] = {
+          attachment(t_.diffuse.view, VK_IMAGE_LAYOUT_GENERAL, op),
+          attachment(t_.normal[cur].view, VK_IMAGE_LAYOUT_GENERAL, op),
+          attachment(t_.motion.view, VK_IMAGE_LAYOUT_GENERAL, op),
+          attachment(t_.emissive.view, VK_IMAGE_LAYOUT_GENERAL, op),
+          attachment(t_.specular.view, VK_IMAGE_LAYOUT_GENERAL, op),
+          attachment(t_.visibility[cur].view, VK_IMAGE_LAYOUT_GENERAL, op),  // 0 = sem objeto
+      };
+      VkRenderingAttachmentInfo depth = attachment(t_.depth[cur].view, VK_IMAGE_LAYOUT_GENERAL, op);
+      depth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = infinito
+      VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+      ri.renderArea = {{0, 0}, R};
+      ri.layerCount = 1;
+      ri.colorAttachmentCount = 6;
+      ri.pColorAttachments = colors;
+      ri.pDepthAttachment = &depth;
+      vkCmdBeginRendering(cmd, &ri);
+      setViewport(cmd, R);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferPipeline_);
+      vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
+      // Uma chamada por malha com todas as suas instâncias (medido na cidade: 98 mil chamadas, uma por objeto, custavam
+      // ~25 ms de CPU por frame).
+      VkPipeline bound = gbufferPipeline_;
+      GBufferPush p{culled.address, commands.address};
+      vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
+      // Opacos pelo desenho indexado, opacos por meshlets e por fim os misturados (decals), por cima. Os de meshlets
+      // depois de todos os indexados: uma troca de pipeline por passe, e o llvmpipe (Mesa 25.2) trava num desenho
+      // indexado logo depois de um por mesh shader na mesma passada de renderização.
+      for (uint32_t pass = 0; pass < 3; ++pass)
+        for (uint32_t bi = 0; bi < drawBatches_.size(); ++bi) {
+          const DrawBatch& b = drawBatches_[bi];
+          if (b.blend != (pass == 2)) continue;
+          if (pass < 2 && (pass == 1) != (meshlets && b.meshlets)) continue;
+          if (!scene_->meshes[b.mesh].resident) continue;  // streaming: fora da memória (o culling já não pôs ninguém)
+          const bool byMeshlets = meshlets && b.meshlets;
+          const VkPipeline want = pass == 2 ? gbufferBlendPipeline_ : byMeshlets ? gbufferMeshPipeline_ : gbufferPipeline_;
+          if (want != bound) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, want);
+            bound = want;
+          }
+          const auto& m = scene_->meshes[b.mesh];
+          vkCmdSetCullMode(cmd, b.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+          vkCmdSetFrontFace(cmd, b.mirrored != kFrontFaceClockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
+          if (byMeshlets) {
+            p.meshlets = m.meshlets.address;
+            p.vertices = m.vertices.address;
+            p.batch = bi;
+            p.meshletCount = m.meshletCount;
+            p.vertexBase = m.meshletVertexBase;
+            p.triangleBase = m.meshletTriangleBase;
+            p.flags = (settings.gpuCulling ? 1u : 0u) | (b.doubleSided ? 2u : 0u);
+            vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
+            ctx_->vkCmdDrawMeshTasksIndirectEXT(cmd, meshArgs.handle, VkDeviceSize(bi) * 3 * sizeof(uint32_t), 1,
+                                                3 * sizeof(uint32_t));
+            continue;
+          }
+          VkBuffer vbs[2] = {m.vertices.handle, m.deformable() ? m.prevVertices.handle : m.vertices.handle};
+          VkDeviceSize offsets[2] = {0, 0};
+          vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
+          vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
+          vkCmdDrawIndexedIndirect(cmd, commands.handle, VkDeviceSize(bi) * sizeof(VkDrawIndexedIndirectCommand), 1,
+                                   sizeof(VkDrawIndexedIndirectCommand));
+        }
+      vkCmdEndRendering(cmd);
+    };
+    cull(0, drawCommands_, culledList_);
+    profiler_.mark(cmd, "culling");
+    draw(true, drawCommands_, culledList_, meshletArgs_[0]);
+    barrier();
+    if (occlusion) {
+      // Pirâmide da profundidade da fase 0 (nível 0 = cópia; depois o mais distante de cada 2x2).
+      const uint32_t fromDepth = 1, fromLevel = 0;
+      for (uint32_t m = 0; m < hiZ_.mipLevels; ++m) {
+        const VkExtent2D e{std::max(1u, hiZ_.extent.width >> m), std::max(1u, hiZ_.extent.height >> m)};
+        hiZBuildPass_.dispatch(cmd, gs, {m == 0 ? tex(t_.depth[cur]) : Binding::sampled(hiZMips_[m - 1], nearest_),
+                                         Binding::storageImage(hiZMips_[m])}, e, m == 0 ? &fromDepth : &fromLevel);
+        barrier();
+      }
+      cull(1, drawCommands2_, culledList2_);
+      draw(false, drawCommands2_, culledList2_, meshletArgs_[1]);
     }
-    vkCmdEndRendering(cmd);
   }
   cpuMark("desenho");
   barrier();
@@ -1298,8 +1389,8 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   // que mudaram (medido na cidade de 98 mil objetos: ~35 ms de CPU por frame reescrevendo tudo).
   // Streaming: endereços das malhas que acabaram de entrar no buffer de instâncias (antes dos passes que o leem).
   for (uint32_t o : s.takeInstanceUpdates()) {
-    struct { uint64_t vertices, indices; uint32_t material, pad0; uint64_t pad1; } inst{0, 0, s.objects[o].material, 0, 0};
-    s.instanceAddresses(s.objects[o].mesh, inst.vertices, inst.indices);
+    struct { uint64_t vertices, indices; uint32_t material, pad0; uint64_t colors; } inst{0, 0, s.objects[o].material, 0, 0};
+    s.instanceAddresses(s.objects[o].mesh, inst.vertices, inst.indices, inst.colors);
     vkCmdUpdateBuffer(cmd, s.instances().handle, VkDeviceSize(o) * sizeof(inst), sizeof(inst), &inst);
   }
   const auto& changed = s.changedObjects();
@@ -1502,13 +1593,16 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, exposureState_);
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
-  for (rhi::Buffer* b : {&entryBatch_, &cullBatches_, &drawCommands_, &culledList_, &crowdFrames_}) rhi::destroyBuffer(ctx, *b);
-  for (rhi::ComputePass* p : {&clothPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::Buffer* b : {&entryBatch_, &cullBatches_, &drawCommands_, &culledList_, &crowdFrames_, &drawCommands2_,
+                         &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1]})
+    rhi::destroyBuffer(ctx, *b);
+  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
   vkDestroyPipeline(ctx.device, gbufferPipeline_, nullptr);
   vkDestroyPipeline(ctx.device, gbufferBlendPipeline_, nullptr);
+  if (gbufferMeshPipeline_) vkDestroyPipeline(ctx.device, gbufferMeshPipeline_, nullptr);
   if (particlePipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(ctx.device, particlePipeline_, nullptr);
   rhi::destroyBuffer(ctx, emitterBuffer_);
   particleLayout_.destroy(ctx);

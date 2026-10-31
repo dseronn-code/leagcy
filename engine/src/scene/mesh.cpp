@@ -67,7 +67,7 @@ MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles) {
       Quadric q;
       glm::dvec3 sumP{0.0}, sumN{0.0};
       glm::dvec2 sumUv{0.0};
-      glm::dvec4 sumT{0.0};
+      glm::dvec4 sumT{0.0}, sumC{0.0};
       double count = 0.0;
     };
     std::unordered_map<uint64_t, uint32_t> groupOf;
@@ -92,6 +92,7 @@ MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles) {
       g.sumN += glm::dvec3(vx.normal);
       g.sumUv += glm::dvec2(vx.uv);
       g.sumT += glm::dvec4(vx.tangent);
+      if (!mesh.colors.empty()) g.sumC += glm::dvec4(mesh.colors[v]);
       g.count += 1.0;
     }
     for (uint32_t t = 0; t < tris; ++t) {
@@ -105,6 +106,10 @@ MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles) {
     }
     MeshData out;
     out.vertices.resize(groups.size());
+    if (!mesh.colors.empty()) {
+      out.colors.resize(groups.size());
+      for (size_t gi = 0; gi < groups.size(); ++gi) out.colors[gi] = glm::vec4(groups[gi].sumC / groups[gi].count);
+    }
     for (size_t gi = 0; gi < groups.size(); ++gi) {
       const Group& g = groups[gi];
       const glm::dvec3 mean = g.sumP / g.count;
@@ -376,6 +381,78 @@ void computeTangents(MeshData& m) {
     float w = glm::dot(glm::cross(n, t), bit[i]) < 0.0f ? -1.0f : 1.0f;
     m.vertices[i].tangent = glm::vec4(t, w);
   }
+}
+
+MeshletData buildMeshlets(const MeshData& mesh) {
+  MeshletData out;
+  const uint32_t triCount = uint32_t(mesh.indices.size() / 3);
+  std::vector<int32_t> local(mesh.vertices.size(), -1);
+  std::vector<uint32_t> verts;
+  uint32_t first = 0;
+  auto close = [&](uint32_t end) {  // triângulos [first, end)
+    if (end == first) return;
+    Meshlet m{};
+    m.vertexOffset = uint32_t(out.vertices.size());
+    m.triangleOffset = uint32_t(out.triangles.size());
+    m.counts = uint32_t(verts.size()) | ((end - first) << 8);
+    m.firstTriangle = first;
+    glm::vec3 lo(1e30f), hi(-1e30f);
+    for (uint32_t v : verts) {
+      lo = glm::min(lo, mesh.vertices[v].position);
+      hi = glm::max(hi, mesh.vertices[v].position);
+    }
+    m.center = 0.5f * (lo + hi);
+    for (uint32_t v : verts) m.radius = std::max(m.radius, glm::length(mesh.vertices[v].position - m.center));
+    // Cone das normais das faces (pela ordem dos vértices, como o rasterizador decide frente e verso).
+    glm::vec3 sum(0.0f);
+    std::vector<glm::vec3> normals;
+    for (uint32_t t = first; t < end; ++t) {
+      const glm::vec3 a = mesh.vertices[mesh.indices[3 * t]].position, b = mesh.vertices[mesh.indices[3 * t + 1]].position,
+                      c = mesh.vertices[mesh.indices[3 * t + 2]].position;
+      glm::vec3 n = glm::cross(b - a, c - a);
+      const float l = glm::length(n);
+      if (l > 0.0f) {
+        normals.push_back(n / l);
+        sum += n / l;
+      }
+      const uint32_t i0 = uint32_t(local[mesh.indices[3 * t]]), i1 = uint32_t(local[mesh.indices[3 * t + 1]]),
+                     i2 = uint32_t(local[mesh.indices[3 * t + 2]]);
+      out.triangles.push_back(i0 | (i1 << 8) | (i2 << 16));
+    }
+    m.coneCutoff = 1.0f;
+    const float sl = glm::length(sum);
+    if (sl > 1e-6f && !normals.empty()) {
+      m.coneAxis = sum / sl;
+      float minDot = 1.0f;
+      for (const glm::vec3& n : normals) minDot = std::min(minDot, glm::dot(n, m.coneAxis));
+      // Cone aberto demais (mais de ~84° de meio-ângulo): nunca fica todo de costas.
+      if (minDot > 0.1f) m.coneCutoff = std::sqrt(1.0f - minDot * minDot);
+    }
+    out.vertices.insert(out.vertices.end(), verts.begin(), verts.end());
+    for (uint32_t v : verts) local[v] = -1;
+    verts.clear();
+    out.meshlets.push_back(m);
+    first = end;
+  };
+  for (uint32_t t = 0; t < triCount; ++t) {
+    uint32_t extra = 0;
+    for (int k = 0; k < 3; ++k) {
+      const uint32_t v = mesh.indices[3 * t + k];
+      bool repeated = local[v] >= 0;
+      for (int j = 0; j < k; ++j) repeated = repeated || mesh.indices[3 * t + j] == v;
+      extra += repeated ? 0 : 1;
+    }
+    if (verts.size() + extra > kMeshletMaxVertices || t - first + 1 > kMeshletMaxTriangles) close(t);
+    for (int k = 0; k < 3; ++k) {
+      const uint32_t v = mesh.indices[3 * t + k];
+      if (local[v] < 0) {
+        local[v] = int32_t(verts.size());
+        verts.push_back(v);
+      }
+    }
+  }
+  close(triCount);
+  return out;
 }
 
 }  // namespace scene

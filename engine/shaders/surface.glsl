@@ -28,6 +28,7 @@ struct PixelSurface {
   vec3 Pshadow;   // origem dos raios de sombra (antes do deslocamento de Wächter-Binder)
   uint material;  // material do triângulo (NO_MATERIAL se desconhecido)
   vec2 uv;        // coordenadas de textura no ponto exato
+  vec4 color;     // cor por vértice no ponto exato (branco se não há)
 };
 const uint NO_MATERIAL = 0xFFFFFFFFu;
 
@@ -71,6 +72,7 @@ bool intersectTriangle(uint obj, uint prim, mat4 model, vec3 C, vec3 dir, inout 
 
   s.material = d.material;
   s.uv = fetchVertexUV(vb, i0) * b.x + fetchVertexUV(vb, i1) * b.y + fetchVertexUV(vb, i2) * b.z;
+  s.color = interpolateVertexColor(d, i0, i1, i2, b);
   s.g.P = P;
   s.g.Ng = Ng;
   s.g.V = -dir;
@@ -87,6 +89,7 @@ PixelSurface loadSurface(ivec2 id) {
   s.Pshadow = s.g.P;
   s.material = NO_MATERIAL;
   s.uv = vec2(0.0);
+  s.color = vec4(1.0);
   s.rayBias = RAY_BIAS_DEPTH * length(frame.cameraPos.xyz - s.g.P);
   uvec2 vis = texelFetch(gVisibility, id, 0).xy;
   if (vis.x == 0u || s.g.depth <= 0.0) return s;

@@ -6,11 +6,13 @@
 
 layout(location = 0) in vec2 vUV;
 layout(location = 1) flat in uint vMaterial;
+layout(location = 2) in float vAlpha;
 
 void main() {
   Material m = materials[vMaterial];
-  if ((m.flags & MATERIAL_ALPHA_MASK) != 0u && m.baseColorTex >= 0) {
-    float a = m.baseColor.a * texture(textures[nonuniformEXT(m.baseColorTex)], vUV).a;
+  if ((m.flags & MATERIAL_ALPHA_MASK) != 0u) {
+    float a = m.baseColor.a * vAlpha;
+    if (m.baseColorTex >= 0) a *= texture(textures[nonuniformEXT(m.baseColorTex)], vUV).a;
     if (a < m.alphaCutoff) discard;
   }
 }

@@ -124,6 +124,14 @@ void Context::createDevice(VkSurfaceKHR surface) {
     exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
     exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
   }
+  VkPhysicalDeviceMeshShaderFeaturesEXT meshSupported{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
+  if (hasDeviceExtension(gpu, VK_EXT_MESH_SHADER_EXTENSION_NAME)) {
+    VkPhysicalDeviceFeatures2 q{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    q.pNext = &meshSupported;
+    vkGetPhysicalDeviceFeatures2(gpu, &q);
+    meshShaders = meshSupported.taskShader && meshSupported.meshShader;
+  }
+  if (meshShaders) exts.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
   // Exigidas pelo DLSS (NVIDIA NGX) no Vulkan; só existem em GPUs NVIDIA. Sem elas o motor usa o TAA próprio.
   for (const char* e : {VK_NVX_BINARY_IMPORT_EXTENSION_NAME, VK_NVX_IMAGE_VIEW_HANDLE_EXTENSION_NAME})
     if (hasDeviceExtension(gpu, e)) exts.push_back(e);
@@ -154,6 +162,12 @@ void Context::createDevice(VkSurfaceKHR surface) {
   f13.synchronization2 = VK_TRUE;
   f13.maintenance4 = VK_TRUE;
   f13.pNext = rayTracing ? &as : nullptr;
+  VkPhysicalDeviceMeshShaderFeaturesEXT mesh{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT};
+  mesh.taskShader = mesh.meshShader = VK_TRUE;
+  if (meshShaders) {
+    mesh.pNext = f13.pNext;
+    f13.pNext = &mesh;
+  }
 
   VkPhysicalDeviceVulkan12Features f12 = s12;
   f12.bufferDeviceAddress = VK_TRUE;
@@ -201,6 +215,13 @@ void Context::createDevice(VkSurfaceKHR surface) {
   vkGetDeviceQueue(device, queueFamily, 0, &queue);
   vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR");
 
+  if (meshShaders) {
+    vkCmdDrawMeshTasksIndirectEXT =
+        (PFN_vkCmdDrawMeshTasksIndirectEXT)vkGetDeviceProcAddr(device, "vkCmdDrawMeshTasksIndirectEXT");
+    VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    p2.pNext = &meshShaderProperties;
+    vkGetPhysicalDeviceProperties2(gpu, &p2);
+  }
   if (rayTracing) {
 #define LOAD_RT(fn) rt.fn = (PFN_##fn)vkGetDeviceProcAddr(device, #fn)
     LOAD_RT(vkCreateAccelerationStructureKHR);
@@ -235,6 +256,7 @@ void Context::createDevice(VkSurfaceKHR surface) {
   LOG_INFO("GPU: %s (Vulkan %u.%u.%u) | ray tracing: %s", properties.deviceName,
            VK_API_VERSION_MAJOR(properties.apiVersion), VK_API_VERSION_MINOR(properties.apiVersion),
            VK_API_VERSION_PATCH(properties.apiVersion), rayTracing ? "SIM" : "não");
+  LOG_INFO("Mesh shaders: %s", meshShaders ? "SIM" : "não");
 }
 
 void Context::immediateSubmit(const std::function<void(VkCommandBuffer)>& record) {

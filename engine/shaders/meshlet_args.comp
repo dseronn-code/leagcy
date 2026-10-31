@@ -1,0 +1,20 @@
+#version 460
+// Argumentos do desenho por meshlets (vkCmdDrawMeshTasksIndirectEXT), um por lote, a partir do número de instâncias
+// que o culling deixou: grupos do task shader = instâncias × grupos de 32 meshlets, divididos em x·y (limite de 65.535
+// por dimensão). Lote sem meshlets: 0 grupos.
+layout(local_size_x = 64) in;
+struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
+layout(set = 1, binding = 0, std430) readonly buffer Commands { DrawCommand commands[]; };
+layout(set = 1, binding = 1, std430) readonly buffer Groups { uint groupsPerInstance[]; };
+layout(set = 1, binding = 2, std430) writeonly buffer Args { uint args[]; };
+layout(push_constant) uniform Push { uint batchCount; uint maxGroups; } pc;
+
+void main() {
+  uint b = gl_GlobalInvocationID.x;
+  if (b >= pc.batchCount) return;
+  uint total = min(commands[b].instanceCount * groupsPerInstance[b], pc.maxGroups);
+  uint x = min(total, 65535u), y = x == 0u ? 0u : (total + x - 1u) / x;
+  args[3u * b] = x;
+  args[3u * b + 1u] = y;
+  args[3u * b + 2u] = 1u;
+}

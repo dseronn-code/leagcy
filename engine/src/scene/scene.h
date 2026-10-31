@@ -259,6 +259,11 @@ struct GpuMesh {
   glm::vec4 clothColliders[4] = {};
   rhi::Buffer clothPos, clothPrev;
   bool deformable() const { return skinned || cloth; }  // vértices reescritos na GPU a cada frame
+  // Meshlets (só com mesh shaders e malha rígida): um buffer com [Meshlet × meshletCount][vértices][triângulos];
+  // os dois últimos começam em meshletVertexBase / meshletTriangleBase (em uints).
+  rhi::Buffer meshlets;
+  rhi::Buffer colors;  // cor por vértice (vec4 linear), só se o glTF tiver COLOR_0
+  uint32_t meshletCount = 0, meshletVertexBase = 0, meshletTriangleBase = 0;
   // Níveis de detalhe (só a rasterização; o ray tracing usa a malha completa): malhas simplificadas e a distância
   // (m) a partir da qual cada uma é usada. -1 = sem esse nível.
   int lod[2] = {-1, -1};
@@ -353,10 +358,12 @@ class Scene {
   uint32_t tlasLayout() const { return tlasLayout_; }
   // Endereços de vértices/índices de uma malha para o buffer de instâncias: a malha vazia (válida) se ela está fora
   // da memória — nenhum shader lê endereço inválido mesmo que um driver ignore a máscara da instância.
-  void instanceAddresses(uint32_t mesh, uint64_t& vertices, uint64_t& indices) const {
+  // `colors`: cores por vértice (COLOR_0), 0 = sem.
+  void instanceAddresses(uint32_t mesh, uint64_t& vertices, uint64_t& indices, uint64_t& colors) const {
     const bool r = meshes[mesh].resident;
     vertices = r ? meshes[mesh].vertices.address : emptyVertices_.address;
     indices = r ? meshes[mesh].indices.address : emptyIndices_.address;
+    colors = r ? meshes[mesh].colors.address : 0;
   }
   // Assa `frames` poses do clipe ativo da malha com esqueleto do modelo (pele feita na CPU) e devolve o índice do
   // clipe. Chame antes do upload.
@@ -429,6 +436,7 @@ class Scene {
   // Streaming: dados de CPU das malhas de células (ficam na RAM), objetos por malha, destruições adiadas.
   std::vector<int> meshCellPending_;
   std::vector<MeshData> streamData_;
+  std::vector<std::vector<uint32_t>> streamMeshlets_;  // meshlets das malhas de célula, prontos para subir
   std::vector<std::vector<uint32_t>> objectsOfMesh_;
   std::vector<uint32_t> instanceUpdates_;
   struct PendingDestroy {

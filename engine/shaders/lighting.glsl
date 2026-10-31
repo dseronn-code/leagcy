@@ -195,7 +195,7 @@ bool traceHitThroughGlassDir(vec3 origin, inout vec3 dir, float tMax, out HitInf
     if (inside) T *= exp(-absorb * hit.t);  // Beer no trecho dentro do volume
     Material m = materials[hit.material];
     if ((m.flags & MATERIAL_TRANSMISSIVE) == 0u) return true;
-    Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
+    Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv, hit.color);
     T *= s.transmission * (inside ? vec3(1.0) : s.transmissionTint) * (vec3(1.0) - F_Schlick(s.f0, s.f90, abs(dot(hit.N, dir))));
     if (max(T.r, max(T.g, T.b)) < 1e-4) break;
     if (m.thickness > 0.0) {  // volume: refrata e entra/sai
@@ -253,7 +253,7 @@ vec3 pathContinue(HitInfo hit, Surface s, BrdfContext bc, uint seed) {
     }
     if (blocked) break;
     T *= Tg;
-    s = evalMaterial(materials[next.material], next.P, next.N, vec4(0.0), next.uv);
+    s = evalMaterial(materials[next.material], next.P, next.N, vec4(0.0), next.uv, next.color);
     bc = makeBrdfContext(next.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
     vec2 uSun = rand2(st), uLight = rand2(st);
     L += T * hitDirectLighting(next, s, bc, uSun, uLight, pcg(st), false);
@@ -290,7 +290,7 @@ vec3 secondaryRadiance(vec3 origin, vec3 dir, inout uint st) {
   bool blocked;
   if (!traceHitThroughGlass(origin, dir, 1e4, h, Tg, blocked)) return clampFirefly(Tg * sampleSky(dir));
   if (blocked) return vec3(0.0);
-  Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv);
+  Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv, h.color);
   BrdfContext c = makeBrdfContext(h.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
   vec2 uSun = rand2(st), uLight = rand2(st);
   vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st), false);
@@ -301,7 +301,7 @@ vec3 secondaryRadiance(vec3 origin, vec3 dir, inout uint st) {
 // Radiância que sai de `hit` para a origem do raio (ver traceRadiance, logo abaixo).
 vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool countSampledEmission) {
   Material m = materials[hit.material];
-  Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv);
+  Surface s = evalMaterial(m, hit.P, hit.N, vec4(0.0), hit.uv, hit.color);
   BrdfContext bc = makeBrdfContext(hit.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
   uint dimBase = bounce * 3u;
   uint rngLight = pcg3d(uvec3(floatBitsToUint(sample2D(sg, DIM_HIT_LIGHT_PICK + dimBase).x), bounce, frame.frameInfo.x)).x;
@@ -405,7 +405,7 @@ void main() {
   px.clearcoat = 0.0;
   uint pxFlags = sf.material != NO_MATERIAL ? materials[sf.material].flags : 0u;
   if ((pxFlags & (MATERIAL_TRANSMISSIVE | MATERIAL_CLEARCOAT)) != 0u)  // (SSS só lê o raio do material)
-    px = evalMaterial(materials[sf.material], g.P, g.N, vec4(0.0), sf.uv);
+    px = evalMaterial(materials[sf.material], g.P, g.N, vec4(0.0), sf.uv, sf.color);
   // A demodulação do especular usa o contexto do G-buffer: a composição remultiplica pelo mesmo valor.
   BrdfContext bcDemod = brdfContextFor(g);
   // Verniz (KHR_materials_clearcoat): a base usa a própria rugosidade; o verniz é um GGX dielétrico (f0 = 4%) na

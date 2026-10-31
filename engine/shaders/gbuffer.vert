@@ -23,7 +23,8 @@ layout(location = 5) out vec4 vPrevClip;
 layout(location = 6) flat out uint vObject;
 layout(location = 7) flat out uint vMaterial;
 layout(location = 8) flat out uint vLod;
-layout(location = 9) out float vCoverage;  // cabelo: fração do pixel que o fio cobre (transparência estocástica)
+layout(location = 9) out float vCoverage;
+layout(location = 10) out vec4 vColor;      // cor por vértice (COLOR_0), branco se não há  // cabelo: fração do pixel que o fio cobre (transparência estocástica)
 
 // Vento na folhagem: rajadas que viajam pelo espaço (ondas lentas na direção do vento), curvatura que cresce com a
 // altura acima da base do objeto (o tronco quase não mexe, a copa sim) e tremor rápido das folhas.
@@ -41,6 +42,7 @@ void main() {
   vObject = entry & 0x3FFFFFFFu;
   vLod = entry >> 30;  // nível de detalhe (cull.comp)
   vMaterial = instances[vObject].material;
+  vColor = fetchVertexColor(instances[vObject], uint(gl_VertexIndex));
   ObjectData o = objects[vObject];
   if ((materials[vMaterial].flags & MATERIAL_WATER) != 0u) {
     // Mar: a malha (radial, em volta da origem) segue a câmera em passos de 2 m e é deslocada pelas ondas, lidas na

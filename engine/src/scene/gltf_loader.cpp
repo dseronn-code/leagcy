@@ -214,7 +214,8 @@ struct Loader {
       for (size_t pi = 0; pi < mesh.primitives_count; ++pi) {
         const cgltf_primitive& prim = mesh.primitives[pi];
         if (prim.type != cgltf_primitive_type_triangles) continue;
-        const cgltf_accessor *pos = nullptr, *nrm = nullptr, *uv = nullptr, *tan = nullptr, *jnt = nullptr, *wgt = nullptr;
+        const cgltf_accessor *pos = nullptr, *nrm = nullptr, *uv = nullptr, *tan = nullptr, *jnt = nullptr, *wgt = nullptr,
+                             *col = nullptr;
         for (size_t a = 0; a < prim.attributes_count; ++a) {
           const cgltf_attribute& attr = prim.attributes[a];
           if (attr.type == cgltf_attribute_type_position) pos = attr.data;
@@ -223,6 +224,7 @@ struct Loader {
           else if (attr.type == cgltf_attribute_type_tangent) tan = attr.data;
           else if (attr.type == cgltf_attribute_type_joints && attr.index == 0) jnt = attr.data;
           else if (attr.type == cgltf_attribute_type_weights && attr.index == 0) wgt = attr.data;
+          else if (attr.type == cgltf_attribute_type_color && attr.index == 0) col = attr.data;
         }
         if (!pos) continue;
         MeshData md;
@@ -243,6 +245,11 @@ struct Loader {
         } else {
           md.indices.resize(pos->count);
           for (size_t i = 0; i < pos->count; ++i) md.indices[i] = uint32_t(i);
+        }
+        if (col) {  // vec3 ou vec4, float ou inteiro normalizado (o cgltf converte para 0..1)
+          const cgltf_size n = cgltf_num_components(col->type);
+          md.colors.assign(pos->count, glm::vec4(1.0f));
+          for (size_t v = 0; v < pos->count && v < col->count; ++v) cgltf_accessor_read_float(col, v, &md.colors[v].x, n);
         }
         if (jnt && wgt) {
           md.joints.resize(pos->count);
