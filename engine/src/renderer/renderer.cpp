@@ -504,6 +504,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   const bool rt = ctx.rayTracing;
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
   clothPass_.init(ctx, "cloth.comp", g, {}, 112);
+  hairSimPass_.init(ctx, "hair_sim.comp", g, {}, 56);
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});
   aerialPerspectivePass_.init(ctx, "aerial_perspective.comp", g, {SI});
   cloudSkyPass_.init(ctx, "clouds_sky.comp", g, {SI, CIS});
@@ -1614,6 +1615,23 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
            s.time, m.clothPinned ? 1u : 0u, {m.clothColliders[0], m.clothColliders[1], m.clothColliders[2], m.clothColliders[3]}};
       clothPass_.dispatchGroups(cmd, globalSets_[slot], {}, 1, 1, &cp);
     }
+    // Cabelo: física por fio no mundo (o objeto que usa a malha dá a posição da cabeça).
+    for (uint32_t mi = 0; mi < s.meshes.size(); ++mi) {
+      const auto& m = s.meshes[mi];
+      if (!m.hair) continue;
+      uint32_t object = ~0u;
+      for (uint32_t i = 0; i < s.objects.size() && object == ~0u; ++i)
+        if (s.objects[i].mesh == mi) object = i;
+      if (object == ~0u) continue;
+      struct {
+        VkDeviceAddress rest, pos, prev, vertices;
+        uint32_t object, strands, points;
+        float dt, time;
+        uint32_t reset;
+      } hp{m.hairRest.address, m.hairPos.address, m.hairPrev.address, m.vertices.address, object, m.hairStrands,
+           m.hairPoints, sceneDt, s.time, historyValid_ ? 0u : 1u};
+      hairSimPass_.dispatchGroups(cmd, globalSets_[slot], {}, (m.hairStrands + 63) / 64, 1, &hp);
+    }
     for (const auto& m : s.meshes) {
       if (!m.skinned) continue;
       SkinningPush p{m.restVertices.address, m.skinData.address,
@@ -1697,6 +1715,36 @@ float Renderer::runAtmosphereTest(uint32_t pathsPerThread) {
   return mean;
 }
 
+void Renderer::dumpHair(const std::string& path) {
+  rhi::Context& ctx = *ctx_;
+  scene::Scene& s = *scene_;
+  for (uint32_t mi = 0; mi < s.meshes.size(); ++mi) {
+    const auto& m = s.meshes[mi];
+    if (!m.hair) continue;
+    uint32_t object = 0;
+    while (object < s.objects.size() && s.objects[object].mesh != mi) ++object;
+    if (object == s.objects.size()) return;
+    const VkDeviceSize bytes = VkDeviceSize(m.hairStrands) * m.hairPoints * sizeof(glm::vec4);
+    rhi::Buffer stage = rhi::createBuffer(ctx, 2 * bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::GpuToCpu);
+    ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+      VkBufferCopy r0{0, 0, bytes}, r1{0, bytes, bytes};
+      vkCmdCopyBuffer(cmd, m.hairRest.handle, stage.handle, 1, &r0);
+      vkCmdCopyBuffer(cmd, m.hairPos.handle, stage.handle, 1, &r1);
+    });
+    vmaInvalidateAllocation(ctx.allocator, stage.allocation, 0, VK_WHOLE_SIZE);
+    FILE* f = std::fopen(path.c_str(), "wb");
+    if (f) {
+      const uint32_t header[2] = {m.hairStrands, m.hairPoints};
+      std::fwrite(header, sizeof(header), 1, f);
+      std::fwrite(&s.objects[object].transform[0][0], sizeof(glm::mat4), 1, f);
+      std::fwrite(stage.mapped, 1, size_t(2 * bytes), f);
+      std::fclose(f);
+    }
+    rhi::destroyBuffer(ctx, stage);
+    return;
+  }
+}
+
 void Renderer::destroy() {
   if (!ctx_) return;
   rhi::Context& ctx = *ctx_;
@@ -1733,7 +1781,7 @@ void Renderer::destroy() {
                          &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1],
                          &hlodInfo_, &hlodCells_})
     rhi::destroyBuffer(ctx, *b);
-  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

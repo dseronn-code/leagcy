@@ -681,3 +681,13 @@ anterior do mesmo slot, sobe os níveis que faltam (maior ganho primeiro, 32 MB 
 - Primeira versão: média 0,43 que não caía — os raios liam um nível fixo contado na imagem pequena (mais grosso) e
   texturas vistas só em reflexo nunca eram pedidas. Corrigido; validação Vulkan limpa. `--no-texture-streaming`.
 
+### Cabelo com física por fio (1/11)
+
+`hair_sim.comp`: uma invocação por fio (14 mil fios × 15 pontos), Follow-The-Leader dinâmico (Müller, Kim & Chentanez
+2012): Verlet com gravidade, vento (as mesmas rajadas da folhagem) e arrasto, retorno suave ao penteado (mais forte
+na raiz), comprimento de cada segmento exato com a correção de velocidade do FTL, colisão com o elipsoide do couro.
+Simula no mundo (a cabeça anima: o cabelo atrasa e balança) e reescreve a fita no espaço do objeto; a BLAS é
+atualizada como a do tecido, e os vetores de movimento usam a posição simulada do frame anterior (o balanço por vento
+no vertex shader saiu). `tools/cabelo.py` lê as posições da GPU (LEGACY_HAIR_DUMP): erro de comprimento 0,000%,
+0,000% dos pontos dentro da cabeça, desvio da pose rígida 0 → 14 mm da raiz à ponta. Validação limpa.
+

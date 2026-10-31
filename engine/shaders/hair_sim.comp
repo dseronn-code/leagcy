@@ -1,0 +1,100 @@
+#version 460
+// Física do cabelo por fio: uma invocação por fio, Follow-The-Leader dinâmico (Müller, Kim & Chentanez 2012, "Fast
+// Simulation of Inextensible Hair and Fur"): integração de Verlet com gravidade e vento, retorno suave ao penteado
+// (mais forte na raiz), comprimento de cada segmento exato e correção de velocidade do FTL (sem ganho de energia),
+// colisão com o elipsoide do couro cabeludo. Os 2 primeiros pontos seguem a cabeça (raiz firme). Simula no mundo
+// (a cabeça se move: o cabelo atrasa e balança) e reescreve a fita de cada fio no espaço do objeto — a mesma fita que
+// o raster vira para a câmera (gbuffer.vert) e o ray tracing usa (BLAS atualizada depois).
+#extension GL_GOOGLE_include_directive : require
+#include "scene.glsl"
+
+layout(local_size_x = 64) in;
+layout(buffer_reference, scalar) buffer Points { vec4 p[]; };
+layout(buffer_reference, scalar) writeonly buffer Verts { float v[]; };
+layout(push_constant) uniform Push {
+  uint64_t rest;      // centro do fio em repouso (espaço do objeto), w = meia largura da fita
+  uint64_t pos;       // posição atual (mundo)
+  uint64_t prev;      // posição anterior (mundo)
+  uint64_t vertices;  // fita (scene::Vertex)
+  uint object, strands, points;
+  float dt, time;
+  uint reset;
+} pc;
+
+const vec3 GRAVITY = vec3(0.0, -9.81, 0.0);
+const uint SUBSTEPS = 4u;
+
+vec3 windAccel(vec3 p, float t) {  // mesmas rajadas da folhagem (gbuffer.vert), em m/s²
+  const vec3 WIND = vec3(0.94, 0.0, 0.34);
+  float gust = 0.6 + 0.4 * sin(t * 0.7 - dot(p.xz, WIND.xz) * 0.08);
+  float sway = (sin(t * 1.4 - dot(p.xz, WIND.xz) * 0.25) * 0.7 + sin(t * 2.9 + p.x * 0.6 + p.z * 0.4) * 0.3) * gust;
+  return WIND * 1.6 * (0.6 + sway);
+}
+
+void main() {
+  uint s = gl_GlobalInvocationID.x;
+  if (s >= pc.strands) return;
+  Points rest = Points(pc.rest), pos = Points(pc.pos), prev = Points(pc.prev);
+  mat4 M = objects[pc.object].model, Mi = inverse(M);
+  uint n = pc.points, b = s * n;
+  if (pc.reset != 0u) {
+    for (uint j = 0u; j < n; ++j) {
+      vec3 w = (M * vec4(rest.p[b + j].xyz, 1.0)).xyz;
+      pos.p[b + j] = vec4(w, 0.0);
+      prev.p[b + j] = vec4(w, 0.0);
+    }
+  } else if (pc.dt > 0.0) {
+    float h = min(pc.dt, 1.0 / 30.0) / float(SUBSTEPS);
+    for (uint it = 0u; it < SUBSTEPS; ++it) {
+      float t = pc.time - pc.dt + h * float(it + 1u);
+      // Raiz e 2º ponto presos à cabeça.
+      for (uint j = 0u; j < 2u; ++j) {
+        vec3 w = (M * vec4(rest.p[b + j].xyz, 1.0)).xyz;
+        prev.p[b + j] = vec4(w, 0.0);
+        pos.p[b + j] = vec4(w, 0.0);
+      }
+      vec3 corrNext = vec3(0.0);
+      for (uint j = 2u; j < n; ++j) {
+        float u = float(j) / float(n - 1u);
+        vec3 p = pos.p[b + j].xyz, q = prev.p[b + j].xyz;
+        vec3 v = (p - q) * 0.985;  // arrasto do ar
+        q = p;
+        p += v + (GRAVITY + windAccel(p, t)) * h * h;
+        // Penteado: puxa para onde o segmento de repouso apontaria a partir do ponto anterior (já resolvido).
+        vec3 parent = pos.p[b + j - 1u].xyz;
+        vec3 restSeg = mat3(M) * (rest.p[b + j].xyz - rest.p[b + j - 1u].xyz);
+        float k = 0.02 + 0.3 * (1.0 - u) * (1.0 - u);
+        p += (parent + restSeg - p) * k;
+        // Colisão com o couro (elipsoide do objeto, raio 1,02 no espaço dele).
+        vec3 po = (Mi * vec4(p, 1.0)).xyz;
+        float r = length(po), minR = 1.02 + 0.03 * u;
+        if (r < minR) p = (M * vec4(po * (minR / max(r, 1e-6)), 1.0)).xyz;
+        // Comprimento exato (seguir o líder) e a correção de velocidade do FTL no ponto anterior.
+        vec3 solved = parent + normalize(p - parent) * length(restSeg);
+        vec3 corr = solved - p;
+        p = solved;
+        if (j > 2u) prev.p[b + j - 1u] = vec4(prev.p[b + j - 1u].xyz + 0.9 * corr, 0.0);
+        pos.p[b + j] = vec4(p, 0.0);
+        prev.p[b + j] = vec4(q, 0.0);
+      }
+    }
+  }
+  // Fita no espaço do objeto: centro ± lado × meia largura; lado tangente à cabeça (deitado sobre o couro).
+  Verts out_ = Verts(pc.vertices);
+  for (uint j = 0u; j < n; ++j) {
+    vec3 c = (Mi * vec4(pos.p[b + j].xyz, 1.0)).xyz;
+    vec3 a = (Mi * vec4(pos.p[b + max(j, 1u) - 1u].xyz, 1.0)).xyz, z = (Mi * vec4(pos.p[b + min(j + 1u, n - 1u)].xyz, 1.0)).xyz;
+    vec3 t = normalize(z - a + 1e-7);
+    vec3 side = normalize(cross(t, normalize(c)) + vec3(1e-6, 0.0, 0.0));
+    vec3 nrm = normalize(cross(t, side));
+    float w = rest.p[b + j].w;
+    for (uint sd = 0u; sd < 2u; ++sd) {
+      uint o = ((b + j) * 2u + sd) * 12u;
+      vec3 vp = c + side * (sd == 1u ? w : -w);
+      out_.v[o + 0u] = vp.x; out_.v[o + 1u] = vp.y; out_.v[o + 2u] = vp.z;
+      out_.v[o + 3u] = nrm.x; out_.v[o + 4u] = nrm.y; out_.v[o + 5u] = nrm.z;
+      out_.v[o + 6u] = float(sd); out_.v[o + 7u] = float(j) / float(n - 1u);
+      out_.v[o + 8u] = t.x; out_.v[o + 9u] = t.y; out_.v[o + 10u] = t.z; out_.v[o + 11u] = w;
+    }
+  }
+}
