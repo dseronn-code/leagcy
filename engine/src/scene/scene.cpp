@@ -423,6 +423,7 @@ bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
     }
   }
   std::sort(toLoad.begin(), toLoad.end());
+  if (!loader_) return changed;  // cena sem células de streaming
   // Leituras do disco: pede as células que faltam (a mais perto primeiro) e recolhe as que a thread já leu.
   StreamLoader& L = *loader_;
   auto collect = [&] {
