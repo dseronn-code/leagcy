@@ -123,8 +123,8 @@ set_target_properties(bc7enc PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # MikkTSpace (Morten Mikkelsen; licença zlib): tangentes no padrão do Blender, Substance, Unreal e Unity — o mesmo que o
 # glTF manda usar quando o arquivo não traz TANGENT.
-# Desligado até o download ser aprovado e o resultado medido (--tangent-test); sem ele, a aproximação própria.
-option(LEGACY_MIKKTSPACE "Tangentes pela biblioteca MikkTSpace (baixada do GitHub)" OFF)
+# Ligado: medido igual às tangentes do Blender (--tangent-test: 0,000° em média). OFF = a aproximação própria.
+option(LEGACY_MIKKTSPACE "Tangentes pela biblioteca MikkTSpace (baixada do GitHub)" ON)
 if(LEGACY_MIKKTSPACE)
   FetchContent_Declare(mikktspace
     GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git
