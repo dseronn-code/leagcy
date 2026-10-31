@@ -1,6 +1,7 @@
 #include "scene/demo_scene.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <random>
