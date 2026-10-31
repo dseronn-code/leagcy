@@ -91,8 +91,12 @@ MeshData makeRadialGrid(uint32_t rings, uint32_t segments, float innerRadius, fl
 MeshData makeTerrain(float size, uint32_t res, const std::function<float(float, float)>& heightFn);
 
 float fbm(float x, float y, int octaves = 6);
-// Tangentes por acúmulo das derivadas de UV de cada triângulo (aproxima MikkTSpace).
+// Tangentes por acúmulo das derivadas de UV de cada triângulo (aproxima MikkTSpace; malhas procedurais).
 void computeTangents(MeshData& mesh);
+// Tangentes MikkTSpace (a biblioteca de referência): por canto de triângulo; onde cantos do mesmo vértice discordam,
+// o vértice é separado (cor e pesos de skin copiados), como fazem as ferramentas que geram os modelos. `origin`
+// (opcional) recebe o vértice original de cada vértice de saída. Para assets glTF sem TANGENT.
+void computeTangentsMikk(MeshData& mesh, std::vector<uint32_t>* origin = nullptr);
 // Normais suaves ponderadas por área (para malhas sem NORMAL, ex.: Fox do glTF-Sample-Assets).
 void computeNormals(MeshData& mesh);
 

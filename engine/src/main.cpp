@@ -39,9 +39,11 @@ struct Options {
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
   bool textureStreaming = true;  // mips finos das texturas sob demanda (--no-texture-streaming: tudo no início)
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
-  bool compressTextures = true;  // texturas em BC7 (--no-texture-compression = RGBA8)
+  bool compressTextures = true;
+  bool ignoreTangents = false;   // --ignore-tangents  // texturas em BC7 (--no-texture-compression = RGBA8)
   bool meshLights = true;        // triângulos emissivos como luzes (--no-mesh-lights: só pelos raios de GI)
   bool meshLods = true;          // níveis de detalhe das malhas grandes (--no-lod)
+  std::string tangentTest;      // --tangent-test arquivo.gltf: tangentes do arquivo x aproximação x MikkTSpace
   uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
   float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
   scene::DemoOptions scene;
@@ -75,6 +77,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
     else if (a == "--sun-azimuth") o.sunAzimuth = float(std::atof(next()));
+    else if (a == "--ignore-tangents") o.ignoreTangents = true;
+    else if (a == "--tangent-test") o.tangentTest = next();
     else if (a == "--atmosphere-test") o.atmosphereTest = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--scene") o.scene.name = next();
     else if (a == "--cam" || a == "--look") {
@@ -199,6 +203,7 @@ Options parseArgs(int argc, char** argv) {
           "  --no-ripples --no-sss --no-texture-streaming --stream-sync  idem (ondulações, pele, texturas, streaming)\n"
           "  --clouds-reference         nuvens por Monte Carlo volumétrico exato (tools/nuvens.py)\n"
           "  --fog-reference            névoa integrada por pixel, sem grade (precisa de ray tracing; tools/nevoa.py)\n"
+          "  --tangent-test arquivo.gltf  tangentes do arquivo contra a aproximação e o MikkTSpace\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n");
@@ -250,6 +255,7 @@ int runHeadless(const Options& opt) {
 
   scene::Scene scene;
   scene::Camera camera;
+  scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
   if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
   if (opt.customCamera) {
     camera.position = opt.cameraPos;
@@ -371,6 +377,7 @@ int runWindowed(const Options& opt) {
 
   scene::Scene scene;
   scene::Camera camera;
+  scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
   if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
   if (opt.customCamera) {
     camera.position = opt.cameraPos;
@@ -581,6 +588,7 @@ int main(int argc, char** argv) {
   SetConsoleOutputCP(65001);
 #endif
   Options opt = parseArgs(argc, argv);
+  if (!opt.tangentTest.empty()) return scene::tangentTest(opt.tangentTest);
   if (opt.atmosphereTest) return runAtmosphereTest(opt);
   return opt.headless ? runHeadless(opt) : runWindowed(opt);
 }

@@ -265,7 +265,7 @@ struct Loader {
           }
         }
         if (!nrm) computeNormals(md);
-        if (!tan) computeTangents(md);
+        if (!tan || scene.ignoreFileTangents) computeTangentsMikk(md);  // o que o glTF manda quando o arquivo não traz TANGENT
         uint32_t material = prim.material ? materialMap[size_t(prim.material - data->materials)] : defaultMaterial;
         meshPrims[mi].push_back({std::move(md), material, -1});
       }
@@ -430,6 +430,80 @@ struct Loader {
 };
 
 }  // namespace
+
+int tangentTest(const std::string& path) {
+  cgltf_options options{};
+  cgltf_data* data = nullptr;
+  if (cgltf_parse_file(&options, path.c_str(), &data) != cgltf_result_success ||
+      cgltf_load_buffers(&options, data, path.c_str()) != cgltf_result_success) {
+    LOG_ERROR("Não foi possível ler %s", path.c_str());
+    if (data) cgltf_free(data);
+    return 1;
+  }
+  // Por vértice: ângulo entre a tangente do arquivo e a calculada (as duas no plano da normal) e o sinal da bitangente.
+  struct Stats {
+    std::vector<float> angles;
+    size_t signOk = 0;
+  } approx, mikk;
+  size_t prims = 0;
+  auto compare = [](const glm::vec3& n, const glm::vec4& ref, const glm::vec4& t, Stats& st) {
+    glm::vec3 a = glm::vec3(ref) - n * glm::dot(n, glm::vec3(ref)), b = glm::vec3(t) - n * glm::dot(n, glm::vec3(t));
+    if (!(glm::dot(a, a) > 1e-12f) || !(glm::dot(b, b) > 1e-12f)) return;  // nula ou NaN no arquivo
+    st.angles.push_back(glm::degrees(std::acos(glm::clamp(glm::dot(glm::normalize(a), glm::normalize(b)), -1.0f, 1.0f))));
+    st.signOk += (ref.w < 0.0f) == (t.w < 0.0f) ? 1 : 0;
+  };
+  for (size_t mi = 0; mi < data->meshes_count; ++mi)
+    for (size_t pi = 0; pi < data->meshes[mi].primitives_count; ++pi) {
+      const cgltf_primitive& prim = data->meshes[mi].primitives[pi];
+      const cgltf_accessor *pos = nullptr, *nrm = nullptr, *uv = nullptr, *tan = nullptr;
+      for (size_t a = 0; a < prim.attributes_count; ++a) {
+        const cgltf_attribute& at = prim.attributes[a];
+        if (at.type == cgltf_attribute_type_position) pos = at.data;
+        else if (at.type == cgltf_attribute_type_normal) nrm = at.data;
+        else if (at.type == cgltf_attribute_type_texcoord && at.index == 0) uv = at.data;
+        else if (at.type == cgltf_attribute_type_tangent) tan = at.data;
+      }
+      if (!pos || !nrm || !uv || !tan || prim.type != cgltf_primitive_type_triangles) continue;
+      ++prims;
+      MeshData md;
+      std::vector<glm::vec4> ref(pos->count);
+      md.vertices.resize(pos->count);
+      for (size_t v = 0; v < pos->count; ++v) {
+        cgltf_accessor_read_float(pos, v, &md.vertices[v].position.x, 3);
+        cgltf_accessor_read_float(nrm, v, &md.vertices[v].normal.x, 3);
+        cgltf_accessor_read_float(uv, v, &md.vertices[v].uv.x, 2);
+        cgltf_accessor_read_float(tan, v, &ref[v].x, 4);
+      }
+      md.indices.resize(prim.indices ? prim.indices->count : pos->count);
+      for (size_t i = 0; i < md.indices.size(); ++i)
+        md.indices[i] = prim.indices ? uint32_t(cgltf_accessor_read_index(prim.indices, i)) : uint32_t(i);
+      MeshData a = md, m = md;
+      computeTangents(a);
+      std::vector<uint32_t> origin;
+      computeTangentsMikk(m, &origin);
+      for (size_t v = 0; v < a.vertices.size(); ++v) compare(a.vertices[v].normal, ref[v], a.vertices[v].tangent, approx);
+      for (size_t v = 0; v < m.vertices.size(); ++v) compare(m.vertices[v].normal, ref[origin[v]], m.vertices[v].tangent, mikk);
+    }
+  cgltf_free(data);
+  auto report = [](const char* name, Stats& st) {
+    if (st.angles.empty()) return;
+    std::sort(st.angles.begin(), st.angles.end());
+    double sum = 0.0;
+    size_t over5 = 0;
+    for (float x : st.angles) {
+      sum += x;
+      over5 += x > 5.0f ? 1 : 0;
+    }
+    LOG_INFO("%-12s ângulo médio %.3f°, mediana %.3f°, p99 %.2f°, > 5°: %.2f%%, sinal igual: %.2f%% (%zu vértices)", name,
+             sum / double(st.angles.size()), st.angles[st.angles.size() / 2], st.angles[st.angles.size() * 99 / 100],
+             100.0 * double(over5) / double(st.angles.size()), 100.0 * double(st.signOk) / double(st.angles.size()),
+             st.angles.size());
+  };
+  LOG_INFO("Tangentes de %s: %zu primitivas com TANGENT no arquivo", path.c_str(), prims);
+  report("aproximação", approx);
+  report("MikkTSpace", mikk);
+  return prims ? 0 : 1;
+}
 
 bool loadImageFile(const std::string& path, bool srgb, bool normalMap, TextureData& out) {
   int w = 0, h = 0, comp = 0;

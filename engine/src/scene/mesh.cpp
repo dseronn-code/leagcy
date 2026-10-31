@@ -1,5 +1,9 @@
 #include "scene/mesh.h"
 
+#ifdef LEGACY_MIKKTSPACE
+#include <mikktspace.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
@@ -407,10 +411,105 @@ void computeTangents(MeshData& m) {
       t = std::abs(n.x) < 0.9f ? glm::cross(n, glm::vec3(1, 0, 0)) : glm::cross(n, glm::vec3(0, 1, 0));
     }
     t = glm::normalize(t);
-    float w = glm::dot(glm::cross(n, t), bit[i]) < 0.0f ? -1.0f : 1.0f;
+    // glTF: bitangente = normal × tangente × w apontando para v DECRESCENTE (origem das UVs em cima; o normal map
+    // segue a convenção do OpenGL, verde para cima). bit[] é a derivada em +v: w é o oposto do sinal dela. Medido no
+    // NormalTangentMirrorTest da Khronos: com o sinal ao contrário, 100% dos vértices discordavam das tangentes que o
+    // Blender exporta e o relevo saía invertido nos modelos sem TANGENT (DamagedHelmet, o scan de pele).
+    float w = glm::dot(glm::cross(n, t), bit[i]) < 0.0f ? 1.0f : -1.0f;
     m.vertices[i].tangent = glm::vec4(t, w);
   }
 }
+
+#ifdef LEGACY_MIKKTSPACE
+namespace {
+struct MikkContext {
+  const MeshData* mesh;
+  std::vector<glm::vec4> corner;  // tangente de cada canto (3 por triângulo)
+};
+int mikkFaces(const SMikkTSpaceContext* c) { return int(static_cast<MikkContext*>(c->m_pUserData)->mesh->indices.size() / 3); }
+int mikkFaceVerts(const SMikkTSpaceContext*, int) { return 3; }
+const Vertex& mikkVertex(const SMikkTSpaceContext* c, int face, int vert) {
+  const MeshData& m = *static_cast<MikkContext*>(c->m_pUserData)->mesh;
+  return m.vertices[m.indices[size_t(face) * 3 + size_t(vert)]];
+}
+void mikkPosition(const SMikkTSpaceContext* c, float out[], int face, int vert) {
+  const glm::vec3 p = mikkVertex(c, face, vert).position;
+  out[0] = p.x, out[1] = p.y, out[2] = p.z;
+}
+void mikkNormal(const SMikkTSpaceContext* c, float out[], int face, int vert) {
+  const glm::vec3 n = mikkVertex(c, face, vert).normal;
+  out[0] = n.x, out[1] = n.y, out[2] = n.z;
+}
+void mikkUV(const SMikkTSpaceContext* c, float out[], int face, int vert) {
+  // glTF tem a origem das UVs em cima; o MikkTSpace (como o Blender) conta de baixo: v invertido (o sinal da
+  // bitangente sai igual ao que o exportador do Blender grava).
+  const glm::vec2 uv = mikkVertex(c, face, vert).uv;
+  out[0] = uv.x, out[1] = 1.0f - uv.y;
+}
+void mikkSet(const SMikkTSpaceContext* c, const float t[], float sign, int face, int vert) {
+  static_cast<MikkContext*>(c->m_pUserData)->corner[size_t(face) * 3 + size_t(vert)] = glm::vec4(t[0], t[1], t[2], sign);
+}
+}  // namespace
+#endif
+
+void computeTangentsMikk(MeshData& m, std::vector<uint32_t>* origin) {
+  if (origin) {
+    origin->resize(m.vertices.size());
+    for (uint32_t i = 0; i < origin->size(); ++i) (*origin)[i] = i;
+  }
+#ifndef LEGACY_MIKKTSPACE
+  computeTangents(m);  // compilado sem a biblioteca (LEGACY_MIKKTSPACE=OFF): a aproximação
+}
+#else
+  if (m.indices.size() < 3) return;
+  MikkContext ctx{&m, std::vector<glm::vec4>(m.indices.size() / 3 * 3, glm::vec4(0.0f))};
+  SMikkTSpaceInterface in{};
+  in.m_getNumFaces = mikkFaces;
+  in.m_getNumVerticesOfFace = mikkFaceVerts;
+  in.m_getPosition = mikkPosition;
+  in.m_getNormal = mikkNormal;
+  in.m_getTexCoord = mikkUV;
+  in.m_setTSpaceBasic = mikkSet;
+  SMikkTSpaceContext c{&in, &ctx};
+  if (!genTangSpaceDefault(&c)) {  // sem memória: fica a aproximação
+    computeTangents(m);
+    return;
+  }
+  // Primeiro canto de cada vértice define a tangente dele; um canto que discorda ganha uma cópia do vértice (as
+  // cópias com a mesma tangente são reaproveitadas).
+  const size_t original = m.vertices.size();
+  std::vector<int32_t> first(original, -1);
+  std::vector<std::vector<uint32_t>> copies(original);
+  auto same = [](const glm::vec4& a, const glm::vec4& b) {
+    return a.w == b.w && glm::dot(glm::vec3(a), glm::vec3(b)) > 0.99999f;
+  };
+  for (size_t k = 0; k < ctx.corner.size(); ++k) {
+    const uint32_t v = m.indices[k];
+    const glm::vec4 t = ctx.corner[k];
+    if (first[v] < 0) {
+      first[v] = int32_t(v);
+      m.vertices[v].tangent = t;
+      continue;
+    }
+    if (same(m.vertices[v].tangent, t)) continue;
+    uint32_t use = ~0u;
+    for (uint32_t cp : copies[v])
+      if (same(m.vertices[cp].tangent, t)) use = cp;
+    if (use == ~0u) {
+      use = uint32_t(m.vertices.size());
+      Vertex x = m.vertices[v];
+      x.tangent = t;
+      m.vertices.push_back(x);
+      if (!m.colors.empty()) m.colors.push_back(m.colors[v]);
+      if (!m.joints.empty()) m.joints.push_back(m.joints[v]);
+      if (!m.weights.empty()) m.weights.push_back(m.weights[v]);
+      if (origin) origin->push_back(v);
+      copies[v].push_back(use);
+    }
+    m.indices[k] = use;
+  }
+}
+#endif
 
 MeshletData buildMeshlets(const MeshData& mesh) {
   MeshletData out;

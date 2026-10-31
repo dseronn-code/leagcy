@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.30)  # o NRD exige 3.30
-project(LegacyEngine LANGUAGES CXX)
+project(LegacyEngine LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -121,6 +121,21 @@ add_library(bc7enc STATIC ${bc7enc_SOURCE_DIR}/bc7enc.cpp ${bc7enc_SOURCE_DIR}/b
 target_include_directories(bc7enc SYSTEM PUBLIC ${bc7enc_SOURCE_DIR})
 set_target_properties(bc7enc PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# MikkTSpace (Morten Mikkelsen; licença zlib): tangentes no padrão do Blender, Substance, Unreal e Unity — o mesmo que o
+# glTF manda usar quando o arquivo não traz TANGENT.
+# Desligado até o download ser aprovado e o resultado medido (--tangent-test); sem ele, a aproximação própria.
+option(LEGACY_MIKKTSPACE "Tangentes pela biblioteca MikkTSpace (baixada do GitHub)" OFF)
+if(LEGACY_MIKKTSPACE)
+  FetchContent_Declare(mikktspace
+    GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git
+    GIT_TAG 3e895b49d05ea07e4c2133156cfa94369e19e409
+    SOURCE_SUBDIR _sem_cmake)
+  FetchContent_MakeAvailable(mikktspace)
+  add_library(mikktspace STATIC ${mikktspace_SOURCE_DIR}/mikktspace.c)
+  target_include_directories(mikktspace SYSTEM PUBLIC ${mikktspace_SOURCE_DIR})
+  set_target_properties(mikktspace PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # ---- Shaders: GLSL -> SPIR-V em tempo de build ----
 file(GLOB SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.vert
@@ -152,6 +167,10 @@ target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc)
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
+if(LEGACY_MIKKTSPACE)
+  target_link_libraries(legacy PRIVATE mikktspace)
+  target_compile_definitions(legacy PRIVATE LEGACY_MIKKTSPACE=1)
+endif()
 # As bibliotecas de execução do DLSS/FSR precisam ficar ao lado do executável (o NRI as copia para a pasta dele).
 if(LEGACY_DLSS)
   FetchContent_GetProperties(ngx)

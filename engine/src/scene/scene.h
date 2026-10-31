@@ -339,6 +339,7 @@ class Scene {
 
   // Texturas em BC7 (4x menos memória de vídeo; ver texture_compress.h). false = RGBA8 com mips na GPU.
   bool compressTextures = true;
+  bool ignoreFileTangents = false;  // --ignore-tangents: recalcula mesmo quando o glTF traz TANGENT (teste das tangentes)
   bool meshLights = true;  // triângulos emissivos viram luzes no upload
   bool meshLods = true;    // gera LODs das malhas grandes no upload
   // HLOD (> 0 liga): objetos `hlodCandidate` agrupados em células desse tamanho (m) e por material; cada grupo vira
@@ -541,5 +542,8 @@ class Scene {
 bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform, int* modelOut = nullptr);
 // Imagem avulsa (PNG/JPG) como textura RGBA8: cor (sRGB) ou dado/normal map (linear).
 bool loadImageFile(const std::string& path, bool srgb, bool normalMap, TextureData& out);
+// Teste das tangentes (--tangent-test): nas primitivas do glTF que trazem TANGENT (exportadas pela ferramenta que fez
+// o modelo), recalcula pela aproximação e pelo MikkTSpace e imprime a diferença de ângulo e de sinal. 0 = ok.
+int tangentTest(const std::string& path);
 
 }  // namespace scene
