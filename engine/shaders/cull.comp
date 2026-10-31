@@ -26,7 +26,11 @@ layout(set = 1, binding = 4, std430) writeonly buffer Culled { uint culled[]; };
 // pirâmide de profundidade dessa primeira passada, desenha os que apareceram e atualiza a visibilidade.
 layout(set = 1, binding = 5, std430) buffer VisibleLast { uint visibleLast[]; };
 layout(set = 1, binding = 6) uniform sampler2D hiZ;  // profundidade mais distante por região (reverse-Z: min)
-layout(push_constant) uniform Push { uint entryCount; uint enabled; uint phase; uint occlusion; } pc;
+// HLOD: por objeto, 0 = fora, senão (célula + 1) | bit 31 se é o proxy; células = caixa (mundo) + distância de troca.
+layout(set = 1, binding = 7, std430) readonly buffer HlodInfo { uint hlodInfo[]; };
+struct HlodCell { vec3 lo; float distance; vec3 hi; float pad; };
+layout(set = 1, binding = 8, std430) readonly buffer HlodCells { HlodCell hlodCells[]; };
+layout(push_constant) uniform Push { uint entryCount; uint enabled; uint phase; uint occlusion; uint hlod; } pc;
 
 // Visível pela pirâmide: o ponto MAIS PERTO da caixa (maior z em reverse-Z) contra a profundidade MAIS DISTANTE já
 // desenhada no retângulo que a caixa cobre na tela (num nível em que ele cabe em 2x2 texels).
@@ -90,7 +94,38 @@ void main() {
   // Em unidades da malha (as distâncias de troca vêm do raio dela): divide pela escala do objeto.
   float scale = max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz)));
   float d = distance((model * vec4(0.5 * (cb.boundsMin + cb.boundsMax), 1.0)).xyz, frame.cameraPos.xyz) / max(scale, 1e-6);
-  if (d < cb.lodNear || d >= cb.lodFar) return;
+  // Troca suave: numa faixa de 10% em volta de cada distância de troca os dois níveis desenham, com pontilhados
+  // complementares (gbuffer.frag): t = 0 → inteiro, t = 1 → sumiu; quem entra usa o complemento.
+  float t = 0.0;
+  bool fadeIn = false;
+  float bandFar = 0.1 * cb.lodFar, bandNear = 0.1 * cb.lodNear;
+  if (d >= cb.lodFar + 0.5 * bandFar || d < cb.lodNear - 0.5 * bandNear) return;
+  if (cb.lodFar < 1e29 && d > cb.lodFar - 0.5 * bandFar) t = (d - (cb.lodFar - 0.5 * bandFar)) / bandFar;
+  else if (cb.lodNear > 0.0 && d < cb.lodNear + 0.5 * bandNear) {
+    t = (d - (cb.lodNear - 0.5 * bandNear)) / bandNear;
+    fadeIn = true;
+  }
+  // HLOD: perto da célula os membros, longe o proxy, e os dois na faixa de troca.
+  uint h = hlodInfo[object];
+  if (h != 0u) {
+    bool proxy = (h >> 31) != 0u;
+    if (pc.hlod == 0u) {
+      if (proxy) return;
+    } else {
+      HlodCell hc = hlodCells[(h & 0x7FFFFFFFu) - 1u];
+      float qd = distance(clamp(frame.cameraPos.xyz, hc.lo, hc.hi), frame.cameraPos.xyz), band = 0.1 * hc.distance;
+      float th = clamp((qd - (hc.distance - 0.5 * band)) / band, 0.0, 1.0);
+      if (th > 0.0 && th < 1.0) {
+        t = th;
+        fadeIn = proxy;
+      } else if ((th >= 1.0) != proxy) {
+        return;
+      }
+    }
+  }
+  uint fade = uint(clamp(t, 0.0, 1.0) * 32.0 + 0.5);
+  if (fadeIn ? fade == 0u : fade >= 32u) return;  // ainda não entrou / já saiu
+  uint dither = (fade == 0u || fade >= 32u) ? 0u : (fade | (fadeIn ? 32u : 0u));
   // Folga em metros → unidades da malha pela MENOR escala dos eixos (a caixa cresce pelo menos a folga em todo eixo).
   float minScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz)));
   cb.boundsMin -= cb.worldMargin / max(minScale, 1e-6);
@@ -109,5 +144,6 @@ void main() {
     if (!vis || drawnBefore) return;  // já desenhado na fase 0
   }
   uint slot = atomicAdd(commands[b].instanceCount, 1u);
-  culled[cb.first + slot] = object | (cb.lod << 30);  // nível nos 2 bits de cima (gbuffer.vert)
+  // Entrada: objeto (24 bits) | pontilhado (6 bits: fração em 1/32 + "entrando") | nível de detalhe (2 bits).
+  culled[cb.first + slot] = object | (dither << 24) | (cb.lod << 30);
 }

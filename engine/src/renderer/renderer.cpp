@@ -322,6 +322,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       // Meshlets só no caminho rígido de gbuffer.vert (sem vento, cabelo, mar, multidão, esqueleto nem tecido) e em
       // malhas grandes o bastante (≥ 8 meshlets, ~1.000 triângulos) para o descarte por pedaço pagar o grupo do task
       // shader por instância: medido no llvmpipe, malhas pequenas repetidas (cidade, mundo) ficavam mais lentas.
+      drawBatches_[b].hlodProxy = scene.objects[order[db.first]].hlodProxy;
       drawBatches_[b].meshlets = gm.meshletCount >= 8 && !gm.deformable() && !special && !crowd && !db.blend;
       meshletGroups.push_back(drawBatches_[b].meshlets ? (gm.meshletCount + 31) / 32 : 0);
       // As poses da multidão saem da caixa da pose 0 (em unidades da malha). O vento empurra a folhagem até ~1,1 m para
@@ -346,11 +347,24 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       commands.push_back({});
     }
     meshletGroups.resize(commands.size(), 0);
+    std::vector<uint32_t> hlodInfo(std::max<size_t>(scene.objects.size(), 1), 0);
+    for (size_t i = 0; i < scene.objects.size(); ++i)
+      if (scene.objects[i].hlodCell >= 0) hlodInfo[i] = uint32_t(scene.objects[i].hlodCell + 1) | (scene.objects[i].hlodProxy ? 0x80000000u : 0u);
+    std::vector<glm::vec4> cells;
+    for (const scene::HlodCell& c : scene.hlodCells) {
+      cells.push_back(glm::vec4(c.lo, c.distance));
+      cells.push_back(glm::vec4(c.hi, 0.0f));
+    }
+    if (cells.empty()) cells.resize(2, glm::vec4(0.0f));
+    hlodInfo_ = rhi::createBufferWithData(ctx, hlodInfo.data(), hlodInfo.size() * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    hlodCells_ = rhi::createBufferWithData(ctx, cells.data(), cells.size() * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     meshletGroups_ = rhi::createBufferWithData(ctx, meshletGroups.data(), meshletGroups.size() * sizeof(uint32_t),
                                                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     for (rhi::Buffer& a : meshletArgs_)
       a = rhi::createBuffer(ctx, commands.size() * 3 * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
                             rhi::MemoryUsage::GpuOnly);
+    // cull.comp guarda o objeto em 24 bits da entrada (o resto: pontilhado da troca e nível de detalhe).
+    if (scene.objects.size() >= (1u << 24)) FATAL("Cena com %zu objetos (máximo 16.777.215)", scene.objects.size());
     drawEntries_ = uint32_t(scene.objects.empty() ? 0 : order.size());
     drawList_ = rhi::createBufferWithData(ctx, order.data(), order.size() * sizeof(uint32_t),
                                           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
@@ -463,7 +477,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   cloudScreenPass_.init(ctx, "clouds_screen.comp", g, {SI, CIS, CIS});
   fogInjectPass_.init(ctx, rt ? "fog_inject_rt.comp" : "fog_inject.comp", g, {SI, CIS});
   fogIntegratePass_.init(ctx, "fog_integrate.comp", g, {CIS, SI});
-  cullPass_.init(ctx, "cull.comp", g, {SB, SB, SB, SB, SB, SB, CIS}, 4 * sizeof(uint32_t));
+  cullPass_.init(ctx, "cull.comp", g, {SB, SB, SB, SB, SB, SB, CIS, SB, SB}, 5 * sizeof(uint32_t));
   hiZBuildPass_.init(ctx, "hiz_build.comp", g, {CIS, SI}, sizeof(uint32_t));
   meshletArgsPass_.init(ctx, "meshlet_args.comp", g, {SB, SB, SB}, 2 * sizeof(uint32_t));
   cullResetPass_.init(ctx, "cull_reset.comp", g, {SB}, sizeof(uint32_t));
@@ -969,11 +983,12 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     auto cull = [&](uint32_t phase, const rhi::Buffer& commands, const rhi::Buffer& culled) {
       cullResetPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(commands)}, (batchCount + 63) / 64 + 1, 1, &batchCount);
       barrier();
-      const uint32_t cp[4] = {entries, settings.gpuCulling ? 1u : 0u, phase, occlusion ? 1u : 0u};
+      const uint32_t cp[5] = {entries, settings.gpuCulling ? 1u : 0u, phase, occlusion ? 1u : 0u, settings.hlod ? 1u : 0u};
       cullPass_.dispatchGroups(cmd, gs, {Binding::storageBuffer(drawList_), Binding::storageBuffer(entryBatch_),
                                          Binding::storageBuffer(cullBatches_), Binding::storageBuffer(commands),
                                          Binding::storageBuffer(culled), Binding::storageBuffer(visibleLast_),
-                                         Binding::sampled(hiZ_.view, nearest_)},
+                                         Binding::sampled(hiZ_.view, nearest_), Binding::storageBuffer(hlodInfo_),
+                                         Binding::storageBuffer(hlodCells_)},
                                (entries + 63) / 64 + 1, 1, cp);
       barrier();
       if (meshlets) {  // grupos do task shader de cada lote a partir das instâncias visíveis
@@ -1092,7 +1107,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       struct { VkDeviceAddress drawList; uint32_t cascade, pad; } sp{drawList_.address, c, 0};
       vkCmdPushConstants(cmd, shadowLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(sp), &sp);
       for (const DrawBatch& b : drawBatches_) {
-        if (b.lod != 0) continue;  // sombra com a malha completa (os lotes de LOD repetem os objetos)
+        if (b.lod != 0 || b.hlodProxy) continue;  // sombra com a malha completa (LOD e HLOD repetem os objetos)
         if (!scene_->meshes[b.mesh].resident) continue;  // streaming
         const auto& m = scene_->meshes[b.mesh];
         VkBuffer vbs[2] = {m.vertices.handle, m.vertices.handle};
@@ -1594,7 +1609,8 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, radianceCache_);
   rhi::destroyBuffer(ctx, drawList_);
   for (rhi::Buffer* b : {&entryBatch_, &cullBatches_, &drawCommands_, &culledList_, &crowdFrames_, &drawCommands2_,
-                         &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1]})
+                         &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1],
+                         &hlodInfo_, &hlodCells_})
     rhi::destroyBuffer(ctx, *b);
   for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,

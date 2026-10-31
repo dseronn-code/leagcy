@@ -519,6 +519,10 @@ bool buildCity(Scene& s, Camera& camera, const DemoOptions& opt) {
         s.addObject(cube, trs({x - 0.3f, 1.45f, z}, {1.2f, 0.3f, 0.85f}), m);     // cabine
       }
     }
+  // Nada da cidade se move: tudo pode virar HLOD. Células de 128 m (~1 quarteirão e meio), proxy a partir de 250 m.
+  for (Object& o : s.objects) o.hlodCandidate = true;
+  s.hlodCellSize = 128.0f;
+  s.hlodDistance = 250.0f;
   s.sunDirection = sunFrom(opt.night ? -10.0f : 35.0f, 140.0f);
   s.sunIlluminance = opt.night ? 0.0f : 100000.0f;
   s.cloudCoverage = 0.4f;

@@ -20,7 +20,7 @@ void main() {
   bool live = slot < cmd.instanceCount;
   uint entry = live ? DrawList(pc.drawList).objects[cmd.firstInstance + slot] : 0u;
   bool keep = live && m < pc.meshletCount &&
-              meshletVisible(MeshletList(pc.meshlets).m[m], objects[entry & 0x3FFFFFFFu].model);
+              meshletVisible(MeshletList(pc.meshlets).m[m], objects[entry & 0xFFFFFFu].model);
   if (keep) atomicOr(keepMask, 1u << lane);
   barrier();
   // Compactação na ordem original (posição = quantos antes dele sobreviveram).

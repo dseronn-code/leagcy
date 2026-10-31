@@ -215,7 +215,8 @@ def gpudriven(binario, rel):
     cenas = [('Sponza', []), ('Cidade', ['--scene', 'city']), ('Cidade 30 quadras', ['--scene', 'city', '--city-blocks', '30']),
              ('Mundo 8 km', ['--scene', 'world']), ('Bistro', ['--scene', 'assets/Bistro/bistro.gltf'])]
     casos = [('tudo ligado', []), ('sem oclusão', ['--no-occlusion']), ('sem meshlets', ['--no-meshlets']),
-             ('sem culling', ['--no-gpu-culling', '--no-occlusion', '--no-meshlets'])]
+             ('sem HLOD', ['--no-hlod']),
+             ('sem culling', ['--no-gpu-culling', '--no-occlusion', '--no-meshlets', '--no-hlod'])]
     for cena, extra in cenas:
         ref = None
         for nome, args in casos:

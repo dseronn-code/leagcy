@@ -618,3 +618,19 @@ antes os três quadrados de cima mostravam "X"; agora mostram o mesmo "✓" da l
 quadrado igual à de baixo com 1–2 níveis de diferença, no motor e no path tracing de referência). Cenas sem cor por
 vértice: diferença máxima de 1 nível contra o build anterior.
 
+### HLOD e troca suave de nível (31/10)
+
+- **HLOD**: a cena marca o que nunca se move (`hlodCandidate`; a cidade marca tudo). No upload, os candidatos são
+  agrupados por célula de 128 m e material; cada grupo com 2+ objetos vira um proxy fundido no espaço do mundo (com
+  cor por vértice e espelhados tratados), simplificado para 1/4 quando passa de 2 mil triângulos. O culling da GPU
+  troca membros por proxy a 250 m da caixa da célula. Proxies ficam fora do TLAS e das shadow maps (luz, reflexos e
+  sombras sempre dos objetos reais) e são criados depois das luzes de malha. `--no-hlod` desliga.
+- **Troca suave**: numa faixa de 10% em volta de cada distância de troca (LOD 0→1→2 e membros→proxy) os dois níveis
+  desenham, com pontilhados complementares (o mesmo número aleatório por pixel decide quem fica, então nunca há
+  buraco nem pixel duplo), sorteados de novo a cada frame. A entrada da lista visível passou a guardar o objeto em
+  24 bits (máx. 16,7 milhões, com erro claro acima disso), 6 bits do pontilhado e 2 do nível.
+- **Medido**: cidade 30×30 vista de cima, HLOD ligado x desligado: diferença média 0,04 (máx. 12) com centenas de
+  proxies na tela. Câmera andando 24 quadros: só nos primeiros quadros (histórico curto do TAA) até 16 pixels acima
+  de 20 pelo ruído do pontilhado; depois máx. 10–15, média ≤ 0,05 — nenhum estalo. Oclusão continua diferença 0;
+  validação Vulkan limpa.
+

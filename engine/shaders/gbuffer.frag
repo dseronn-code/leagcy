@@ -25,6 +25,7 @@ layout(location = 7) flat in uint vMaterial;
 layout(location = 8) flat in uint vLod;
 layout(location = 9) in float vCoverage;
 layout(location = 10) in vec4 vColor;
+layout(location = 11) flat in uint vDither;
 
 // Anti-aliasing especular geométrico (Tokuyoshi & Kaplanyan, "Improved Geometric Specular
 // Antialiasing", I3D 2019): a variação da normal dentro do pixel alarga o lóbulo GGX, então
@@ -40,6 +41,13 @@ float filterRoughness(vec3 normal, float roughness, float normalVariance) {
 }
 
 void main() {
+  if ((vDither & 31u) != 0u) {
+    // Troca suave de nível: o mesmo número por pixel para quem sai e quem entra (pontilhados complementares, nenhum
+    // buraco nem pixel duplo), sorteado de novo a cada frame para o TAA/DLSS fazer a mistura.
+    float u = float(pcg3d(uvec3(uvec2(gl_FragCoord.xy), frame.frameInfo.x)).x) * (1.0 / 4294967296.0);
+    float t = float(vDither & 31u) / 32.0;
+    if ((vDither & 32u) != 0u ? u >= t : u < t) discard;
+  }
   Material m = materials[vMaterial];
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;  // materiais de dois lados

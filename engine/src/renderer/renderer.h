@@ -64,6 +64,7 @@ struct Settings {
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
+  bool hlod = true;              // proxies de HLOD ao longe, onde a cena montou (--no-hlod: sempre os membros)
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
@@ -204,6 +205,7 @@ class Renderer {
     uint32_t lod = 0, lodBase = 0;  // nível de detalhe (0 = completo) e o lote completo de origem
     bool blend = false;             // decals BLEND: segundo passe, misturado no G-buffer
     bool meshlets = false;          // malha rígida comum: desenhada por meshlets (gbuffer.task/.mesh) se houver suporte
+    bool hlodProxy = false;         // proxy de HLOD: só no G-buffer (as sombras usam os membros)
   };
   std::vector<DrawBatch> drawBatches_;
   rhi::Buffer drawList_;
@@ -217,6 +219,8 @@ class Renderer {
   // Meshlets: grupos de 32 meshlets por instância de cada lote (0 = lote no desenho indexado) e os argumentos do
   // vkCmdDrawMeshTasksIndirectEXT de cada fase.
   rhi::Buffer meshletGroups_, meshletArgs_[2];
+  // HLOD: célula de cada objeto (cull.comp, binding 7) e as caixas das células (binding 8).
+  rhi::Buffer hlodInfo_, hlodCells_;
   rhi::ComputePass meshletArgsPass_;
   VkPipeline gbufferMeshPipeline_ = VK_NULL_HANDLE;
   uint32_t drawEntries_ = 0;
