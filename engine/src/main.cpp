@@ -149,6 +149,7 @@ Options parseArgs(int argc, char** argv) {
       o.render.motionBlur = false;
       o.render.sharpness = 0.0f;
       o.scaleOverride = 1.0f;
+      o.textureStreaming = false;  // texturas inteiras desde o 1º frame acumulado (sem mips grossos no começo da média)
     }
     else if (a == "--no-energy-compensation") o.render.energyCompensation = false;
     else if (a == "--restir-no-reuse") {

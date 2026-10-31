@@ -36,7 +36,9 @@ def rodar(binario, args):
 
 
 def medir(binario, cena, pasta, extra=()):
-    base = CENAS[cena] + ['--exposure', EXPOSICAO[cena]] + list(extra)
+    # Texturas inteiras desde o 1º frame: a referência é um frame só, e com o streaming ele sairia com os mips grossos
+    # do início (albedo diferente dos frames do motor, que já subiram os finos: ~0,6% de viés falso na Sponza).
+    base = CENAS[cena] + ['--exposure', EXPOSICAO[cena], '--no-texture-streaming'] + list(extra)
     ref = os.path.join(pasta, f'{cena}_ref.png')
     if not os.path.exists(ref):
         rodar(binario, base + ['--debug-view', 'luzes-ref', '--frames', '1', '--out', ref])
