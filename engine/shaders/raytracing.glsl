@@ -29,10 +29,11 @@ bool alphaTestPasses(uint inst, uint prim, vec2 bary) {
   Material m = materials[d.material];
   if ((m.flags & MATERIAL_ALPHA_MASK) == 0u) return true;
   float a = m.baseColor.a;
+  IndexData ib = IndexData(d.indices);
+  uint i0 = ib.i[prim * 3u], i1 = ib.i[prim * 3u + 1u], i2 = ib.i[prim * 3u + 2u];
+  a *= interpolateVertexColor(d, i0, i1, i2, vec3(1.0 - bary.x - bary.y, bary.x, bary.y)).a;
   if (m.baseColorTex >= 0) {
-    IndexData ib = IndexData(d.indices);
     VertexData vb = VertexData(d.vertices);
-    uint i0 = ib.i[prim * 3u], i1 = ib.i[prim * 3u + 1u], i2 = ib.i[prim * 3u + 2u];
     vec2 uv = fetchVertexUV(vb, i0) * (1.0 - bary.x - bary.y) + fetchVertexUV(vb, i1) * bary.x + fetchVertexUV(vb, i2) * bary.y;
     a *= textureLod(textures[nonuniformEXT(m.baseColorTex)], uv, 0.0).a;
   }
@@ -88,6 +89,7 @@ struct HitInfo {
   vec3 N;   // normal de shading, virada contra o raio
   vec3 Ng;  // normal geométrica do triângulo, virada contra o raio
   vec2 uv;
+  vec4 color;  // cor por vértice interpolada
   uint material;
   float t;
 };
@@ -116,6 +118,7 @@ bool traceHit(vec3 origin, vec3 dir, float tMax, out HitInfo hit) {
   hit.N = normalize(normalMatrix * n);
   if (dot(hit.N, hit.Ng) < 0.0) hit.N = -hit.N;  // mesmo lado da faceta
   hit.uv = fetchVertexUV(vb, i0) * b0 + fetchVertexUV(vb, i1) * bary.x + fetchVertexUV(vb, i2) * bary.y;
+  hit.color = interpolateVertexColor(d, i0, i1, i2, vec3(b0, bary.x, bary.y));
   hit.t = rayQueryGetIntersectionTEXT(rq, true);
   hit.P = origin + dir * hit.t;
   hit.material = d.material;

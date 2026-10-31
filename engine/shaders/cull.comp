@@ -13,7 +13,8 @@ struct CullBatch {  // == CullBatch em renderer.cpp
   vec3 boundsMax;
   uint alwaysVisible;  // malha que se deforma (esqueleto, mar): sem teste de frustum
   float lodNear, lodFar;  // faixa de distância em que este nível de detalhe desenha o objeto
-  uint lod, pad;
+  uint lod;
+  float worldMargin;  // folga em metros do mundo (vento da folhagem)
 };
 struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
 layout(set = 1, binding = 0, std430) readonly buffer DrawList { uint drawList[]; };
@@ -21,7 +22,42 @@ layout(set = 1, binding = 1, std430) readonly buffer EntryBatch { uint entryBatc
 layout(set = 1, binding = 2, std430) readonly buffer Batches { CullBatch batches[]; };
 layout(set = 1, binding = 3, std430) buffer Commands { DrawCommand commands[]; };
 layout(set = 1, binding = 4, std430) writeonly buffer Culled { uint culled[]; };
-layout(push_constant) uniform Push { uint entryCount; uint enabled; } pc;
+// Oclusão em duas fases: fase 0 desenha o que estava visível no frame anterior; a fase 1 testa todos contra a
+// pirâmide de profundidade dessa primeira passada, desenha os que apareceram e atualiza a visibilidade.
+layout(set = 1, binding = 5, std430) buffer VisibleLast { uint visibleLast[]; };
+layout(set = 1, binding = 6) uniform sampler2D hiZ;  // profundidade mais distante por região (reverse-Z: min)
+layout(push_constant) uniform Push { uint entryCount; uint enabled; uint phase; uint occlusion; } pc;
+
+// Visível pela pirâmide: o ponto MAIS PERTO da caixa (maior z em reverse-Z) contra a profundidade MAIS DISTANTE já
+// desenhada no retângulo que a caixa cobre na tela (num nível em que ele cabe em 2x2 texels).
+bool notOccluded(CullBatch b, mat4 model) {
+  vec2 lo = vec2(1e9), hi = vec2(-1e9);
+  float nearest = 0.0;
+  for (int k = 0; k < 8; ++k) {
+    vec3 p = mix(b.boundsMin, b.boundsMax, vec3(k & 1, (k >> 1) & 1, (k >> 2) & 1));
+    vec4 c = frame.viewProjNoJitter * (model * vec4(p, 1.0));
+    if (c.w <= 1e-4) return true;  // cruza o plano da câmera: visível
+    vec3 n = c.xyz / c.w;
+    vec2 uv = n.xy * 0.5 + 0.5;
+    lo = min(lo, uv);
+    hi = max(hi, uv);
+    nearest = max(nearest, n.z);
+  }
+  lo = clamp(lo, 0.0, 1.0);
+  hi = clamp(hi, 0.0, 1.0);
+  vec2 size0 = vec2(textureSize(hiZ, 0));
+  vec2 extent = (hi - lo) * size0 + 2.0;  // + 1 texel de folga de cada lado (jitter do TAA)
+  float level = ceil(log2(max(max(extent.x, extent.y), 1.0)));
+  level = clamp(level, 0.0, float(textureQueryLevels(hiZ) - 1));
+  // Tamanho do nível pela regra do Vulkan (max(1, tamanho >> nível)), não por textureSize(hiZ, nível): no llvmpipe o
+  // textureSize com nível diferente entre invocações vizinhas devolvia o de outra (vasos do Sponza sumiam).
+  ivec2 sz = max(ivec2(size0) >> int(level), ivec2(1));
+  ivec2 a = clamp(ivec2(floor(lo * vec2(sz))) - 1, ivec2(0), sz - 1), z = clamp(ivec2(floor(hi * vec2(sz))) + 1, ivec2(0), sz - 1);
+  float farthest = 1.0;
+  for (int y = a.y; y <= z.y; ++y)
+    for (int x = a.x; x <= z.x; ++x) farthest = min(farthest, texelFetch(hiZ, ivec2(x, y), int(level)).r);
+  return nearest >= farthest;
+}
 
 bool visible(CullBatch b, mat4 model) {
   if (b.alwaysVisible != 0u || pc.enabled == 0u) return true;
@@ -55,7 +91,23 @@ void main() {
   float scale = max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz)));
   float d = distance((model * vec4(0.5 * (cb.boundsMin + cb.boundsMax), 1.0)).xyz, frame.cameraPos.xyz) / max(scale, 1e-6);
   if (d < cb.lodNear || d >= cb.lodFar) return;
-  if (!visible(cb, model)) return;
+  // Folga em metros → unidades da malha pela MENOR escala dos eixos (a caixa cresce pelo menos a folga em todo eixo).
+  float minScale = min(length(model[0].xyz), min(length(model[1].xyz), length(model[2].xyz)));
+  cb.boundsMin -= cb.worldMargin / max(minScale, 1e-6);
+  cb.boundsMax += cb.worldMargin / max(minScale, 1e-6);
+  bool inFrustum = visible(cb, model);
+  if (pc.phase == 0u) {
+    // Sem oclusão (ou desligada): tudo o que está no frustum vai na fase 0 e a fase 1 não desenha nada.
+    bool draw = inFrustum && (pc.occlusion == 0u || visibleLast[k] != 0u);
+    if (pc.occlusion == 0u) visibleLast[k] = inFrustum ? 1u : 0u;
+    if (!draw) return;
+  } else {
+    if (pc.occlusion == 0u) return;
+    bool vis = inFrustum && (cb.alwaysVisible != 0u || notOccluded(cb, model));
+    bool drawnBefore = visibleLast[k] != 0u;
+    visibleLast[k] = vis ? 1u : 0u;
+    if (!vis || drawnBefore) return;  // já desenhado na fase 0
+  }
   uint slot = atomicAdd(commands[b].instanceCount, 1u);
   culled[cb.first + slot] = object | (cb.lod << 30);  // nível nos 2 bits de cima (gbuffer.vert)
 }

@@ -70,7 +70,7 @@ struct InstanceData {  // == InstanceGpu em scene.cpp
   uint64_t indices;
   uint material;
   uint pad0;
-  uint64_t pad1;
+  uint64_t colors;  // cor por vértice (glTF COLOR_0, vec4 linear) ou 0
 };
 
 struct PointLight {  // == scene::PointLight (esfera/spot ou triângulo emissivo)
@@ -107,6 +107,15 @@ layout(buffer_reference, scalar) readonly buffer IndexData { uint i[]; };
 vec3 fetchVertexPosition(VertexData vb, uint i) { return vec3(vb.v[i * 12u], vb.v[i * 12u + 1u], vb.v[i * 12u + 2u]); }
 vec3 fetchVertexNormal(VertexData vb, uint i) { return vec3(vb.v[i * 12u + 3u], vb.v[i * 12u + 4u], vb.v[i * 12u + 5u]); }
 vec2 fetchVertexUV(VertexData vb, uint i) { return vec2(vb.v[i * 12u + 6u], vb.v[i * 12u + 7u]); }
+
+layout(buffer_reference, scalar) readonly buffer ColorData { vec4 c[]; };
+// Cor por vértice (multiplica a cor base e o alfa): branco se a malha não tem.
+vec4 fetchVertexColor(InstanceData d, uint i) { return d.colors != 0ul ? ColorData(d.colors).c[i] : vec4(1.0); }
+vec4 interpolateVertexColor(InstanceData d, uint i0, uint i1, uint i2, vec3 b) {
+  if (d.colors == 0ul) return vec4(1.0);
+  ColorData c = ColorData(d.colors);
+  return c.c[i0] * b.x + c.c[i1] * b.y + c.c[i2] * b.z;
+}
 
 // Janela suave que leva a influência da luz a zero no alcance (evita corte seco), vezes o cone do spot
 // (KHR_lights_punctual), avaliado na direção do centro da luz até P.

@@ -21,11 +21,18 @@ VkShaderModule loadShader(Context& ctx, const std::string& name) {
 }
 
 VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
-  VkShaderModule vs = loadShader(ctx, d.vertexShader);
-  VkShaderModule fs = loadShader(ctx, d.fragmentShader);
-  VkPipelineShaderStageCreateInfo stages[2]{};
-  stages[0] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "main"};
-  stages[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, fs, "main"};
+  std::vector<VkPipelineShaderStageCreateInfo> stages;
+  auto stage = [&](VkShaderStageFlagBits bit, const std::string& name) {
+    stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, bit, loadShader(ctx, name), "main"});
+  };
+  const bool mesh = !d.meshShader.empty();
+  if (mesh) {
+    if (!d.taskShader.empty()) stage(VK_SHADER_STAGE_TASK_BIT_EXT, d.taskShader);
+    stage(VK_SHADER_STAGE_MESH_BIT_EXT, d.meshShader);
+  } else {
+    stage(VK_SHADER_STAGE_VERTEX_BIT, d.vertexShader);
+  }
+  stage(VK_SHADER_STAGE_FRAGMENT_BIT, d.fragmentShader);
 
   VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
   vi.vertexBindingDescriptionCount = uint32_t(d.vertexBindings.size());
@@ -82,10 +89,10 @@ VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
 
   VkGraphicsPipelineCreateInfo pi{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
   pi.pNext = &ri;
-  pi.stageCount = 2;
-  pi.pStages = stages;
-  pi.pVertexInputState = &vi;
-  pi.pInputAssemblyState = &ia;
+  pi.stageCount = uint32_t(stages.size());
+  pi.pStages = stages.data();
+  pi.pVertexInputState = mesh ? nullptr : &vi;
+  pi.pInputAssemblyState = mesh ? nullptr : &ia;
   pi.pViewportState = &vp;
   pi.pRasterizationState = &rs;
   pi.pMultisampleState = &ms;
@@ -95,8 +102,7 @@ VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
   pi.layout = d.layout;
   VkPipeline p;
   VK_CHECK(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pi, nullptr, &p));
-  vkDestroyShaderModule(ctx.device, vs, nullptr);
-  vkDestroyShaderModule(ctx.device, fs, nullptr);
+  for (const auto& st : stages) vkDestroyShaderModule(ctx.device, st.module, nullptr);
   return p;
 }
 

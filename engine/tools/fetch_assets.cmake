@@ -3,7 +3,7 @@
 # Os arquivos não vão para o git (ver .gitignore).
 
 set(BASE "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models")
-set(MODELS Sponza DamagedHelmet Fox CesiumMan)
+set(MODELS Sponza DamagedHelmet Fox CesiumMan VertexColorTest)
 get_filename_component(ROOT "${CMAKE_CURRENT_LIST_DIR}/../assets" ABSOLUTE)
 
 function(download url dest)

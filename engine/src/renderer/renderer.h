@@ -62,6 +62,8 @@ struct Settings {
   bool motionBlur = true;
   bool shadowMaps = false;  // shadow maps em cascata mesmo com ray tracing (sem RT eles são sempre usados)
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
+  bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
+  bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
@@ -201,11 +203,22 @@ class Renderer {
     bool doubleSided, mirrored;  // glTF doubleSided: sem culling | transformação espelhada: frente invertida
     uint32_t lod = 0, lodBase = 0;  // nível de detalhe (0 = completo) e o lote completo de origem
     bool blend = false;             // decals BLEND: segundo passe, misturado no G-buffer
+    bool meshlets = false;          // malha rígida comum: desenhada por meshlets (gbuffer.task/.mesh) se houver suporte
   };
   std::vector<DrawBatch> drawBatches_;
   rhi::Buffer drawList_;
   // Culling na GPU: lote de cada entrada, caixas por lote, comandos indiretos e a lista visível compactada.
   rhi::Buffer entryBatch_, cullBatches_, drawCommands_, culledList_;
+  // Oclusão (duas fases): comandos/lista da fase 1, visibilidade do frame anterior por entrada, pirâmide de profundidade.
+  rhi::Buffer drawCommands2_, culledList2_, visibleLast_;
+  rhi::Image hiZ_;
+  std::vector<VkImageView> hiZMips_;
+  rhi::ComputePass hiZBuildPass_;
+  // Meshlets: grupos de 32 meshlets por instância de cada lote (0 = lote no desenho indexado) e os argumentos do
+  // vkCmdDrawMeshTasksIndirectEXT de cada fase.
+  rhi::Buffer meshletGroups_, meshletArgs_[2];
+  rhi::ComputePass meshletArgsPass_;
+  VkPipeline gbufferMeshPipeline_ = VK_NULL_HANDLE;
   uint32_t drawEntries_ = 0;
   rhi::ComputePass cullPass_, cullResetPass_, clothPass_;
   // Multidões: endereços dos vértices de cada pose assada (set 0, binding 22) e onde começa cada clipe.

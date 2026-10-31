@@ -163,14 +163,15 @@ Surface evalWater(vec3 P) {
   return s;
 }
 
-Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv) {
+// vertexColor: cor por vértice interpolada (glTF COLOR_0; branco se a malha não tem).
+Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexColor) {
   if ((m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
   if (m.uvRotation != 0.0 || m.uvScale != vec2(1.0) || m.uvOffset != vec2(0.0)) {  // KHR_texture_transform
     float c = cos(m.uvRotation), sn = sin(m.uvRotation);
     uv = mat2(c, sn, -sn, c) * (uv * m.uvScale) + m.uvOffset;  // mesma matriz do README da Khronos (colunas)
   }
   Surface s;
-  vec4 base = m.baseColor;
+  vec4 base = m.baseColor * vertexColor;
   if (m.baseColorTex >= 0) base *= MATERIAL_SAMPLE(m.baseColorTex, uv);
   s.alpha = base.a;
   s.emissive = m.emissive;

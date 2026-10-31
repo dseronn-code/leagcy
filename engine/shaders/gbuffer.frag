@@ -24,6 +24,7 @@ layout(location = 6) flat in uint vObject;
 layout(location = 7) flat in uint vMaterial;
 layout(location = 8) flat in uint vLod;
 layout(location = 9) in float vCoverage;
+layout(location = 10) in vec4 vColor;
 
 // Anti-aliasing especular geométrico (Tokuyoshi & Kaplanyan, "Improved Geometric Specular
 // Antialiasing", I3D 2019): a variação da normal dentro do pixel alarga o lóbulo GGX, então
@@ -42,7 +43,7 @@ void main() {
   Material m = materials[vMaterial];
   vec3 N = normalize(vNormal);
   if (!gl_FrontFacing) N = -N;  // materiais de dois lados
-  Surface s = evalMaterial(m, vWorldPos, N, vTangent, vUV);
+  Surface s = evalMaterial(m, vWorldPos, N, vTangent, vUV, vColor);
   // Misturados (decals BLEND): sem recorte, o alfa vai para a mistura (pipeline de decals: .a de cada anexo).
   bool blend = (m.flags & MATERIAL_BLEND) != 0u;
   // Cabelo mais fino que o pixel: transparência estocástica (o TAA/DLSS faz a média entre frames).

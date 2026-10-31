@@ -127,6 +127,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-lens-flare") o.render.lensFlare = 0.0f;
     else if (a == "--shadow-maps") o.render.shadowMaps = true;
     else if (a == "--no-gpu-culling") o.render.gpuCulling = false;
+    else if (a == "--no-occlusion") o.render.occlusionCulling = false;
+    else if (a == "--no-meshlets") o.render.meshlets = false;
     else if (a == "--no-radiance-cache") o.render.radianceCache = false;
     else if (a == "--no-virtual-motion") o.render.virtualMotion = false;  // medição do SVGF
     else if (a == "--reference" || a == "--reference-pt") {  // verdade por acumulação: sem denoiser, TAA, upscaling nem blur

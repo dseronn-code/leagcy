@@ -7,15 +7,16 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 
 namespace scene {
 
 namespace {
 // Espelhado em shaders/scene.glsl (InstanceData).
-struct InstanceGpu {
+struct InstanceGpu {  // == InstanceData em shaders/scene.glsl
   uint64_t vertices, indices;
   uint32_t material, pad0;
-  uint64_t pad1;
+  uint64_t colors;  // cor por vértice (COLOR_0) ou 0
 };
 static_assert(sizeof(InstanceGpu) == 32);
 
@@ -144,6 +145,35 @@ void Scene::rebuildTlasLayout() {
   ++tlasLayout_;
 }
 
+namespace {
+// Meshlets de uma malha rígida (com mesh shaders), num bloco só: [Meshlet × n][vértices][triângulos]. Preenche os
+// contadores da malha; vazio sem mesh shaders ou para malha deformável.
+std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const MeshData& data) {
+  if (!ctx.meshShaders || data.clothWidth > 0 || !data.joints.empty() || data.indices.empty()) return {};
+  const MeshletData md = buildMeshlets(data);
+  std::vector<uint32_t> blob(md.meshlets.size() * (sizeof(Meshlet) / 4));
+  std::memcpy(blob.data(), md.meshlets.data(), md.meshlets.size() * sizeof(Meshlet));
+  gm.meshletCount = uint32_t(md.meshlets.size());
+  gm.meshletVertexBase = uint32_t(blob.size());
+  blob.insert(blob.end(), md.vertices.begin(), md.vertices.end());
+  gm.meshletTriangleBase = uint32_t(blob.size());
+  blob.insert(blob.end(), md.triangles.begin(), md.triangles.end());
+  return blob;
+}
+VkDeviceSize uploadColors(rhi::Context& ctx, GpuMesh& gm, const MeshData& data) {
+  if (data.colors.empty()) return 0;
+  gm.colors = rhi::createBufferWithData(ctx, data.colors.data(), data.colors.size() * sizeof(glm::vec4),
+                                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+  return gm.colors.size;
+}
+VkDeviceSize uploadMeshlets(rhi::Context& ctx, GpuMesh& gm, const std::vector<uint32_t>& blob) {
+  if (blob.empty()) return 0;
+  gm.meshlets = rhi::createBufferWithData(ctx, blob.data(), blob.size() * sizeof(uint32_t),
+                                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+  return gm.meshlets.size;
+}
+}  // namespace
+
 void Scene::makeResident(uint32_t mi) {
   rhi::Context& ctx = *ctx_;
   GpuMesh& gm = meshes[mi];
@@ -158,7 +188,8 @@ void Scene::makeResident(uint32_t mi) {
     gm.blas = rhi::buildBlas(ctx, in, false);
   }
   gm.resident = true;
-  residentBytes_ += vbytes + ibytes + (ctx.rayTracing ? gm.blas.storage.size : 0);
+  residentBytes_ += vbytes + ibytes + (ctx.rayTracing ? gm.blas.storage.size : 0) + uploadMeshlets(ctx, gm, streamMeshlets_[mi]) +
+                    uploadColors(ctx, gm, data);
   for (uint32_t o : objectsOfMesh_[mi]) {
     instanceUpdates_.push_back(o);  // endereços novos da malha no buffer de instâncias
     // Reescreve o objeto na GPU neste frame (visível de novo). Direto em changed_: stream() roda depois de update(),
@@ -192,8 +223,10 @@ bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
       continue;
     }
     GpuMesh& gm = meshes[p.mesh];
-    residentBytes_ -= gm.vertices.size + gm.indices.size + (ctx.rayTracing ? gm.blas.storage.size : 0);
+    residentBytes_ -= gm.vertices.size + gm.indices.size + (ctx.rayTracing ? gm.blas.storage.size : 0) + gm.meshlets.size + gm.colors.size;
     rhi::destroyBuffer(ctx, gm.vertices);
+    rhi::destroyBuffer(ctx, gm.meshlets);
+    rhi::destroyBuffer(ctx, gm.colors);
     rhi::destroyBuffer(ctx, gm.indices);
     if (ctx.rayTracing) rhi::destroyAccel(ctx, gm.blas);
     pendingDestroy_[k] = pendingDestroy_.back();
@@ -538,6 +571,7 @@ void Scene::upload(rhi::Context& ctx) {
   ctx_ = &ctx;
   meshCellPending_.resize(cpuMeshes_.size(), -1);
   streamData_.resize(cpuMeshes_.size());
+  streamMeshlets_.resize(cpuMeshes_.size());
   for (auto& data : cpuMeshes_) {
     GpuMesh gm;
     const size_t meshIndex = meshes.size();
@@ -554,6 +588,7 @@ void Scene::upload(rhi::Context& ctx) {
         gm.boundsMax = glm::max(gm.boundsMax, v.position);
       }
       triangles += data.indices.size() / 3;
+      streamMeshlets_[meshIndex] = meshletBlob(ctx, gm, data);
       streamData_[meshIndex] = std::move(data);
       meshes.push_back(gm);
       continue;
@@ -608,6 +643,8 @@ void Scene::upload(rhi::Context& ctx) {
       }
     }
     triangles += data.indices.size() / 3;
+    uploadMeshlets(ctx, gm, meshletBlob(ctx, gm, data));
+    uploadColors(ctx, gm, data);
     gm.boundsMin = glm::vec3(1e30f);
     gm.boundsMax = glm::vec3(-1e30f);
     for (const auto& v : data.vertices) {
@@ -705,7 +742,7 @@ void Scene::upload(rhi::Context& ctx) {
   std::vector<InstanceGpu> inst;
   for (auto& o : objects) {
     InstanceGpu g{0, 0, o.material, 0, 0};
-    instanceAddresses(o.mesh, g.vertices, g.indices);
+    instanceAddresses(o.mesh, g.vertices, g.indices, g.colors);
     inst.push_back(g);
   }
   // TRANSFER_DST: o streaming reescreve os endereços das malhas que entram (Renderer::updateDynamicScene).
@@ -733,7 +770,8 @@ void Scene::upload(rhi::Context& ctx) {
 void Scene::destroy(rhi::Context& ctx) {
   if (ctx.rayTracing) tlas.destroy();
   for (auto& m : meshes) {
-    for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices, &m.clothPos, &m.clothPrev})
+    for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices, &m.clothPos, &m.clothPrev,
+                           &m.meshlets, &m.colors})
       rhi::destroyBuffer(ctx, *b);
     if (ctx.rayTracing) rhi::destroyAccel(ctx, m.blas);
   }

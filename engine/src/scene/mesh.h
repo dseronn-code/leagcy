@@ -18,6 +18,8 @@ static_assert(sizeof(Vertex) == 48);
 struct MeshData {
   std::vector<Vertex> vertices;
   std::vector<uint32_t> indices;
+  // Cor por vértice (glTF COLOR_0, linear; multiplica a cor base e o alfa). Vazio = branco.
+  std::vector<glm::vec4> colors;
   // Skinning (opcional): até 4 juntas por vértice, índices relativos à skin do modelo.
   std::vector<glm::uvec4> joints;
   std::vector<glm::vec4> weights;
@@ -36,6 +38,29 @@ struct MeshData {
 // Simplification of Large Polygonal Models") — preserva quinas e silhuetas melhor que a média simples. Normais e UVs
 // pela média do grupo, separados por lado da normal (não junta frente com verso de uma parede fina).
 MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles);
+
+// Meshlets (pedaços de até 64 vértices e 124 triângulos) para os mesh shaders do G-buffer. Os triângulos de cada um são
+// um trecho CONTÍNUO da lista de índices original, na mesma ordem: o gl_PrimitiveID (firstTriangle + i) é o mesmo do
+// desenho indexado e o ray tracing/visibility buffer continuam valendo. Cada meshlet leva esfera envolvente e cone das
+// normais (Wihlidal 2016; teste como no meshoptimizer) para o task shader descartar os fora da tela ou de costas.
+struct Meshlet {  // == Meshlet em shaders/meshlet.glsl (48 bytes)
+  glm::vec3 center;
+  float radius;
+  glm::vec3 coneAxis;
+  float coneCutoff;        // seno do meio-ângulo do cone (1 = nunca descartar por estar de costas)
+  uint32_t vertexOffset;   // em MeshletData::vertices
+  uint32_t triangleOffset; // em MeshletData::triangles (um uint por triângulo: 3 índices locais de 8 bits)
+  uint32_t counts;         // vértices | triângulos << 8
+  uint32_t firstTriangle;  // primeiro triângulo na lista de índices original
+};
+static_assert(sizeof(Meshlet) == 48);
+struct MeshletData {
+  std::vector<Meshlet> meshlets;
+  std::vector<uint32_t> vertices;   // índice do vértice da malha
+  std::vector<uint32_t> triangles;  // índices locais empacotados
+};
+constexpr uint32_t kMeshletMaxVertices = 64, kMeshletMaxTriangles = 124;
+MeshletData buildMeshlets(const MeshData& mesh);
 
 // Cabelo por fios: `strands` fios com `segments` segmentos nascendo na calota de cima de uma esfera de raio
 // `scalpRadius` (origem no centro), comprimento `length` (m), curvados pela gravidade. Cada segmento é uma fita: os

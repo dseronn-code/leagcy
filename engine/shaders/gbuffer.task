@@ -1,0 +1,31 @@
+#version 460
+// Task shader do G-buffer com meshlets: cada grupo testa 32 meshlets de uma instância visível (a lista compactada do
+// culling por objeto) e lança um grupo do mesh shader por meshlet que sobrevive.
+#extension GL_EXT_mesh_shader : require
+#extension GL_GOOGLE_include_directive : require
+#include "meshlet.glsl"
+
+layout(local_size_x = 32) in;
+taskPayloadSharedEXT MeshletTask task;
+shared uint keepMask;
+
+void main() {
+  DrawCommand cmd = DrawCommands(pc.commands).c[pc.batch];
+  uint groupsPerInstance = (pc.meshletCount + MESHLET_GROUP - 1u) / MESHLET_GROUP;
+  uint group = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+  uint slot = group / groupsPerInstance, lane = gl_LocalInvocationIndex;
+  uint m = (group % groupsPerInstance) * MESHLET_GROUP + lane;
+  if (lane == 0u) keepMask = 0u;
+  barrier();
+  bool live = slot < cmd.instanceCount;
+  uint entry = live ? DrawList(pc.drawList).objects[cmd.firstInstance + slot] : 0u;
+  bool keep = live && m < pc.meshletCount &&
+              meshletVisible(MeshletList(pc.meshlets).m[m], objects[entry & 0x3FFFFFFFu].model);
+  if (keep) atomicOr(keepMask, 1u << lane);
+  barrier();
+  // Compactação na ordem original (posição = quantos antes dele sobreviveram).
+  uint mask = keepMask;
+  if (keep) task.meshlets[bitCount(mask & ((1u << lane) - 1u))] = m;
+  if (lane == 0u) task.entry = entry;
+  EmitMeshTasksEXT(uint(bitCount(mask)), 1u, 1u);
+}

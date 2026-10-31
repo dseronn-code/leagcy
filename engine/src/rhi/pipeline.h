@@ -12,6 +12,9 @@ VkShaderModule loadShader(Context& ctx, const std::string& name);  // nome relat
 struct GraphicsPipelineDesc {
   std::string vertexShader;
   std::string fragmentShader;
+  // Mesh shaders (VK_EXT_mesh_shader): com meshShader, task (opcional) + mesh no lugar do vertex shader, sem entrada
+  // de vértices.
+  std::string taskShader, meshShader;
   VkPipelineLayout layout = VK_NULL_HANDLE;
   std::vector<VkVertexInputBindingDescription> vertexBindings;
   std::vector<VkVertexInputAttributeDescription> vertexAttributes;

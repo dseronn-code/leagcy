@@ -567,5 +567,54 @@ bateria na RTX (`python tools\teste_pc.py`, com a nova seção "galeria").
 | Assets | KHR_texture_transform, decals procedurais | — |
 
 Pendências conhecidas: MikkTSpace de referência (o download da biblioteca foi barrado pela política de permissões do
-ambiente — precisa de aprovação), COLOR_0, HLOD, oclusão HiZ, terreno por clipmaps, carregamento assíncrono do
+ambiente — precisa de aprovação), COLOR_0, HLOD, terreno por clipmaps, carregamento assíncrono do
 disco, streaming de texturas, Marschner completo e física dos fios, vista subaquática.
+
+### 30–31/10 — oclusão HiZ em duas fases (e dois bugs que ela revelou)
+
+Fase 0 desenha o que estava visível no frame anterior; uma pirâmide de profundidade (HiZ, a mais distante por região)
+é montada dessa passada; a fase 1 testa todos contra ela, desenha os que apareceram e guarda a visibilidade. Conferido
+pela imagem: diferença **0** com e sem (`--no-occlusion`) na Sponza parada (com e sem LOD) e na cidade andando,
+validação Vulkan limpa. Antes de chegar ao 0 o A/B mostrou vasos com plantas da Sponza piscando, por duas causas:
+
+- **Folga do vento na unidade errada** (bug que já afetava o culling por frustum): a folga de 0,6 era somada à caixa
+  em unidades da malha; o Sponza tem escala 0,008, então valia 5 mm, e o vento empurra a folhagem até ~1,1 m. Agora a
+  folga é em metros do mundo, convertida pela menor escala do objeto no próprio shader.
+- **`textureSize(hiZ, nível)` com nível diferente entre invocações vizinhas** devolvia, no llvmpipe, o tamanho de
+  outro nível (achado isolando: com qualquer nível fixo 0–8 o erro sumia; com o nível calculado, voltava). O tamanho
+  agora sai da regra do Vulkan (max(1, tamanho >> nível)), idêntica pela especificação e sem depender do driver.
+
+Ganho no llvmpipe: −10% no G-buffer da cidade (aqui o custo é quase todo de pixel; o ganho real se mede na RTX).
+
+### Meshlets por mesh shader (31/10)
+
+Malhas rígidas com ≥ 8 meshlets (~1.000 triângulos) são desenhadas por `VK_EXT_mesh_shader` (llvmpipe e RTX 3070 Ti
+têm): cada meshlet tem até 64 vértices e 124 triângulos, num trecho contínuo da lista de índices (o `gl_PrimitiveID`
+continua o do triângulo original, então visibility buffer, luzes de malha e ray tracing não mudam). O task shader
+testa 32 meshlets por instância visível (fora dos 4 planos laterais com 1 pixel de folga pelo jitter; todos os
+triângulos de costas pelo cone das normais, só com escala uniforme) e mantém a ordem original dos que sobram. Vento,
+cabelo, mar, multidão, esqueleto, tecido e decals continuam no desenho indexado. `--no-meshlets` desliga.
+
+- **A/B** (meshlets x indexado, mesma configuração): Sponza parada, cidade andando, streaming, mundo de 8 km e
+  Bistro — diferença média ≤ 0,15 nível de 255, e só 2 pixels acima de 20 (pontos das lâmpadas no Bistro); nenhum
+  objeto ou triângulo falta. A sobra é arredondamento: o llvmpipe compila as mesmas contas de outro jeito no estágio
+  mesh. Validação Vulkan limpa (Sponza, cidade, mundo).
+- **Bug do llvmpipe (Mesa 25.2)**: um desenho indexado logo depois de um por mesh shader, na mesma passada de
+  renderização, derruba o processo (achado isolando: até um `vkCmdDrawMeshTasksEXT(0, 1, 1)` com shaders vazios
+  derrubava; só meshlets não). Os lotes por meshlets agora vêm depois de todos os indexados (também é uma troca de
+  pipeline a menos por passada).
+- **Desempenho**: no llvmpipe (CPU) a Sponza ganhou, e malhas pequenas repetidas perderam — daí o mínimo de 8
+  meshlets por malha. O número que vale é o da RTX: `python tools\teste_pc.py --so gpudriven` (tudo ligado, sem
+  oclusão, sem meshlets, sem culling, em 5 cenas, com a diferença de imagem de cada um).
+
+### Cor por vértice — `COLOR_0` (31/10)
+
+O glTF pode trazer uma cor por vértice que multiplica a cor base e o alfa. Agora ela é lida (vec3/vec4, float ou
+inteiro normalizado), vai num buffer separado por malha (o vértice continua com 48 bytes; o endereço fica no campo
+livre da instância, 0 = sem cor) e chega a todos os caminhos: G-buffer (vertex e mesh shader), reconstrução exata do
+pixel pelo visibility buffer, raios de reflexo/GI/path tracing, recorte por alfa nos raios e nas shadow maps, e LOD
+(média por grupo). Teste: o modelo oficial **VertexColorTest** da Khronos (agora em `tools/fetch_assets.cmake`) —
+antes os três quadrados de cima mostravam "X"; agora mostram o mesmo "✓" da linha de referência (média de cor por
+quadrado igual à de baixo com 1–2 níveis de diferença, no motor e no path tracing de referência). Cenas sem cor por
+vértice: diferença máxima de 1 nível contra o build anterior.
+

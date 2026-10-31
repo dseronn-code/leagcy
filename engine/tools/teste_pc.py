@@ -209,6 +209,30 @@ def movimento(binario, rel):
         rel.append(f'{grupo}: {" | ".join(n for n, _ in casos)} -> {grupo}_comparacao.png')
 
 
+def gpudriven(binario, rel):
+    """Culling GPU-driven: oclusão HiZ e meshlets ligados x desligados (tempo do G-buffer e imagem igual)."""
+    rel.append('\n== GPU-driven (1920x1080, 120 frames andando; "gbuffer" = ms da passada na GPU; dif = maior diferença de pixel)')
+    cenas = [('Sponza', []), ('Cidade', ['--scene', 'city']), ('Cidade 30 quadras', ['--scene', 'city', '--city-blocks', '30']),
+             ('Mundo 8 km', ['--scene', 'world']), ('Bistro', ['--scene', 'assets/Bistro/bistro.gltf'])]
+    casos = [('tudo ligado', []), ('sem oclusão', ['--no-occlusion']), ('sem meshlets', ['--no-meshlets']),
+             ('sem culling', ['--no-gpu-culling', '--no-occlusion', '--no-meshlets'])]
+    for cena, extra in cenas:
+        ref = None
+        for nome, args in casos:
+            arq = os.path.join(PASTA, 'gpudriven.png')
+            code, out = rodar(binario, ['--headless', '--width', '1920', '--height', '1080', '--frames', '120', '--move', '2',
+                                        '--out', arq] + extra + args)
+            if code:
+                rel.append(f'{cena} / {nome}: ERRO código {code}')
+                continue
+            gb = linha(out, r'gbuffer [0-9.]+')
+            ms = linha(out, r'[0-9.]+ ms/frame')
+            img = np.asarray(Image.open(arq).convert('RGB')).astype(int)
+            dif = '' if ref is None else f', dif {int(np.abs(img - ref).max())}'
+            ref = img if ref is None else ref
+            rel.append(f'{cena} / {nome}: {ms}, {gb}{dif}')
+
+
 def main():
     for f in (sys.stdout, sys.stderr):
         f.reconfigure(encoding='utf-8', errors='replace')
@@ -220,7 +244,8 @@ def main():
     rel.append(linha(out, r'GPU: [^\n]*') or 'GPU: ?')
     rel.append('DLSS: ' + (linha(out, r'DLSS (ativo|indispon)[^\n]*') or '?'))
 
-    # --so secao1,secao2: só algumas seções (suite, desempenho, nitidez, denoisers, reflexos, luzes, galeria, movimento).
+    # --so secao1,secao2: só algumas seções (suite, desempenho, nitidez, denoisers, reflexos, luzes, galeria, movimento,
+    # gpudriven).
     so = None
     if '--so' in sys.argv:
         so = set(sys.argv[sys.argv.index('--so') + 1].split(','))
@@ -230,7 +255,8 @@ def main():
         print('suíte de testes...', flush=True)
         suite(binario, rel)
     etapas = [('desempenho', desempenho), ('nitidez', nitidez), ('denoisers', denoisers), ('denoisers', texturas),
-              ('reflexos', reflexos), ('luzes', luzes), ('galeria', galeria), ('movimento', movimento)]
+              ('reflexos', reflexos), ('luzes', luzes), ('galeria', galeria), ('movimento', movimento),
+              ('gpudriven', gpudriven)]
     for nome, f in etapas:
         if quer(nome):
             print(f'{nome}...', flush=True)
