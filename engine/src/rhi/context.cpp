@@ -259,7 +259,71 @@ void Context::createDevice(VkSurfaceKHR surface) {
   LOG_INFO("Mesh shaders: %s", meshShaders ? "SIM" : "não");
 }
 
+void Context::beginDeferred() {
+  if (deferredCmd_) return;
+  VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+  ai.commandPool = uploadPool_;
+  ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  ai.commandBufferCount = 1;
+  VK_CHECK(vkAllocateCommandBuffers(device, &ai, &deferredCmd_));
+  VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+  bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  VK_CHECK(vkBeginCommandBuffer(deferredCmd_, &bi));
+}
+
+void Context::endDeferred() {
+  if (!deferredCmd_) return;
+  VK_CHECK(vkEndCommandBuffer(deferredCmd_));
+  VkFenceCreateInfo fci{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  VkFence fence;
+  VK_CHECK(vkCreateFence(device, &fci, nullptr, &fence));
+  VkCommandBufferSubmitInfo cbi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+  cbi.commandBuffer = deferredCmd_;
+  VkSubmitInfo2 si{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  si.commandBufferInfoCount = 1;
+  si.pCommandBufferInfos = &cbi;
+  // Mesma fila do frame: o frame seguinte começa com uma barreira de todos os comandos (escopo inclui os envios
+  // anteriores na fila), então já vê os dados copiados.
+  VK_CHECK(vkQueueSubmit2(queue, 1, &si, fence));
+  inFlight_.push_back({fence, deferredCmd_, std::move(deferredRetire_)});
+  deferredRetire_.clear();
+  deferredCmd_ = VK_NULL_HANDLE;
+}
+
+void Context::retire(std::function<void()> fn) {
+  if (deferredCmd_) deferredRetire_.push_back(std::move(fn));
+  else fn();
+}
+
+void Context::collectFinished(bool wait) {
+  for (size_t k = 0; k < inFlight_.size();) {
+    DeferredBatch& b = inFlight_[k];
+    if (wait) VK_CHECK(vkWaitForFences(device, 1, &b.fence, VK_TRUE, UINT64_MAX));
+    if (vkGetFenceStatus(device, b.fence) != VK_SUCCESS) {
+      ++k;
+      continue;
+    }
+    for (auto& fn : b.retire) fn();
+    vkDestroyFence(device, b.fence, nullptr);
+    vkFreeCommandBuffers(device, uploadPool_, 1, &b.cmd);
+    inFlight_[k] = std::move(inFlight_.back());
+    inFlight_.pop_back();
+  }
+}
+
 void Context::immediateSubmit(const std::function<void(VkCommandBuffer)>& record) {
+  if (deferredCmd_) {
+    record(deferredCmd_);
+    VkMemoryBarrier2 b{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    b.srcStageMask = b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    b.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    b.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(deferredCmd_, &dep);
+    return;
+  }
   VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
   ai.commandPool = uploadPool_;
   ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -286,6 +350,8 @@ void Context::immediateSubmit(const std::function<void(VkCommandBuffer)>& record
 void Context::destroy() {
   if (!device) return;
   vkDeviceWaitIdle(device);
+  endDeferred();
+  collectFinished(true);
   vkDestroyFence(device, uploadFence_, nullptr);
   vkDestroyCommandPool(device, uploadPool_, nullptr);
   vmaDestroyAllocator(allocator);

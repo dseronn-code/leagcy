@@ -98,7 +98,7 @@ AccelStructure buildBlas(Context& ctx, const BlasInput& in, bool allowUpdate) {
   VkAccelerationStructureBuildRangeInfoKHR range{primitives, 0, 0, 0};
   const VkAccelerationStructureBuildRangeInfoKHR* ranges = &range;
   ctx.immediateSubmit([&](VkCommandBuffer cmd) { ctx.rt.vkCmdBuildAccelerationStructuresKHR(cmd, 1, &build, &ranges); });
-  destroyBuffer(ctx, scratch);
+  ctx.retire([&ctx, scratch]() mutable { destroyBuffer(ctx, scratch); });
   return as;
 }
 

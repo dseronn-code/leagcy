@@ -391,6 +391,7 @@ void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint
     }
   }
   if (texturePack_.empty()) return;
+  ctx.beginDeferred();  // subidas e descidas de nível sem esperar a GPU (o 2º beginDeferred abaixo não faz nada)
   // Nível pedido: o mais grosso que ainda tem os texels que a tela pediu.
   struct Want {
     float priority;
@@ -420,8 +421,10 @@ void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint
       ts.idleFrames = 0;
     }
   }
-  // Sobe primeiro as que mais ganham (maior salto de resolução), até o orçamento do frame.
+  // Sobe primeiro as que mais ganham (maior salto de resolução), até o orçamento do frame — num lote enviado sem
+  // esperar a GPU.
   std::sort(up.begin(), up.end(), [](const Want& a, const Want& b) { return a.priority > b.priority; });
+  ctx.beginDeferred();
   double budget = double(textureStreamBudgetMB) * 1048576.0;
   for (const Want& w : up) {
     TextureStream& ts = textureStreams[w.texture];
@@ -434,6 +437,8 @@ void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint
     budget -= double(bytes);
     ++texturesVersion;
   }
+  ctx.endDeferred();
+  ctx.collectFinished();
 }
 
 void Scene::makeResident(uint32_t mi, const MeshData& data, const std::vector<uint32_t>& meshlets) {
@@ -471,6 +476,7 @@ void Scene::evict(uint32_t mi) {
 
 bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
   bool changed = false;
+  ctx.collectFinished();  // libera staging/scratch dos envios adiados que a GPU já terminou
   // Destruições adiadas: só quando nenhum frame em voo usa mais a malha.
   for (size_t k = 0; k < pendingDestroy_.size();) {
     PendingDestroy& p = pendingDestroy_[k];
@@ -540,6 +546,8 @@ bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
     });
   }
   double budget = double(streamBudgetMB) * 1048576.0;
+  // Cópias e BLAS das células num lote só, enviado sem esperar a GPU (a thread principal segue para o frame).
+  ctx.beginDeferred();
   for (const auto& [d, c] : toLoad) {
     auto it = loadedCells_.find(c);
     if (it == loadedCells_.end()) continue;  // ainda no disco
@@ -554,6 +562,7 @@ bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
     budget -= double(bytes);
     changed = true;
   }
+  ctx.endDeferred();
   // Lidas mas não mais desejadas (a câmera se afastou antes de subir): descarta, um novo pedido relê.
   for (auto it = loadedCells_.begin(); it != loadedCells_.end();) {
     const StreamCell& cell = streamCells[it->first];
