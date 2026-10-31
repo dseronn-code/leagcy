@@ -269,8 +269,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
   if ((m.flags & MATERIAL_TERRAIN) != 0u) {
     for (int k = 0; k < 4; ++k) rayTextureRequest(terrainLayers.albedo[k]);
   } else {
-    rayTextureRequest(m.baseColorTex);
-    rayTextureRequest(m.normalTex);
+    rayTextureRequest(m.baseColorTex);  // (o normal map não: nos raios ele não é lido — tangente zero)
     rayTextureRequest(m.metalRoughTex);
     rayTextureRequest(m.emissiveTex);
     rayTextureRequest(m.occlusionTex);
