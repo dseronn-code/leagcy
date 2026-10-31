@@ -667,3 +667,17 @@ de 17 de 255 de diferença ainda no frame 29).
   em volta do barco e do caminho dele (esteira em V, anéis, onda de proa); a primeira versão (só afundar) fazia uma
   faixa escura em vez de ondas. Validação Vulkan limpa.
 
+### Streaming de texturas (31/10)
+
+Os mips de cada textura comprimida (BC7/BC5, maior que 128 texels) vão para um arquivo no carregamento; a imagem na
+GPU começa no nível de até 128 texels (Bistro: 334 texturas, 7 MB em vez de 1.930 MB). Um pixel em 16 do G-buffer
+(posição que roda a cada frame) anota, por textura, a resolução que o hardware de fato usou (`textureQueryLod` + viés
+de mip); os raios anotam a do nível fixo deles e descontam o nível que falta na imagem. A CPU lê esse pedido do frame
+anterior do mesmo slot, sobe os níveis que faltam (maior ganho primeiro, 32 MB por frame), devolve os não usados há
+~5 s e reescreve só os descritores do slot que vai gravar (imagens trocadas esperam os frames em voo).
+
+- Bistro parado, 60 frames, com x sem streaming: 1.266 MB no fim (tudo o que a tela e os reflexos pediram); diferença
+  média 0,26 de 255, 77% dos pixels idênticos, o resto ruído espalhado do denoiser (0,17% acima de 3 níveis).
+- Primeira versão: média 0,43 que não caía — os raios liam um nível fixo contado na imagem pequena (mais grosso) e
+  texturas vistas só em reflexo nunca eram pedidas. Corrigido; validação Vulkan limpa. `--no-texture-streaming`.
+
