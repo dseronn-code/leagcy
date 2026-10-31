@@ -96,10 +96,11 @@ layout(set = 0, binding = 4, std430) readonly buffer Lights { PointLight lights[
 layout(set = 0, binding = 5) uniform sampler2D textures[];
 // Streaming de texturas (Scene::updateTextureStreaming): [i] = resolução que a tela/os raios pediram da textura i
 // neste frame (texels no maior eixo, atomicMax), [MAX_TEXTURES + i] = nível da textura que é o nível 0 da imagem na
-// GPU (escrito pela CPU).
+// GPU e [2 MAX_TEXTURES + i] = maior eixo da textura inteira (os dois escritos pela CPU: sem textureSize no shader).
 const uint MAX_TEXTURES = 4096u;  // == kMaxTextures em renderer.cpp
 layout(set = 0, binding = 24, std430) buffer TextureFeedback { uint textureFeedback[]; };
 uint textureBase(int i) { return textureFeedback[MAX_TEXTURES + uint(i)]; }
+uint textureFullSize(int i) { return textureFeedback[2u * MAX_TEXTURES + uint(i)]; }
 
 struct ObjectData {  // == ObjectGpu em renderer.cpp
   mat4 model;
