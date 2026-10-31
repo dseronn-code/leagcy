@@ -118,6 +118,8 @@ class Renderer {
             const Settings& initialSettings = {});
   void resize(VkExtent2D outputExtent);
   void destroy();
+  // Diagnóstico (tools/cabelo.py): grava modelo, repouso e posições simuladas do primeiro cabelo da cena.
+  void dumpHair(const std::string& path);
 
   // Grava todos os passes. A imagem de saída termina em COLOR_ATTACHMENT_OPTIMAL.
   void record(VkCommandBuffer cmd, uint32_t frameSlot, const scene::Camera& camera, VkImage output,
@@ -239,7 +241,7 @@ class Renderer {
   rhi::ComputePass meshletArgsPass_;
   VkPipeline gbufferMeshPipeline_ = VK_NULL_HANDLE;
   uint32_t drawEntries_ = 0;
-  rhi::ComputePass cullPass_, cullResetPass_, clothPass_;
+  rhi::ComputePass cullPass_, cullResetPass_, clothPass_, hairSimPass_;
   // Multidões: endereços dos vértices de cada pose assada (set 0, binding 22) e onde começa cada clipe.
   rhi::Buffer crowdFrames_;
   std::vector<uint32_t> crowdFrameBase_;

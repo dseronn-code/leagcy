@@ -293,7 +293,11 @@ struct GpuMesh {
   bool clothPinned = true;
   glm::vec4 clothColliders[4] = {};
   rhi::Buffer clothPos, clothPrev;
-  bool deformable() const { return skinned || cloth; }  // vértices reescritos na GPU a cada frame
+  // Cabelo simulado: centro de cada ponto em repouso (objeto, w = meia largura) e posições atual/anterior (mundo).
+  bool hair = false;
+  uint32_t hairStrands = 0, hairPoints = 0;
+  rhi::Buffer hairRest, hairPos, hairPrev;
+  bool deformable() const { return skinned || cloth || hair; }  // vértices reescritos na GPU a cada frame
   // Meshlets (só com mesh shaders e malha rígida): um buffer com [Meshlet × meshletCount][vértices][triângulos];
   // os dois últimos começam em meshletVertexBase / meshletTriangleBase (em uints).
   rhi::Buffer meshlets;

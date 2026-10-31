@@ -321,6 +321,7 @@ int runHeadless(const Options& opt) {
 
   rhi::destroyBuffer(ctx, readback);
   rhi::destroyImage(ctx, output);
+  if (const char* dump = std::getenv("LEGACY_HAIR_DUMP")) r.dumpHair(dump);
   r.destroy();
   scene.destroy(ctx);
   ctx.destroy();

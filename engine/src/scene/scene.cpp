@@ -157,7 +157,7 @@ namespace {
 // Meshlets de uma malha rígida (com mesh shaders), num bloco só: [Meshlet × n][vértices][triângulos]. Preenche os
 // contadores da malha; vazio sem mesh shaders ou para malha deformável.
 std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const MeshData& data) {
-  if (!ctx.meshShaders || data.clothWidth > 0 || !data.joints.empty() || data.indices.empty()) return {};
+  if (!ctx.meshShaders || data.clothWidth > 0 || data.hairStrands > 0 || !data.joints.empty() || data.indices.empty()) return {};
   const MeshletData md = buildMeshlets(data);
   std::vector<uint32_t> blob(md.meshlets.size() * (sizeof(Meshlet) / 4));
   std::memcpy(blob.data(), md.meshlets.data(), md.meshlets.size() * sizeof(Meshlet));
@@ -902,9 +902,9 @@ void Scene::upload(rhi::Context& ctx) {
       continue;
     }
     bool skinned = !data.joints.empty() && data.skinModel >= 0 && data.skin >= 0;
-    const bool cloth = data.clothWidth > 0;
+    const bool cloth = data.clothWidth > 0, hair = data.hairStrands > 0;
     VkDeviceSize vbytes = data.vertices.size() * sizeof(Vertex);
-    VkBufferUsageFlags vusage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | geometryUsage | ((skinned || cloth) ? skinnedUsage : 0);
+    VkBufferUsageFlags vusage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | geometryUsage | ((skinned || cloth || hair) ? skinnedUsage : 0);
     gm.vertices = rhi::createBufferWithData(ctx, data.vertices.data(), vbytes, vusage);
     gm.indices = rhi::createBufferWithData(ctx, data.indices.data(), data.indices.size() * sizeof(uint32_t),
                                            VK_BUFFER_USAGE_INDEX_BUFFER_BIT | geometryUsage);
@@ -942,10 +942,24 @@ void Scene::upload(rhi::Context& ctx) {
       gm.clothPrev = rhi::createBufferWithData(ctx, p.data(), p.size() * sizeof(glm::vec4), su);
       gm.prevVertices = rhi::createBufferWithData(ctx, data.vertices.data(), vbytes, vusage);
     }
+    if (hair) {
+      gm.hair = true;
+      gm.hairStrands = data.hairStrands;
+      gm.hairPoints = data.hairPoints;
+      std::vector<glm::vec4> rest(size_t(data.hairStrands) * data.hairPoints);
+      for (size_t i = 0; i < rest.size(); ++i)  // centro da fita (média dos dois lados), meia largura
+        rest[i] = glm::vec4(0.5f * (data.vertices[2 * i].position + data.vertices[2 * i + 1].position), data.vertices[2 * i].tangent.w);
+      const VkBufferUsageFlags su = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT;  // TRANSFER_SRC: Renderer::dumpHair
+      gm.hairRest = rhi::createBufferWithData(ctx, rest.data(), rest.size() * sizeof(glm::vec4), su);
+      gm.hairPos = rhi::createBuffer(ctx, rest.size() * sizeof(glm::vec4), su, rhi::MemoryUsage::GpuOnly);
+      gm.hairPrev = rhi::createBuffer(ctx, rest.size() * sizeof(glm::vec4), su, rhi::MemoryUsage::GpuOnly);
+      gm.prevVertices = rhi::createBufferWithData(ctx, data.vertices.data(), vbytes, vusage);
+    }
     if (ctx.rayTracing) {
       rhi::BlasInput in{gm.vertices.address, gm.vertexCount, sizeof(Vertex), gm.indices.address, gm.indexCount};
-      gm.blas = rhi::buildBlas(ctx, in, skinned || cloth);
-      if (skinned || cloth) {
+      gm.blas = rhi::buildBlas(ctx, in, skinned || cloth || hair);
+      if (skinned || cloth || hair) {
         gm.updateScratchOffset = scratchTotal;
         scratchTotal += rhi::blasUpdateScratchSize(ctx, in);
       }
@@ -1125,7 +1139,7 @@ void Scene::destroy(rhi::Context& ctx) {
   if (ctx.rayTracing) tlas.destroy();
   for (auto& m : meshes) {
     for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices, &m.clothPos, &m.clothPrev,
-                           &m.meshlets, &m.colors})
+                           &m.meshlets, &m.colors, &m.hairRest, &m.hairPos, &m.hairPrev})
       rhi::destroyBuffer(ctx, *b);
     if (ctx.rayTracing) rhi::destroyAccel(ctx, m.blas);
   }

@@ -197,6 +197,8 @@ MeshData makeHair(uint32_t strands, uint32_t segments, float scalpRadius, float 
       m.indices.insert(m.indices.end(), {a, a + 1, a + 2, a + 1, a + 3, a + 2});
     }
   }
+  m.hairStrands = strands;
+  m.hairPoints = segments + 1;
   return m;
 }
 

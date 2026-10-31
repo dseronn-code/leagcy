@@ -30,6 +30,8 @@ struct MeshData {
   uint32_t clothWidth = 0, clothHeight = 0;
   float clothSpacing = 0.0f;
   bool clothPinned = true;               // coluna 0 presa (bandeira); falso = cai livre (toalha)
+  // Cabelo simulado (shaders/hair_sim.comp): fios consecutivos de hairPoints pontos (2 vértices de fita por ponto).
+  uint32_t hairStrands = 0, hairPoints = 0;
   glm::vec4 clothColliders[4] = {};      // esferas de colisão no espaço do pano (xyz centro, w raio; w = 0 nenhuma)
 };
 

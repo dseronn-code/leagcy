@@ -988,6 +988,7 @@ bool buildHairTest(Scene& s, Camera& camera) {
   skin.flags = kMaterialSubsurface;
   skin.subsurfaceRadius = glm::vec3(0.0040f, 0.0015f, 0.0007f);
   const glm::vec3 head(0.0f, 0.35f, 0.0f);
+  const uint32_t first = uint32_t(s.objects.size());  // cabeça, olhos e cabelo giram juntos (abaixo)
   s.addObject(sphere, trs(head, glm::vec3(0.09f, 0.11f, 0.095f)), s.addMaterial(skin));
   Material eye;
   eye.baseColor = glm::vec4(0.25f, 0.16f, 0.08f, 1.0f);  // castanho
@@ -1003,6 +1004,19 @@ bool buildHairTest(Scene& s, Camera& camera) {
   // Fios na esfera de raio 1 escalada para a cabeça (o couro fica 3% para fora da pele).
   glm::mat4 t = glm::scale(glm::translate(glm::mat4(1.0f), head), glm::vec3(0.093f, 0.113f, 0.098f));
   s.addObject(s.addMesh(makeHair(14000, 14, 1.0f, 2.6f, 0.0012f, 7)), t, s.addMaterial(hair));
+  // A cabeça vira para os lados e balança um pouco (o cabelo, simulado, atrasa e balança depois: hair_sim.comp).
+  {
+    std::vector<std::pair<uint32_t, glm::mat4>> parts;
+    for (uint32_t i = first; i < s.objects.size(); ++i) parts.push_back({i, s.objects[i].transform});
+    s.addAnimator([=](Scene& sc, float time, float) {
+      const float yaw = 0.6f * std::sin(time * 2.2f), nod = 0.15f * std::sin(time * 3.1f + 0.7f);
+      glm::mat4 r = glm::translate(glm::mat4(1.0f), head);
+      r = glm::rotate(r, yaw, glm::vec3(0, 1, 0));
+      r = glm::rotate(r, nod, glm::vec3(1, 0, 0));
+      r = glm::translate(r, -head);
+      for (const auto& [o, base] : parts) sc.setTransform(o, r * base);
+    });
+  }
   s.sunDirection = sunFrom(30.0f, 60.0f);
   s.sunIlluminance = 90000.0f;
   s.fogDensity = 0.0f;
