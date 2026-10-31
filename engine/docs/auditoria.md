@@ -739,3 +739,20 @@ cada espalhamento, direção nova sorteada pela fase, o céu daquela direção a
 - A primeira tentativa de medida comparou a imagem inteira: o bloom do céu mais claro contaminava o chão; a medida
   ficou só no céu.
 
+### Terreno por camadas e o custo dos shaders (1/11)
+
+- **Camadas** (`scene::TerrainLayers`, binding 25): grama, terra, rocha e cascalho, cada uma com cor (alfa = altura) e
+  normal map 512² gerados no carregamento (ruído e Worley periódicos: repetem sem emenda) — a Poly Haven está fora da
+  rede deste ambiente; texturas reais entram nos mesmos índices. Peso por inclinação e ruído grande, mistura por altura
+  (Mittring), triplanar nos barrancos (rocha), normal pelo "whiteout". Nos raios, só a cor planar.
+- **Achado — o shader de luz inflou a compilação**: a primeira versão (terreno completo em cada chamada do material
+  no shader de luz, e o pedido de resolução de textura em cada amostra) fez a primeira compilação no llvmpipe
+  chegar a **12 GB** (o sistema matava o processo) e o passe de luz ficar ~20x mais lento (atomics no mesmo endereço).
+  Corrigido em passos medidos sem cache de shaders (`MESA_SHADER_CACHE_DISABLE`): terreno simples nos raios (5,7 GB),
+  pedido de resolução uma vez por material atingido (4,5 GB), tamanho das texturas por buffer e terreno sem
+  `nonuniformEXT` (3,8 GB). O resto é o tamanho natural dos recursos desde 29/10 (o binário daquele dia: 0,8 GB).
+  Com o cache, a cena externa fica em ~1 GB, estável entre 8 e 16 frames (sem vazamento).
+- **Streaming de texturas conferido de novo** (Bistro, 60 frames): 1.266 MB na GPU contra 1.930 MB, diferença média
+  0,31 de 255. Uma versão intermediária pedia o normal map nos raios (que ele não lê) e carregava tudo (1.927 MB).
+- Cena externa, 480x270: passe de luz igual com e sem camadas (1.665 x 1.676 ms); G-buffer +50% (1.659 x 1.110 ms).
+
