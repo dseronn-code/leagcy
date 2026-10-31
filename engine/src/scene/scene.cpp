@@ -352,6 +352,87 @@ struct StreamLoader {
   }
 };
 
+size_t Scene::textureBytes() const {
+  size_t bytes = 0;
+  for (size_t i = 0; i < textures.size(); ++i) {
+    const TextureStream& ts = i < textureStreams.size() ? textureStreams[i] : TextureStream{};
+    if (ts.streamed()) {
+      for (size_t m = ts.base; m < ts.size.size(); ++m) bytes += ts.size[m];
+    } else {
+      bytes += size_t(textures[i].extent.width) * textures[i].extent.height * 4 * 4 / 3;  // estimativa (RGBA8 ou BC)
+    }
+  }
+  return bytes;
+}
+
+rhi::Image Scene::uploadTextureFrom(rhi::Context& ctx, const TextureStream& t, uint32_t base) {
+  std::ifstream in(texturePack_, std::ios::binary);
+  std::vector<std::vector<uint8_t>> mips(t.size.size() - base);
+  for (size_t m = base; m < t.size.size(); ++m) {
+    mips[m - base].resize(t.size[m]);
+    in.seekg(std::streamoff(t.offset[m]));
+    in.read(reinterpret_cast<char*>(mips[m - base].data()), t.size[m]);
+  }
+  if (!in) FATAL("Streaming de texturas: leitura falhou em %s", texturePack_.c_str());
+  return rhi::createCompressedTexture(ctx, t.format, std::max(1u, t.width >> base), std::max(1u, t.height >> base), mips);
+}
+
+void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint32_t count) {
+  for (size_t k = 0; k < textureGraveyard_.size();) {
+    if (--textureGraveyard_[k].framesLeft == 0) {
+      rhi::destroyImage(ctx, textureGraveyard_[k].image);
+      textureGraveyard_[k] = textureGraveyard_.back();
+      textureGraveyard_.pop_back();
+    } else {
+      ++k;
+    }
+  }
+  if (texturePack_.empty()) return;
+  // Nível pedido: o mais grosso que ainda tem os texels que a tela pediu.
+  struct Want {
+    float priority;
+    uint32_t texture, base;
+  };
+  std::vector<Want> up;
+  for (uint32_t i = 0; i < count && i < textureStreams.size(); ++i) {
+    TextureStream& ts = textureStreams[i];
+    if (!ts.streamed()) continue;
+    const uint32_t full = std::max(ts.width, ts.height);
+    uint32_t want = ts.coarsest;
+    if (need[i] > 0)
+      while (want > 0 && (full >> want) < need[i]) --want;
+    if (want < ts.base) {
+      up.push_back({float(full >> want) / float(full >> ts.base), i, want});
+      ts.idleFrames = 0;
+    } else if (want > ts.base) {
+      // Devolve os mips finos só depois de ~5 s sem uso (não fica trocando de nível a cada passo da câmera).
+      if (++ts.idleFrames > 300) {
+        textureGraveyard_.push_back({textures[i], rhi::kFramesInFlightMax + 1});
+        textures[i] = uploadTextureFrom(ctx, ts, want);
+        ts.base = want;
+        ts.idleFrames = 0;
+        ++texturesVersion;
+      }
+    } else {
+      ts.idleFrames = 0;
+    }
+  }
+  // Sobe primeiro as que mais ganham (maior salto de resolução), até o orçamento do frame.
+  std::sort(up.begin(), up.end(), [](const Want& a, const Want& b) { return a.priority > b.priority; });
+  double budget = double(textureStreamBudgetMB) * 1048576.0;
+  for (const Want& w : up) {
+    TextureStream& ts = textureStreams[w.texture];
+    size_t bytes = 0;
+    for (size_t m = w.base; m < ts.size.size(); ++m) bytes += ts.size[m];
+    if (budget <= 0.0) break;
+    textureGraveyard_.push_back({textures[w.texture], rhi::kFramesInFlightMax + 1});
+    textures[w.texture] = uploadTextureFrom(ctx, ts, w.base);
+    ts.base = w.base;
+    budget -= double(bytes);
+    ++texturesVersion;
+  }
+}
+
 void Scene::makeResident(uint32_t mi, const MeshData& data, const std::vector<uint32_t>& meshlets) {
   rhi::Context& ctx = *ctx_;
   GpuMesh& gm = meshes[mi];
@@ -906,6 +987,36 @@ void Scene::upload(rhi::Context& ctx) {
   double bytesRaw = 0.0, bytesGpu = 0.0, psnrSum = 0.0, psnrMin = 99.0;
   uint32_t encoded = 0, precompressed = 0;
   auto t0 = std::chrono::steady_clock::now();
+  // Streaming de texturas: todos os mips vão para um arquivo; a GPU começa só com os níveis de até 128 texels e
+  // recebe os finos quando a tela pede (updateTextureStreaming).
+  std::ofstream pack;
+  if (textureStreaming && compress) {
+    texturePack_ = (std::filesystem::temp_directory_path() /
+                    ("legacy_textures_" + std::to_string(uintptr_t(this)) + ".pak")).string();
+    pack.open(texturePack_, std::ios::binary | std::ios::trunc);
+  }
+  textureStreams.assign(cpuTextures_.size(), {});
+  auto addCompressed = [&](VkFormat format, const CompressedTexture& ct) {
+    const size_t i = textures.size();
+    TextureStream& ts = textureStreams[i];
+    if (pack.is_open() && ct.mips.size() > 1 && std::max(ct.width, ct.height) > 128) {
+      ts.format = format;
+      ts.width = ct.width;
+      ts.height = ct.height;
+      for (const auto& m : ct.mips) {
+        ts.offset.push_back(uint64_t(pack.tellp()));
+        ts.size.push_back(uint32_t(m.size()));
+        pack.write(reinterpret_cast<const char*>(m.data()), std::streamsize(m.size()));
+      }
+      while (ts.coarsest + 1 < ct.mips.size() && (std::max(ct.width, ct.height) >> ts.coarsest) > 128) ++ts.coarsest;
+      ts.base = ts.coarsest;
+      const std::vector<std::vector<uint8_t>> tail(ct.mips.begin() + ts.base, ct.mips.end());
+      textures.push_back(rhi::createCompressedTexture(ctx, format, std::max(1u, ct.width >> ts.base),
+                                                      std::max(1u, ct.height >> ts.base), tail));
+    } else {
+      textures.push_back(rhi::createCompressedTexture(ctx, format, ct.width, ct.height, ct.mips));
+    }
+  };
   for (auto& t : cpuTextures_) {
     textureWrap.push_back({t.wrapU, t.wrapV});
     const double raw = double(t.width) * t.height * 4.0 * 4.0 / 3.0;  // RGBA8 com a cadeia de mips
@@ -922,8 +1033,7 @@ void Scene::upload(rhi::Context& ctx) {
         CompressedTexture& ct = t.precompressed;
         for (const auto& m : ct.mips) bytesGpu += double(m.size());
         ++precompressed;
-        textures.push_back(rhi::createCompressedTexture(
-            ctx, t.srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK, ct.width, ct.height, ct.mips));
+        addCompressed(t.srgb ? VK_FORMAT_BC7_SRGB_BLOCK : VK_FORMAT_BC7_UNORM_BLOCK, ct);
       } else {
         bytesGpu += raw;
         textures.push_back(rhi::createTexture(ctx, decodeBc7(t.precompressed, 0).data(), t.width, t.height, t.srgb));
@@ -938,7 +1048,7 @@ void Scene::upload(rhi::Context& ctx) {
       psnrMin = std::min(psnrMin, p);
       if (p < 35.0)
         LOG_INFO("Textura BC7 com PSNR baixo: %s (%ux%u %s), %.1f dB", t.name.c_str(), t.width, t.height, t.srgb ? "sRGB" : "linear", p);
-      textures.push_back(rhi::createCompressedTexture(ctx, ct.format, ct.width, ct.height, ct.mips));
+      addCompressed(ct.format, ct);
     } else {
       bytesGpu += raw;
       textures.push_back(rhi::createTexture(ctx, t.rgba.data(), t.width, t.height, t.srgb));
@@ -952,6 +1062,13 @@ void Scene::upload(rhi::Context& ctx) {
              encoded ? psnrSum / double(encoded) : 0.0, encoded ? psnrMin : 0.0, precompressed,
              std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
   cpuTextures_.clear();
+  if (pack.is_open()) {
+    pack.close();
+    size_t streamed = 0;
+    for (const TextureStream& ts : textureStreams) streamed += ts.streamed() ? 1 : 0;
+    LOG_INFO("Streaming de texturas: %zu texturas começam nos mips de até 128 texels (%.0f MB na GPU)", streamed,
+             double(textureBytes()) / 1048576.0);
+  }
 
   if (materials.empty()) addMaterial({});
   materialBuffer = rhi::createBufferWithData(ctx, materials.data(), materials.size() * sizeof(Material),
@@ -999,6 +1116,9 @@ void Scene::upload(rhi::Context& ctx) {
 
 void Scene::destroy(rhi::Context& ctx) {
   loader_.reset();  // para a thread de leitura e apaga o arquivo
+  for (DeadImage& d : textureGraveyard_) rhi::destroyImage(ctx, d.image);
+  textureGraveyard_.clear();
+  if (!texturePack_.empty()) std::remove(texturePack_.c_str());
   if (ctx.rayTracing) tlas.destroy();
   for (auto& m : meshes) {
     for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices, &m.clothPos, &m.clothPrev,

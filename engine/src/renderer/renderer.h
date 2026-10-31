@@ -165,6 +165,12 @@ class Renderer {
   void createTargets();
   void destroyTargets();
   void writeGlobalDescriptors();
+  std::vector<VkDescriptorImageInfo> textureInfos();
+  // Streaming de texturas: pedidos de resolução que o G-buffer escreve (binding 24, um buffer por frame em voo) e a
+  // versão das texturas já escrita nos descritores de cada frame em voo.
+  rhi::Buffer textureFeedback_[kFramesInFlight];
+  bool textureFeedbackValid_[kFramesInFlight] = {};
+  uint32_t texturesVersionWritten_[kFramesInFlight] = {};
   // Transformações, skinning, refit das BLAS e reconstrução do TLAS para este frame.
   void updateDynamicScene(VkCommandBuffer cmd, uint32_t slot);
 
