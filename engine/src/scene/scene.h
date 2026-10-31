@@ -46,6 +46,7 @@ enum MaterialFlags : uint32_t {
   // Cabelo (makeHair): fitas viradas para a câmera no raster, transparência estocástica abaixo de um pixel,
   // sombreamento anisotrópico (Kajiya-Kay com as duas lobas de Scheuermann) pela tangente do fio.
   kMaterialHair = 1u << 13,
+  kMaterialRiver = 1u << 14,  // água corrente numa malha comum: ondas que andam pela tangente (flow map), flowSpeed
 };
 
 // Material PBR no modelo do glTF 2.0: metálico/rugosidade + KHR_materials_specular + KHR_materials_ior,
@@ -95,7 +96,8 @@ struct Material {
   glm::vec2 uvOffset{0.0f};
   glm::vec2 uvScale{1.0f};
   float uvRotation = 0.0f;
-  float pad4[3] = {};
+  float flowSpeed = 0.0f;  // rio (kMaterialRiver): velocidade da correnteza em m/s, na direção da tangente da malha
+  float pad4[2] = {};
 };
 static_assert(sizeof(Material) == 192);
 

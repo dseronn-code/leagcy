@@ -131,6 +131,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-occlusion") o.render.occlusionCulling = false;
     else if (a == "--no-meshlets") o.render.meshlets = false;
     else if (a == "--no-hlod") o.render.hlod = false;
+    else if (a == "--no-ripples") o.render.ripples = false;
     else if (a == "--stream-sync") o.streamSync = true;
     else if (a == "--no-radiance-cache") o.render.radianceCache = false;
     else if (a == "--no-virtual-motion") o.render.virtualMotion = false;  // medição do SVGF

@@ -38,7 +38,21 @@ layout(set = 0, binding = 0) uniform FrameData {
   vec4 shadowSplits;          // xyz = fim das cascatas 0..2 (m da câmera), w = fim da última; 0 = desligado
   vec4 shadowParams;          // x = metros por texel da cascata 0, y = 1: usa os shadow maps mesmo com ray tracing
   vec4 water;                 // x = nível do mar (m), y = 1: há oceano
+  vec4 ripple;                // ondulações (ripple.comp): xy = canto da grade (m), z = tamanho (m), w = 1 ligadas
 } frame;
+
+layout(set = 0, binding = 23) uniform sampler2D rippleHeight;  // r = altura das ondulações (m)
+
+// Inclinação (∂h/∂x, ∂h/∂z) das ondulações em P, some na borda da grade.
+vec2 rippleSlope(vec3 P) {
+  if (frame.ripple.w <= 0.0) return vec2(0.0);
+  vec2 uv = (P.xz - frame.ripple.xy) / frame.ripple.z;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec2(0.0);
+  float texel = 1.0 / float(textureSize(rippleHeight, 0).x), cell = frame.ripple.z * texel;
+  float hx = textureLod(rippleHeight, uv + vec2(texel, 0.0), 0.0).r - textureLod(rippleHeight, uv - vec2(texel, 0.0), 0.0).r;
+  float hz = textureLod(rippleHeight, uv + vec2(0.0, texel), 0.0).r - textureLod(rippleHeight, uv - vec2(0.0, texel), 0.0).r;
+  return vec2(hx, hz) / (2.0 * cell);
+}
 
 // Água do mar (Jerlov tipo I, oceano claro): absorção + espalhamento por metro; o vermelho some em poucos metros.
 const vec3 SEA_EXTINCTION = vec3(0.45, 0.065, 0.045);

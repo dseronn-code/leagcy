@@ -756,6 +756,14 @@ bool buildOcean(Scene& s, Camera& camera, const DemoOptions& opt) {
   s.addObject(cube, trs({0.0f, -6.5f, 0.0f}, {80.0f, 0.5f, 80.0f}), sand);
   for (int i = 0; i < 8; ++i)
     s.addObject(sphere, trs({-10.0f + 3.0f * float(i), -6.0f, -6.0f - 2.0f * float(i % 3)}, glm::vec3(0.8f, 0.6f, 0.9f)), rock);
+  // Boia vermelha dando voltas (3 m/s) metade dentro d'água: empurra a água e deixa anéis e esteira (ripple.comp).
+  {
+    const uint32_t buoy = s.addObject(sphere, trs({8.0f, 0.0f, -8.0f}, glm::vec3(0.7f)), red);
+    s.addAnimator([=](Scene& sc, float t, float) {
+      const float a = t * 3.0f / 8.0f;
+      sc.setTransform(buoy, trs({8.0f * std::cos(a), sc.seaLevel, -8.0f + 8.0f * std::sin(a)}, glm::vec3(0.7f)));
+    });
+  }
   s.sunDirection = sunFrom(opt.night ? -10.0f : 22.0f, 200.0f);
   s.sunIlluminance = opt.night ? 0.0f : 120000.0f;
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
@@ -763,6 +771,100 @@ bool buildOcean(Scene& s, Camera& camera, const DemoOptions& opt) {
   s.fogDensity = 0.00005f;
   camera.position = glm::vec3(0.0f, 3.2f, 20.0f);
   camera.lookAt(glm::vec3(0.0f, 1.5f, -40.0f));
+  return true;
+}
+
+// Rio (água corrente, kMaterialRiver): vale escavado num terreno ondulado, a fita d'água seguindo uma curva com a
+// tangente na direção da correnteza, pedras no leito e grama nas margens.
+namespace {
+float riverCenter(float x) { return 18.0f * std::sin(x * 0.012f) + 6.0f * std::sin(x * 0.041f + 1.3f); }
+constexpr float kRiverHalfWidth = 9.0f, kRiverLevel = -1.4f;
+float riverTerrain(float x, float z) {
+  // Morros de até ±0,8 m: a margem (a 15 m do eixo) nunca desce abaixo da água (−1,4), o leito fica a ~1,5 m.
+  const float hills = 0.6f * std::sin(x * 0.021f) * std::cos(z * 0.017f) + 0.2f * std::sin(x * 0.07f + z * 0.05f);
+  const float dz = std::abs(z - riverCenter(x));
+  // Leito a 2,6 m abaixo da margem, barranco suave de 6 m.
+  const float carve = 2.6f * (1.0f - glm::smoothstep(kRiverHalfWidth - 2.0f, kRiverHalfWidth + 6.0f, dz));
+  return hills + 0.6f - carve - 0.9f;
+}
+}  // namespace
+
+bool buildRiver(Scene& s, Camera& camera, const DemoOptions& opt) {
+  Material ground;
+  ground.flags = kMaterialTerrain;
+  s.addObject(s.addMesh(makeTerrain(800.0f, 400, riverTerrain)), glm::mat4(1.0f), s.addMaterial(ground));
+  // Fita do rio: um par de vértices a cada 2 m ao longo da curva, tangente = direção da correnteza (+x).
+  MeshData river;
+  for (int i = 0; i <= 200; ++i) {
+    const float x = -200.0f + 2.0f * float(i), zc = riverCenter(x);
+    const glm::vec3 dir = glm::normalize(glm::vec3(2.0f, 0.0f, riverCenter(x + 1.0f) - riverCenter(x - 1.0f)));
+    // Mais larga que o canal: a borda da fita fica sempre enterrada no barranco.
+    const glm::vec3 side = glm::normalize(glm::cross(glm::vec3(0, 1, 0), dir)) * (kRiverHalfWidth + 8.0f);
+    for (int k = 0; k < 2; ++k) {
+      Vertex v;
+      v.position = glm::vec3(x, kRiverLevel, zc) + (k == 0 ? -side : side);
+      v.normal = glm::vec3(0, 1, 0);
+      v.uv = glm::vec2(float(k), x * 0.05f);
+      v.tangent = glm::vec4(dir, 1.0f);
+      river.vertices.push_back(v);
+    }
+    if (i > 0) {
+      const uint32_t a = uint32_t(2 * (i - 1));
+      river.indices.insert(river.indices.end(), {a, a + 2, a + 1, a + 1, a + 2, a + 3});  // frente para cima
+    }
+  }
+  Material water;
+  water.flags = kMaterialRiver;
+  water.baseColor = glm::vec4(0.018f, 0.03f, 0.024f, 1.0f);  // rio verde-escuro, com sedimento
+  water.flowSpeed = 1.8f;
+  s.addObject(s.addMesh(std::move(river)), glm::mat4(1.0f), s.addMaterial(water));
+  // Pedras no leito (algumas furando a superfície) e grama nas margens.
+  Material rockM;
+  rockM.baseColor = glm::vec4(0.22f, 0.21f, 0.19f, 1.0f);
+  rockM.roughness = 0.85f;
+  const uint32_t rock = s.addMaterial(rockM), sphere = s.addMesh(makeSphere(32, 16));
+  std::mt19937 rng(7);
+  std::uniform_real_distribution<float> u(0.0f, 1.0f);
+  for (int i = 0; i < 40; ++i) {
+    const float x = -60.0f + 140.0f * u(rng), z = riverCenter(x) + (u(rng) * 2.0f - 1.0f) * kRiverHalfWidth;
+    const float r = 0.4f + 1.1f * u(rng);
+    s.addObject(sphere, trs({x, riverTerrain(x, z) + 0.3f * r, z}, {r * 1.3f, r * 0.8f, r}), rock);
+  }
+  Material grass;
+  grass.baseColor = glm::vec4(0.16f, 0.24f, 0.06f, 1.0f);
+  grass.roughness = 0.6f;
+  grass.flags = kMaterialDoubleSided | kMaterialFoliage;
+  const uint32_t grassMat = s.addMaterial(grass);
+  uint32_t clumps[4];
+  for (uint32_t v = 0; v < 4; ++v) clumps[v] = s.addMesh(makeGrassClump(14, 0.45f, v + 1));
+  for (int i = 0; i < 5000; ++i) {
+    const float x = -40.0f + 100.0f * u(rng), z = riverCenter(x) + (u(rng) < 0.5f ? -1.0f : 1.0f) * (kRiverHalfWidth + 7.0f + 18.0f * u(rng));
+    glm::mat4 t = glm::translate(glm::mat4(1.0f), {x, riverTerrain(x, z) - 0.02f, z});
+    t = glm::rotate(t, glm::two_pi<float>() * u(rng), glm::vec3(0, 1, 0));
+    s.addObject(clumps[i % 4], glm::scale(t, glm::vec3(0.7f + 0.6f * u(rng))), grassMat);
+  }
+  // Barquinho subindo o rio a 3 m/s (meio afundado): a esteira e as ondas dele vêm das ondulações (ripple.comp).
+  {
+    Material hullM;
+    hullM.baseColor = glm::vec4(0.55f, 0.32f, 0.12f, 1.0f);
+    hullM.roughness = 0.6f;
+    const uint32_t boat = s.addObject(s.addMesh(makeCube()), glm::mat4(1.0f), s.addMaterial(hullM));
+    auto place = [](float t) {
+      const float x = -6.0f - std::fmod(t * 3.0f, 50.0f);  // passa pela câmera (x = −30)
+      const float yaw = std::atan2(riverCenter(x + 1.0f) - riverCenter(x - 1.0f), 2.0f);
+      glm::mat4 m = glm::translate(glm::mat4(1.0f), {x, kRiverLevel, riverCenter(x) - 2.0f});
+      return glm::scale(glm::rotate(m, -yaw, glm::vec3(0, 1, 0)), glm::vec3(1.6f, 0.35f, 0.6f));
+    };
+    s.setTransform(boat, place(0.0f));
+    s.addAnimator([=](Scene& sc, float t, float) { sc.setTransform(boat, place(t)); });
+  }
+  s.sunDirection = sunFrom(opt.night ? -10.0f : 28.0f, 210.0f);
+  s.sunIlluminance = opt.night ? 0.0f : 110000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
+  s.cloudCoverage = 0.35f;
+  const float cx = -30.0f;
+  camera.position = glm::vec3(cx, 2.4f, riverCenter(cx) + kRiverHalfWidth + 4.0f);
+  camera.lookAt(glm::vec3(cx + 40.0f, -0.5f, riverCenter(cx + 40.0f)));
   return true;
 }
 
@@ -1122,6 +1224,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "mesh-lights-panel-free") return buildMeshLightSimple(scene, camera, 4);
   if (opt.name == "glass") return buildGlassTest(scene, camera);
   if (opt.name == "ocean") return buildOcean(scene, camera, opt);
+  if (opt.name == "river") return buildRiver(scene, camera, opt);
   if (opt.name == "paint") return buildPaintTest(scene, camera);
   if (opt.name == "skin") return buildSkinTest(scene, camera, false);
   if (opt.name == "skin-backlit") return buildSkinTest(scene, camera, true);

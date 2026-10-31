@@ -649,3 +649,21 @@ de 17 de 255 de diferença ainda no frame 29).
   borda de 350 m chegando um frame depois). Validação Vulkan limpa (cidade de torres e mundo de 8 km).
 - Falta: streaming de texturas, e a cópia para a GPU ainda acontece na thread principal (`immediateSubmit`).
 
+### Água: rios e ondulações de objetos (31/10)
+
+- **Rio** (`kMaterialRiver`, `Material::flowSpeed`; `--scene river`): água numa malha comum (não segue a câmera como
+  o mar), com a correnteza na direção da tangente. O detalhe (3 oitavas de ruído com derivadas analíticas, sem
+  depender da simulação do mar) é arrastado pela correnteza em duas fases defasadas de meio ciclo e misturadas
+  (flow map de Vlachos 2010, o recomeço de cada fase fica escondido pela outra); espuma em traços nas cristas.
+  Prova: câmera de cima, correlação de fase entre quadros a 6 frames de distância: o padrão anda 4–7 pixels rio
+  abaixo (com o desvio lateral da curva), de forma consistente em 5 janelas. Bug achado: a fita do rio estava com a
+  frente para baixo (o culling a escondia e aparecia o leito escuro); e a borda da fita ficava à mostra onde o
+  barranco descia — fita mais larga que o canal e margem sempre acima da água.
+- **Ondulações** (`ripple.comp`, binding 23, `frame.ripple`): equação da onda 2D (2,5 m/s, amortecida) numa grade
+  256² de 25 cm que anda com a câmera em passos de um texel (o conteúdo é deslocado junto), dois subpassos por frame,
+  parada com a cena pausada. Objetos que se moveram e cruzam o nível da água (o mar, ou a altura da malha do rio)
+  entram como perturbadores: um "chapéu mexicano" do tamanho do objeto (afunda embaixo, levanta em volta), forte
+  com a velocidade. A inclinação entra na normal da água do mar e do rio. A/B (`--no-ripples`): a diferença fica só
+  em volta do barco e do caminho dele (esteira em V, anéis, onda de proa); a primeira versão (só afundar) fazia uma
+  faixa escura em vez de ondas. Validação Vulkan limpa.
+

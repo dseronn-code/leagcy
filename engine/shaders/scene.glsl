@@ -23,6 +23,7 @@ const uint MATERIAL_SUBSURFACE = 1024u;     // espalhamento subsuperficial (sss.
 const uint MATERIAL_BLEND = 2048u;          // misturado no G-buffer (decals BLEND do glTF)
 const uint MATERIAL_EYE = 4096u;            // olho procedural (material.glsl)
 const uint MATERIAL_HAIR = 8192u;           // cabelo por fios (gbuffer.vert, lighting.glsl)
+const uint MATERIAL_RIVER = 16384u;         // água corrente (material.glsl: evalRiver)
 
 // Simulação do oceano: oceanDisplacement / oceanSlope / OCEAN_PATCH ficam em frame.glsl (o sol debaixo d'água usa).
 
@@ -62,7 +63,8 @@ struct Material {  // == scene::Material (192 bytes)
   vec2 uvOffset;          // KHR_texture_transform
   vec2 uvScale;
   float uvRotation;
-  float pad4a, pad4b, pad4c;
+  float flowSpeed;  // rio: m/s na direção da tangente
+  float pad4b, pad4c;
 };
 
 struct InstanceData {  // == InstanceGpu em scene.cpp

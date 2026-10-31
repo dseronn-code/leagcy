@@ -64,6 +64,7 @@ struct Settings {
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
+  bool ripples = true;           // ondulações de objetos na água (--no-ripples)
   bool hlod = true;              // proxies de HLOD ao longe, onde a cena montou (--no-hlod: sempre os membros)
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
@@ -179,6 +180,14 @@ class Renderer {
   VkSampler cloudSampler_ = VK_NULL_HANDLE;  // linear, repete nas três direções (o ruído é periódico)
   rhi::ComputePass cloudSkyPass_, cloudShadowPass_, cloudScreenPass_, fogInjectPass_, fogIntegratePass_;
   Ocean ocean_;  // simulação FFT (só nas cenas com oceano)
+  // Ondulações de objetos na água (ripple.comp): grade de altura em volta da câmera, ping-pong (o resultado do frame
+  // fica sempre em ripple_[0]), perturbadores por frame em voo, nível da água da cena (mar ou rio).
+  rhi::Image ripple_[2];
+  rhi::Buffer rippleDisturbers_[kFramesInFlight];
+  rhi::ComputePass ripplePass_;
+  bool rippleOn_ = false, rippleValid_ = false;
+  float rippleLevel_ = 0.0f, rippleTime_ = 0.0f, rippleDt_ = 0.0f;
+  glm::ivec2 rippleCell_{0}, rippleShift_{0};  // canto da grade em texels do mundo; deslocamento deste frame
   float prevSceneTime_ = 0.0f;
   bool hasSubsurface_ = false;  // a cena tem material com espalhamento subsuperficial
   rhi::ComputePass sssPass_, rainOcclusionPass_;

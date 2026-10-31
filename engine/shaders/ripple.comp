@@ -1,0 +1,47 @@
+#version 460
+// Ondulações na água empurrada por objetos: equação da onda 2D numa grade de altura em volta da câmera (64 m, 25 cm
+// por texel), dois subpassos por frame. Cada texel guarda (altura agora, altura no subpasso anterior). Objetos que
+// cruzam a superfície andando afundam a água sob eles (um sino gaussiano do tamanho do objeto, proporcional à
+// velocidade); a onda espalha o anel e a esteira. Lida pela água (frame.glsl: rippleSlope).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0) uniform sampler2D src;              // (h, hAnterior)
+layout(set = 1, binding = 1, rg32f) uniform writeonly image2D dst;
+layout(set = 1, binding = 2, std430) readonly buffer Disturbers { vec4 disturbers[]; };  // x, z, raio, velocidade (m/s)
+layout(push_constant) uniform Push {
+  ivec2 shift;  // a grade andou com a câmera: o texel c de agora era o c + shift do passo anterior
+  float dt;     // s deste subpasso
+  uint count;   // perturbadores
+  vec2 origin;  // canto da grade (m, xz)
+  float cell;   // m por texel
+  float pad;
+} pc;
+
+const float WAVE_SPEED = 2.5;  // m/s (ondas curtas de águas rasas: a esteira de um barco a 3 m/s abre em cone)
+const float PUSH = 0.35;       // m de afundamento por (m/s de velocidade × s)
+
+vec2 fetchH(ivec2 c) {
+  ivec2 n = textureSize(src, 0);
+  return any(lessThan(c, ivec2(0))) || any(greaterThanEqual(c, n)) ? vec2(0.0) : texelFetch(src, c, 0).rg;
+}
+
+void main() {
+  ivec2 c = ivec2(gl_GlobalInvocationID.xy), n = imageSize(dst);
+  if (any(greaterThanEqual(c, n))) return;
+  ivec2 s = c + pc.shift;
+  vec2 v = fetchH(s);
+  float lap = fetchH(s + ivec2(1, 0)).r + fetchH(s - ivec2(1, 0)).r + fetchH(s + ivec2(0, 1)).r + fetchH(s - ivec2(0, 1)).r - 4.0 * v.r;
+  float k = WAVE_SPEED * pc.dt / pc.cell;
+  // Verlet da equação da onda + amortecimento (~ metade da energia por segundo).
+  float h = (2.0 * v.r - v.g + k * k * lap) * exp(-0.7 * pc.dt) - (v.r - v.g) * 0.5 * pc.dt;
+  vec2 p = pc.origin + (vec2(c) + 0.5) * pc.cell;
+  for (uint i = 0u; i < pc.count; ++i) {
+    vec4 d = disturbers[i];
+    float r2 = max(d.z * d.z, pc.cell * pc.cell), q = dot(p - d.xy, p - d.xy);
+    // Chapéu mexicano (média zero): afunda sob o objeto e levanta em volta, como a proa — a água só muda de lugar.
+    if (q < 9.0 * r2) h -= PUSH * d.w * pc.dt * (1.0 - q / r2) * exp(-q / r2);
+  }
+  // Borda da grade absorve (sem reflexo da onda na borda).
+  vec2 e = min(vec2(c), vec2(n - 1 - c)) / 8.0;
+  h *= clamp(min(e.x, e.y), 0.0, 1.0);
+  imageStore(dst, c, vec4(h, v.r, 0.0, 0.0));
+}

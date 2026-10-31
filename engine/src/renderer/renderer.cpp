@@ -52,8 +52,11 @@ struct FrameUniforms {
   glm::vec4 shadowSplits;       // fim de cada cascata (m); w = 0: desligado
   glm::vec4 shadowParams;       // x = m por texel da cascata 0, y = 1: shadow maps mesmo com ray tracing
   glm::vec4 water;              // x = nível do mar (m), y = 1: há oceano (vista subaquática e cáusticas)
+  glm::vec4 ripple;             // ondulações: xy = canto da grade (m), z = tamanho (m), w = 1 ligadas
 };
-static_assert(sizeof(FrameUniforms) == 976);
+static_assert(sizeof(FrameUniforms) == 992);
+constexpr uint32_t kRippleSize = 256, kMaxDisturbers = 64;
+constexpr float kRippleCell = 0.25f;  // m por texel: grade de 64 m
 constexpr uint32_t kShadowMapSize = 2048;
 
 // Frente dos triângulos: anti-horário, como no glTF (a projeção inverte o Y e o viewport do Vulkan também: as duas
@@ -421,6 +424,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {20, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {21, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {22, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {23, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -436,7 +440,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
 
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
-      {CIS, kFramesInFlight * (11 + kMaxTextures)},
+      {CIS, kFramesInFlight * (12 + kMaxTextures)},
       {SB, kFramesInFlight * 9},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
@@ -453,6 +457,31 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   ai.pSetLayouts = layouts.data();
   VK_CHECK(vkAllocateDescriptorSets(dev, &ai, globalSets_.data()));
   if (scene.ocean) ocean_.init(ctx, globalLayout_, scene.windSpeed, scene.windDirection, scene.waveHeight);
+  // Ondulações: ligadas se a cena tem água (mar, ou rio: o nível é a altura da malha dele, que é plana).
+  rippleOn_ = scene.ocean && settings.ripples;
+  rippleLevel_ = scene.seaLevel;
+  for (const auto& o : scene.objects)
+    if (!rippleOn_ && settings.ripples && (scene.materials[o.material].flags & scene::kMaterialRiver)) {
+      const scene::GpuMesh& gm = scene.meshes[o.mesh];
+      rippleLevel_ = (o.transform * glm::vec4(0.5f * (gm.boundsMin + gm.boundsMax), 1.0f)).y;
+      rippleOn_ = true;
+    }
+  for (rhi::Image& img : ripple_)
+    img = rhi::createImage2D(ctx, {kRippleSize, kRippleSize}, VK_FORMAT_R32G32_SFLOAT,
+                             VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+  ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+    for (rhi::Image& img : ripple_) {
+      rhi::imageBarrier(cmd, img.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                        VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                        VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
+      VkClearColorValue zero{};
+      VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+      vkCmdClearColorImage(cmd, img.handle, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    }
+  });
+  for (rhi::Buffer& b : rippleDisturbers_)
+    b = rhi::createBuffer(ctx, kMaxDisturbers * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+  ripplePass_.init(ctx, "ripple.comp", globalLayout_, {CIS, SI, SB}, 32);
   {  // multidões: endereço dos vértices de cada pose assada
     std::vector<VkDeviceAddress> addresses;
     for (const scene::CrowdClip& c : scene.crowdClips) {
@@ -677,6 +706,8 @@ void Renderer::writeGlobalDescriptors() {
     add(21, CIS, 1).pImageInfo = &cascades;
     VkDescriptorBufferInfo crowd{crowdFrames_.handle, 0, VK_WHOLE_SIZE};
     add(22, SB, 1).pBufferInfo = &crowd;
+    VkDescriptorImageInfo rippleInfo{linear_, ripple_[0].view, VK_IMAGE_LAYOUT_GENERAL};
+    add(23, CIS, 1).pImageInfo = &rippleInfo;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -862,6 +893,17 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                         historyValid_ ? prevSceneTime_ : scene_->time);
   prevSceneTime_ = scene_->time;
   u.water = glm::vec4(scene_->seaLevel, scene_->ocean ? 1.0f : 0.0f, 0.0f, 0.0f);
+  // Ondulações: a grade anda com a câmera em passos de um texel (só com a cena andando: parada, o estado fica).
+  rippleDt_ = rippleValid_ ? std::max(scene_->time - rippleTime_, 0.0f) : 0.0f;
+  rippleTime_ = scene_->time;
+  rippleShift_ = glm::ivec2(0);
+  if (rippleOn_ && (rippleDt_ > 0.0f || !rippleValid_)) {
+    const glm::ivec2 cell = glm::ivec2(glm::floor(glm::vec2(cam.position.x, cam.position.z) / kRippleCell)) - int(kRippleSize / 2);
+    rippleShift_ = rippleValid_ ? cell - rippleCell_ : glm::ivec2(0);
+    rippleCell_ = cell;
+  }
+  rippleValid_ = rippleOn_;
+  u.ripple = rippleOn_ ? glm::vec4(glm::vec2(rippleCell_) * kRippleCell, float(kRippleSize) * kRippleCell, 1.0f) : glm::vec4(0.0f);
   if (scene_->sunIlluminance <= 0.0f) {
     u.night.y = 2.5e-6f;
     if (scene_->moonIlluminance > 0.0f) {
@@ -941,6 +983,42 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   ++cpuFrames_;
   updateDynamicScene(cmd, slot);
   if (ocean_.ready()) ocean_.update(cmd, gs, scene_->time);
+  if (rippleOn_ && rippleDt_ > 0.0f) {
+    // Perturbadores: objetos que andaram e cruzam o nível da água (caixa do mundo), velocidade pelo deslocamento.
+    auto* dist = static_cast<glm::vec4*>(rippleDisturbers_[slot].mapped);
+    uint32_t count = 0;
+    for (const auto& o : scene_->objects) {
+      if (count == kMaxDisturbers) break;
+      const glm::vec3 p = glm::vec3(o.transform[3]), q = glm::vec3(o.prevTransform[3]);
+      const float speed = glm::length(glm::vec2(p.x - q.x, p.z - q.z)) / rippleDt_;
+      if (speed < 0.05f) continue;
+      const scene::GpuMesh& gm = scene_->meshes[o.mesh];
+      glm::vec3 lo(1e30f), hi(-1e30f);
+      for (int k = 0; k < 8; ++k) {
+        const glm::vec3 c((k & 1) ? gm.boundsMax.x : gm.boundsMin.x, (k & 2) ? gm.boundsMax.y : gm.boundsMin.y,
+                          (k & 4) ? gm.boundsMax.z : gm.boundsMin.z);
+        const glm::vec3 w = glm::vec3(o.transform * glm::vec4(c, 1.0f));
+        lo = glm::min(lo, w);
+        hi = glm::max(hi, w);
+      }
+      if (lo.y > rippleLevel_ || hi.y < rippleLevel_) continue;
+      dist[count++] = glm::vec4(0.5f * (lo.x + hi.x), 0.5f * (lo.z + hi.z), 0.5f * std::min(hi.x - lo.x, hi.z - lo.z), speed);
+    }
+    // Dois subpassos: 0 → 1 (com o deslocamento da grade) e 1 → 0 (o resultado fica sempre em ripple_[0]).
+    struct {
+      glm::ivec2 shift;
+      float dt;
+      uint32_t count;
+      glm::vec2 origin;
+      float cell, pad;
+    } rp{rippleShift_, 0.5f * std::min(rippleDt_, 0.1f), count, glm::vec2(rippleCell_) * kRippleCell, kRippleCell, 0.0f};
+    for (int step = 0; step < 2; ++step) {
+      ripplePass_.dispatch(cmd, gs, {Binding::sampled(ripple_[step].view, nearest_), Binding::storageImage(ripple_[1 - step].view),
+                                     Binding::storageBuffer(rippleDisturbers_[slot])}, {kRippleSize, kRippleSize}, &rp);
+      barrier();
+      rp.shift = glm::ivec2(0);
+    }
+  }
   barrier();
   profiler_.mark(cmd, "cena");
 
@@ -1596,6 +1674,9 @@ void Renderer::destroy() {
   vkDestroySampler(ctx.device, cloudSampler_, nullptr);
   vkDestroySampler(ctx.device, oceanSampler_, nullptr);
   ocean_.destroy(ctx);
+  ripplePass_.destroy(ctx);
+  for (rhi::Image& img : ripple_) rhi::destroyImage(ctx, img);
+  for (rhi::Buffer& b : rippleDisturbers_) rhi::destroyBuffer(ctx, b);
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
