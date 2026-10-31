@@ -910,9 +910,9 @@ bool buildScanHead(Scene& s, Camera& camera, const DemoOptions& opt, bool backli
   if (!loadGltf(s, dir + "LeePerrySmith.glb", glm::mat4(1.0f))) return false;
   glm::vec3 lo, hi;
   s.bounds(lo, hi);
-  const float scale = 0.23f / std::max(hi.y - lo.y, 1e-6f);  // altura real de uma cabeça
+  const float scale = 0.45f / std::max(hi.y - lo.y, 1e-6f);  // busto (cabeça e ombros) em tamanho real
   const glm::vec3 center = 0.5f * (lo + hi);
-  const glm::mat4 fit = glm::translate(glm::mat4(1.0f), {0.0f, 0.35f, 0.0f}) * glm::scale(glm::mat4(1.0f), glm::vec3(scale)) *
+  const glm::mat4 fit = glm::translate(glm::mat4(1.0f), {0.0f, 0.225f, 0.0f}) * glm::scale(glm::mat4(1.0f), glm::vec3(scale)) *
                         glm::translate(glm::mat4(1.0f), -center);
   TextureData col, nrm;
   if (!loadImageFile(dir + "Map-COL.jpg", true, false, col) || !loadImageFile(dir + "Infinite-Level_02_Tangent_SmoothUV.jpg", false, true, nrm))
@@ -933,11 +933,13 @@ bool buildScanHead(Scene& s, Camera& camera, const DemoOptions& opt, bool backli
   floorM.baseColor = glm::vec4(glm::vec3(0.3f), 1.0f);
   floorM.roughness = 0.8f;
   s.addObject(s.addMesh(makeCube()), trs({0.0f, -0.05f, 0.0f}, {2.0f, 0.05f, 2.0f}), s.addMaterial(floorM));
-  s.sunDirection = backlit ? sunFrom(15.0f, 180.0f) : sunFrom(25.0f, 60.0f);
+  // Azimute 180° = do lado da câmera (rosto iluminado, um pouco de lado); 0° = por trás da cabeça (contraluz: orelhas
+  // e bordas avermelham pela transmissão).
+  s.sunDirection = backlit ? sunFrom(12.0f, 10.0f) : sunFrom(25.0f, 150.0f);
   s.sunIlluminance = 90000.0f;
   s.fogDensity = 0.0f;
-  camera.position = glm::vec3(0.0f, 0.38f, 0.55f);
-  camera.lookAt(glm::vec3(0.0f, 0.36f, 0.0f));
+  camera.position = glm::vec3(0.12f, 0.36f, 0.42f);  // rosto de perto, um pouco de lado
+  camera.lookAt(glm::vec3(0.0f, 0.34f, 0.0f));
   camera.nearPlane = 0.01f;
   return true;
 }

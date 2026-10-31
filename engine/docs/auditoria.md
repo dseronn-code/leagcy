@@ -762,3 +762,12 @@ A altura das ondulações (`rippleHeightAt`, binding 23) também desloca os vér
 FFT) e no rio (fita refeita com 1 m ao longo e 16 faixas na largura, para ter vértices onde a onda passa). A/B no rio
 com o barco (`--no-ripples`): a diferença fica só em volta do barco e da esteira; validação limpa no rio e no mar.
 
+### Pele num scan real (1/11)
+
+Cena `scan`/`scan-backlit`: o busto escaneado do Lee Perry-Smith (Infinite-Realities, CC BY 3.0; os arquivos do
+exemplo do three.js, baixados para `assets/LeePerrySmith`), com a textura de cor e o normal map do scan
+(`loadImageFile`, novo) num material de pele com SSS, em tamanho real (45 cm). `--no-sss` desliga o espalhamento.
+`tools/pele.py`: média do rosto com SSS / sem = R 1,001 G 0,999 B 0,999 de frente e 1,007 / 1,002 / 1,000 em
+contraluz — o SSS redistribui sem criar nem perder luz. Na primeira versão os sóis estavam trocados (o rosto "de
+frente" estava na sombra); corrigido. Comparação com foto do mesmo rosto: não há foto de referência livre do scan.
+
