@@ -139,7 +139,8 @@ Surface evalWater(vec3 P) {
   vec4 a = textureLod(oceanSlope, uv0, 0.0);
   vec2 b = textureLod(oceanSlope, uv0 * 5.37 + vec2(0.31, 0.71), 0.0).xy * 0.35;
   float foam = clamp(a.z, 0.0, 1.0);
-  s.normal = normalize(vec3(-(a.x + b.x), 1.0, -(a.y + b.y)));
+  vec2 rs = rippleSlope(P);  // objetos empurrando a água
+  s.normal = normalize(vec3(-(a.x + b.x + rs.x), 1.0, -(a.y + b.y + rs.y)));
   s.diffuseColor = mix(vec3(0.004, 0.018, 0.022), vec3(0.7), foam);
   // Luz que atravessa a crista fina das ondas (turquesa), forte olhando contra o sol: emissão aproximada pela
   // iluminância do sol × altura da onda × espalhamento para a frente (Henyey-Greenstein).
@@ -163,9 +164,66 @@ Surface evalWater(vec3 P) {
   return s;
 }
 
+// Ruído de valor 2D com derivadas analíticas (Quílez): xy = derivadas, z = valor em [0, 1].
+vec3 valueNoised(vec2 p) {
+  vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f), du = 6.0 * f * (1.0 - f);
+  uvec2 c = uvec2(ivec2(i) + 32768);
+  float a = float(pcg3d(uvec3(c, 7u)).x) / 4294967296.0, b = float(pcg3d(uvec3(c + uvec2(1, 0), 7u)).x) / 4294967296.0;
+  float cc = float(pcg3d(uvec3(c + uvec2(0, 1), 7u)).x) / 4294967296.0, d = float(pcg3d(uvec3(c + uvec2(1, 1), 7u)).x) / 4294967296.0;
+  float k1 = b - a, k2 = cc - a, k4 = a - b - cc + d;
+  return vec3(du * vec2(k1 + k4 * u.y, k2 + k4 * u.x), a + k1 * u.x + k2 * u.y + k4 * u.x * u.y);
+}
+
+// Inclinação (∂h/∂x, ∂h/∂z) e espuma de ondinhas de rio em p (m): 3 oitavas de ruído, alturas de ~2 cm.
+vec3 riverDetail(vec2 p) {
+  vec2 slope = vec2(0.0);
+  float amp = 0.035, freq = 1.3, foam = 0.0;
+  for (int o = 0; o < 3; ++o) {
+    vec3 n = valueNoised(p * freq + float(o) * 17.3);
+    slope += n.xy * amp * freq;
+    if (o == 1) foam = n.z;  // espuma na oitava do meio: traços de ~30 cm, não manchas
+    amp *= 0.5;
+    freq *= 2.3;
+  }
+  return vec3(slope, foam);
+}
+
+// Rio (kMaterialRiver): água numa malha comum, com a correnteza na direção da tangente. Técnica de flow map
+// (Vlachos, "Water Flow in Portal 2", 2010): o detalhe é arrastado pela correnteza em duas fases defasadas de meio
+// ciclo, misturadas por um triângulo de pesos — cada fase volta ao começo quando a outra está no peso máximo, então o
+// recomeço nunca aparece. Cor: a de m.baseColor é a do que está dentro d'água (rio barrento, verde, limpo).
+Surface evalRiver(Material m, vec3 P, vec3 N, vec4 T) {
+  vec2 flow = length(T.xz) > 1e-4 ? normalize(T.xz) : vec2(1.0, 0.0);  // sem tangente (raios): uma direção qualquer
+  const float CYCLE = 1.6;  // s por fase
+  float t = frame.night.w / CYCLE, p0 = fract(t), p1 = fract(t + 0.5), w1 = abs(1.0 - 2.0 * p0);
+  vec2 drift = flow * m.flowSpeed * CYCLE;
+  vec3 d0 = riverDetail(P.xz - drift * p0), d1 = riverDetail(P.xz - drift * p1 + vec2(7.1, 3.7));
+  vec3 d = mix(d0, d1, w1);
+  Surface s;
+  vec3 up = normalize(N);
+  vec2 rs = rippleSlope(P);  // objetos empurrando a água
+  s.normal = normalize(up - vec3(d.x, 0.0, d.y) * min(m.flowSpeed, 3.0) / 3.0 * 2.0 - vec3(rs.x, 0.0, rs.y));
+  // Espuma nas cristas, mais com correnteza forte.
+  float foam = smoothstep(0.86, 0.97, d.z) * clamp(m.flowSpeed / 3.0, 0.0, 1.0) * 0.3;
+  s.diffuseColor = mix(m.baseColor.rgb, vec3(0.7), foam);
+  s.f0 = vec3(0.02);
+  s.f90 = 1.0;
+  s.alpha = 1.0;
+  s.roughness = mix(0.03, 0.5, foam);
+  s.emissive = vec3(0.0);
+  s.normalVariance = 0.0;
+  s.occlusion = 1.0;
+  s.transmission = 0.0;
+  s.transmissionTint = vec3(1.0);
+  s.clearcoat = 0.0;
+  s.clearcoatRoughness = 0.0;
+  return s;
+}
+
 // vertexColor: cor por vértice interpolada (glTF COLOR_0; branco se a malha não tem).
 Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexColor) {
   if ((m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
+  if ((m.flags & MATERIAL_RIVER) != 0u) return evalRiver(m, P, N, T);
   if (m.uvRotation != 0.0 || m.uvScale != vec2(1.0) || m.uvOffset != vec2(0.0)) {  // KHR_texture_transform
     float c = cos(m.uvRotation), sn = sin(m.uvRotation);
     uv = mat2(c, sn, -sn, c) * (uv * m.uvScale) + m.uvOffset;  // mesma matriz do README da Khronos (colunas)
