@@ -756,3 +756,9 @@ cada espalhamento, direção nova sorteada pela fase, o céu daquela direção a
   0,31 de 255. Uma versão intermediária pedia o normal map nos raios (que ele não lê) e carregava tudo (1.927 MB).
 - Cena externa, 480x270: passe de luz igual com e sem camadas (1.665 x 1.676 ms); G-buffer +50% (1.659 x 1.110 ms).
 
+### Ondulações na geometria da água (1/11)
+
+A altura das ondulações (`rippleHeightAt`, binding 23) também desloca os vértices: no mar (junto do deslocamento da
+FFT) e no rio (fita refeita com 1 m ao longo e 16 faixas na largura, para ter vértices onde a onda passa). A/B no rio
+com o barco (`--no-ripples`): a diferença fica só em volta do barco e da esteira; validação limpa no rio e no mar.
+
