@@ -7,7 +7,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <condition_variable>
+#include <cstdio>
 #include <cstring>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <thread>
 #include <map>
 
 namespace scene {
@@ -256,10 +263,98 @@ void Scene::buildHlod() {
            proxies, members, trisIn, trisOut);
 }
 
-void Scene::makeResident(uint32_t mi) {
+// Leitor do disco em segundo plano: um arquivo com as malhas de todas as células (vértices, índices, cores e
+// meshlets, uma atrás da outra) e uma thread que lê uma célula inteira por pedido.
+struct StreamLoader {
+  struct Record {
+    uint64_t offset = 0;
+    uint32_t vertices = 0, indices = 0, colors = 0, meshletWords = 0;
+  };
+  std::string path;
+  std::ofstream out;
+  std::vector<Record> records;               // por malha
+  std::vector<std::vector<uint32_t>> cells;  // malhas de cada célula
+  std::thread worker;
+  std::mutex mu;
+  std::condition_variable cv;
+  std::deque<uint32_t> requests;
+  std::vector<std::pair<uint32_t, std::vector<LoadedMesh>>> ready;
+  bool quit = false;
+
+  explicit StreamLoader(size_t meshCount) : records(meshCount) {
+    static int serial = 0;
+    path = (std::filesystem::temp_directory_path() /
+            ("legacy_stream_" + std::to_string(uintptr_t(this)) + "_" + std::to_string(serial++) + ".pak")).string();
+    out.open(path, std::ios::binary | std::ios::trunc);
+    if (!out) FATAL("Streaming: não deu para criar %s", path.c_str());
+  }
+  ~StreamLoader() {
+    {
+      std::lock_guard<std::mutex> l(mu);
+      quit = true;
+    }
+    cv.notify_all();
+    if (worker.joinable()) worker.join();
+    std::remove(path.c_str());
+  }
+  template <class T> void put(const std::vector<T>& v) { out.write(reinterpret_cast<const char*>(v.data()), std::streamsize(v.size() * sizeof(T))); }
+  void write(uint32_t mesh, const MeshData& d, const std::vector<uint32_t>& meshlets) {
+    Record& r = records[mesh];
+    r.offset = uint64_t(out.tellp());
+    r.vertices = uint32_t(d.vertices.size());
+    r.indices = uint32_t(d.indices.size());
+    r.colors = uint32_t(d.colors.size());
+    r.meshletWords = uint32_t(meshlets.size());
+    put(d.vertices);
+    put(d.indices);
+    put(d.colors);
+    put(meshlets);
+  }
+  void start(std::vector<std::vector<uint32_t>> cellMeshes) {
+    out.close();
+    cells = std::move(cellMeshes);
+    worker = std::thread([this] { run(); });
+  }
+  template <class T> static void get(std::ifstream& in, std::vector<T>& v, uint32_t n) {
+    v.resize(n);
+    in.read(reinterpret_cast<char*>(v.data()), std::streamsize(size_t(n) * sizeof(T)));
+  }
+  void run() {
+    std::ifstream in(path, std::ios::binary);
+    for (;;) {
+      uint32_t cell;
+      {
+        std::unique_lock<std::mutex> l(mu);
+        cv.wait(l, [&] { return quit || !requests.empty(); });
+        if (quit) return;
+        cell = requests.front();
+        requests.pop_front();
+      }
+      std::vector<LoadedMesh> meshes;
+      for (uint32_t m : cells[cell]) {
+        const Record& r = records[m];
+        LoadedMesh lm;
+        lm.mesh = m;
+        in.seekg(std::streamoff(r.offset));
+        get(in, lm.data.vertices, r.vertices);
+        get(in, lm.data.indices, r.indices);
+        get(in, lm.data.colors, r.colors);
+        get(in, lm.meshlets, r.meshletWords);
+        if (!in) FATAL("Streaming: leitura falhou em %s", path.c_str());
+        meshes.push_back(std::move(lm));
+      }
+      {
+        std::lock_guard<std::mutex> l(mu);
+        ready.emplace_back(cell, std::move(meshes));
+      }
+      cv.notify_all();
+    }
+  }
+};
+
+void Scene::makeResident(uint32_t mi, const MeshData& data, const std::vector<uint32_t>& meshlets) {
   rhi::Context& ctx = *ctx_;
   GpuMesh& gm = meshes[mi];
-  const MeshData& data = streamData_[mi];
   VkBufferUsageFlags geometryUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
   if (ctx.rayTracing) geometryUsage |= VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
   const VkDeviceSize vbytes = data.vertices.size() * sizeof(Vertex), ibytes = data.indices.size() * sizeof(uint32_t);
@@ -270,7 +365,7 @@ void Scene::makeResident(uint32_t mi) {
     gm.blas = rhi::buildBlas(ctx, in, false);
   }
   gm.resident = true;
-  residentBytes_ += vbytes + ibytes + (ctx.rayTracing ? gm.blas.storage.size : 0) + uploadMeshlets(ctx, gm, streamMeshlets_[mi]) +
+  residentBytes_ += vbytes + ibytes + (ctx.rayTracing ? gm.blas.storage.size : 0) + uploadMeshlets(ctx, gm, meshlets) +
                     uploadColors(ctx, gm, data);
   for (uint32_t o : objectsOfMesh_[mi]) {
     instanceUpdates_.push_back(o);  // endereços novos da malha no buffer de instâncias
@@ -323,21 +418,66 @@ bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
     if (cell.resident && d > streamUnloadDistance) {
       for (uint32_t m : cell.meshes) evict(m);
       cell.resident = false;
+      cellRequested_[c] = 0;
       changed = true;
     }
   }
   std::sort(toLoad.begin(), toLoad.end());
+  // Leituras do disco: pede as células que faltam (a mais perto primeiro) e recolhe as que a thread já leu.
+  StreamLoader& L = *loader_;
+  auto collect = [&] {
+    std::lock_guard<std::mutex> l(L.mu);
+    for (auto& [c, data] : L.ready) loadedCells_[c] = std::move(data);
+    L.ready.clear();
+  };
+  {
+    std::lock_guard<std::mutex> l(L.mu);
+    for (const auto& [d, c] : toLoad)
+      if (!cellRequested_[c]) {
+        cellRequested_[c] = 1;
+        L.requests.push_back(c);
+      }
+  }
+  L.cv.notify_all();
+  collect();
+  // Esperar no mesmo frame: a célula onde a câmera está (senão o chão some), tudo na primeira chamada (a "tela de
+  // carregamento": sem ela o 1º frame sai sem os prédios de longe e a auto-exposição demora a voltar) ou tudo sempre,
+  // no modo de referência.
+  const bool waitAll = streamSync || !streamStarted_;
+  streamStarted_ = true;
+  for (const auto& [d, c] : toLoad) {
+    if (!(waitAll || d <= 0.0f)) continue;
+    std::unique_lock<std::mutex> l(L.mu);
+    L.cv.wait(l, [&] {
+      for (auto& [rc, data] : L.ready) loadedCells_[rc] = std::move(data);
+      L.ready.clear();
+      return loadedCells_.count(c) > 0;
+    });
+  }
   double budget = double(streamBudgetMB) * 1048576.0;
   for (const auto& [d, c] : toLoad) {
+    auto it = loadedCells_.find(c);
+    if (it == loadedCells_.end()) continue;  // ainda no disco
     StreamCell& cell = streamCells[c];
     size_t bytes = 0;
-    for (uint32_t m : cell.meshes) bytes += streamData_[m].vertices.size() * sizeof(Vertex) + streamData_[m].indices.size() * 4;
+    for (const LoadedMesh& lm : it->second) bytes += lm.data.vertices.size() * sizeof(Vertex) + lm.data.indices.size() * 4;
     if (budget <= 0.0 && d > 0.0) break;  // orçamento do frame acabou (a célula onde a câmera está sempre carrega)
-    for (uint32_t m : cell.meshes)
-      if (!meshes[m].resident) makeResident(m);
+    for (const LoadedMesh& lm : it->second)
+      if (!meshes[lm.mesh].resident) makeResident(lm.mesh, lm.data, lm.meshlets);
     cell.resident = true;
+    loadedCells_.erase(it);  // a cópia na RAM sai assim que sobe
     budget -= double(bytes);
     changed = true;
+  }
+  // Lidas mas não mais desejadas (a câmera se afastou antes de subir): descarta, um novo pedido relê.
+  for (auto it = loadedCells_.begin(); it != loadedCells_.end();) {
+    const StreamCell& cell = streamCells[it->first];
+    if (std::max(glm::length(cell.center - camera) - cell.radius, 0.0f) > streamUnloadDistance) {
+      cellRequested_[it->first] = 0;
+      it = loadedCells_.erase(it);
+    } else {
+      ++it;
+    }
   }
   if (changed) {
     rebuildTlasLayout();
@@ -653,8 +793,8 @@ void Scene::upload(rhi::Context& ctx) {
   VkDeviceSize scratchTotal = 0;
   ctx_ = &ctx;
   meshCellPending_.resize(cpuMeshes_.size(), -1);
-  streamData_.resize(cpuMeshes_.size());
-  streamMeshlets_.resize(cpuMeshes_.size());
+  for (int c : meshCellPending_)
+    if (c >= 0 && !loader_) loader_ = std::make_shared<StreamLoader>(cpuMeshes_.size());
   for (auto& data : cpuMeshes_) {
     GpuMesh gm;
     const size_t meshIndex = meshes.size();
@@ -671,8 +811,8 @@ void Scene::upload(rhi::Context& ctx) {
         gm.boundsMax = glm::max(gm.boundsMax, v.position);
       }
       triangles += data.indices.size() / 3;
-      streamMeshlets_[meshIndex] = meshletBlob(ctx, gm, data);
-      streamData_[meshIndex] = std::move(data);
+      loader_->write(uint32_t(meshIndex), data, meshletBlob(ctx, gm, data));
+      data = MeshData{};  // fica só no disco
       meshes.push_back(gm);
       continue;
     }
@@ -746,6 +886,12 @@ void Scene::upload(rhi::Context& ctx) {
     meshes.push_back(gm);
   }
   cpuMeshes_.clear();
+  if (loader_) {  // as células de streaming agora só existem no disco: a thread de leitura começa
+    std::vector<std::vector<uint32_t>> cells;
+    for (const StreamCell& c : streamCells) cells.push_back(c.meshes);
+    loader_->start(std::move(cells));
+    cellRequested_.assign(streamCells.size(), 0);
+  }
   if (scratchTotal > 0)
     skinScratch = rhi::createBuffer(ctx, scratchTotal, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                     rhi::MemoryUsage::GpuOnly);
@@ -851,6 +997,7 @@ void Scene::upload(rhi::Context& ctx) {
 }
 
 void Scene::destroy(rhi::Context& ctx) {
+  loader_.reset();  // para a thread de leitura e apaga o arquivo
   if (ctx.rayTracing) tlas.destroy();
   for (auto& m : meshes) {
     for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices, &m.clothPos, &m.clothPrev,
