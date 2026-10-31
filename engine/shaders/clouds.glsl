@@ -15,7 +15,7 @@ const float CLOUD_ALBEDO = 0.99;                  // gotas de água quase não a
 // Ajustados contra a referência por Monte Carlo (clouds_reference.comp, tools/nuvens.py).
 #ifndef CLOUD_MS_A
 #define CLOUD_MS_A 0.6
-#define CLOUD_MS_B 0.35
+#define CLOUD_MS_B 0.33
 #define CLOUD_MS_C 0.5
 #define CLOUD_AMB 1.0
 #define CLOUD_AMB_ATT 1.0

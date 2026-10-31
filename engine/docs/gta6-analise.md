@@ -28,7 +28,7 @@ Pesquisa de 22/10/2026, status revisado pela auditoria do Dia 4 (ver [auditoria.
 | Shadow maps em cascata (fallback e performance) | ✅ | 4 cascatas 2048² (divisão prática λ = 0,75, esfera envolvente estável, passos de um texel), PCF por comparação em hardware, folhagem com recorte e vento; sempre sem ray tracing, e com `--shadow-maps` numa RTX (imagem praticamente igual à sombra traçada na Sponza). Sem RT a luz ambiente ainda não tem oclusão |
 | Milhares de luzes (neon, faróis, postes) | ✅ | ReSTIR de produção: BVH de luzes, GRIS/MIS em pares, correção de viés por ray tracing, filtro de boiling; viés < 1,5% contra força bruta (`tools/restir.py`) |
 | Céu e atmosfera física | ✅ | Pipeline completa de Hillaire (transmitância, múltiplo espalhamento, sky-view, perspectiva aérea), 4% de erro contra path tracing de referência |
-| Nuvens volumétricas, raios de luz (god rays) | ✅ | Nuvens Nubis/Hillaire (Perlin-Worley, múltiplo espalhamento, vento) no céu, nos reflexos e com sombra no chão; névoa volumétrica em froxels com sombra do sol por ray tracing e céu com visibilidade (raios de luz, névoa escura dentro de prédios) |
+| Nuvens volumétricas, raios de luz (god rays) | ✅ | Nuvens Nubis/Hillaire (Perlin-Worley, múltiplo espalhamento, vento) no céu, nos reflexos e com sombra no chão; névoa volumétrica em froxels com sombra do sol por ray tracing e céu com visibilidade (raios de luz, névoa escura dentro de prédios). Nuvens medidas contra Monte Carlo volumétrico com espalhamento múltiplo exato (`tools/nuvens.py`): viés −5,7%, correlação 0,83 (antes do ajuste: +118% e 0,27) |
 | Ciclo dia/noite | ✅ | Sol físico; à noite lua (luz e disco), estrelas e luzes da cidade (milhares pelo ReSTIR + emissivos como luz) |
 
 ### Imagem

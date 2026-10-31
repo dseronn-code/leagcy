@@ -724,3 +724,18 @@ distância) fica a pelo menos 0,8 do espaçamento (a espessura do pano), metade 
 (LEGACY_CLOTH_DUMP) e compara com a colisão desligada (LEGACY_NO_CLOTH_SELF), toalha caindo sobre a bola, 150 frames:
 sem: menor distância 0,37 do espaçamento e 16 pares a menos de 0,5 (atravessando); com: 0,79 e nenhum. Validação limpa.
 
+### Nuvens medidas contra Monte Carlo volumétrico (1/11)
+
+`clouds_reference.comp` (`--clouds-reference`): mesma densidade (com detalhe em todo ponto), albedo, fase de duas lobas,
+sol (com a transmitância da atmosfera) e céu; delta tracking para as colisões, ratio tracking para a sombra do sol em
+cada espalhamento, direção nova sorteada pela fase, o céu daquela direção ao sair da camada, roleta russa sem viés.
+`tools/nuvens.py` compara a faixa de céu (blocos 6x8; 1.024 amostras por pixel na referência).
+
+- Antes: viés **+118%**, erro relativo 1,60, correlação **0,27** — o céu entrava igual no miolo das nuvens densas (a
+  nuvem saía um cinza claro uniforme) e as oitavas de Wrenninge (a 0,6, b 0,3) davam energia demais.
+- Correção: o céu chega atenuado pela profundidade óptica até o topo da camada; oitavas ajustadas numa grade
+  (a 0,6, b 0,33, c 0,5): viés **−5,7%**, erro 0,316, correlação **0,83**. (b 0,35 dava erro 0,274 mas viés −18%;
+  escolhido o menor viés de energia.)
+- A primeira tentativa de medida comparou a imagem inteira: o bloom do céu mais claro contaminava o chão; a medida
+  ficou só no céu.
+
