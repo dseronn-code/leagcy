@@ -9,7 +9,8 @@ vec4 sampleMaterialTexture(int i, vec2 uv) {
   if ((uint(gl_FragCoord.x) & 3u) == (f & 3u) && (uint(gl_FragCoord.y) & 3u) == ((f >> 2) & 3u)) {
     ivec2 size = textureSize(textures[nonuniformEXT(i)], 0);
     float lod = textureQueryLod(textures[nonuniformEXT(i)], uv).y + textureMipBias();
-    atomicMax(textureFeedback[i], uint(clamp(float(max(size.x, size.y)) * exp2(-lod), 1.0, 65536.0)));
+    uint want = uint(clamp(float(max(size.x, size.y)) * exp2(-lod), 1.0, 65536.0));
+    if (textureFeedback[i] < want) atomicMax(textureFeedback[i], want);  // só escreve se pedir mais (sem fila)
   }
   return texture(textures[nonuniformEXT(i)], uv, textureMipBias());
 }
