@@ -531,7 +531,12 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI});
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
-  compositePass_.init(ctx, "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, CIS, CIS, CIS});
+  if (settings.fogReference && !rt) {
+    LOG_WARN("--fog-reference precisa de ray tracing; ignorado");
+    settings.fogReference = false;
+  }
+  if (settings.fogReference) fogReferencePass_.init(ctx, "fog_reference.comp", g, {CIS, SI, CIS}, sizeof(uint32_t));
+  compositePass_.init(ctx, settings.fogReference ? "composite_fog_reference.comp" : "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, CIS, CIS, CIS});
   taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI});
   rrGuidesPass_.init(ctx, "rr_guides.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   accumulatePass_.init(ctx, "accumulate.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI}, sizeof(uint32_t));
@@ -798,6 +803,8 @@ void Renderer::createTargets() {
   const VkExtent3D froxels{(R.width + 7) / 8, (R.height + 7) / 8, kFogSlices};
   for (auto& f : t_.fogInject) f = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
   t_.fogIntegrated = rhi::createImage3D(ctx, froxels, kHdrFormat, storage);
+  for (auto& f : t_.fogReference)
+    f = rhi::createImage2D(ctx, settings.fogReference ? R : VkExtent2D{1, 1}, VK_FORMAT_R32G32B32A32_SFLOAT, storage);
   hiZ_ = rhi::createImage2D(ctx, R, VK_FORMAT_R32_SFLOAT, storage, rhi::mipCount(R));
   for (uint32_t m = 0; m < hiZ_.mipLevels; ++m) hiZMips_.push_back(rhi::createMipView(ctx, hiZ_, m));
   t_.sssA = rhi::createImage2D(ctx, R, kHdrFormat, storage);
@@ -825,7 +832,7 @@ void Renderer::createTargets() {
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                             &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
-                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.sssA, &t_.sssB, &hiZ_})
+                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.fogReference[0], &t_.fogReference[1], &t_.sssA, &t_.sssB, &hiZ_})
       toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
   });
   if (upscalerReady_) {
@@ -865,7 +872,7 @@ void Renderer::destroyTargets() {
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                           &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
-                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.sssA, &t_.sssB})
+                            &t_.clouds[1], &t_.fogInject[0], &t_.fogInject[1], &t_.fogIntegrated, &t_.fogReference[0], &t_.fogReference[1], &t_.sssA, &t_.sssB})
     rhi::destroyImage(ctx, *img);
   for (VkImageView v : t_.bloomMips) vkDestroyImageView(ctx.device, v, nullptr);
   t_.bloomMips.clear();
@@ -1379,9 +1386,16 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   if (!showValidation) {
   // ---- 6. Composição ----
+  if (settings.fogReference && scene_->fogDensity > 0.0f) {
+    fogReferencePass_.dispatch(cmd, gs, {gDepth, Binding::storageImage(t_.fogReference[cur].view), Binding::sampled(t_.fogReference[cur ^ 1u].view, nearest_)},
+                               R, &fogReferenceFrames_);
+    ++fogReferenceFrames_;
+    barrier();
+  }
   compositePass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.emissive), tex(*diffuseFinal), tex(*specularFinal),
                                     storage(t_.sceneColor), Binding::sampled(t_.clouds[cur].view, linear_),
-                                    Binding::sampled(skyClear_.view, linear_), Binding::sampled(t_.fogIntegrated.view, linear_)}, R);
+                                    Binding::sampled(skyClear_.view, linear_),
+                                    settings.fogReference ? Binding::sampled(t_.fogReference[cur].view, nearest_) : Binding::sampled(t_.fogIntegrated.view, linear_)}, R);
   barrier();
   if (particlePipeline_ != VK_NULL_HANDLE) {
     VkRenderingAttachmentInfo color = attachment(t_.sceneColor.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD);
@@ -1827,7 +1841,7 @@ void Renderer::destroy() {
                          &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1],
                          &hlodInfo_, &hlodCells_})
     rhi::destroyBuffer(ctx, *b);
-  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &cloudReferencePass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &cloudReferencePass_, &fogReferencePass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

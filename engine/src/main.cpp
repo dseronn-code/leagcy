@@ -36,8 +36,8 @@ struct Options {
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
-  bool streamSync = false;
-  bool textureStreaming = true;  // mips finos das texturas sob demanda (--no-texture-streaming: tudo no início)  // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
+  bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
+  bool textureStreaming = true;  // mips finos das texturas sob demanda (--no-texture-streaming: tudo no início)
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
   bool compressTextures = true;  // texturas em BC7 (--no-texture-compression = RGBA8)
   bool meshLights = true;        // triângulos emissivos como luzes (--no-mesh-lights: só pelos raios de GI)
@@ -134,6 +134,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-hlod") o.render.hlod = false;
     else if (a == "--no-ripples") o.render.ripples = false;
     else if (a == "--clouds-reference") o.render.cloudReference = true;
+    else if (a == "--fog-reference") o.render.fogReference = true;
     else if (a == "--no-sss") o.render.subsurface = false;
     else if (a == "--stream-sync") o.streamSync = true;
     else if (a == "--no-texture-streaming") o.textureStreaming = false;
@@ -163,7 +164,9 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--help" || a == "-h") {
       std::printf(
           "uso: legacy [opções]\n"
-          "  --scene sponza|outdoor|furnace|arquivo.gltf   cena (furnace = teste da fornalha branca)\n"
+          "  --scene NOME|arquivo.gltf  cena: sponza (padrão), outdoor, city, ocean, river, world, stream, crowd, hair,\n"
+          "                             cloth, scan, scan-backlit, skin, skin-backlit, glass, paint, reflections, vfx,\n"
+          "                             shadows, shadows-far, mesh-lights*, furnace (teste da fornalha branca)\n"
           "  --night [--no-moon]      noite: luzes locais (ReSTIR), lua cheia e estrelas\n"
           "  --clouds X               cobertura de nuvens volumétricas 0..1 (0 = céu limpo)\n"
           "  --fog X                  névoa volumétrica: densidade no chão (1/m; 0,02 = neblina com raios de luz)\n"
@@ -191,6 +194,10 @@ Options parseArgs(int argc, char** argv) {
           "  --sharpness X              nitidez RCAS na saída (0 a 1; padrão 0,5, ou 0 com DLSS)\n"
           "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
           "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"
+          "  --no-gpu-culling --no-occlusion --no-meshlets --no-hlod   desligam partes do culling/desenho (medição)\n"
+          "  --no-ripples --no-sss --no-texture-streaming --stream-sync  idem (ondulações, pele, texturas, streaming)\n"
+          "  --clouds-reference         nuvens por Monte Carlo volumétrico exato (tools/nuvens.py)\n"
+          "  --fog-reference            névoa integrada por pixel, sem grade (precisa de ray tracing; tools/nevoa.py)\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n");

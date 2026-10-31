@@ -1,0 +1,5 @@
+#version 460
+// composite com a névoa da referência por pixel (--fog-reference).
+#extension GL_GOOGLE_include_directive : require
+#define FOG_REFERENCE 1
+#include "composite.glsl"

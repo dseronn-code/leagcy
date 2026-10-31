@@ -66,6 +66,7 @@ struct Settings {
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
   bool subsurface = true;        // espalhamento subsuperficial da pele (--no-sss: medição de energia)
   bool cloudReference = false;   // nuvens da tela por Monte Carlo volumétrico sem aproximação (--clouds-reference)
+  bool fogReference = false;     // névoa integrada por pixel com sombra e céu exatos, sem grade (--fog-reference; RT)
   bool ripples = true;           // ondulações de objetos na água (--no-ripples)
   bool hlod = true;              // proxies de HLOD ao longe, onde a cena montou (--no-hlod: sempre os membros)
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
@@ -161,6 +162,7 @@ class Renderer {
     std::array<rhi::Image, 2> clouds;  // nuvens da vista principal em meia resolução (atual / anterior)
     std::array<rhi::Image, 2> fogInject;  // névoa volumétrica: células da grade 3D (atual / anterior)
     rhi::Image fogIntegrated;             // névoa acumulada ao longo das fatias
+    std::array<rhi::Image, 2> fogReference;  // --fog-reference: névoa por pixel acumulada (atual / anterior; 1×1 sem ela)
     rhi::Image sssA, sssB;                // espalhamento subsuperficial: passadas horizontal e vertical
     rhi::Image postA, postB, bloom;
     std::vector<VkImageView> bloomMips;
@@ -199,6 +201,8 @@ class Renderer {
   rhi::ComputePass ripplePass_;
   rhi::ComputePass cloudReferencePass_;
   uint32_t cloudReferenceFrames_ = 0;
+  rhi::ComputePass fogReferencePass_;
+  uint32_t fogReferenceFrames_ = 0;
   bool rippleOn_ = false, rippleValid_ = false;
   float rippleLevel_ = 0.0f, rippleTime_ = 0.0f, rippleDt_ = 0.0f;
   glm::ivec2 rippleCell_{0}, rippleShift_{0};  // canto da grade em texels do mundo; deslocamento deste frame

@@ -106,6 +106,9 @@ void main() {
     }
   }
   vec4 cur = vec4(S * haze, mix(1.0, T, haze));
-  if (pc.frames > 0u) cur = mix(texelFetch(cloudsPrev, id, 0), cur, 1.0 / float(pc.frames + 1u));
+  if (pc.frames > 0u) {  // média dos frames, a luz anterior trazida para a pré-exposição deste
+    vec4 prev = texelFetch(cloudsPrev, id, 0);
+    cur = mix(vec4(prev.rgb * historyExposureScale(), prev.a), cur, 1.0 / float(pc.frames + 1u));
+  }
   imageStore(cloudsOut, id, vec4(clampHalf(cur.rgb), clamp(cur.a, 0.0, 1.0)));
 }

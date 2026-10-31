@@ -964,9 +964,9 @@ bool buildRiver(Scene& s, Camera& camera, const DemoOptions& opt) {
   ground.flags = kMaterialTerrain;
   addTerrainLayers(s);
   s.addObject(s.addMesh(makeTerrain(800.0f, 400, riverTerrain)), glm::mat4(1.0f), s.addMaterial(ground));
-  // Fita do rio: um par de vértices a cada 2 m ao longo da curva, tangente = direção da correnteza (+x).
+  // Fita do rio ao longo da curva, tangente = direção da correnteza (+x). Malha fina (1 m ao longo, 16 faixas na
+  // largura): as ondulações dos objetos deslocam os vértices (gbuffer.vert).
   MeshData river;
-  // Malha fina (1 m ao longo, 16 faixas na largura): as ondulações dos objetos deslocam os vértices (gbuffer.vert).
   constexpr int kAcross = 16;
   for (int i = 0; i <= 400; ++i) {
     const float x = -200.0f + 1.0f * float(i), zc = riverCenter(x);
@@ -1151,7 +1151,7 @@ bool buildCrowd(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
-// Cabelo por fios: cabeça (esfera com pele e SSS), olhos e 12 mil fios de 25 cm, castanhos, ao sol de lado.
+// Cabelo por fios: cabeça (esfera com pele e SSS), olhos e 14 mil fios de 25 cm, castanhos, ao sol de lado.
 bool buildHairTest(Scene& s, Camera& camera) {
   uint32_t sphere = s.addMesh(makeSphere(96, 48)), cube = s.addMesh(makeCube());
   Material floor;

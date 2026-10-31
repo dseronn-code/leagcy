@@ -27,8 +27,10 @@ void main() {
   vec4 prevClip = frame.prevViewProjNoJitter * vec4(dir, 0.0);
   if (frame.frameInfo.w != 0u && prevClip.w > 0.0) {
     vec2 prevUv = prevClip.xy / prevClip.w * 0.5 + 0.5;
-    if (all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0))))
-      cur = mix(textureLod(cloudsPrev, prevUv, 0.0), cur, 0.2);
+    if (all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0)))) {
+      vec4 prev = textureLod(cloudsPrev, prevUv, 0.0);  // luz do frame anterior na pré-exposição deste
+      cur = mix(vec4(prev.rgb * historyExposureScale(), prev.a), cur, 0.2);
+    }
   }
   imageStore(cloudsOut, id, vec4(clampHalf(cur.rgb), clamp(cur.a, 0.0, 1.0)));
 }

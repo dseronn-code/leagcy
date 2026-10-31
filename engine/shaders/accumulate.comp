@@ -15,6 +15,9 @@ void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (!insideRender(id)) return;
   vec4 a = pc.count <= 1u ? vec4(0.0) : imageLoad(accum, id);
+  // A cor vem pré-exposta: a soma dos frames anteriores vai para a escala deste (a exposição dos primeiros frames
+  // ainda está convergindo; sem isso eles pesavam na média com a escala errada).
+  a.rgb *= historyExposureScale();
   a += vec4(texelFetch(sceneIn, id, 0).rgb, 1.0);
   imageStore(accum, id, a);
   imageStore(outColor, id, vec4(a.rgb / a.w, 1.0));

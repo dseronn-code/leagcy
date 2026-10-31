@@ -14,6 +14,7 @@ void main() {
   if (b >= pc.batchCount) return;
   uint total = min(commands[b].instanceCount * groupsPerInstance[b], pc.maxGroups);
   uint x = min(total, 65535u), y = x == 0u ? 0u : (total + x - 1u) / x;
+  if (x * y > pc.maxGroups) y = pc.maxGroups / x;  // o arredondamento para cima não pode passar do limite total
   args[3u * b] = x;
   args[3u * b + 1u] = y;
   args[3u * b + 2u] = 1u;

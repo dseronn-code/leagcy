@@ -120,6 +120,7 @@ void main() {
         barrier();
         k = 0u;
         for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          if (fixedPoint(i)) continue;  // ponto preso fica onde está
           bool hit;
           P[i] = collide(P[i] + push[k], hit);
         }

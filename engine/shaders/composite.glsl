@@ -1,0 +1,114 @@
+// Corpo de composite.comp (e da variante composite_fog_reference.comp, com a névoa da referência).
+// Recompõe a imagem: difuso filtrado × albedo + especular filtrado × refletância especular + emissão; céu e névoa.
+#extension GL_GOOGLE_include_directive : require
+#include "gbuffer.glsl"
+#include "brdf.glsl"
+#include "fog.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 4) uniform sampler2D gEmissive;
+layout(set = 1, binding = 5) uniform sampler2D diffuseIn;
+layout(set = 1, binding = 6) uniform sampler2D specularIn;
+layout(set = 1, binding = 7, rgba16f) uniform writeonly image2D sceneOut;
+layout(set = 1, binding = 8) uniform sampler2D cloudsScreen;  // nuvens na tela (rgb = luz, a = transmitância)
+layout(set = 1, binding = 9) uniform sampler2D clearSky;      // céu sem nuvens
+#ifdef FOG_REFERENCE
+layout(set = 1, binding = 10) uniform sampler2D fogReference;  // referência por pixel (fog_reference.comp): rgb = luz, a = T
+#else
+layout(set = 1, binding = 10) uniform sampler3D fogVolume;    // névoa volumétrica acumulada (fog_integrate.comp)
+#endif
+
+// Névoa entre a câmera e um ponto a `dist` metros na direção v: trecho além de FOG_FAR pela fórmula analítica (sem
+// sombra), o resto pela grade volumétrica (com sombra: raios de luz).
+vec3 applyFog(vec3 color, vec2 uv, vec3 v, float dist) {
+  if (frame.params.z <= 0.0) return color;
+#ifdef FOG_REFERENCE
+  vec4 r = texelFetch(fogReference, ivec2(gl_GlobalInvocationID.xy), 0);  // o trecho inteiro, já integrado
+  return color * r.a + r.rgb;
+#else
+  if (dist > FOG_FAR) {
+    float T;
+    vec3 L;
+    heightFogSegment(frame.cameraPos.xyz, v, FOG_FAR, dist, T, L);
+    color = color * T + L;
+    dist = FOG_FAR;
+  }
+  float slices = float(textureSize(fogVolume, 0).z);
+  float f = fogSliceCoord(dist) * slices;  // a fatia z guarda o acumulado até o FIM dela (f = z + 1)
+  vec4 fog = textureLod(fogVolume, vec3(uv, (max(f - 1.0, 0.0) + 0.5) / slices), 0.0);
+  fog = mix(vec4(0.0, 0.0, 0.0, 1.0), fog, clamp(f, 0.0, 1.0));  // antes do fim da 1ª fatia: parte dela
+  return color * fog.a + fog.rgb;
+#endif
+}
+
+// Debaixo d'água: luz espalhada pela própria água (sol que chegou até a câmera, mais o céu filtrado), por pixel.
+vec3 waterInscatter() {
+  vec3 sun = sunIrradianceAt(frame.cameraPos.xyz) / PI;
+  vec3 sky = sampleSky(vec3(0.0, 1.0, 0.0)) * exp(-SEA_EXTINCTION * max(frame.water.x - frame.cameraPos.y, 0.0));
+  return (sun * 0.35 + sky) * SEA_SCATTER_ALBEDO;
+}
+// Trecho de `dist` metros dentro d'água: absorção de Beer por canal e a luz espalhada no caminho.
+vec3 applyWater(vec3 color, float dist) {
+  vec3 T = exp(-SEA_EXTINCTION * dist);
+  return color * T + waterInscatter() * (1.0 - T);
+}
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (!insideRender(id)) return;
+  float depth = texelFetch(gDepth, id, 0).r;
+  vec2 uv = (vec2(id) + 0.5) * frame.renderSize.zw;
+  vec3 color;
+  bool camUnder = underwater(frame.cameraPos.xyz);
+  if (depth <= 0.0 && camUnder) {
+    // Sem geometria vista de baixo: a superfície do mar (o mar só é desenhado por cima). Janela de Snell: dentro do
+    // cone crítico (48,6°) o céu refratado; fora, reflexão interna total (o azul da própria água).
+    vec3 dir = viewDirFromUv(uv);
+    vec3 below = waterInscatter();
+    if (dir.y > 0.0) {
+      float t = (frame.water.x - frame.cameraPos.y) / dir.y;
+      vec3 out_ = refract(dir, vec3(0.0, -1.0, 0.0), 1.333);
+      vec3 surface = below;
+      if (dot(out_, out_) > 0.0) {
+        float F = 0.02 + 0.98 * pow(1.0 - clamp(dir.y, 0.0, 1.0), 5.0);
+        surface = mix(sampleSky(normalize(out_)) + sunDisk(normalize(out_)), below, F);
+      }
+      color = applyWater(surface, t);
+    } else {
+      color = below;  // olhando para o fundo sem fim
+    }
+    imageStore(sceneOut, id, vec4(clampHalf(color), 1.0));
+    return;
+  }
+  if (depth <= 0.0) {
+    vec3 dir = viewDirFromUv(uv);
+    if (frame.night.z > 0.0) {  // nuvens em meia resolução na frente do céu limpo, do sol e das estrelas
+      vec4 c = textureLod(cloudsScreen, uv, 0.0);
+      color = (textureLod(clearSky, skyLutUv(dir), 0.0).rgb + sunDisk(dir) + starField(dir)) * c.a + c.rgb;
+    } else {
+      color = sampleSky(dir) + sunDisk(dir) + starField(dir);
+    }
+    color = applyFog(color, uv, dir, 4000.0);  // céu atrás da névoa
+  } else {
+    GSample g = loadGBuffer(id);
+    BrdfContext bc = makeBrdfContext(g.N, g.V, g.f0, g.f90, g.roughness, energyCompensationEnabled());
+    vec3 dIn = texelFetch(diffuseIn, id, 0).rgb, sIn = texelFetch(specularIn, id, 0).rgb;
+    if (reblurSignal()) {  // REBLUR_BackEnd_UnpackRadianceAndNormHitDist
+      dIn = nrdYCoCgToLinear(dIn);
+      sIn = nrdYCoCgToLinear(sIn);
+    }
+    color = dIn * g.diffuseColor + sIn * specularDemodulation(bc) +
+            texelFetch(gEmissive, id, 0).rgb;
+    if (camUnder) {
+      color = applyWater(color, distance(g.P, frame.cameraPos.xyz));  // água em vez de ar entre câmera e ponto
+    } else {
+      color = applyAerialPerspective(color, uv, g.P);
+      color = applyFog(color, uv, normalize(g.P - frame.cameraPos.xyz), distance(g.P, frame.cameraPos.xyz));
+      if (underwater(g.P) && frame.water.y > 0.5) {  // ponto submerso visto de cima (raso): a água sobre ele
+        vec3 v = normalize(g.P - frame.cameraPos.xyz);
+        color = applyWater(color, (frame.water.x - g.P.y) / max(-v.y, 0.1));
+      }
+    }
+  }
+  imageStore(sceneOut, id, vec4(clampHalf(color), 1.0));
+}

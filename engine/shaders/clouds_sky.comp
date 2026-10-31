@@ -26,6 +26,6 @@ void main() {
   cloudMarch(cloudPlanetPos(frame.cameraPos.xyz), dir, jitter, ambient, S, T);
   vec3 L = sky * T + S;
   // Histórico: só quando o frame anterior existe (a câmera anda pouco perto da escala das nuvens).
-  if (frame.frameInfo.w != 0u) L = mix(imageLoad(skyOut, id).rgb, L, 0.25);
+  if (frame.frameInfo.w != 0u) L = mix(imageLoad(skyOut, id).rgb * historyExposureScale(), L, 0.25);  // na pré-exposição deste frame
   imageStore(skyOut, id, vec4(clampHalf(L), 1.0));
 }

@@ -31,12 +31,11 @@ void main() {
 #else
     if (shadowMapsEnabled()) vis = sunShadowMap(p, vec3(0.0));
 #endif
-    // Luz do céu: uma direção sorteada na esfera e um raio de visibilidade — dentro de um prédio o céu está tapado e a
-    // névoa fica escura (estimador sem viés de ∫ céu × visibilidade × fase isotrópica; a média temporal tira o ruído).
+    // Luz do céu: uma direção sorteada pela fase da névoa e um raio de visibilidade — dentro de um prédio o céu está
+    // tapado e a névoa fica escura (estimador sem viés de ∫ céu × visibilidade × fase; a média temporal tira o ruído).
+    // (A fase isotrópica que estava aqui não é a da névoa: o céu em volta da direção de visão pesa mais.)
     uvec3 h = pcg3d(uvec3(id.xy, uint(id.z) + frame.frameInfo.x * 64u));
-    vec2 r = vec2(h.xy) * (1.0 / 4294967296.0);
-    float z = 1.0 - 2.0 * r.x, sr = sqrt(max(1.0 - z * z, 0.0));
-    vec3 w = vec3(sr * cos(TWO_PI * r.y), z, sr * sin(TWO_PI * r.y));
+    vec3 w = sampleFogPhase(v, FOG_PHASE_G, vec2(h.xy) * (1.0 / 4294967296.0));
     vec3 ambient = sampleSky(w);
 #ifdef RAY_TRACING
     ambient *= traceVisibility(p, w, 1e4);
@@ -50,7 +49,10 @@ void main() {
     vec2 prevUv = prevClip.xy / prevClip.w * 0.5 + 0.5;
     float prevW = fogSliceCoord(distance(p, frame.prevCameraPos.xyz));
     vec3 c = vec3(prevUv, prevW);
-    if (all(greaterThanEqual(c, vec3(0.0))) && all(lessThanEqual(c, vec3(1.0)))) cur = mix(textureLod(injectPrev, c, 0.0), cur, 0.1);
+    if (all(greaterThanEqual(c, vec3(0.0))) && all(lessThanEqual(c, vec3(1.0)))) {
+      vec4 prev = textureLod(injectPrev, c, 0.0);  // luz do frame anterior na pré-exposição deste
+      cur = mix(vec4(prev.rgb * historyExposureScale(), prev.a), cur, 0.1);
+    }
   }
   imageStore(injectOut, id, vec4(clampHalf(cur.rgb), cur.a));
 }
