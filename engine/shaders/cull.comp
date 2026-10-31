@@ -86,7 +86,7 @@ void main() {
   uint k = gl_GlobalInvocationID.x;
   if (k >= pc.entryCount) return;
   uint object = drawList[k];
-  if (objects[object].anim.w != 0u) return;  // streaming: malha fora da memória
+  if ((objects[object].anim.w & 1u) != 0u) return;  // streaming: malha fora da memória
   uint b = entryBatch[k];
   CullBatch cb = batches[b];
   // Nível de detalhe: distância da câmera ao centro da caixa do objeto (cada objeto cai em exatamente um nível).

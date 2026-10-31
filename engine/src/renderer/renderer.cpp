@@ -491,7 +491,11 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     std::vector<VkDeviceAddress> addresses;
     for (const scene::CrowdClip& c : scene.crowdClips) {
       crowdFrameBase_.push_back(uint32_t(addresses.size()));
-      for (uint32_t k = 0; k < c.frames; ++k) addresses.push_back(scene.meshes[c.firstMesh + k].vertices.address);
+      // Poses do nível 0, depois as dos níveis 1 e 2 (gbuffer.vert: base + nível × poses + pose).
+      for (uint32_t level = 0; level < 3; ++level) {
+        const uint32_t first = level == 0 || c.lodFirstMesh[level - 1] == ~0u ? c.firstMesh : c.lodFirstMesh[level - 1];
+        for (uint32_t k = 0; k < c.frames; ++k) addresses.push_back(scene.meshes[first + k].vertices.address);
+      }
     }
     if (addresses.empty()) addresses.push_back(0);
     crowdFrames_ = rhi::createBufferWithData(ctx, addresses.data(), addresses.size() * sizeof(VkDeviceAddress),
@@ -1536,7 +1540,8 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
     glm::uvec4 anim = ob.crowdClip != ~0u
                           ? glm::uvec4(crowdFrameBase_[ob.crowdClip], ob.animFrame, historyValid_ ? ob.prevAnimFrame : ob.animFrame, 0)
                           : glm::uvec4(~0u, 0, 0, 0);
-    anim.w = s.meshes[ob.mesh].resident ? 0u : 1u;  // streaming: malha fora da memória = objeto oculto no culling
+    // Bit 0: streaming (malha fora da memória = objeto oculto no culling); acima: poses do clipe (passo entre níveis).
+    anim.w = (s.meshes[ob.mesh].resident ? 0u : 1u) | (ob.crowdClip != ~0u ? s.crowdClips[ob.crowdClip].frames << 1 : 0u);
     objs[i] = {ob.transform, historyValid_ ? ob.prevTransform : ob.transform, anim};
     if (ctx.rayTracing && s.tlasSlotOf(i) >= 0) s.tlas.writeInstance(slot, uint32_t(s.tlasSlotOf(i)), s.tlasInstance(i));
   };

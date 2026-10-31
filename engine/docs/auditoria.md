@@ -691,3 +691,17 @@ atualizada como a do tecido, e os vetores de movimento usam a posição simulada
 no vertex shader saiu). `tools/cabelo.py` lê as posições da GPU (LEGACY_HAIR_DUMP): erro de comprimento 0,000%,
 0,000% dos pontos dentro da cabeça, desvio da pose rígida 0 → 14 mm da raiz à ponta. Validação limpa.
 
+### LOD da multidão (1/11)
+
+As poses assadas são lidas pelo índice do vértice, então cada nível precisa da mesma topologia em todas as poses: o
+agrupamento de vértices é calculado na pose 0 (`simplifyMesh` com grupos, posição pela média) e aplicado às 32 poses
+(`applyVertexGroups`). Níveis 1/4 e 1/8; o `crowdFrames` guarda nível 0, 1 e 2 em sequência e o vertex shader soma
+`nível × poses` (o número de poses vai em `anim.w >> 1`; o bit 0 continua sendo o "fora da memória" do streaming).
+Troca ao dobro da distância das malhas comuns (~45 e ~125 m): a 25 raios a silhueta mais cheia aparecia.
+
+- 300 pessoas: G-buffer 448 → 342 ms, 0,24% dos pixels mudam (média 0,33), na linha do LOD comum do Bistro.
+- 3.000 pessoas (câmera a 95 m): G-buffer 3.774 → 1.144 ms; 2% dos pixels acima de 20, na faixa de 60–120 m, quase
+  igual com o nível 2 em 1/16 (2.689) ou 1/8 (2.620): a diferença vem do raster simplificado contra o ray tracing com
+  a malha completa (o mesmo efeito de qualquer LOD aqui), não da agressividade do nível. Validação limpa.
+- As outras 31 poses ganhavam o LOD genérico à toa (memória): agora ficam fora dele.
+

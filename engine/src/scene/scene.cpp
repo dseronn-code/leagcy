@@ -605,6 +605,20 @@ uint32_t Scene::bakeCrowdClip(int modelIndex, uint32_t frames) {
     }
     addMesh(std::move(pose));
   }
+  // LOD das poses: um agrupamento de vértices calculado na pose 0 e aplicado a todas (mesma topologia em cada nível,
+  // o vertex shader puxa o vértice pelo índice). Para a multidão de longe (milhares de pessoas).
+  const uint32_t tris = uint32_t(src.indices.size() / 3);
+  if (meshLods && tris >= 400) {
+    for (int k = 0; k < 2; ++k) {
+      std::vector<uint32_t> groups;
+      const MeshData lod0 = simplifyMesh(cpuMeshes_[clip.firstMesh], tris / (k == 0 ? 4 : 8), &groups);
+      clip.lodFirstMesh[k] = uint32_t(cpuMeshes_.size());
+      for (uint32_t f = 0; f < frames; ++f) {
+        MeshData lod = applyVertexGroups(cpuMeshes_[clip.firstMesh + f], groups, lod0);  // cópia antes do addMesh
+        addMesh(std::move(lod));
+      }
+    }
+  }
   m.root = savedRoot;
   m.time = savedTime;
   animateModel(m, 0.0f);
@@ -849,6 +863,12 @@ void Scene::upload(rhi::Context& ctx) {
     std::vector<uint8_t> excluded(original, 0);
     for (const Object& o : objects)
       if (o.crowdClip != ~0u || (materials[o.material].flags & (kMaterialWater | kMaterialHair))) excluded[o.mesh] = 1;
+    for (const CrowdClip& c : crowdClips) {  // poses assadas: o LOD delas é o da multidão (bakeCrowdClip)
+      for (uint32_t f = 0; f < c.frames; ++f) excluded[c.firstMesh + f] = 1;
+      for (uint32_t l : c.lodFirstMesh)
+        if (l != ~0u)
+          for (uint32_t f = 0; f < c.frames; ++f) excluded[l + f] = 1;
+    }
     size_t made = 0;
     for (size_t i = 0; i < original; ++i) {
       const MeshData& md = cpuMeshes_[i];
@@ -868,6 +888,19 @@ void Scene::upload(rhi::Context& ctx) {
       ++made;
     }
     if (made) LOG_INFO("LODs: %zu malhas com 2 níveis simplificados", made);
+    // Multidões: o nível de cada clipe vem das poses simplificadas (bakeCrowdClip); a troca é pela pose 0.
+    for (const CrowdClip& c : crowdClips) {
+      if (c.lodFirstMesh[0] == ~0u) continue;
+      glm::vec3 lo(1e30f), hi(-1e30f);
+      for (const Vertex& v : cpuMeshes_[c.firstMesh].vertices) {
+        lo = glm::min(lo, v.position);
+        hi = glm::max(hi, v.position);
+      }
+      // O dobro da distância de troca das malhas comuns: o agrupamento junta braço e tronco, e a 25 raios (~22 m)
+      // a silhueta mais cheia ainda aparecia (medido na cena crowd).
+      meshRadius[c.firstMesh] = glm::length(hi - lo);
+      lodOf[c.firstMesh] = {int(c.lodFirstMesh[0]), int(c.lodFirstMesh[1])};
+    }
   }
 
   VkBufferUsageFlags geometryUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;

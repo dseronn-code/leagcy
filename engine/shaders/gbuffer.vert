@@ -66,7 +66,9 @@ void main() {
   vec3 position = aPosition, normal = aNormal, prevPosition = aPrevPosition;
   vec4 tangent = aTangent;
   if (o.anim.x != 0xFFFFFFFFu) {
-    VertexData cur = VertexData(crowdFrames[o.anim.x + o.anim.y]), prv = VertexData(crowdFrames[o.anim.x + o.anim.z]);
+    // Poses do nível de detalhe deste lote: os níveis vêm um depois do outro (anim.w >> 1 poses cada).
+    uint level = o.anim.x + vLod * (o.anim.w >> 1);
+    VertexData cur = VertexData(crowdFrames[level + o.anim.y]), prv = VertexData(crowdFrames[level + o.anim.z]);
     uint vi = uint(gl_VertexIndex);
     position = fetchVertexPosition(cur, vi);
     normal = fetchVertexNormal(cur, vi);
