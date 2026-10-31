@@ -6,7 +6,16 @@
 #include "restir.glsl"
 #define SURFACE_VISIBILITY_BINDING 7
 #include "surface.glsl"
-#define MATERIAL_SAMPLE(i, uv) textureLod(textures[nonuniformEXT(i)], uv, frame.quality1.x)
+// Raios: nível fixo (frame.quality1.x) contado na textura inteira — com streaming a imagem começa no nível
+// textureBase(i), então desconta; e o raio também pede essa resolução (textura vista só em reflexo sobe igual).
+vec4 sampleRayTexture(int i, vec2 uv) {
+  uint base = textureBase(i);
+  float lod = frame.quality1.x - float(base);
+  ivec2 size = textureSize(textures[nonuniformEXT(i)], 0) << int(base);
+  atomicMax(textureFeedback[i], uint(max(float(max(size.x, size.y)) * exp2(-frame.quality1.x), 1.0)));
+  return textureLod(textures[nonuniformEXT(i)], uv, max(lod, 0.0));
+}
+#define MATERIAL_SAMPLE(i, uv) sampleRayTexture(i, uv)
 #include "material.glsl"
 #ifdef RAY_TRACING
 #define GLASS_SHADOWS 1  // traceTransmittance tinge pela cor do vidro (glassTransmittanceAlong, abaixo)

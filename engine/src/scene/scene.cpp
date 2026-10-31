@@ -359,7 +359,10 @@ size_t Scene::textureBytes() const {
     if (ts.streamed()) {
       for (size_t m = ts.base; m < ts.size.size(); ++m) bytes += ts.size[m];
     } else {
-      bytes += size_t(textures[i].extent.width) * textures[i].extent.height * 4 * 4 / 3;  // estimativa (RGBA8 ou BC)
+      // BC7/BC5: 1 byte por texel; RGBA8: 4; mais 1/3 da cadeia de mips.
+      const VkFormat f = textures[i].format;
+      const size_t perTexel = (f == VK_FORMAT_BC7_SRGB_BLOCK || f == VK_FORMAT_BC7_UNORM_BLOCK || f == VK_FORMAT_BC5_UNORM_BLOCK) ? 1 : 4;
+      bytes += size_t(textures[i].extent.width) * textures[i].extent.height * perTexel * 4 / 3;
     }
   }
   return bytes;
