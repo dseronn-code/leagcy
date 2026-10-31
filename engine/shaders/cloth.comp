@@ -16,11 +16,11 @@ layout(push_constant) uniform Push {
   uint64_t pos, prev, vertices;
   uint width, height;
   float spacing, dt, time;
-  uint pinned;          // 1 = coluna 0 presa
+  uint pinned;          // 1 = coluna 0 presa (bit 0); bit 1 = sem colisão consigo mesmo (medição)
   vec4 colliders[4];    // esferas (espaço do pano): xyz centro, w raio
 } pc;
 
-bool fixedPoint(uint i) { return pc.pinned != 0u && i % pc.width == 0u; }
+bool fixedPoint(uint i) { return (pc.pinned & 1u) != 0u && i % pc.width == 0u; }
 // Empurra o ponto para fora das esferas (o chão é uma esfera enorme); `hit` = encostou em algo (atrito).
 vec3 collide(vec3 p, out bool hit) {
   hit = false;
@@ -59,7 +59,7 @@ void main() {
         // Vento: base na direção +z com rajadas e uma onda que corre pelo pano (o "tremular" da bandeira).
         float gust = 0.6 + 0.4 * sin(time * 0.9) + 0.25 * sin(time * 2.3 + 1.7);
         vec3 wind = vec3(0.6, 0.0, 6.0) * gust + vec3(0.0, 0.0, 2.0) * sin(time * 7.0 - p.x * 2.5);
-        vec3 acc = vec3(0.0, -9.81, 0.0) + (pc.pinned != 0u ? wind * 1.4 : vec3(0.0));  // pano solto: sem vento
+        vec3 acc = vec3(0.0, -9.81, 0.0) + ((pc.pinned & 1u) != 0u ? wind * 1.4 : vec3(0.0));  // pano solto: sem vento
         Q[i] = p;
         P[i] = p + vel + acc * h * h;
       }
@@ -91,6 +91,37 @@ void main() {
           bool hit;
           P[i] = collide(P[i] + corr[k], hit);
           if (hit) Q[i] = mix(Q[i], P[i], 0.3);  // atrito: o contato tira parte da velocidade
+        }
+        barrier();
+      }
+      // Colisão do pano consigo mesmo: pontos que não são vizinhos na grade (mais de 2 de distância) ficam a pelo
+      // menos 0,8 do espaçamento (a espessura do pano); cada par afasta metade da sobreposição para cada lado
+      // (Jacobi). Todos os pares (até 1.024 pontos, na memória compartilhada).
+      if ((pc.pinned & 2u) == 0u) {
+        const float thick = 0.8 * pc.spacing;
+        vec3 push[4];
+        uint k = 0u;
+        for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          push[k] = vec3(0.0);
+          if (fixedPoint(i)) continue;
+          ivec2 gi = ivec2(i % pc.width, i / pc.width);
+          vec3 pi = P[i];
+          for (uint j = 0u; j < n; ++j) {
+            ivec2 gj = ivec2(j % pc.width, j / pc.width);
+            if (max(abs(gi.x - gj.x), abs(gi.y - gj.y)) <= 2) continue;
+            vec3 d = pi - P[j];
+            float l2 = dot(d, d);
+            if (l2 < thick * thick && l2 > 1e-12) {
+              float l = sqrt(l2);
+              push[k] += d / l * (thick - l) * 0.5;
+            }
+          }
+        }
+        barrier();
+        k = 0u;
+        for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          bool hit;
+          P[i] = collide(P[i] + push[k], hit);
         }
         barrier();
       }

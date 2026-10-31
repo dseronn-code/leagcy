@@ -979,7 +979,8 @@ void Scene::upload(rhi::Context& ctx) {
       for (int k = 0; k < 4; ++k) gm.clothColliders[k] = data.clothColliders[k];
       std::vector<glm::vec4> p(data.vertices.size());
       for (size_t i = 0; i < p.size(); ++i) p[i] = glm::vec4(data.vertices[i].position, 0.0f);
-      const VkBufferUsageFlags su = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+      const VkBufferUsageFlags su = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT;  // TRANSFER_SRC: Renderer::dumpCloth
       gm.clothPos = rhi::createBufferWithData(ctx, p.data(), p.size() * sizeof(glm::vec4), su);
       gm.clothPrev = rhi::createBufferWithData(ctx, p.data(), p.size() * sizeof(glm::vec4), su);
       gm.prevVertices = rhi::createBufferWithData(ctx, data.vertices.data(), vbytes, vusage);

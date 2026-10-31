@@ -64,6 +64,7 @@ struct Settings {
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
+  bool cloudReference = false;   // nuvens da tela por Monte Carlo volumétrico sem aproximação (--clouds-reference)
   bool ripples = true;           // ondulações de objetos na água (--no-ripples)
   bool hlod = true;              // proxies de HLOD ao longe, onde a cena montou (--no-hlod: sempre os membros)
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
@@ -120,6 +121,7 @@ class Renderer {
   void destroy();
   // Diagnóstico (tools/cabelo.py): grava modelo, repouso e posições simuladas do primeiro cabelo da cena.
   void dumpHair(const std::string& path);
+  void dumpCloth(const std::string& path);  // diagnóstico (tools/tecido.py): posições do primeiro pano
 
   // Grava todos os passes. A imagem de saída termina em COLOR_ATTACHMENT_OPTIMAL.
   void record(VkCommandBuffer cmd, uint32_t frameSlot, const scene::Camera& camera, VkImage output,
@@ -193,6 +195,8 @@ class Renderer {
   rhi::Image ripple_[2];
   rhi::Buffer rippleDisturbers_[kFramesInFlight];
   rhi::ComputePass ripplePass_;
+  rhi::ComputePass cloudReferencePass_;
+  uint32_t cloudReferenceFrames_ = 0;
   bool rippleOn_ = false, rippleValid_ = false;
   float rippleLevel_ = 0.0f, rippleTime_ = 0.0f, rippleDt_ = 0.0f;
   glm::ivec2 rippleCell_{0}, rippleShift_{0};  // canto da grade em texels do mundo; deslocamento deste frame
