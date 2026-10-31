@@ -14,8 +14,21 @@
 #include <filesystem>
 #include <fstream>
 #include <mutex>
-#include <thread>
 #include <map>
+#include <random>
+#include <thread>
+#ifdef _WIN32
+#include <process.h>
+// Só o necessário da API do Windows, sem incluir <windows.h> (as macros dele colidem com nomes do código).
+extern "C" __declspec(dllimport) void* __stdcall OpenProcess(unsigned long access, int inherit, unsigned long pid);
+extern "C" __declspec(dllimport) int __stdcall GetExitCodeProcess(void* process, unsigned long* code);
+extern "C" __declspec(dllimport) int __stdcall CloseHandle(void* handle);
+extern "C" __declspec(dllimport) unsigned long __stdcall GetLastError();
+#else
+#include <cerrno>
+#include <csignal>
+#include <unistd.h>
+#endif
 
 namespace scene {
 
@@ -263,6 +276,52 @@ void Scene::buildHlod() {
            proxies, members, trisIn, trisOut);
 }
 
+namespace {
+uint64_t processId() {
+#ifdef _WIN32
+  return uint64_t(_getpid());
+#else
+  return uint64_t(getpid());
+#endif
+}
+bool processAlive(uint64_t pid) {
+#ifdef _WIN32
+  void* h = OpenProcess(0x1000u /* PROCESS_QUERY_LIMITED_INFORMATION */, 0, static_cast<unsigned long>(pid));
+  if (!h) return GetLastError() == 5u;  // ERROR_ACCESS_DENIED: existe, mas de outro usuário
+  unsigned long code = 0;
+  const bool alive = GetExitCodeProcess(h, &code) && code == 259u;  // STILL_ACTIVE
+  CloseHandle(h);
+  return alive;
+#else
+  if (pid > 0x7FFFFFFFu) return false;  // não é um número de processo (nome de outro formato)
+  return kill(pid_t(pid), 0) == 0 || errno == EPERM;
+#endif
+}
+
+// Arquivo temporário com nome único: legacy_<tipo>_<processo>_<aleatório>.pak. Só o endereço do objeto colidia entre
+// dois processos do motor ao mesmo tempo (um apagava o arquivo do outro ao sair). Antes de criar, apaga os pacotes de
+// processos que já não existem (um travamento ou um kill não chega a apagar o seu: dezenas a centenas de MB cada).
+std::string uniqueTempPath(const char* kind) {
+  const std::filesystem::path dir = std::filesystem::temp_directory_path();
+  std::error_code ec;
+  for (const auto& e : std::filesystem::directory_iterator(dir, ec)) {
+    const std::string name = e.path().filename().string();
+    if (name.rfind("legacy_", 0) != 0 || e.path().extension() != ".pak") continue;
+    const size_t a = name.find('_', 7), b = a == std::string::npos ? a : name.find('_', a + 1);
+    if (b == std::string::npos) {  // nome antigo, sem o processo: sobra de versão anterior com mais de 1 hora
+      const auto age = std::filesystem::file_time_type::clock::now() - std::filesystem::last_write_time(e.path(), ec);
+      if (!ec && age > std::chrono::hours(1)) std::filesystem::remove(e.path(), ec);
+      continue;
+    }
+    const uint64_t pid = std::strtoull(name.substr(a + 1, b - a - 1).c_str(), nullptr, 10);
+    if (pid != 0 && pid != processId() && !processAlive(pid)) std::filesystem::remove(e.path(), ec);
+  }
+  std::random_device rd;
+  const uint64_t tag = (uint64_t(rd()) << 32) ^ rd() ^ uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());
+  return (dir / ("legacy_" + std::string(kind) + "_" + std::to_string(processId()) + "_" + std::to_string(tag) + ".pak")).string();
+}
+}  // namespace
+
 // Leitor do disco em segundo plano: um arquivo com as malhas de todas as células (vértices, índices, cores e
 // meshlets, uma atrás da outra) e uma thread que lê uma célula inteira por pedido.
 struct StreamLoader {
@@ -282,9 +341,7 @@ struct StreamLoader {
   bool quit = false;
 
   explicit StreamLoader(size_t meshCount) : records(meshCount) {
-    static int serial = 0;
-    path = (std::filesystem::temp_directory_path() /
-            ("legacy_stream_" + std::to_string(uintptr_t(this)) + "_" + std::to_string(serial++) + ".pak")).string();
+    path = uniqueTempPath("stream");
     out.open(path, std::ios::binary | std::ios::trunc);
     if (!out) FATAL("Streaming: não deu para criar %s", path.c_str());
   }
@@ -1051,8 +1108,7 @@ void Scene::upload(rhi::Context& ctx) {
   // recebe os finos quando a tela pede (updateTextureStreaming).
   std::ofstream pack;
   if (textureStreaming && compress) {
-    texturePack_ = (std::filesystem::temp_directory_path() /
-                    ("legacy_textures_" + std::to_string(uintptr_t(this)) + ".pak")).string();
+    texturePack_ = uniqueTempPath("textures");
     pack.open(texturePack_, std::ios::binary | std::ios::trunc);
   }
   textureStreams.assign(cpuTextures_.size(), {});
