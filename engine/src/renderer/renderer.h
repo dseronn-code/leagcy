@@ -64,6 +64,7 @@ struct Settings {
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
+  bool subsurface = true;        // espalhamento subsuperficial da pele (--no-sss: medição de energia)
   bool cloudReference = false;   // nuvens da tela por Monte Carlo volumétrico sem aproximação (--clouds-reference)
   bool ripples = true;           // ondulações de objetos na água (--no-ripples)
   bool hlod = true;              // proxies de HLOD ao longe, onde a cena montou (--no-hlod: sempre os membros)
@@ -173,6 +174,7 @@ class Renderer {
   // Streaming de texturas: pedidos de resolução que o G-buffer escreve (binding 24, um buffer por frame em voo) e a
   // versão das texturas já escrita nos descritores de cada frame em voo.
   rhi::Buffer textureFeedback_[kFramesInFlight];
+  rhi::Buffer terrainLayers_;  // scene::TerrainLayers (binding 25)
   bool textureFeedbackValid_[kFramesInFlight] = {};
   uint32_t texturesVersionWritten_[kFramesInFlight] = {};
   // Transformações, skinning, refit das BLAS e reconstrução do TLAS para este frame.

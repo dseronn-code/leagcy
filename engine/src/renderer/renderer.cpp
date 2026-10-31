@@ -426,6 +426,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {22, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {23, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {24, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {25, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -442,7 +443,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (12 + kMaxTextures)},
-      {SB, kFramesInFlight * 10},
+      {SB, kFramesInFlight * 11},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -480,6 +481,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       vkCmdClearColorImage(cmd, img.handle, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
     }
   });
+  terrainLayers_ = rhi::createBufferWithData(ctx, &scene.terrainLayers, sizeof(scene::TerrainLayers), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
   for (rhi::Buffer& b : textureFeedback_) {
     b = rhi::createBuffer(ctx, 2 * kMaxTextures * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     std::memset(b.mapped, 0, 2 * kMaxTextures * sizeof(uint32_t));
@@ -728,6 +730,8 @@ void Renderer::writeGlobalDescriptors() {
     add(23, CIS, 1).pImageInfo = &rippleInfo;
     VkDescriptorBufferInfo feedback{textureFeedback_[i].handle, 0, VK_WHOLE_SIZE};
     add(24, SB, 1).pBufferInfo = &feedback;
+    VkDescriptorBufferInfo terrain{terrainLayers_.handle, 0, VK_WHOLE_SIZE};
+    add(25, SB, 1).pBufferInfo = &terrain;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -1358,7 +1362,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
 
   // ---- 5b. Espalhamento subsuperficial (pele): borra a irradiância difusa dos pixels com SSS ----
-  if (hasSubsurface_) {
+  if (hasSubsurface_ && settings.subsurface) {
     const glm::ivec2 horizontal(1, 0), vertical(0, 1);
     sssPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, tex(t_.visibility[cur]), tex(*diffuseFinal), storage(t_.sssA)}, R,
                       &horizontal);
@@ -1802,6 +1806,7 @@ void Renderer::destroy() {
   for (rhi::Image& img : ripple_) rhi::destroyImage(ctx, img);
   for (rhi::Buffer& b : rippleDisturbers_) rhi::destroyBuffer(ctx, b);
   for (rhi::Buffer& b : textureFeedback_) rhi::destroyBuffer(ctx, b);
+  rhi::destroyBuffer(ctx, terrainLayers_);
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);

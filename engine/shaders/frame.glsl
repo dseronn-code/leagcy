@@ -43,6 +43,14 @@ layout(set = 0, binding = 0) uniform FrameData {
 
 layout(set = 0, binding = 23) uniform sampler2D rippleHeight;  // r = altura das ondulações (m)
 
+// Altura (m) das ondulações em P (0 fora da grade): desloca os vértices da água (gbuffer.vert).
+float rippleHeightAt(vec3 P) {
+  if (frame.ripple.w <= 0.0) return 0.0;
+  vec2 uv = (P.xz - frame.ripple.xy) / frame.ripple.z;
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+  return textureLod(rippleHeight, uv, 0.0).r;
+}
+
 // Inclinação (∂h/∂x, ∂h/∂z) das ondulações em P, some na borda da grade.
 vec2 rippleSlope(vec3 P) {
   if (frame.ripple.w <= 0.0) return vec2(0.0);
