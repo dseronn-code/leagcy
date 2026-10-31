@@ -893,8 +893,7 @@ void makeTerrainLayer(int kind, uint32_t size, TextureData& albedo, TextureData&
 
 // Liga as camadas texturizadas ao terreno da cena (texturas de 512², repetidas pelos metros de cada camada).
 void addTerrainLayers(Scene& s) {
-  // Em verificação (custo de carga e de sombreamento ainda sendo medidos): só com LEGACY_TERRAIN_LAYERS=1.
-  if (!std::getenv("LEGACY_TERRAIN_LAYERS")) return;
+  if (std::getenv("LEGACY_NO_TERRAIN_LAYERS")) return;  // terreno procedural (comparação)
   for (int k = 0; k < 4; ++k) {
     TextureData a, n;
     makeTerrainLayer(k, 512, a, n);
