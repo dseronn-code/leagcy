@@ -481,8 +481,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     }
   });
   for (rhi::Buffer& b : textureFeedback_) {
-    b = rhi::createBuffer(ctx, kMaxTextures * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
-    std::memset(b.mapped, 0, kMaxTextures * sizeof(uint32_t));
+    b = rhi::createBuffer(ctx, 2 * kMaxTextures * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    std::memset(b.mapped, 0, 2 * kMaxTextures * sizeof(uint32_t));
   }
   for (rhi::Buffer& b : rippleDisturbers_)
     b = rhi::createBuffer(ctx, kMaxDisturbers * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
@@ -886,6 +886,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     vmaInvalidateAllocation(c.allocator, textureFeedback_[slot].allocation, 0, VK_WHOLE_SIZE);
     if (textureFeedbackValid_[slot]) scene_->updateTextureStreaming(c, need, uint32_t(scene_->textures.size()));
     std::memset(need, 0, kMaxTextures * sizeof(uint32_t));
+    for (size_t i = 0; i < scene_->textures.size(); ++i)  // nível de cada textura que é o nível 0 da imagem
+      need[kMaxTextures + i] = i < scene_->textureStreams.size() ? scene_->textureStreams[i].base : 0;
     vmaFlushAllocation(c.allocator, textureFeedback_[slot].allocation, 0, VK_WHOLE_SIZE);
     textureFeedbackValid_[slot] = true;
     if (texturesVersionWritten_[slot] != scene_->texturesVersion && !scene_->textures.empty()) {
