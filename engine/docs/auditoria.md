@@ -716,3 +716,11 @@ BLAS) e no de texturas. Medido (cena stream, 40 frames a 200 m/s, `--stream-sync
 (stream e Bistro). No llvmpipe a "GPU" é a própria CPU, então o lote adiado disputa núcleos com a gravação do frame
 seguinte (o tempo de gravação desses frames sobe); o tempo total caiu 4%.
 
+### Tecido: colisão consigo mesmo (1/11)
+
+`cloth.comp`, a cada subpasso, depois das restrições: todo par de pontos que não são vizinhos na grade (mais de 2 de
+distância) fica a pelo menos 0,8 do espaçamento (a espessura do pano), metade da sobreposição para cada lado
+(Jacobi), sobre os até 1.024 pontos já na memória compartilhada. `tools/tecido.py` lê as posições da GPU
+(LEGACY_CLOTH_DUMP) e compara com a colisão desligada (LEGACY_NO_CLOTH_SELF), toalha caindo sobre a bola, 150 frames:
+sem: menor distância 0,37 do espaçamento e 16 pares a menos de 0,5 (atravessando); com: 0,79 e nenhum. Validação limpa.
+

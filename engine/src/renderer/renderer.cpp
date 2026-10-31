@@ -514,6 +514,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   cloudSkyPass_.init(ctx, "clouds_sky.comp", g, {SI, CIS});
   cloudShadowPass_.init(ctx, "cloud_shadow.comp", g, {SI});
   cloudScreenPass_.init(ctx, "clouds_screen.comp", g, {SI, CIS, CIS});
+  if (settings.cloudReference) cloudReferencePass_.init(ctx, "clouds_reference.comp", g, {SI, CIS, CIS}, sizeof(uint32_t));
   fogInjectPass_.init(ctx, rt ? "fog_inject_rt.comp" : "fog_inject.comp", g, {SI, CIS});
   fogIntegratePass_.init(ctx, "fog_integrate.comp", g, {CIS, SI});
   cullPass_.init(ctx, "cull.comp", g, {SB, SB, SB, SB, SB, SB, CIS, SB, SB}, 5 * sizeof(uint32_t));
@@ -1078,9 +1079,16 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   if (clouds) {
     cloudSkyPass_.dispatch(cmd, gs, {Binding::storageImage(skyLut_.view), Binding::sampled(skyClear_.view, linear_)},
                            skyLutExtent_);
-    cloudScreenPass_.dispatch(cmd, gs, {Binding::storageImage(t_.clouds[cur].view), Binding::sampled(t_.clouds[cur ^ 1u].view, linear_),
-                                        Binding::sampled(skyClear_.view, linear_)},
-                              t_.clouds[cur].extent);
+    if (settings.cloudReference) {
+      cloudReferencePass_.dispatch(cmd, gs, {Binding::storageImage(t_.clouds[cur].view), Binding::sampled(t_.clouds[cur ^ 1u].view, nearest_),
+                                             Binding::sampled(skyClear_.view, linear_)},
+                                   t_.clouds[cur].extent, &cloudReferenceFrames_);
+      ++cloudReferenceFrames_;
+    } else {
+      cloudScreenPass_.dispatch(cmd, gs, {Binding::storageImage(t_.clouds[cur].view), Binding::sampled(t_.clouds[cur ^ 1u].view, linear_),
+                                          Binding::sampled(skyClear_.view, linear_)},
+                                t_.clouds[cur].extent);
+    }
     barrier();
   }
   // Névoa volumétrica: luz do sol com sombra em cada célula, depois a soma ao longo das fatias.
@@ -1617,7 +1625,7 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
         uint32_t pinned;
         glm::vec4 colliders[4];
       } cp{m.clothPos.address, m.clothPrev.address, m.vertices.address, m.clothWidth, m.clothHeight, m.clothSpacing, sceneDt,
-           s.time, m.clothPinned ? 1u : 0u, {m.clothColliders[0], m.clothColliders[1], m.clothColliders[2], m.clothColliders[3]}};
+           s.time, (m.clothPinned ? 1u : 0u) | (std::getenv("LEGACY_NO_CLOTH_SELF") ? 2u : 0u), {m.clothColliders[0], m.clothColliders[1], m.clothColliders[2], m.clothColliders[3]}};
       clothPass_.dispatchGroups(cmd, globalSets_[slot], {}, 1, 1, &cp);
     }
     // Cabelo: física por fio no mundo (o objeto que usa a malha dá a posição da cabeça).
@@ -1720,6 +1728,30 @@ float Renderer::runAtmosphereTest(uint32_t pathsPerThread) {
   return mean;
 }
 
+void Renderer::dumpCloth(const std::string& path) {
+  rhi::Context& ctx = *ctx_;
+  for (const auto& m : scene_->meshes) {
+    if (!m.cloth) continue;
+    const VkDeviceSize bytes = VkDeviceSize(m.clothWidth) * m.clothHeight * sizeof(glm::vec4);
+    rhi::Buffer stage = rhi::createBuffer(ctx, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::GpuToCpu);
+    ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+      VkBufferCopy r{0, 0, bytes};
+      vkCmdCopyBuffer(cmd, m.clothPos.handle, stage.handle, 1, &r);
+    });
+    vmaInvalidateAllocation(ctx.allocator, stage.allocation, 0, VK_WHOLE_SIZE);
+    if (FILE* f = std::fopen(path.c_str(), "wb")) {
+      const uint32_t header[2] = {m.clothWidth, m.clothHeight};
+      const float spacing = m.clothSpacing;
+      std::fwrite(header, sizeof(header), 1, f);
+      std::fwrite(&spacing, sizeof(float), 1, f);
+      std::fwrite(stage.mapped, 1, size_t(bytes), f);
+      std::fclose(f);
+    }
+    rhi::destroyBuffer(ctx, stage);
+    return;
+  }
+}
+
 void Renderer::dumpHair(const std::string& path) {
   rhi::Context& ctx = *ctx_;
   scene::Scene& s = *scene_;
@@ -1786,7 +1818,7 @@ void Renderer::destroy() {
                          &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1],
                          &hlodInfo_, &hlodCells_})
     rhi::destroyBuffer(ctx, *b);
-  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &cloudReferencePass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

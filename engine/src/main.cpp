@@ -133,6 +133,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-meshlets") o.render.meshlets = false;
     else if (a == "--no-hlod") o.render.hlod = false;
     else if (a == "--no-ripples") o.render.ripples = false;
+    else if (a == "--clouds-reference") o.render.cloudReference = true;
     else if (a == "--stream-sync") o.streamSync = true;
     else if (a == "--no-texture-streaming") o.textureStreaming = false;
     else if (a == "--texture-streaming") o.textureStreaming = true;
@@ -322,6 +323,7 @@ int runHeadless(const Options& opt) {
   rhi::destroyBuffer(ctx, readback);
   rhi::destroyImage(ctx, output);
   if (const char* dump = std::getenv("LEGACY_HAIR_DUMP")) r.dumpHair(dump);
+  if (const char* dump = std::getenv("LEGACY_CLOTH_DUMP")) r.dumpCloth(dump);
   r.destroy();
   scene.destroy(ctx);
   ctx.destroy();
