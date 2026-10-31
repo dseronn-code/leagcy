@@ -230,6 +230,12 @@ layout(set = 0, binding = 25, std430) readonly buffer TerrainLayersBuf {
 // altura (a) e, em nOut, a normal da camada no mundo (normal map por cima da normal da geometria).
 vec4 terrainLayer(int layer, vec3 P, vec3 N, float triplanar, out vec3 nOut) {
   float tile = terrainLayers.metersPerTile[layer];
+#ifndef MATERIAL_DERIVATIVES
+  // Raios (reflexo, GI): só a cor, planar — o mesmo tom rebatido com uma fração do código (o shader de luz chama o
+  // material em vários lugares e o compilador repete tudo em cada um: a versão completa inflava a compilação).
+  nOut = N;
+  return MATERIAL_SAMPLE(terrainLayers.albedo[layer], P.xz / tile);
+#endif
   int ca = terrainLayers.albedo[layer], cn = terrainLayers.normal[layer];
   vec3 w = pow(abs(N), vec3(4.0));
   w = mix(vec3(0.0, 1.0, 0.0), w / (w.x + w.y + w.z), triplanar);
