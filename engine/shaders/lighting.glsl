@@ -7,18 +7,18 @@
 #define SURFACE_VISIBILITY_BINDING 7
 #include "surface.glsl"
 // Raios: nível fixo (frame.quality1.x) contado na textura inteira — com streaming a imagem começa no nível
-// textureBase(i), então desconta; e o raio também pede essa resolução (textura vista só em reflexo sobe igual).
-vec4 sampleRayTexture(int i, vec2 uv) {
+// textureBase(i), então desconta. O pedido de resolução dos raios é feito uma vez por material atingido
+// (MATERIAL_RAY_FEEDBACK, abaixo), não em cada amostra: uma função com leitura, textureSize e atomic em cada uma das
+// dezenas de amostras, repetida em cada chamada do material, inflava a compilação do shader (medido no llvmpipe).
+#define MATERIAL_SAMPLE(i, uv) textureLod(textures[nonuniformEXT(i)], uv, max(frame.quality1.x - float(textureBase(i)), 0.0))
+void rayTextureRequest(int i) {
+  if (i < 0) return;
   uint base = textureBase(i);
-  float lod = frame.quality1.x - float(base);
   ivec2 size = textureSize(textures[nonuniformEXT(i)], 0) << int(base);
-  // Lê antes e só escreve se pedir mais: todo raio que bate no terreno amostraria as mesmas texturas, e um atomicMax
-  // por amostra no mesmo endereço virava fila (medido: o passe de luz 20x mais lento na cena externa).
   uint want = uint(max(float(max(size.x, size.y)) * exp2(-frame.quality1.x), 1.0));
   if (textureFeedback[i] < want) atomicMax(textureFeedback[i], want);
-  return textureLod(textures[nonuniformEXT(i)], uv, max(lod, 0.0));
 }
-#define MATERIAL_SAMPLE(i, uv) sampleRayTexture(i, uv)
+#define MATERIAL_RAY_FEEDBACK 1
 #include "material.glsl"
 #ifdef RAY_TRACING
 #define GLASS_SHADOWS 1  // traceTransmittance tinge pela cor do vidro (glassTransmittanceAlong, abaixo)

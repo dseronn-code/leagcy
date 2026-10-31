@@ -258,6 +258,18 @@ vec4 terrainLayer(int layer, vec3 P, vec3 N, float triplanar, out vec3 nOut) {
 
 // vertexColor: cor por vértice interpolada (glTF COLOR_0; branco se a malha não tem).
 Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexColor) {
+#ifdef MATERIAL_RAY_FEEDBACK
+  // Streaming de texturas: o raio pede, uma vez por material atingido, a resolução de todas as texturas dele.
+  if ((m.flags & MATERIAL_TERRAIN) != 0u) {
+    for (int k = 0; k < 4; ++k) rayTextureRequest(terrainLayers.albedo[k]);
+  } else {
+    rayTextureRequest(m.baseColorTex);
+    rayTextureRequest(m.normalTex);
+    rayTextureRequest(m.metalRoughTex);
+    rayTextureRequest(m.emissiveTex);
+    rayTextureRequest(m.occlusionTex);
+  }
+#endif
   if ((m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
   if ((m.flags & MATERIAL_RIVER) != 0u) return evalRiver(m, P, N, T);
   if (m.uvRotation != 0.0 || m.uvScale != vec2(1.0) || m.uvOffset != vec2(0.0)) {  // KHR_texture_transform
