@@ -12,7 +12,10 @@ vec4 sampleRayTexture(int i, vec2 uv) {
   uint base = textureBase(i);
   float lod = frame.quality1.x - float(base);
   ivec2 size = textureSize(textures[nonuniformEXT(i)], 0) << int(base);
-  atomicMax(textureFeedback[i], uint(max(float(max(size.x, size.y)) * exp2(-frame.quality1.x), 1.0)));
+  // Lê antes e só escreve se pedir mais: todo raio que bate no terreno amostraria as mesmas texturas, e um atomicMax
+  // por amostra no mesmo endereço virava fila (medido: o passe de luz 20x mais lento na cena externa).
+  uint want = uint(max(float(max(size.x, size.y)) * exp2(-frame.quality1.x), 1.0));
+  if (textureFeedback[i] < want) atomicMax(textureFeedback[i], want);
   return textureLod(textures[nonuniformEXT(i)], uv, max(lod, 0.0));
 }
 #define MATERIAL_SAMPLE(i, uv) sampleRayTexture(i, uv)
