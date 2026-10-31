@@ -4,17 +4,24 @@
 #include "scene.glsl"
 // Streaming de texturas: um pixel em 16 (posição que roda a cada frame) anota a resolução que a tela pede de cada
 // textura (texels no maior eixo, pelo LOD que o hardware calcula, com o viés de mip). A CPU lê no frame seguinte.
-vec4 sampleMaterialTexture(int i, vec2 uv) {
+void textureRequest(int i, vec2 uv) {
   const uint f = frame.frameInfo.x;
   if ((uint(gl_FragCoord.x) & 3u) == (f & 3u) && (uint(gl_FragCoord.y) & 3u) == ((f >> 2) & 3u)) {
-    ivec2 size = textureSize(textures[nonuniformEXT(i)], 0);
+    float size = float(max(textureFullSize(i) >> textureBase(i), 1u));  // maior eixo da imagem na GPU
     float lod = textureQueryLod(textures[nonuniformEXT(i)], uv).y + textureMipBias();
-    uint want = uint(clamp(float(max(size.x, size.y)) * exp2(-lod), 1.0, 65536.0));
+    uint want = uint(clamp(size * exp2(-lod), 1.0, 65536.0));
     if (textureFeedback[i] < want) atomicMax(textureFeedback[i], want);  // só escreve se pedir mais (sem fila)
   }
+}
+vec4 sampleMaterialTexture(int i, vec2 uv) {
+  textureRequest(i, uv);
   return texture(textures[nonuniformEXT(i)], uv, textureMipBias());
 }
 #define MATERIAL_SAMPLE(i, uv) sampleMaterialTexture(i, uv)
+// Terreno: o mesmo índice em todas as invocações (sem nonuniformEXT, que no llvmpipe vira um laço por pista em cada
+// amostra); o pedido de resolução vai uma vez por camada (TERRAIN_REQUEST), fora da projeção triplanar.
+#define TERRAIN_SAMPLE(i, uv) texture(textures[i], uv, textureMipBias())
+#define TERRAIN_REQUEST(i, uv) textureRequest(i, uv)
 #define MATERIAL_DERIVATIVES  // dFdx/dFdy disponíveis (flocos metálicos medem o tamanho do pixel)
 #include "material.glsl"
 

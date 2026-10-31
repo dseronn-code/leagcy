@@ -228,13 +228,19 @@ layout(set = 0, binding = 25, std430) readonly buffer TerrainLayersBuf {
 
 // Amostra uma camada: planar (de cima) no chão, triplanar nos barrancos (a textura não estica). Devolve a cor e
 // altura (a) e, em nOut, a normal da camada no mundo (normal map por cima da normal da geometria).
+#ifndef TERRAIN_SAMPLE  // quem não define (outros shaders): amostra comum
+#define TERRAIN_SAMPLE(i, uv) MATERIAL_SAMPLE(i, uv)
+#define TERRAIN_REQUEST(i, uv)
+#endif
 vec4 terrainLayer(int layer, vec3 P, vec3 N, float triplanar, out vec3 nOut) {
   float tile = terrainLayers.metersPerTile[layer];
+  TERRAIN_REQUEST(terrainLayers.albedo[layer], P.xz / tile);
+  TERRAIN_REQUEST(terrainLayers.normal[layer], P.xz / tile);
 #ifndef MATERIAL_DERIVATIVES
   // Raios (reflexo, GI): só a cor, planar — o mesmo tom rebatido com uma fração do código (o shader de luz chama o
   // material em vários lugares e o compilador repete tudo em cada um: a versão completa inflava a compilação).
   nOut = N;
-  return MATERIAL_SAMPLE(terrainLayers.albedo[layer], P.xz / tile);
+  return TERRAIN_SAMPLE(terrainLayers.albedo[layer], P.xz / tile);
 #endif
   int ca = terrainLayers.albedo[layer], cn = terrainLayers.normal[layer];
   vec3 w = pow(abs(N), vec3(4.0));
@@ -244,8 +250,8 @@ vec4 terrainLayer(int layer, vec3 P, vec3 N, float triplanar, out vec3 nOut) {
   for (int axis = 0; axis < 3; ++axis) {
     if (w[axis] < 0.01) continue;
     vec2 uv = (axis == 0 ? P.zy : axis == 1 ? P.xz : P.xy) / tile;
-    col += MATERIAL_SAMPLE(ca, uv) * w[axis];
-    vec3 tn = MATERIAL_SAMPLE(cn, uv).xyz * 2.0 - 1.0;
+    col += TERRAIN_SAMPLE(ca, uv) * w[axis];
+    vec3 tn = TERRAIN_SAMPLE(cn, uv).xyz * 2.0 - 1.0;
     if (tn.z < -0.99) tn.z = sqrt(max(1.0 - dot(tn.xy, tn.xy), 0.0));  // BC5: z reconstruído
     // "Whiteout" (Barré-Brisebois & Hill): soma a inclinação do mapa à normal da geometria no plano da projeção.
     vec3 g = axis == 0 ? N.zyx : axis == 1 ? N.xzy : N;

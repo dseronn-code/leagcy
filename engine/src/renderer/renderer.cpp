@@ -483,8 +483,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   });
   terrainLayers_ = rhi::createBufferWithData(ctx, &scene.terrainLayers, sizeof(scene::TerrainLayers), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
   for (rhi::Buffer& b : textureFeedback_) {
-    b = rhi::createBuffer(ctx, 2 * kMaxTextures * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
-    std::memset(b.mapped, 0, 2 * kMaxTextures * sizeof(uint32_t));
+    b = rhi::createBuffer(ctx, 3 * kMaxTextures * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    std::memset(b.mapped, 0, 3 * kMaxTextures * sizeof(uint32_t));
   }
   for (rhi::Buffer& b : rippleDisturbers_)
     b = rhi::createBuffer(ctx, kMaxDisturbers * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
@@ -896,8 +896,12 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     vmaInvalidateAllocation(c.allocator, textureFeedback_[slot].allocation, 0, VK_WHOLE_SIZE);
     if (textureFeedbackValid_[slot]) scene_->updateTextureStreaming(c, need, uint32_t(scene_->textures.size()));
     std::memset(need, 0, kMaxTextures * sizeof(uint32_t));
-    for (size_t i = 0; i < scene_->textures.size(); ++i)  // nível de cada textura que é o nível 0 da imagem
-      need[kMaxTextures + i] = i < scene_->textureStreams.size() ? scene_->textureStreams[i].base : 0;
+    for (size_t i = 0; i < scene_->textures.size(); ++i) {  // nível na GPU e maior eixo da textura inteira
+      const bool streamed = i < scene_->textureStreams.size() && scene_->textureStreams[i].streamed();
+      need[kMaxTextures + i] = streamed ? scene_->textureStreams[i].base : 0;
+      need[2 * kMaxTextures + i] = streamed ? std::max(scene_->textureStreams[i].width, scene_->textureStreams[i].height)
+                                            : std::max(scene_->textures[i].extent.width, scene_->textures[i].extent.height);
+    }
     vmaFlushAllocation(c.allocator, textureFeedback_[slot].allocation, 0, VK_WHOLE_SIZE);
     textureFeedbackValid_[slot] = true;
     if (texturesVersionWritten_[slot] != scene_->texturesVersion && !scene_->textures.empty()) {

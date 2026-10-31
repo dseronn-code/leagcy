@@ -13,12 +13,12 @@
 #define MATERIAL_SAMPLE(i, uv) textureLod(textures[nonuniformEXT(i)], uv, max(frame.quality1.x - float(textureBase(i)), 0.0))
 void rayTextureRequest(int i) {
   if (i < 0) return;
-  uint base = textureBase(i);
-  ivec2 size = textureSize(textures[nonuniformEXT(i)], 0) << int(base);
-  uint want = uint(max(float(max(size.x, size.y)) * exp2(-frame.quality1.x), 1.0));
+  uint want = uint(max(float(textureFullSize(i)) * exp2(-frame.quality1.x), 1.0));
   if (textureFeedback[i] < want) atomicMax(textureFeedback[i], want);
 }
 #define MATERIAL_RAY_FEEDBACK 1
+#define TERRAIN_SAMPLE(i, uv) textureLod(textures[i], uv, max(frame.quality1.x - float(textureBase(i)), 0.0))
+#define TERRAIN_REQUEST(i, uv)
 #include "material.glsl"
 #ifdef RAY_TRACING
 #define GLASS_SHADOWS 1  // traceTransmittance tinge pela cor do vidro (glassTransmittanceAlong, abaixo)
