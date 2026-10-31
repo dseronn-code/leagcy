@@ -50,7 +50,7 @@ struct Quadric {  // erro quádrico: soma de (n·p + d)² dos planos dos triâng
 };
 }  // namespace
 
-MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles) {
+MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles, std::vector<uint32_t>* groupsOut) {
   glm::vec3 lo(1e30f), hi(-1e30f);
   for (const Vertex& v : mesh.vertices) {
     lo = glm::min(lo, v.position);
@@ -115,7 +115,7 @@ MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles) {
       const glm::dvec3 mean = g.sumP / g.count;
       glm::dvec3 p;
       // O ponto ótimo só vale se ficar perto da célula (senão o sistema era quase singular): fica a média.
-      if (!g.q.solve(p) || glm::length(p - mean) > double(cell)) p = mean;
+      if (groupsOut || !g.q.solve(p) || glm::length(p - mean) > double(cell)) p = mean;
       Vertex& v = out.vertices[gi];
       v.position = glm::vec3(p);
       v.normal = glm::length(g.sumN) > 1e-9 ? glm::vec3(glm::normalize(g.sumN)) : glm::vec3(0, 1, 0);
@@ -140,13 +140,40 @@ MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles) {
       out.indices.insert(out.indices.end(), {a, b, c});
     }
     const uint32_t got = uint32_t(out.indices.size() / 3);
-    if (best.indices.empty() || std::abs(int(got) - int(targetTriangles)) < std::abs(int(best.indices.size() / 3) - int(targetTriangles)))
+    if (best.indices.empty() || std::abs(int(got) - int(targetTriangles)) < std::abs(int(best.indices.size() / 3) - int(targetTriangles))) {
       best = std::move(out);
+      if (groupsOut) *groupsOut = vgroup;
+    }
     if (got > targetTriangles * 1.25f) cellsPerAxis *= 0.75f;
     else if (got < targetTriangles * 0.75f) cellsPerAxis *= 1.3f;
     else break;
   }
   return best;
+}
+
+MeshData applyVertexGroups(const MeshData& pose, const std::vector<uint32_t>& groups, const MeshData& lod) {
+  MeshData out;
+  out.indices = lod.indices;
+  out.vertices.assign(lod.vertices.size(), Vertex{glm::vec3(0.0f), glm::vec3(0.0f), glm::vec2(0.0f), glm::vec4(0.0f)});
+  std::vector<float> count(lod.vertices.size(), 0.0f);
+  for (size_t v = 0; v < pose.vertices.size() && v < groups.size(); ++v) {
+    Vertex& o = out.vertices[groups[v]];
+    o.position += pose.vertices[v].position;
+    o.normal += pose.vertices[v].normal;
+    o.uv += pose.vertices[v].uv;
+    o.tangent += pose.vertices[v].tangent;
+    count[groups[v]] += 1.0f;
+  }
+  for (size_t g = 0; g < out.vertices.size(); ++g) {
+    Vertex& o = out.vertices[g];
+    const float c = std::max(count[g], 1.0f);
+    o.position /= c;
+    o.uv /= c;
+    o.normal = glm::length(o.normal) > 1e-9f ? glm::normalize(o.normal) : glm::vec3(0, 1, 0);
+    const glm::vec3 t(o.tangent);
+    o.tangent = glm::vec4(glm::length(t) > 1e-9f ? glm::normalize(t) : glm::vec3(1, 0, 0), o.tangent.w >= 0.0f ? 1.0f : -1.0f);
+  }
+  return out;
 }
 
 MeshData makeHair(uint32_t strands, uint32_t segments, float scalpRadius, float length, float halfWidth, uint32_t seed) {

@@ -39,7 +39,12 @@ struct MeshData {
 // cada grupo pela minimização do erro quádrico dos triângulos que tocam o grupo (Lindstrom 2000, "Out-of-Core
 // Simplification of Large Polygonal Models") — preserva quinas e silhuetas melhor que a média simples. Normais e UVs
 // pela média do grupo, separados por lado da normal (não junta frente com verso de uma parede fina).
-MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles);
+// groups != nullptr: posição pela média do grupo (sem erro quádrico) e devolve o grupo de cada vértice — o mesmo
+// agrupamento serve para outras malhas da mesma topologia (poses assadas da multidão: applyVertexGroups).
+MeshData simplifyMesh(const MeshData& mesh, uint32_t targetTriangles, std::vector<uint32_t>* groups = nullptr);
+// Malha simplificada `lod` (de simplifyMesh com grupos) reconstruída para `pose` (mesma topologia da original): cada
+// vértice do LOD é a média dos vértices do seu grupo nesta pose; os triângulos são os do LOD.
+MeshData applyVertexGroups(const MeshData& pose, const std::vector<uint32_t>& groups, const MeshData& lod);
 
 // Meshlets (pedaços de até 64 vértices e 124 triângulos) para os mesh shaders do G-buffer. Os triângulos de cada um são
 // um trecho CONTÍNUO da lista de índices original, na mesma ordem: o gl_PrimitiveID (firstTriangle + i) é o mesmo do

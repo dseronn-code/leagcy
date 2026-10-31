@@ -942,7 +942,7 @@ bool buildCrowd(Scene& s, Camera& camera, const DemoOptions& opt) {
   Material ground;
   ground.baseColor = glm::vec4(0.45f, 0.43f, 0.40f, 1.0f);
   ground.roughness = 0.8f;
-  s.addObject(cube, trs({0.0f, -0.1f, 0.0f}, {60.0f, 0.1f, 60.0f}), s.addMaterial(ground));
+  s.addObject(cube, trs({0.0f, -0.1f, 0.0f}, {400.0f, 0.1f, 400.0f}), s.addMaterial(ground));
   float foot = 0.0f;
   const int man = loadCharacter(s, "CesiumMan/CesiumMan.gltf", 1.0f, "", foot);
   if (man < 0) return false;
@@ -952,7 +952,9 @@ bool buildCrowd(Scene& s, Camera& camera, const DemoOptions& opt) {
   std::uniform_real_distribution<float> u(0.0f, 1.0f);
   const uint32_t count = opt.lightCount ? opt.lightCount : 300;  // --lights N reaproveitado como tamanho da multidão
   for (uint32_t i = 0; i < count; ++i) {
-    const float radius = 4.0f + 26.0f * std::sqrt(u(rng)), phase = glm::two_pi<float>() * u(rng);
+    // A praça cresce com a multidão (densidade de 300 pessoas num raio de 30 m).
+    const float spread = 26.0f * std::sqrt(std::max(float(count) / 300.0f, 1.0f));
+    const float radius = 4.0f + spread * std::sqrt(u(rng)), phase = glm::two_pi<float>() * u(rng);
     const float speed = (1.1f + 0.5f * u(rng)) * (u(rng) < 0.5f ? 1.0f : -1.0f);  // m/s, metade em cada sentido
     const float scale = 0.9f + 0.2f * u(rng);
     const uint32_t agent = s.addCrowdAgent(clip, glm::mat4(1.0f), 3.0f * u(rng));

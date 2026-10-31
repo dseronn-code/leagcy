@@ -227,6 +227,9 @@ struct CrowdClip {
   uint32_t firstMesh = 0, frames = 0;
   float duration = 1.0f;  // s do ciclo
   uint32_t material = 0;
+  // Níveis de detalhe (1/4 e 1/16 dos triângulos): as mesmas `frames` poses, a partir de lodFirstMesh[k] (~0 = sem).
+  // Todas as poses de um nível têm a mesma topologia (o mesmo agrupamento de vértices).
+  uint32_t lodFirstMesh[2] = {~0u, ~0u};
 };
 
 // ---- Animação (glTF): hierarquia de nós, clipes e esqueletos ----
