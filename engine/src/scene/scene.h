@@ -214,6 +214,15 @@ struct TextureStream {
   bool streamed() const { return !offset.empty(); }
 };
 
+// Camadas do terreno (material kMaterialTerrain): grama, terra, rocha e cascalho, cada uma com textura de cor
+// (alfa = altura, para a mistura por altura) e normal map, metros por repetição e rugosidade. -1 = terreno
+// procedural (sem texturas). == TerrainLayers em shaders/material.glsl.
+struct TerrainLayers {
+  glm::ivec4 albedo{-1}, normal{-1};
+  glm::vec4 metersPerTile{2.0f, 3.0f, 4.0f, 1.5f};
+  glm::vec4 roughness{0.9f, 0.95f, 0.7f, 0.85f};
+};
+
 // Célula de HLOD: caixa dos membros (mundo) e a distância da câmera à caixa a partir da qual o proxy substitui.
 struct HlodCell {
   glm::vec3 lo{1e30f}, hi{-1e30f};
@@ -335,6 +344,7 @@ class Scene {
   // HLOD (> 0 liga): objetos `hlodCandidate` agrupados em células desse tamanho (m) e por material; cada grupo vira
   // um proxy fundido, trocado pelos membros a partir de hlodDistance (m) da caixa da célula.
   float hlodCellSize = 0.0f, hlodDistance = 0.0f;
+  TerrainLayers terrainLayers;
   std::vector<HlodCell> hlodCells;
   std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
 
@@ -529,5 +539,7 @@ class Scene {
 // Carrega um arquivo .gltf/.glb, adicionando malhas, materiais e texturas à cena.
 // Se o arquivo tiver animações ou esqueletos, cria um Model e devolve seu índice em *modelOut (senão -1).
 bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform, int* modelOut = nullptr);
+// Imagem avulsa (PNG/JPG) como textura RGBA8: cor (sRGB) ou dado/normal map (linear).
+bool loadImageFile(const std::string& path, bool srgb, bool normalMap, TextureData& out);
 
 }  // namespace scene

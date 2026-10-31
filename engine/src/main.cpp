@@ -134,6 +134,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-hlod") o.render.hlod = false;
     else if (a == "--no-ripples") o.render.ripples = false;
     else if (a == "--clouds-reference") o.render.cloudReference = true;
+    else if (a == "--no-sss") o.render.subsurface = false;
     else if (a == "--stream-sync") o.streamSync = true;
     else if (a == "--no-texture-streaming") o.textureStreaming = false;
     else if (a == "--texture-streaming") o.textureStreaming = true;

@@ -53,6 +53,7 @@ void main() {
     vec3 base = vec3(snapped.x + aPosition.x, o.model[3].y, snapped.y + aPosition.z);
     float fade = 1.0 - smoothstep(800.0, 4000.0, distance(base.xz, frame.cameraPos.xz));
     vec3 world = base + textureLod(oceanDisplacement, base.xz / OCEAN_PATCH, 0.0).xyz * fade;
+    world.y += rippleHeightAt(world);  // ondulações de objetos (ripple.comp) também na forma, não só na normal
     vWorldPos = world;
     vNormal = vec3(0.0, 1.0, 0.0);
     vTangent = vec4(1.0, 0.0, 0.0, 1.0);
@@ -106,6 +107,11 @@ void main() {
   vec4 world = o.model * vec4(position, 1.0);
   vec4 prevWorld = o.prevModel * vec4(prevPosition, 1.0);
   vec3 wind = vec3(0.0);
+  if ((materials[vMaterial].flags & MATERIAL_RIVER) != 0u) {  // rio: as ondulações de objetos sobem e descem a água
+    wind.y = rippleHeightAt(world.xyz);
+    world.y += wind.y;
+    prevWorld.y += wind.y;  // o campo do frame anterior não é guardado: a diferença é de milímetros por frame
+  }
   if ((materials[vMaterial].flags & MATERIAL_FOLIAGE) != 0u) {
     float height = max(world.y - o.model[3].y, 0.0);
     wind = windSway(world.xyz, height, frame.night.w);

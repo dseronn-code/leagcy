@@ -431,6 +431,21 @@ struct Loader {
 
 }  // namespace
 
+bool loadImageFile(const std::string& path, bool srgb, bool normalMap, TextureData& out) {
+  int w = 0, h = 0, comp = 0;
+  stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &comp, 4);
+  if (!pixels) return false;
+  out = {};
+  out.width = uint32_t(w);
+  out.height = uint32_t(h);
+  out.srgb = srgb;
+  out.normalMap = normalMap;
+  out.name = path;
+  out.rgba.assign(pixels, pixels + size_t(w) * h * 4);
+  stbi_image_free(pixels);
+  return true;
+}
+
 bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform, int* modelOut) {
   cgltf_options options{};
   cgltf_data* data = nullptr;

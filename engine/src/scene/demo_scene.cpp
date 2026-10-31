@@ -10,6 +10,8 @@
 
 namespace scene {
 
+void addTerrainLayers(Scene& s);  // camadas texturizadas do terreno (definida mais abaixo)
+
 namespace {
 
 glm::mat4 trs(glm::vec3 t, glm::vec3 s, float yawDeg = 0.0f) {
@@ -101,6 +103,7 @@ bool buildOutdoor(Scene& s, Camera& camera, const DemoOptions& opt) {
 
   Material ground;
   ground.flags = kMaterialTerrain;
+  addTerrainLayers(s);
   s.addObject(terrain, glm::mat4(1.0f), s.addMaterial(ground));
   // Grama: 4 variações de tufo instanciadas aos milhares na encosta perto da câmera (uma chamada por variação; no
   // ray tracing, uma BLAS por variação). Balança com o vento (folhagem).
@@ -774,6 +777,171 @@ bool buildOcean(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Texturas das camadas do terreno, geradas na CPU (repetem sem emenda): cor com a altura no alfa e o normal map
+// tirado da altura. Grama (fios curtos e touceiras), terra (pedriscos), rocha (placas com rachaduras) e cascalho.
+namespace {
+uint32_t hash2(int x, int y, uint32_t seed) {
+  uint32_t h = uint32_t(x) * 374761393u + uint32_t(y) * 668265263u + seed * 2246822519u;
+  h = (h ^ (h >> 13)) * 1274126177u;
+  return h ^ (h >> 16);
+}
+float rnd2(int x, int y, uint32_t seed) { return float(hash2(x, y, seed) & 0xFFFFFF) / 16777216.0f; }
+int wrapi(int v, int p) { return ((v % p) + p) % p; }
+// Ruído de valor periódico (período p células) e fbm.
+float pnoise(float x, float y, int p, uint32_t seed) {
+  const int ix = int(std::floor(x)), iy = int(std::floor(y));
+  const float fx = x - float(ix), fy = y - float(iy), ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  auto v = [&](int a, int b) { return rnd2(wrapi(a, p), wrapi(b, p), seed); };
+  return glm::mix(glm::mix(v(ix, iy), v(ix + 1, iy), ux), glm::mix(v(ix, iy + 1), v(ix + 1, iy + 1), ux), uy);
+}
+float pfbm(float u, float v, int base, int octaves, uint32_t seed) {
+  float s = 0.0f, a = 0.5f, n = 0.0f;
+  for (int o = 0; o < octaves; ++o) {
+    const int p = base << o;
+    s += a * pnoise(u * float(p), v * float(p), p, seed + uint32_t(o));
+    n += a;
+    a *= 0.5f;
+  }
+  return s / n;
+}
+// Worley periódico: distância ao ponto mais próximo (f1), ao segundo (f2) e o sorteio da célula mais próxima.
+void pworley(float u, float v, int p, uint32_t seed, float& f1, float& f2, float& cell) {
+  const float x = u * float(p), y = v * float(p);
+  const int ix = int(std::floor(x)), iy = int(std::floor(y));
+  f1 = f2 = 1e9f;
+  cell = 0.0f;
+  for (int dy = -1; dy <= 1; ++dy)
+    for (int dx = -1; dx <= 1; ++dx) {
+      const int cx = ix + dx, cy = iy + dy;
+      const float px = float(cx) + rnd2(wrapi(cx, p), wrapi(cy, p), seed), py = float(cy) + rnd2(wrapi(cx, p), wrapi(cy, p), seed + 7u);
+      const float d = std::hypot(px - x, py - y);
+      if (d < f1) {
+        f2 = f1;
+        f1 = d;
+        cell = rnd2(wrapi(cx, p), wrapi(cy, p), seed + 13u);
+      } else if (d < f2) {
+        f2 = d;
+      }
+    }
+}
+}  // namespace
+
+void makeTerrainLayer(int kind, uint32_t size, TextureData& albedo, TextureData& normal) {
+  std::vector<float> h(size_t(size) * size);
+  std::vector<glm::vec3> c(h.size());
+  for (uint32_t y = 0; y < size; ++y)
+    for (uint32_t x = 0; x < size; ++x) {
+      const float u = (float(x) + 0.5f) / float(size), v = (float(y) + 0.5f) / float(size);
+      float height = 0.5f;
+      glm::vec3 col(0.5f);
+      if (kind == 0) {  // grama: touceiras grossas + fios finos (ruído esticado em direções variadas)
+        const float clump = pfbm(u, v, 8, 4, 11u), blades = pnoise(u * 256.0f, v * 64.0f, 256, 3u) * 0.5f +
+                                                        pnoise(u * 64.0f, v * 256.0f, 64, 5u) * 0.5f;
+        height = 0.35f * clump + 0.65f * blades;
+        col = glm::mix(glm::vec3(0.05f, 0.09f, 0.02f), glm::vec3(0.16f, 0.20f, 0.05f), clump) * (0.55f + 0.7f * blades);
+        col = glm::mix(col, glm::vec3(0.20f, 0.17f, 0.08f), glm::smoothstep(0.62f, 0.8f, pfbm(u, v, 4, 3, 21u)) * 0.6f);  // seca
+      } else if (kind == 1) {  // terra: base fina + pedriscos
+        float f1, f2, cell;
+        pworley(u, v, 48, 31u, f1, f2, cell);
+        const float pebble = glm::smoothstep(0.42f, 0.18f, f1) * (cell > 0.55f ? 1.0f : 0.0f), grain = pfbm(u, v, 32, 4, 33u);
+        height = 0.4f * grain + 0.6f * pebble;
+        col = glm::vec3(0.20f, 0.14f, 0.09f) * (0.7f + 0.5f * grain);
+        col = glm::mix(col, glm::vec3(0.30f, 0.27f, 0.23f) * (0.8f + 0.4f * cell), pebble);
+      } else if (kind == 2) {  // rocha: placas (Worley) com rachaduras nas bordas, manchas grandes
+        float f1, f2, cell;
+        pworley(u, v, 6, 41u, f1, f2, cell);
+        const float crack = glm::smoothstep(0.0f, 0.06f, f2 - f1), detail = pfbm(u, v, 16, 5, 43u), blot = pfbm(u, v, 3, 3, 47u);
+        height = (0.55f + 0.25f * cell + 0.3f * detail) * (0.35f + 0.65f * crack);
+        col = glm::mix(glm::vec3(0.22f, 0.21f, 0.19f), glm::vec3(0.36f, 0.34f, 0.30f), detail) * (0.75f + 0.4f * blot);
+        col *= 0.45f + 0.55f * crack;
+      } else {  // cascalho: pedras pequenas em várias cores
+        float f1, f2, cell;
+        pworley(u, v, 40, 51u, f1, f2, cell);
+        const float stone = glm::smoothstep(0.0f, 0.25f, f2 - f1);
+        height = stone * (0.7f + 0.3f * cell);
+        col = glm::mix(glm::vec3(0.24f, 0.22f, 0.19f), glm::vec3(0.40f, 0.37f, 0.33f), cell) * (0.35f + 0.65f * stone);
+      }
+      h[size_t(y) * size + x] = glm::clamp(height, 0.0f, 1.0f);
+      c[size_t(y) * size + x] = col;
+    }
+  albedo = {};
+  albedo.width = albedo.height = size;
+  albedo.srgb = true;
+  albedo.name = "terreno_cor";
+  albedo.rgba.resize(h.size() * 4);
+  normal = {};
+  normal.width = normal.height = size;
+  normal.srgb = false;
+  normal.normalMap = true;
+  normal.name = "terreno_normal";
+  normal.rgba.resize(h.size() * 4);
+  const float bump = float(size) / 128.0f * (kind == 2 ? 1.6f : 1.0f);  // relevo: rocha mais funda
+  for (uint32_t y = 0; y < size; ++y)
+    for (uint32_t x = 0; x < size; ++x) {
+      const size_t i = size_t(y) * size + x;
+      for (int k = 0; k < 3; ++k) albedo.rgba[i * 4 + k] = uint8_t(std::pow(glm::clamp(c[i][k], 0.0f, 1.0f), 1.0f / 2.2f) * 255.0f + 0.5f);
+      albedo.rgba[i * 4 + 3] = uint8_t(h[i] * 255.0f + 0.5f);
+      auto H = [&](int xx, int yy) { return h[size_t(wrapi(yy, int(size))) * size + size_t(wrapi(xx, int(size)))]; };
+      const float dx = (H(int(x) + 1, int(y)) - H(int(x) - 1, int(y))) * 0.5f * bump;
+      const float dy = (H(int(x), int(y) + 1) - H(int(x), int(y) - 1)) * 0.5f * bump;
+      const glm::vec3 n = glm::normalize(glm::vec3(-dx, -dy, 1.0f));
+      for (int k = 0; k < 3; ++k) normal.rgba[i * 4 + k] = uint8_t((n[k] * 0.5f + 0.5f) * 255.0f + 0.5f);
+      normal.rgba[i * 4 + 3] = 255;
+    }
+}
+
+// Liga as camadas texturizadas ao terreno da cena (texturas de 512², repetidas pelos metros de cada camada).
+void addTerrainLayers(Scene& s) {
+  // Em verificação (custo de carga e de sombreamento ainda sendo medidos): só com LEGACY_TERRAIN_LAYERS=1.
+  if (!std::getenv("LEGACY_TERRAIN_LAYERS")) return;
+  for (int k = 0; k < 4; ++k) {
+    TextureData a, n;
+    makeTerrainLayer(k, 512, a, n);
+    s.terrainLayers.albedo[k] = int(s.addTexture(std::move(a)));
+    s.terrainLayers.normal[k] = int(s.addTexture(std::move(n)));
+  }
+}
+
+// Pele com um scan real: a cabeça do Lee Perry-Smith (Infinite-Realities, CC BY 3.0; a do exemplo do three.js), com
+// a textura de cor e o normal map do scan, pele com espalhamento subsuperficial, luz de lado (ou por trás).
+bool buildScanHead(Scene& s, Camera& camera, const DemoOptions& opt, bool backlit) {
+  const std::string dir = kAssets + "/LeePerrySmith/";
+  const size_t first = s.objects.size();
+  if (!loadGltf(s, dir + "LeePerrySmith.glb", glm::mat4(1.0f))) return false;
+  glm::vec3 lo, hi;
+  s.bounds(lo, hi);
+  const float scale = 0.23f / std::max(hi.y - lo.y, 1e-6f);  // altura real de uma cabeça
+  const glm::vec3 center = 0.5f * (lo + hi);
+  const glm::mat4 fit = glm::translate(glm::mat4(1.0f), {0.0f, 0.35f, 0.0f}) * glm::scale(glm::mat4(1.0f), glm::vec3(scale)) *
+                        glm::translate(glm::mat4(1.0f), -center);
+  TextureData col, nrm;
+  if (!loadImageFile(dir + "Map-COL.jpg", true, false, col) || !loadImageFile(dir + "Infinite-Level_02_Tangent_SmoothUV.jpg", false, true, nrm))
+    return false;
+  Material skin;
+  skin.baseColorTex = int32_t(s.addTexture(std::move(col)));
+  skin.normalTex = int32_t(s.addTexture(std::move(nrm)));
+  skin.roughness = 0.45f;
+  skin.specular = 0.7f;
+  skin.flags = kMaterialSubsurface;
+  skin.subsurfaceRadius = glm::vec3(0.0040f, 0.0015f, 0.0007f);
+  const uint32_t skinMat = s.addMaterial(skin);
+  for (size_t i = first; i < s.objects.size(); ++i) {
+    s.objects[i].transform = s.objects[i].prevTransform = fit * s.objects[i].transform;
+    s.objects[i].material = skinMat;
+  }
+  Material floorM;
+  floorM.baseColor = glm::vec4(glm::vec3(0.3f), 1.0f);
+  floorM.roughness = 0.8f;
+  s.addObject(s.addMesh(makeCube()), trs({0.0f, -0.05f, 0.0f}, {2.0f, 0.05f, 2.0f}), s.addMaterial(floorM));
+  s.sunDirection = backlit ? sunFrom(15.0f, 180.0f) : sunFrom(25.0f, 60.0f);
+  s.sunIlluminance = 90000.0f;
+  s.fogDensity = 0.0f;
+  camera.position = glm::vec3(0.0f, 0.38f, 0.55f);
+  camera.lookAt(glm::vec3(0.0f, 0.36f, 0.0f));
+  camera.nearPlane = 0.01f;
+  return true;
+}
+
 // Rio (água corrente, kMaterialRiver): vale escavado num terreno ondulado, a fita d'água seguindo uma curva com a
 // tangente na direção da correnteza, pedras no leito e grama nas margens.
 namespace {
@@ -792,26 +960,31 @@ float riverTerrain(float x, float z) {
 bool buildRiver(Scene& s, Camera& camera, const DemoOptions& opt) {
   Material ground;
   ground.flags = kMaterialTerrain;
+  addTerrainLayers(s);
   s.addObject(s.addMesh(makeTerrain(800.0f, 400, riverTerrain)), glm::mat4(1.0f), s.addMaterial(ground));
   // Fita do rio: um par de vértices a cada 2 m ao longo da curva, tangente = direção da correnteza (+x).
   MeshData river;
-  for (int i = 0; i <= 200; ++i) {
-    const float x = -200.0f + 2.0f * float(i), zc = riverCenter(x);
+  // Malha fina (1 m ao longo, 16 faixas na largura): as ondulações dos objetos deslocam os vértices (gbuffer.vert).
+  constexpr int kAcross = 16;
+  for (int i = 0; i <= 400; ++i) {
+    const float x = -200.0f + 1.0f * float(i), zc = riverCenter(x);
     const glm::vec3 dir = glm::normalize(glm::vec3(2.0f, 0.0f, riverCenter(x + 1.0f) - riverCenter(x - 1.0f)));
     // Mais larga que o canal: a borda da fita fica sempre enterrada no barranco.
     const glm::vec3 side = glm::normalize(glm::cross(glm::vec3(0, 1, 0), dir)) * (kRiverHalfWidth + 8.0f);
-    for (int k = 0; k < 2; ++k) {
+    for (int k = 0; k <= kAcross; ++k) {
+      const float f = float(k) / float(kAcross) * 2.0f - 1.0f;
       Vertex v;
-      v.position = glm::vec3(x, kRiverLevel, zc) + (k == 0 ? -side : side);
+      v.position = glm::vec3(x, kRiverLevel, zc) + side * f;
       v.normal = glm::vec3(0, 1, 0);
-      v.uv = glm::vec2(float(k), x * 0.05f);
+      v.uv = glm::vec2(0.5f * f + 0.5f, x * 0.05f);
       v.tangent = glm::vec4(dir, 1.0f);
       river.vertices.push_back(v);
     }
-    if (i > 0) {
-      const uint32_t a = uint32_t(2 * (i - 1));
-      river.indices.insert(river.indices.end(), {a, a + 2, a + 1, a + 1, a + 2, a + 3});  // frente para cima
-    }
+    if (i > 0)
+      for (int k = 0; k < kAcross; ++k) {
+        const uint32_t a = uint32_t((i - 1) * (kAcross + 1) + k), b = a + kAcross + 1;
+        river.indices.insert(river.indices.end(), {a, b, a + 1, a + 1, b, b + 1});  // frente para cima
+      }
   }
   Material water;
   water.flags = kMaterialRiver;
@@ -1150,6 +1323,7 @@ bool buildWorldTest(Scene& s, Camera& camera, const DemoOptions& opt) {
   const float world = 8192.0f, half = 0.5f * world, tile = 256.0f;
   Material ground;
   ground.flags = kMaterialTerrain;
+  addTerrainLayers(s);
   const uint32_t mat = s.addMaterial(ground);
   s.addObject(s.addMesh(makeWorldTile(-half, -half, world, 132, 2.0f)), glm::mat4(1.0f), mat);
   const int tiles = int(world / tile);
@@ -1241,6 +1415,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "glass") return buildGlassTest(scene, camera);
   if (opt.name == "ocean") return buildOcean(scene, camera, opt);
   if (opt.name == "river") return buildRiver(scene, camera, opt);
+  if (opt.name == "scan" || opt.name == "scan-backlit") return buildScanHead(scene, camera, opt, opt.name == "scan-backlit");
   if (opt.name == "paint") return buildPaintTest(scene, camera);
   if (opt.name == "skin") return buildSkinTest(scene, camera, false);
   if (opt.name == "skin-backlit") return buildSkinTest(scene, camera, true);

@@ -220,6 +220,36 @@ Surface evalRiver(Material m, vec3 P, vec3 N, vec4 T) {
   return s;
 }
 
+// Camadas do terreno (scene::TerrainLayers, binding 25): grama, terra, rocha, cascalho.
+layout(set = 0, binding = 25, std430) readonly buffer TerrainLayersBuf {
+  ivec4 albedo, normal;
+  vec4 metersPerTile, roughness;
+} terrainLayers;
+
+// Amostra uma camada: planar (de cima) no chão, triplanar nos barrancos (a textura não estica). Devolve a cor e
+// altura (a) e, em nOut, a normal da camada no mundo (normal map por cima da normal da geometria).
+vec4 terrainLayer(int layer, vec3 P, vec3 N, float triplanar, out vec3 nOut) {
+  float tile = terrainLayers.metersPerTile[layer];
+  int ca = terrainLayers.albedo[layer], cn = terrainLayers.normal[layer];
+  vec3 w = pow(abs(N), vec3(4.0));
+  w = mix(vec3(0.0, 1.0, 0.0), w / (w.x + w.y + w.z), triplanar);
+  vec4 col = vec4(0.0);
+  vec3 nsum = vec3(0.0);
+  for (int axis = 0; axis < 3; ++axis) {
+    if (w[axis] < 0.01) continue;
+    vec2 uv = (axis == 0 ? P.zy : axis == 1 ? P.xz : P.xy) / tile;
+    col += MATERIAL_SAMPLE(ca, uv) * w[axis];
+    vec3 tn = MATERIAL_SAMPLE(cn, uv).xyz * 2.0 - 1.0;
+    if (tn.z < -0.99) tn.z = sqrt(max(1.0 - dot(tn.xy, tn.xy), 0.0));  // BC5: z reconstruído
+    // "Whiteout" (Barré-Brisebois & Hill): soma a inclinação do mapa à normal da geometria no plano da projeção.
+    vec3 g = axis == 0 ? N.zyx : axis == 1 ? N.xzy : N;
+    vec3 b = normalize(vec3(tn.xy + g.xy, abs(tn.z) * abs(g.z) * sign(g.z + 1e-6)));
+    nsum += (axis == 0 ? b.zyx : axis == 1 ? b.xzy : b) * w[axis];
+  }
+  nOut = normalize(nsum + N * 1e-4);
+  return col;
+}
+
 // vertexColor: cor por vértice interpolada (glTF COLOR_0; branco se a malha não tem).
 Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexColor) {
   if ((m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
@@ -339,7 +369,35 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
     s.clearcoatRoughness = 0.02;
   }
 
-  if ((m.flags & MATERIAL_TERRAIN) != 0u) {
+  if ((m.flags & MATERIAL_TERRAIN) != 0u && terrainLayers.albedo.x >= 0) {
+    // Terreno por camadas: as mesmas regras do procedural (inclinação e ruído grande) dão o peso de cada camada; a
+    // mistura final é por altura (a pedra aparece entre a grama, não num degradê) e a normal vem da camada.
+    float slope = 1.0 - N.y;
+    float large = fbm(P.xz * 0.06, 5), detail = fbm(P.xz * 0.7, 3);
+    float dirtMask = smoothstep(0.55, 0.72, large + 0.15 * detail);
+    float rockMask = smoothstep(0.18, 0.38, slope + (detail - 0.5) * 0.25);
+    float gravelMask = smoothstep(0.62, 0.7, large + 0.1 * detail) * (1.0 - smoothstep(0.7, 0.8, large));
+    vec4 wl = vec4((1.0 - dirtMask) * (1.0 - rockMask), dirtMask * (1.0 - rockMask) * (1.0 - gravelMask), rockMask,
+                   gravelMask * (1.0 - rockMask));
+    float tri = smoothstep(0.15, 0.35, slope);
+    vec4 c[4];
+    vec3 n[4];
+    for (int k = 0; k < 4; ++k)
+      if (wl[k] > 0.001) c[k] = terrainLayer(k, P, N, k == 2 ? tri : tri * 0.5, n[k]);
+      else { c[k] = vec4(0.0); n[k] = N; }
+    // Mistura por altura (Mittring): só as camadas perto do topo da soma "peso + altura" contam.
+    vec4 hw = wl + vec4(c[0].a, c[1].a, c[2].a, c[3].a) * 0.5 * step(vec4(0.001), wl);
+    float top = max(max(hw.x, hw.y), max(hw.z, hw.w)) - 0.15;
+    vec4 bw = max(hw - top, 0.0) * step(vec4(0.001), wl);
+    bw /= max(dot(bw, vec4(1.0)), 1e-5);
+    s.diffuseColor = c[0].rgb * bw.x + c[1].rgb * bw.y + c[2].rgb * bw.z + c[3].rgb * bw.w;
+    s.normal = normalize(n[0] * bw.x + n[1] * bw.y + n[2] * bw.z + n[3] * bw.w);
+    s.f0 = vec3(0.04);
+    s.f90 = 1.0;
+    s.roughness = dot(terrainLayers.roughness, bw);
+    s.alpha = 1.0;
+    s.occlusion = 1.0;
+  } else if ((m.flags & MATERIAL_TERRAIN) != 0u) {
     // Terreno procedural: grama, terra e rocha por inclinação e ruído.
     float slope = 1.0 - N.y;
     float large = fbm(P.xz * 0.06, 5);
