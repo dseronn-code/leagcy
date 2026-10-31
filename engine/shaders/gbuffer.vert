@@ -24,7 +24,8 @@ layout(location = 6) flat out uint vObject;
 layout(location = 7) flat out uint vMaterial;
 layout(location = 8) flat out uint vLod;
 layout(location = 9) out float vCoverage;
-layout(location = 10) out vec4 vColor;      // cor por vértice (COLOR_0), branco se não há  // cabelo: fração do pixel que o fio cobre (transparência estocástica)
+layout(location = 10) out vec4 vColor;      // cor por vértice (COLOR_0), branco se não há
+layout(location = 11) flat out uint vDither;  // troca suave de nível (cull.comp): fração em 1/32 | 32 = entrando  // cabelo: fração do pixel que o fio cobre (transparência estocástica)
 
 // Vento na folhagem: rajadas que viajam pelo espaço (ondas lentas na direção do vento), curvatura que cresce com a
 // altura acima da base do objeto (o tronco quase não mexe, a copa sim) e tremor rápido das folhas.
@@ -39,7 +40,8 @@ vec3 windSway(vec3 p, float height, float t) {
 
 void main() {
   uint entry = DrawList(pc.drawList).objects[gl_InstanceIndex];
-  vObject = entry & 0x3FFFFFFFu;
+  vObject = entry & 0xFFFFFFu;
+  vDither = (entry >> 24) & 63u;
   vLod = entry >> 30;  // nível de detalhe (cull.comp)
   vMaterial = instances[vObject].material;
   vColor = fetchVertexColor(instances[vObject], uint(gl_VertexIndex));

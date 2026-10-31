@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <map>
 
 namespace scene {
 
@@ -141,7 +142,7 @@ void Scene::rebuildTlasLayout() {
   tlasSlot_.assign(objects.size(), -1);
   tlasCount_ = 0;
   for (uint32_t i = 0; i < objects.size(); ++i)
-    if (meshes[objects[i].mesh].resident) tlasSlot_[i] = int32_t(tlasCount_++);
+    if (meshes[objects[i].mesh].resident && !objects[i].hlodProxy) tlasSlot_[i] = int32_t(tlasCount_++);
   ++tlasLayout_;
 }
 
@@ -173,6 +174,87 @@ VkDeviceSize uploadMeshlets(rhi::Context& ctx, GpuMesh& gm, const std::vector<ui
   return gm.meshlets.size;
 }
 }  // namespace
+
+void Scene::buildHlod() {
+  if (hlodCellSize <= 0.0f) return;
+  // Grupos (célula, material). Fora: o que se deforma, anima ou depende do vertex shader (mar, cabelo, folhagem,
+  // multidão), decals misturados, malhas de streaming e objetos maiores que a célula (o chão da cidade inteira).
+  std::map<std::pair<std::pair<int, int>, uint32_t>, std::vector<uint32_t>> groups;
+  std::map<std::pair<int, int>, int32_t> cellOf;
+  const uint32_t skip = kMaterialWater | kMaterialHair | kMaterialFoliage | kMaterialBlend;
+  const size_t count = objects.size();
+  for (uint32_t i = 0; i < count; ++i) {
+    const Object& o = objects[i];
+    if (!o.hlodCandidate || o.crowdClip != ~0u || (materials[o.material].flags & skip)) continue;
+    if (o.mesh >= cpuMeshes_.size() || (o.mesh < meshCellPending_.size() && meshCellPending_[o.mesh] >= 0)) continue;
+    const MeshData& md = cpuMeshes_[o.mesh];
+    if (!md.joints.empty() || md.clothWidth > 0 || md.indices.empty()) continue;
+    glm::vec3 lo(1e30f), hi(-1e30f);
+    for (const Vertex& v : md.vertices) {
+      const glm::vec3 p = glm::vec3(o.transform * glm::vec4(v.position, 1.0f));
+      lo = glm::min(lo, p);
+      hi = glm::max(hi, p);
+    }
+    if (glm::max(hi.x - lo.x, hi.z - lo.z) > hlodCellSize) continue;
+    const glm::vec3 c = 0.5f * (lo + hi);
+    const std::pair<int, int> key{int(std::floor(c.x / hlodCellSize)), int(std::floor(c.z / hlodCellSize))};
+    auto it = cellOf.find(key);
+    if (it == cellOf.end()) {
+      it = cellOf.emplace(key, int32_t(hlodCells.size())).first;
+      hlodCells.push_back({});
+      hlodCells.back().distance = hlodDistance;
+    }
+    HlodCell& cell = hlodCells[size_t(it->second)];
+    cell.lo = glm::min(cell.lo, lo);
+    cell.hi = glm::max(cell.hi, hi);
+    groups[{key, o.material}].push_back(i);
+  }
+  size_t proxies = 0, members = 0, trisIn = 0, trisOut = 0;
+  for (const auto& [key, list] : groups) {
+    if (list.size() < 2) continue;  // um objeto só: nada a fundir
+    const int32_t cell = cellOf[key.first];
+    const HlodCell& hc = hlodCells[size_t(cell)];
+    const glm::vec3 center(0.5f * (hc.lo.x + hc.hi.x), hc.lo.y, 0.5f * (hc.lo.z + hc.hi.z));
+    MeshData merged;
+    bool colored = false;
+    for (uint32_t i : list) colored = colored || !cpuMeshes_[objects[i].mesh].colors.empty();
+    for (uint32_t i : list) {
+      const Object& o = objects[i];
+      const MeshData& md = cpuMeshes_[o.mesh];
+      const glm::mat3 m3(o.transform), nm = glm::transpose(glm::inverse(m3));
+      const bool mirrored = glm::determinant(m3) < 0.0f;
+      const uint32_t base = uint32_t(merged.vertices.size());
+      for (size_t v = 0; v < md.vertices.size(); ++v) {
+        Vertex x = md.vertices[v];
+        x.position = glm::vec3(o.transform * glm::vec4(x.position, 1.0f)) - center;
+        x.normal = glm::normalize(nm * x.normal);
+        x.tangent = glm::vec4(glm::normalize(m3 * glm::vec3(x.tangent)), x.tangent.w * (mirrored ? -1.0f : 1.0f));
+        merged.vertices.push_back(x);
+        if (colored) merged.colors.push_back(md.colors.empty() ? glm::vec4(1.0f) : md.colors[v]);
+      }
+      for (size_t t = 0; t + 2 < md.indices.size(); t += 3) {  // espelhado: inverte a ordem (a frente continua a mesma)
+        merged.indices.push_back(base + md.indices[t]);
+        merged.indices.push_back(base + md.indices[t + (mirrored ? 2 : 1)]);
+        merged.indices.push_back(base + md.indices[t + (mirrored ? 1 : 2)]);
+      }
+    }
+    const size_t tris = merged.indices.size() / 3;
+    trisIn += tris;
+    // Fusões grandes: 1/4 dos triângulos (erro quádrico). Pequenas (caixas de prédios) ficam como estão: o ganho
+    // delas é trocar dezenas de instâncias por uma.
+    MeshData proxy = tris > 2000 ? simplifyMesh(merged, uint32_t(tris / 4)) : std::move(merged);
+    trisOut += proxy.indices.size() / 3;
+    const uint32_t mesh = addMesh(std::move(proxy));
+    const uint32_t p = addObject(mesh, glm::translate(glm::mat4(1.0f), center), key.second);
+    objects[p].hlodProxy = true;
+    objects[p].hlodCell = cell;
+    for (uint32_t i : list) objects[i].hlodCell = cell;
+    ++proxies;
+    members += list.size();
+  }
+  LOG_INFO("HLOD: %zu células, %zu proxies substituem %zu objetos ao longe (%zu → %zu triângulos)", hlodCells.size(),
+           proxies, members, trisIn, trisOut);
+}
 
 void Scene::makeResident(uint32_t mi) {
   rhi::Context& ctx = *ctx_;
@@ -533,6 +615,7 @@ void Scene::upload(rhi::Context& ctx) {
   for (auto& m : models) animateModel(m, 0.0f);  // pose inicial
   for (auto& o : objects) o.prevTransform = o.transform;
   if (meshLights) buildMeshLights();
+  buildHlod();  // depois das luzes de malha: o proxy não é luz (os membros continuam no ray tracing)
   // LODs: malhas estáticas com mais de 3 mil triângulos ganham versões com 1/4 e 1/16 dos triângulos.
   std::vector<std::array<int, 2>> lodOf(cpuMeshes_.size(), {-1, -1});
   std::vector<float> meshRadius(cpuMeshes_.size(), 0.0f);

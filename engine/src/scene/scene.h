@@ -183,6 +183,18 @@ struct Object {
   // Multidão (animação assada): clipe em Scene::crowdClips e pose deste frame / do anterior. ~0 = objeto comum.
   uint32_t crowdClip = ~0u, animFrame = 0, prevAnimFrame = 0;
   float animPhase = 0.0f;  // s somados ao tempo (cada pessoa num ponto diferente do passo)
+  // HLOD: o objeto não se move (a cena garante) e pode ser fundido com os vizinhos num objeto só ao longe.
+  bool hlodCandidate = false;
+  // HLOD montado no upload: célula em Scene::hlodCells (-1 = nenhuma). Membro = desenhado perto da célula; proxy =
+  // a fusão simplificada, desenhada longe dela (só no raster: o ray tracing e as sombras usam os membros).
+  int32_t hlodCell = -1;
+  bool hlodProxy = false;
+};
+
+// Célula de HLOD: caixa dos membros (mundo) e a distância da câmera à caixa a partir da qual o proxy substitui.
+struct HlodCell {
+  glm::vec3 lo{1e30f}, hi{-1e30f};
+  float distance = 0.0f;
 };
 
 // Clipe de animação "assado" para multidões: K poses do ciclo como malhas estáticas consecutivas (firstMesh ..
@@ -290,6 +302,10 @@ class Scene {
   bool compressTextures = true;
   bool meshLights = true;  // triângulos emissivos viram luzes no upload
   bool meshLods = true;    // gera LODs das malhas grandes no upload
+  // HLOD (> 0 liga): objetos `hlodCandidate` agrupados em células desse tamanho (m) e por material; cada grupo vira
+  // um proxy fundido, trocado pelos membros a partir de hlodDistance (m) da caixa da célula.
+  float hlodCellSize = 0.0f, hlodDistance = 0.0f;
+  std::vector<HlodCell> hlodCells;
   std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
 
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }
@@ -427,6 +443,7 @@ class Scene {
     std::vector<uint32_t> primitives;
   };
   void buildMeshLights();
+  void buildHlod();
   void writeMeshLights(const MeshLightSource& src);
   std::vector<MeshLightSource> meshLightSources_;
   std::vector<int32_t> meshLightSourceOf_;  // objeto -> índice em meshLightSources_ (-1 = nenhum)
