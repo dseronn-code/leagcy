@@ -1,5 +1,7 @@
 #pragma once
 #include <functional>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -191,6 +193,13 @@ struct Object {
   bool hlodProxy = false;
 };
 
+// Malha de célula de streaming lida do disco (StreamLoader em scene.cpp), esperando a vez de subir para a GPU.
+struct LoadedMesh {
+  uint32_t mesh;
+  MeshData data;
+  std::vector<uint32_t> meshlets;
+};
+
 // Célula de HLOD: caixa dos membros (mundo) e a distância da câmera à caixa a partir da qual o proxy substitui.
 struct HlodCell {
   glm::vec3 lo{1e30f}, hi{-1e30f};
@@ -352,6 +361,7 @@ class Scene {
   std::vector<StreamCell> streamCells;
   float streamLoadDistance = 350.0f, streamUnloadDistance = 450.0f;  // m da borda da célula
   float streamBudgetMB = 24.0f;                                      // por chamada de stream()
+  bool streamSync = false;  // espera cada leitura do disco no mesmo frame (referência determinística: --stream-sync)
   uint32_t addStreamCell(glm::vec3 center, float radius) {
     streamCells.push_back({center, radius, {}, false});
     return uint32_t(streamCells.size() - 1);
@@ -452,8 +462,12 @@ class Scene {
   std::vector<uint32_t> crowdObjects_;
   // Streaming: dados de CPU das malhas de células (ficam na RAM), objetos por malha, destruições adiadas.
   std::vector<int> meshCellPending_;
-  std::vector<MeshData> streamData_;
-  std::vector<std::vector<uint32_t>> streamMeshlets_;  // meshlets das malhas de célula, prontos para subir
+  // Streaming do disco: as malhas de célula vão para um arquivo no upload e uma thread de fundo as lê quando a
+  // câmera chega perto (StreamLoader em scene.cpp). Células lidas esperando a vez de subir para a GPU:
+  std::shared_ptr<struct StreamLoader> loader_;
+  std::map<uint32_t, std::vector<LoadedMesh>> loadedCells_;
+  std::vector<uint8_t> cellRequested_;
+  bool streamStarted_ = false;
   std::vector<std::vector<uint32_t>> objectsOfMesh_;
   std::vector<uint32_t> instanceUpdates_;
   struct PendingDestroy {
@@ -467,7 +481,7 @@ class Scene {
   std::vector<int32_t> tlasSlot_;
   uint32_t tlasCount_ = 0, tlasLayout_ = 0;
   void rebuildTlasLayout();
-  void makeResident(uint32_t mesh);
+  void makeResident(uint32_t mesh, const MeshData& data, const std::vector<uint32_t>& meshlets);
   void evict(uint32_t mesh);
   std::vector<uint32_t> changed_, movedNow_, movedLast_;
   std::vector<uint8_t> movedMark_;

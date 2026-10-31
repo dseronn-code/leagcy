@@ -36,6 +36,7 @@ struct Options {
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
+  bool streamSync = false;  // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
   bool compressTextures = true;  // texturas em BC7 (--no-texture-compression = RGBA8)
   bool meshLights = true;        // triângulos emissivos como luzes (--no-mesh-lights: só pelos raios de GI)
@@ -130,6 +131,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-occlusion") o.render.occlusionCulling = false;
     else if (a == "--no-meshlets") o.render.meshlets = false;
     else if (a == "--no-hlod") o.render.hlod = false;
+    else if (a == "--stream-sync") o.streamSync = true;
     else if (a == "--no-radiance-cache") o.render.radianceCache = false;
     else if (a == "--no-virtual-motion") o.render.virtualMotion = false;  // medição do SVGF
     else if (a == "--reference" || a == "--reference-pt") {  // verdade por acumulação: sem denoiser, TAA, upscaling nem blur
@@ -215,6 +217,7 @@ int runAtmosphereTest(const Options& opt) {
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
+  scene.streamSync = opt.streamSync;
   scene.upload(ctx);
   renderer::Renderer r;
   r.init(ctx, scene, {64, 64}, VK_FORMAT_R8G8B8A8_SRGB, opt.render);
@@ -241,6 +244,7 @@ int runHeadless(const Options& opt) {
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
+  scene.streamSync = opt.streamSync;
   scene.upload(ctx);
 
   VkExtent2D extent{opt.width, opt.height};
@@ -357,6 +361,7 @@ int runWindowed(const Options& opt) {
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
+  scene.streamSync = opt.streamSync;
   scene.upload(ctx);
 
   int fbw, fbh;

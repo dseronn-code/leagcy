@@ -634,3 +634,18 @@ vértice: diferença máxima de 1 nível contra o build anterior.
   de 20 pelo ruído do pontilhado; depois máx. 10–15, média ≤ 0,05 — nenhum estalo. Oclusão continua diferença 0;
   validação Vulkan limpa.
 
+### Streaming do disco em segundo plano (31/10)
+
+Antes, as malhas das células de streaming ficavam na RAM e subiam na thread principal. Agora, no carregamento, elas
+são gravadas num arquivo de pacote (vértices, índices, cores e meshlets em sequência, apagado no fim) e saem da RAM.
+Cada célula que entra no alcance vira um pedido para uma thread de leitura; a cada frame a principal recolhe as células
+lidas e sobe as mais próximas dentro do orçamento (24 MB por frame), descartando as que deixaram de ser desejadas.
+Espera no mesmo frame só pela célula onde a câmera está e, na primeira chamada, por tudo ao alcance (tela de
+carregamento: sem ela o 1º frame saía sem os prédios distantes e a auto-exposição levava segundos para voltar — média
+de 17 de 255 de diferença ainda no frame 29).
+
+- `--stream-sync` (espera toda leitura): **diferença 0** contra o streaming antigo, da RAM.
+- Assíncrono contra o síncrono, câmera a 200 m/s, 40 frames: frames 1–2 iguais; depois média ≤ 0,9 (células na
+  borda de 350 m chegando um frame depois). Validação Vulkan limpa (cidade de torres e mundo de 8 km).
+- Falta: streaming de texturas, e a cópia para a GPU ainda acontece na thread principal (`immediateSubmit`).
+
