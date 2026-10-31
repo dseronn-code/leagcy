@@ -202,6 +202,18 @@ struct LoadedMesh {
   std::vector<uint32_t> meshlets;
 };
 
+// Textura com streaming de mips (só as comprimidas, com cadeia de mips): os níveis ficam num arquivo em disco e a
+// GPU guarda só a partir de `base` (o nível 0 da imagem na GPU é o nível `base` da textura).
+struct TextureStream {
+  VkFormat format = VK_FORMAT_UNDEFINED;
+  uint32_t width = 0, height = 0;
+  std::vector<uint64_t> offset;  // de cada nível no arquivo
+  std::vector<uint32_t> size;
+  uint32_t base = 0, coarsest = 0;  // nível residente mais fino; o mais grosso que fica sempre (≤ 128 texels)
+  uint32_t idleFrames = 0;          // frames seguidos pedindo menos que o residente
+  bool streamed() const { return !offset.empty(); }
+};
+
 // Célula de HLOD: caixa dos membros (mundo) e a distância da câmera à caixa a partir da qual o proxy substitui.
 struct HlodCell {
   glm::vec3 lo{1e30f}, hi{-1e30f};
@@ -410,6 +422,15 @@ class Scene {
   std::vector<Model> models;
   std::vector<GpuMesh> meshes;
   std::vector<rhi::Image> textures;
+  // Streaming de texturas (Scene::updateTextureStreaming): estado por textura e uma versão que muda quando alguma
+  // imagem é trocada (o renderer reescreve os descritores).
+  bool textureStreaming = true;
+  float textureStreamBudgetMB = 32.0f;  // por frame
+  std::vector<TextureStream> textureStreams;
+  uint32_t texturesVersion = 0;
+  size_t textureBytes() const;  // memória de vídeo das texturas agora
+  // need[i] = resolução (texels no maior eixo) que a tela pediu da textura i no frame medido; 0 = não apareceu.
+  void updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint32_t count);
   std::vector<std::pair<VkSamplerAddressMode, VkSamplerAddressMode>> textureWrap;  // por textura (u, v)
   rhi::DynamicTlas tlas;
   rhi::Buffer materialBuffer, instanceBuffer, skinScratch;
@@ -470,6 +491,13 @@ class Scene {
   std::map<uint32_t, std::vector<LoadedMesh>> loadedCells_;
   std::vector<uint8_t> cellRequested_;
   bool streamStarted_ = false;
+  std::string texturePack_;  // arquivo com os mips das texturas com streaming
+  struct DeadImage {
+    rhi::Image image;
+    uint32_t framesLeft;
+  };
+  std::vector<DeadImage> textureGraveyard_;  // imagens trocadas, destruídas quando nenhum frame em voo as usa
+  rhi::Image uploadTextureFrom(rhi::Context& ctx, const TextureStream& t, uint32_t base);
   std::vector<std::vector<uint32_t>> objectsOfMesh_;
   std::vector<uint32_t> instanceUpdates_;
   struct PendingDestroy {

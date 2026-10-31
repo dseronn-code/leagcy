@@ -36,7 +36,8 @@ struct Options {
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
-  bool streamSync = false;  // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
+  bool streamSync = false;
+  bool textureStreaming = false;  // mips finos das texturas sob demanda (--texture-streaming; em verificação)  // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
   bool compressTextures = true;  // texturas em BC7 (--no-texture-compression = RGBA8)
   bool meshLights = true;        // triângulos emissivos como luzes (--no-mesh-lights: só pelos raios de GI)
@@ -133,6 +134,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-hlod") o.render.hlod = false;
     else if (a == "--no-ripples") o.render.ripples = false;
     else if (a == "--stream-sync") o.streamSync = true;
+    else if (a == "--no-texture-streaming") o.textureStreaming = false;
+    else if (a == "--texture-streaming") o.textureStreaming = true;
     else if (a == "--no-radiance-cache") o.render.radianceCache = false;
     else if (a == "--no-virtual-motion") o.render.virtualMotion = false;  // medição do SVGF
     else if (a == "--reference" || a == "--reference-pt") {  // verdade por acumulação: sem denoiser, TAA, upscaling nem blur
@@ -219,6 +222,7 @@ int runAtmosphereTest(const Options& opt) {
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
   scene.streamSync = opt.streamSync;
+  scene.textureStreaming = opt.textureStreaming;
   scene.upload(ctx);
   renderer::Renderer r;
   r.init(ctx, scene, {64, 64}, VK_FORMAT_R8G8B8A8_SRGB, opt.render);
@@ -246,6 +250,7 @@ int runHeadless(const Options& opt) {
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
   scene.streamSync = opt.streamSync;
+  scene.textureStreaming = opt.textureStreaming;
   scene.upload(ctx);
 
   VkExtent2D extent{opt.width, opt.height};
@@ -309,6 +314,7 @@ int runHeadless(const Options& opt) {
   double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   LOG_INFO("%u frames em %.2fs (%.1f ms/frame, inclui espera da CPU)", opt.frames, secs, secs * 1000.0 / opt.frames);
   if (opt.frames > 1) LOG_INFO("CPU gravando o frame: %.2f ms/frame", cpuRecordMs / double(opt.frames - 1));
+  if (!scene.textures.empty()) LOG_INFO("Texturas na GPU no fim: %.0f MB", double(scene.textureBytes()) / 1048576.0);
   if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   ok &= savePng(opt.out);
@@ -363,6 +369,7 @@ int runWindowed(const Options& opt) {
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
   scene.streamSync = opt.streamSync;
+  scene.textureStreaming = opt.textureStreaming;
   scene.upload(ctx);
 
   int fbw, fbh;

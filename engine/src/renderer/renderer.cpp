@@ -425,6 +425,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {21, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {22, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {23, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {24, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -441,7 +442,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (12 + kMaxTextures)},
-      {SB, kFramesInFlight * 9},
+      {SB, kFramesInFlight * 10},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -479,6 +480,10 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       vkCmdClearColorImage(cmd, img.handle, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
     }
   });
+  for (rhi::Buffer& b : textureFeedback_) {
+    b = rhi::createBuffer(ctx, kMaxTextures * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    std::memset(b.mapped, 0, kMaxTextures * sizeof(uint32_t));
+  }
   for (rhi::Buffer& b : rippleDisturbers_)
     b = rhi::createBuffer(ctx, kMaxDisturbers * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
   ripplePass_.init(ctx, "ripple.comp", globalLayout_, {CIS, SI, SB}, 32);
@@ -640,7 +645,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   createTargets();
 }
 
-void Renderer::writeGlobalDescriptors() {
+std::vector<VkDescriptorImageInfo> Renderer::textureInfos() {
   scene::Scene& s = *scene_;
   std::vector<VkDescriptorImageInfo> texInfos;
   for (size_t i = 0; i < s.textures.size(); ++i) {
@@ -657,6 +662,13 @@ void Renderer::writeGlobalDescriptors() {
     texInfos.push_back({smp, s.textures[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
   }
   if (texInfos.size() > kMaxTextures) FATAL("Cena com mais de %u texturas", kMaxTextures);
+  return texInfos;
+}
+
+void Renderer::writeGlobalDescriptors() {
+  scene::Scene& s = *scene_;
+  const std::vector<VkDescriptorImageInfo> texInfos = textureInfos();
+  for (uint32_t i = 0; i < kFramesInFlight; ++i) texturesVersionWritten_[i] = s.texturesVersion;
 
   for (uint32_t i = 0; i < kFramesInFlight; ++i) {
     VkDescriptorBufferInfo ubo{frameUbo_[i].handle, 0, VK_WHOLE_SIZE};
@@ -708,6 +720,8 @@ void Renderer::writeGlobalDescriptors() {
     add(22, SB, 1).pBufferInfo = &crowd;
     VkDescriptorImageInfo rippleInfo{linear_, ripple_[0].view, VK_IMAGE_LAYOUT_GENERAL};
     add(23, CIS, 1).pImageInfo = &rippleInfo;
+    VkDescriptorBufferInfo feedback{textureFeedback_[i].handle, 0, VK_WHOLE_SIZE};
+    add(24, SB, 1).pBufferInfo = &feedback;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -863,6 +877,29 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const uint32_t cur = uint32_t(frameIndex_ & 1), prev = cur ^ 1u;
   const VkExtent2D R = renderExtent_, O = outputExtent_;
   const VkDescriptorSet gs = globalSets_[slot];
+  // Streaming de texturas: o que a tela pediu no último frame deste slot (a GPU já terminou com ele) decide os mips
+  // que sobem ou descem; depois os descritores deste slot apontam para as imagens novas (as antigas esperam os
+  // frames em voo no cemitério da cena).
+  {
+    rhi::Context& c = *ctx_;
+    auto* need = static_cast<uint32_t*>(textureFeedback_[slot].mapped);
+    vmaInvalidateAllocation(c.allocator, textureFeedback_[slot].allocation, 0, VK_WHOLE_SIZE);
+    if (textureFeedbackValid_[slot]) scene_->updateTextureStreaming(c, need, uint32_t(scene_->textures.size()));
+    std::memset(need, 0, kMaxTextures * sizeof(uint32_t));
+    vmaFlushAllocation(c.allocator, textureFeedback_[slot].allocation, 0, VK_WHOLE_SIZE);
+    textureFeedbackValid_[slot] = true;
+    if (texturesVersionWritten_[slot] != scene_->texturesVersion && !scene_->textures.empty()) {
+      const std::vector<VkDescriptorImageInfo> infos = textureInfos();
+      VkWriteDescriptorSet x{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+      x.dstSet = gs;
+      x.dstBinding = 5;
+      x.descriptorCount = uint32_t(infos.size());
+      x.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      x.pImageInfo = infos.data();
+      vkUpdateDescriptorSets(c.device, 1, &x, 0, nullptr);
+      texturesVersionWritten_[slot] = scene_->texturesVersion;
+    }
+  }
   auto tex = [&](const rhi::Image& img) { return Binding::sampled(img.view, nearest_); };
   auto texLinear = [&](const rhi::Image& img) { return Binding::sampled(img.view, linear_); };
   auto storage = [&](const rhi::Image& img) { return Binding::storageImage(img.view); };
@@ -1677,6 +1714,7 @@ void Renderer::destroy() {
   ripplePass_.destroy(ctx);
   for (rhi::Image& img : ripple_) rhi::destroyImage(ctx, img);
   for (rhi::Buffer& b : rippleDisturbers_) rhi::destroyBuffer(ctx, b);
+  for (rhi::Buffer& b : textureFeedback_) rhi::destroyBuffer(ctx, b);
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);

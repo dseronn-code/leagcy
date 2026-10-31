@@ -2,7 +2,19 @@
 #extension GL_GOOGLE_include_directive : require
 #include "frame.glsl"
 #include "scene.glsl"
-#define MATERIAL_SAMPLE(i, uv) texture(textures[nonuniformEXT(i)], uv, textureMipBias())
+// Streaming de texturas: um pixel em 16 (posição que roda a cada frame) anota a resolução que a tela pede de cada
+// textura (texels no maior eixo, pelo LOD que o hardware calcula, com o viés de mip). A CPU lê no frame seguinte.
+layout(set = 0, binding = 24, std430) buffer TextureFeedback { uint textureNeed[]; };
+vec4 sampleMaterialTexture(int i, vec2 uv) {
+  const uint f = frame.frameInfo.x;
+  if ((uint(gl_FragCoord.x) & 3u) == (f & 3u) && (uint(gl_FragCoord.y) & 3u) == ((f >> 2) & 3u)) {
+    ivec2 size = textureSize(textures[nonuniformEXT(i)], 0);
+    float lod = textureQueryLod(textures[nonuniformEXT(i)], uv).y + textureMipBias();
+    atomicMax(textureNeed[i], uint(clamp(float(max(size.x, size.y)) * exp2(-lod), 1.0, 65536.0)));
+  }
+  return texture(textures[nonuniformEXT(i)], uv, textureMipBias());
+}
+#define MATERIAL_SAMPLE(i, uv) sampleMaterialTexture(i, uv)
 #define MATERIAL_DERIVATIVES  // dFdx/dFdy disponíveis (flocos metálicos medem o tamanho do pixel)
 #include "material.glsl"
 
