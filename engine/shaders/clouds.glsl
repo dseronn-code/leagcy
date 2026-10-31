@@ -12,6 +12,14 @@ layout(set = 0, binding = 15) uniform sampler3D cloudNoise;
 const float CLOUD_BOTTOM = 1.5, CLOUD_TOP = 4.0;  // km acima do chão
 const float CLOUD_EXTINCTION = 40.0;              // 1/km na densidade 1 (cúmulo denso: ~0,05/m)
 const float CLOUD_ALBEDO = 0.99;                  // gotas de água quase não absorvem
+// Ajustados contra a referência por Monte Carlo (clouds_reference.comp, tools/nuvens.py).
+#ifndef CLOUD_MS_A
+#define CLOUD_MS_A 0.6
+#define CLOUD_MS_B 0.35
+#define CLOUD_MS_C 0.5
+#define CLOUD_AMB 1.0
+#define CLOUD_AMB_ATT 1.0
+#endif
 
 float cloudCoverage() { return frame.night.z; }
 
@@ -125,12 +133,13 @@ void cloudMarch(vec3 o, vec3 d, float jitter, vec3 ambient, out vec3 scattered, 
     float ms = 0.0, a = 1.0, b = 1.0, c = 1.0;
     for (int k = 0; k < 6; ++k) {
       ms += a * exp(-tau * b) * cloudPhase(cosTheta, c);
-      a *= 0.6;
-      b *= 0.3;
-      c *= 0.6;
+      a *= CLOUD_MS_A;
+      b *= CLOUD_MS_B;
+      c *= CLOUD_MS_C;
     }
-    float h = cloudHeightFraction(p);
-    vec3 S = sigmaS * (sunE * ms + ambient * (0.35 + 0.65 * h));
+    // Céu: chega de cima, atenuado pela nuvem acima do ponto (no miolo de uma nuvem densa quase não entra).
+    float tauUp = cloudOpticalDepthToLight(p, normalize(p));
+    vec3 S = sigmaS * (sunE * ms + ambient * exp(-tauUp * CLOUD_AMB_ATT) * CLOUD_AMB);
     // Integração analítica no passo (Hillaire 2016): conserva energia em passos grandes.
     float Tstep = exp(-sigmaT * dt);
     scattered += transmittance * (S - S * Tstep) / max(sigmaT, 1e-6);
