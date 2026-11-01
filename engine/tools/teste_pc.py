@@ -234,6 +234,28 @@ def gpudriven(binario, rel):
             rel.append(f'{cena} / {nome}: {ms}, {gb}{dif}')
 
 
+def custo(binario, rel):
+    """Quanto cada sistema de luz custa na GPU: a mesma cena com um sistema desligado por vez (1080p, 100 frames).
+    A diferença para a linha "tudo ligado" é o custo daquele sistema."""
+    rel.append('\n== Custo por sistema (1920x1080, 100 frames; ms/frame | iluminacao_rt | restir | taa)')
+    cenas = [('Sponza', []), ('Bistro', ['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf')])]
+    casos = [('tudo ligado', []), ('sem luzes de malha', ['--no-mesh-lights']),
+             ('sem cache de radiância', ['--no-radiance-cache']), ('sem movimento virtual', ['--no-virtual-motion']),
+             ('sem pele (SSS)', ['--no-sss']), ('ReSTIR sem reuso', ['--restir-no-reuse', 'all']),
+             ('denoiser NRD (sem DLSS-RR)', ['--denoiser', 'relax']), ('sem streaming de texturas', ['--no-texture-streaming']),
+             ('preset alto', ['--quality', 'alto']), ('preset medio', ['--quality', 'medio'])]
+    for cena, extra in cenas:
+        for nome, args in casos:
+            code, out = rodar(binario, ['--headless', '--width', '1920', '--height', '1080', '--frames', '100',
+                                        '--out', os.path.join(PASTA, 'custo.png')] + extra + args)
+            if code:
+                rel.append(f'{cena} / {nome}: ERRO código {code}')
+                continue
+            ms = linha(out, r'[0-9.]+ ms/frame')
+            partes = [linha(out, rf'{k} [0-9.]+') for k in ('iluminacao_rt', 'restir', 'taa')]
+            rel.append(f'{cena} / {nome}: {ms} | ' + ' | '.join(partes))
+
+
 def main():
     for f in (sys.stdout, sys.stderr):
         f.reconfigure(encoding='utf-8', errors='replace')
@@ -246,7 +268,7 @@ def main():
     rel.append('DLSS: ' + (linha(out, r'DLSS (ativo|indispon)[^\n]*') or '?'))
 
     # --so secao1,secao2: só algumas seções (suite, desempenho, nitidez, denoisers, reflexos, luzes, galeria, movimento,
-    # gpudriven).
+    # gpudriven, custo).
     so = None
     if '--so' in sys.argv:
         so = set(sys.argv[sys.argv.index('--so') + 1].split(','))
@@ -257,7 +279,7 @@ def main():
         suite(binario, rel)
     etapas = [('desempenho', desempenho), ('nitidez', nitidez), ('denoisers', denoisers), ('denoisers', texturas),
               ('reflexos', reflexos), ('luzes', luzes), ('galeria', galeria), ('movimento', movimento),
-              ('gpudriven', gpudriven)]
+              ('gpudriven', gpudriven), ('custo', custo)]
     for nome, f in etapas:
         if quer(nome):
             print(f'{nome}...', flush=True)

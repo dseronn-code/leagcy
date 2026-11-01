@@ -69,7 +69,16 @@ void main() {
   }
   Material m = materials[vMaterial];
   vec3 N = normalize(vNormal);
-  if (!gl_FrontFacing) N = -N;  // materiais de dois lados
+  // Normal do lado visível da faceta (a mesma regra dos acertos de raio em raytracing.glsl). Só gl_FrontFacing não
+  // basta: assets exportados com normais contrárias à ordem dos vértices (Bistro: 14% das folhas de hera, 26% dos
+  // galhos) ficavam com a normal para dentro da parede e saíam pretos dos dois lados.
+  vec3 Nf = cross(dFdx(vWorldPos), dFdy(vWorldPos));
+  if (dot(Nf, Nf) > 1e-24) {
+    if (dot(Nf, frame.cameraPos.xyz - vWorldPos) < 0.0) Nf = -Nf;
+    if (dot(N, Nf) < 0.0) N = -N;
+  } else if (!gl_FrontFacing) {
+    N = -N;  // faceta degenerada na tela: fica a regra antiga dos materiais de dois lados
+  }
   Surface s = evalMaterial(m, vWorldPos, N, vTangent, vUV, vColor);
   // Misturados (decals BLEND): sem recorte, o alfa vai para a mistura (pipeline de decals: .a de cada anexo).
   bool blend = (m.flags & MATERIAL_BLEND) != 0u;
