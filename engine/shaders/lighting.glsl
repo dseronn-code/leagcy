@@ -171,6 +171,7 @@ vec3 refractThroughSurface(vec3 dir, vec3 Ng, float ior, bool inside, out bool r
 // Transmitância das lâminas de vidro entre origin e origin + dir × tMax (só instâncias de vidro: RAY_MASK_GLASS).
 vec3 glassTransmittanceAlong(vec3 origin, vec3 dir, float tMax) {
   vec3 T = vec3(1.0);
+  if (!sceneHas(MATERIAL_TRANSMISSIVE)) return T;
   bool inside = false;
   vec3 absorb = vec3(0.0);
   for (int layer = 0; layer < 6 && tMax > 0.0; ++layer) {
@@ -202,6 +203,7 @@ bool traceHitThroughGlassDir(vec3 origin, inout vec3 dir, float tMax, out HitInf
                              bool inside, vec3 absorb) {  // absorb: coeficiente de absorção do volume de partida (1/m)
   T = vec3(1.0);
   blocked = false;
+  if (!sceneHas(MATERIAL_TRANSMISSIVE)) return traceHit(origin, dir, tMax, hit);  // sem vidro: um raio só
   for (int layer = 0; layer < 6; ++layer) {
     if (!traceHit(origin, dir, tMax, hit)) return false;
     if (inside) T *= exp(-absorb * hit.t);  // Beer no trecho dentro do volume
@@ -322,7 +324,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
   uint st = pcg3d(uvec3(gl_GlobalInvocationID.xy, frame.frameInfo.x * 8u + bounce)).x | 1u;
   // Mesmo limite de vagalumes do motor por amostra: a referência mede reflexos e luz indireta, não cáusticas (sol
   // refletido por espelho, que motor de jogo nenhum calcula e o limite corta — medido: era o resto do viés).
-  if (pathReference()) return clampFirefly(radiance + pathContinue(hit, s, bc, st));
+  if (sceneHas(FEATURE_PATH_REFERENCE) && pathReference()) return clampFirefly(radiance + pathContinue(hit, s, bc, st));
 
   // Indireta difusa: cache de radiância (infinitos rebotes acumulados entre frames; auditoria 3.1).
   vec3 M;
@@ -416,7 +418,7 @@ void main() {
   px.transmission = 0.0;
   px.clearcoat = 0.0;
   uint pxFlags = sf.material != NO_MATERIAL ? materials[sf.material].flags : 0u;
-  if ((pxFlags & (MATERIAL_TRANSMISSIVE | MATERIAL_CLEARCOAT)) != 0u)  // (SSS só lê o raio do material)
+  if ((pxFlags & SCENE_FEATURES & (MATERIAL_TRANSMISSIVE | MATERIAL_CLEARCOAT)) != 0u)  // (SSS só lê o raio do material)
     px = evalMaterial(materials[sf.material], g.P, g.N, vec4(0.0), sf.uv, sf.color);
   // A demodulação do especular usa o contexto do G-buffer: a composição remultiplica pelo mesmo valor.
   BrdfContext bcDemod = brdfContextFor(g);
@@ -445,7 +447,7 @@ void main() {
   vec3 sunE = sunIrradianceAt(g.P);
   BrdfContext bc = brdfContextFor(g);
   // Cabelo: troca o BRDF do sol pelo do fio (a tangente vem do triângulo exato).
-  bool hair = (pxFlags & MATERIAL_HAIR) != 0u;
+  bool hair = sceneHas(MATERIAL_HAIR) && (pxFlags & MATERIAL_HAIR) != 0u;
   vec3 hairT = hair ? hairTangentAt(id) : vec3(0.0);
   vec3 hairColor = hair ? materials[sf.material].baseColor.rgb : vec3(0.0);
   float hairRough = hair ? materials[sf.material].roughness : 0.0;
@@ -494,7 +496,7 @@ void main() {
       // Transmissão em partes finas de material com espalhamento subsuperficial (orelha, nariz, folha contra a luz;
       // Jimenez 2010): um raio para dentro mede a espessura até a outra face, um raio de sombra de lá para o sol, e a
       // luz atravessa atenuada por canal (o vermelho, que anda mais na pele, passa mais).
-      if ((pxFlags & MATERIAL_SUBSURFACE) != 0u && dot(sf.Nb, frame.sunDir.xyz) < 0.2) {
+      if (sceneHas(MATERIAL_SUBSURFACE) && (pxFlags & MATERIAL_SUBSURFACE) != 0u && dot(sf.Nb, frame.sunDir.xyz) < 0.2) {
         HitInfo back;
         vec3 inward = -sf.Nb;
         if (traceHit(offsetRayOrigin(g.P, -g.Ng, sf.rayBias), inward, 0.05, back)) {
@@ -540,7 +542,7 @@ void main() {
     }
 
     // Verniz: um raio de reflexo próprio (VNDF com a rugosidade do verniz, na normal suave).
-    if (coat > 0.0) {
+    if (sceneHas(MATERIAL_CLEARCOAT) && coat > 0.0) {
       float ac = alphaFromRoughness(px.clearcoatRoughness);
       vec3 Tc, Bc;
       orthonormalBasis(sf.Nb, Tc, Bc);
@@ -560,7 +562,7 @@ void main() {
     // (a luz atravessa sem desviar, com o mesmo espalhamento da rugosidade), peso (1 − F) × cor × transmissão. Vai no
     // sinal especular (nítido, depende da vista). O ReSTIR só avalia a reflexão, então este raio conta a emissão das
     // luzes amostradas (a lâmpada dentro da lanterna aparece pelo vidro).
-    if (px.transmission > 0.0) {
+    if (sceneHas(MATERIAL_TRANSMISSIVE) && px.transmission > 0.0) {
       vec3 Ht2 = sampleGGXVNDF(vec3(dot(g.V, T), dot(g.V, B), dot(g.V, g.N)), a, sample2D(sg, DIM_TRANSMISSION));
       vec3 H2 = dot(Ht2, Ht2) > 0.0 ? T * Ht2.x + B * Ht2.y + g.N * Ht2.z : g.N;
       vec3 Lm = reflect(-g.V, H2);

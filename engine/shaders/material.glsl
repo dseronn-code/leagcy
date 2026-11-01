@@ -266,7 +266,7 @@ vec4 terrainLayer(int layer, vec3 P, vec3 N, float triplanar, out vec3 nOut) {
 Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexColor) {
 #ifdef MATERIAL_RAY_FEEDBACK
   // Streaming de texturas: o raio pede, uma vez por material atingido, a resolução de todas as texturas dele.
-  if ((m.flags & MATERIAL_TERRAIN) != 0u) {
+  if (sceneHas(MATERIAL_TERRAIN) && (m.flags & MATERIAL_TERRAIN) != 0u) {
     for (int k = 0; k < 4; ++k) rayTextureRequest(terrainLayers.albedo[k]);
   } else {
     rayTextureRequest(m.baseColorTex);  // (o normal map não: nos raios ele não é lido — tangente zero)
@@ -275,8 +275,8 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
     rayTextureRequest(m.occlusionTex);
   }
 #endif
-  if ((m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
-  if ((m.flags & MATERIAL_RIVER) != 0u) return evalRiver(m, P, N, T);
+  if (sceneHas(MATERIAL_WATER) && (m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
+  if (sceneHas(MATERIAL_RIVER) && (m.flags & MATERIAL_RIVER) != 0u) return evalRiver(m, P, N, T);
   if (m.uvRotation != 0.0 || m.uvScale != vec2(1.0) || m.uvOffset != vec2(0.0)) {  // KHR_texture_transform
     float c = cos(m.uvRotation), sn = sin(m.uvRotation);
     uv = mat2(c, sn, -sn, c) * (uv * m.uvScale) + m.uvOffset;  // mesma matriz do README da Khronos (colunas)
@@ -317,12 +317,12 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
   s.normalVariance = 0.0;
   s.occlusion = m.occlusionTex >= 0 ? MATERIAL_SAMPLE(m.occlusionTex, uv).r : 1.0;
   s.transmission = m.transmission;
-  if (m.transmissionTex >= 0) s.transmission *= MATERIAL_SAMPLE(m.transmissionTex, uv).r;
+  if (sceneHas(MATERIAL_TRANSMISSIVE) && m.transmissionTex >= 0) s.transmission *= MATERIAL_SAMPLE(m.transmissionTex, uv).r;
   s.transmissionTint = base.rgb;
   s.clearcoat = m.clearcoat;
   s.clearcoatRoughness = m.clearcoatRoughness;
-  if (m.clearcoatTex >= 0) s.clearcoat *= MATERIAL_SAMPLE(m.clearcoatTex, uv).r;
-  if (m.clearcoatRoughnessTex >= 0) s.clearcoatRoughness *= MATERIAL_SAMPLE(m.clearcoatRoughnessTex, uv).g;
+  if (sceneHas(MATERIAL_CLEARCOAT) && m.clearcoatTex >= 0) s.clearcoat *= MATERIAL_SAMPLE(m.clearcoatTex, uv).r;
+  if (sceneHas(MATERIAL_CLEARCOAT) && m.clearcoatRoughnessTex >= 0) s.clearcoatRoughness *= MATERIAL_SAMPLE(m.clearcoatRoughnessTex, uv).g;
   s.clearcoatRoughness = clamp(s.clearcoatRoughness, 0.0, 1.0);
   vec3 t = T.xyz - N * dot(N, T.xyz);
   if (m.normalTex >= 0 && dot(t, t) > 1e-8) {
@@ -364,7 +364,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
     s.normalVariance += m.flakes * 0.03 * (1.0 - resolved);  // ≈ variância da inclinação dos flocos
   }
 
-  if ((m.flags & MATERIAL_EYE) != 0u) {
+  if (sceneHas(MATERIAL_EYE) && (m.flags & MATERIAL_EYE) != 0u) {
     // Direção no olho a partir das UVs latitude/longitude da esfera; ângulo até a frente (+z).
     float th = uv.y * PI, ph = uv.x * TWO_PI;
     vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
@@ -392,7 +392,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
     s.clearcoatRoughness = 0.02;
   }
 
-  if ((m.flags & MATERIAL_TERRAIN) != 0u && terrainLayers.albedo.x >= 0) {
+  if (sceneHas(MATERIAL_TERRAIN) && (m.flags & MATERIAL_TERRAIN) != 0u && terrainLayers.albedo.x >= 0) {
     // Terreno por camadas: as mesmas regras do procedural (inclinação e ruído grande) dão o peso de cada camada; a
     // mistura final é por altura (a pedra aparece entre a grama, não num degradê) e a normal vem da camada.
     float slope = 1.0 - N.y;
@@ -420,7 +420,7 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
     s.roughness = dot(terrainLayers.roughness, bw);
     s.alpha = 1.0;
     s.occlusion = 1.0;
-  } else if ((m.flags & MATERIAL_TERRAIN) != 0u) {
+  } else if (sceneHas(MATERIAL_TERRAIN) && (m.flags & MATERIAL_TERRAIN) != 0u) {
     // Terreno procedural: grama, terra e rocha por inclinação e ruído.
     float slope = 1.0 - N.y;
     float large = fbm(P.xz * 0.06, 5);

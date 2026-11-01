@@ -239,7 +239,8 @@ def custo(binario, rel):
     A diferença para a linha "tudo ligado" é o custo daquele sistema."""
     rel.append('\n== Custo por sistema (1920x1080, 100 frames; ms/frame | iluminacao_rt | restir | taa)')
     cenas = [('Sponza', []), ('Bistro', ['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf')])]
-    casos = [('tudo ligado', []), ('sem luzes de malha', ['--no-mesh-lights']),
+    casos = [('tudo ligado', []), ('shaders completos (como antes)', ['--all-shader-features']),
+             ('sem luzes de malha', ['--no-mesh-lights']),
              ('sem cache de radiância', ['--no-radiance-cache']), ('sem movimento virtual', ['--no-virtual-motion']),
              ('sem pele (SSS)', ['--no-sss']), ('ReSTIR sem reuso', ['--restir-no-reuse', 'all']),
              ('denoiser NRD (sem DLSS-RR)', ['--denoiser', 'relax']), ('sem streaming de texturas', ['--no-texture-streaming']),
@@ -254,6 +255,11 @@ def custo(binario, rel):
             ms = linha(out, r'[0-9.]+ ms/frame')
             partes = [linha(out, rf'{k} [0-9.]+') for k in ('iluminacao_rt', 'restir', 'taa')]
             rel.append(f'{cena} / {nome}: {ms} | ' + ' | '.join(partes))
+            if nome == 'tudo ligado':  # tempo de todos os passes e da CPU, uma vez por cena
+                for padrao in (r'GPU [0-9.]+ ms \([^\n]*', r'CPU [0-9.]+ ms \([^\n]*', r'CPU gravando[^\n]*',
+                               r'Shaders de luz[^\n]*'):
+                    if linha(out, padrao):
+                        rel.append('   ' + linha(out, padrao))
 
 
 def main():

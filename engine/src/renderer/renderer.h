@@ -86,6 +86,7 @@ struct Settings {
   // a câmera está parada (zera quando ela se move). Lento para convergir de propósito.
   bool referenceAccumulation = false;
   bool referencePathTrace = false;
+  bool allShaderFeatures = false;  // --all-shader-features: passes de luz com todos os recursos (medição)
   // Cache de radiância (luz indireta com infinitos rebotes nos pontos atingidos por raios: reflexos e GI).
   bool radianceCache = true;
   // SVGF: reflexos reprojetados pelo ponto virtual atrás do espelho (como o NRD), não pela superfície.
@@ -265,6 +266,7 @@ class Renderer {
 
   rhi::ComputePass skinningPass_, aerialPerspectivePass_, radianceCacheResolvePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
+  uint32_t sceneFeatures_ = 0xFFFFFFFFu;  // constante SCENE_FEATURES dos passes de luz
   rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_, rrGuidesPass_, accumulatePass_;
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;
   rhi::PassLayout gbufferLayout_, tonemapLayout_, particleLayout_;

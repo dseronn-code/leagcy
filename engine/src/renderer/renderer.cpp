@@ -526,9 +526,27 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   sssPass_.init(ctx, "sss.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, SI}, sizeof(glm::ivec2));
   if (rt) rainOcclusionPass_.init(ctx, "rain_occlusion.comp", g, {SI});
   for (const auto& m : scene.materials) hasSubsurface_ = hasSubsurface_ || (m.flags & scene::kMaterialSubsurface);
-  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS});
-  restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS});
-  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI});
+  // Passes de luz compilados só com os recursos que a cena usa (shaders/scene.glsl: SCENE_FEATURES): os ramos de
+  // cabelo, vidro, pele, verniz, olho, terreno, água e da referência por path tracing saem do shader quando a cena não
+  // tem nenhum material deles (--all-shader-features: tudo, para comparar).
+  uint32_t features = 0xFFFFFFFFu;
+  if (!settings.allShaderFeatures) {
+    features = settings.referencePathTrace ? 0x80000000u : 0u;  // FEATURE_PATH_REFERENCE
+    for (const scene::Material& m : scene.materials) features |= m.flags;
+  }
+  sceneFeatures_ = features;
+  if (features != 0xFFFFFFFFu) {
+    const std::pair<uint32_t, const char*> names[] = {{1u << 1, "terreno"}, {1u << 6, "vidro"}, {1u << 7, "verniz"},
+                                                      {1u << 8, "mar"}, {1u << 10, "pele"}, {1u << 12, "olho"},
+                                                      {1u << 13, "cabelo"}, {1u << 14, "rio"}, {0x80000000u, "referência"}};
+    std::string list;
+    for (auto& [bit, name] : names)
+      if (features & bit) list += std::string(list.empty() ? "" : ", ") + name;
+    LOG_INFO("Shaders de luz especializados para a cena: %s", list.empty() ? "nenhum recurso opcional" : list.c_str());
+  }
+  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS}, 0, &features);
+  restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS}, 0, &features);
+  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI}, 0, &features);
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
   if (settings.fogReference && !rt) {

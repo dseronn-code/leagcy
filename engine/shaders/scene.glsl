@@ -25,6 +25,15 @@ const uint MATERIAL_EYE = 4096u;            // olho procedural (material.glsl)
 const uint MATERIAL_HAIR = 8192u;           // cabelo por fios (gbuffer.vert, lighting.glsl)
 const uint MATERIAL_RIVER = 16384u;         // água corrente (material.glsl: evalRiver)
 
+// Recursos que a cena usa (constante de especialização 0, definida pelo renderer nos passes de luz): o driver tira do
+// shader compilado os ramos de recursos ausentes. Um shader de luz que carrega cabelo, vidro, pele, verniz, olho,
+// terreno, água e a referência por path tracing ficou 5x maior que o de 28/10 e prende registradores da GPU mesmo
+// quando nenhum desses ramos roda: menos pixels em voo, raios mais lentos. Os bits são os flags de material (acima)
+// mais os FEATURE_* abaixo. Padrão: tudo (shaders sem especialização ficam como antes).
+layout(constant_id = 0) const uint SCENE_FEATURES = 0xFFFFFFFFu;
+const uint FEATURE_PATH_REFERENCE = 0x80000000u;  // --reference-pt: path tracing de verdade nos raios
+bool sceneHas(uint f) { return (SCENE_FEATURES & f) != 0u; }
+
 // Simulação do oceano: oceanDisplacement / oceanSlope / OCEAN_PATCH ficam em frame.glsl (o sol debaixo d'água usa).
 
 // Multidões: endereço dos vértices de cada pose assada (Scene::bakeCrowdClip).

@@ -140,6 +140,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--clouds-reference") o.render.cloudReference = true;
     else if (a == "--fog-reference") o.render.fogReference = true;
     else if (a == "--no-sss") o.render.subsurface = false;
+    else if (a == "--all-shader-features") o.render.allShaderFeatures = true;
     else if (a == "--stream-sync") o.streamSync = true;
     else if (a == "--no-texture-streaming") o.textureStreaming = false;
     else if (a == "--texture-streaming") o.textureStreaming = true;

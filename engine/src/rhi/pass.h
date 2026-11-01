@@ -39,8 +39,9 @@ struct PassLayout {
 // Passe de compute com grupos 8x8.
 class ComputePass {
  public:
+  // specConstant0: valor da constante de especialização 0 (shaders/scene.glsl: SCENE_FEATURES); nulo = padrão do shader.
   void init(Context& ctx, const char* shader, VkDescriptorSetLayout globalSet,
-            std::initializer_list<VkDescriptorType> bindings, uint32_t pushSize = 0);
+            std::initializer_list<VkDescriptorType> bindings, uint32_t pushSize = 0, const uint32_t* specConstant0 = nullptr);
   void dispatch(VkCommandBuffer cmd, VkDescriptorSet globalSet, std::initializer_list<Binding> bindings,
                 VkExtent2D threads, const void* push = nullptr) const;
   // Número de grupos explícito (shaders com outro local_size, ex.: 64x1).
