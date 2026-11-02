@@ -1,2 +1,8 @@
-# Teste de vida do agente (2/11): 1 comando rápido. A rodada 3 volta em seguida.
-build\Release\legacy.exe --headless --width 320 --height 180 --frames 4 --out resultados_pc\vivo.png
+# Rodada 3 (2/11): streaming de texturas em segundo plano (Bistro: CPU gravando o frame); raios secundários separados.
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip espelho
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip espelho-gi
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip cache
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality alto
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --perf-skip espelho-gi
