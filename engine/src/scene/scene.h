@@ -211,6 +211,7 @@ struct TextureStream {
   std::vector<uint32_t> size;
   uint32_t base = 0, coarsest = 0;  // nível residente mais fino; o mais grosso que fica sempre (≤ 128 texels)
   uint32_t idleFrames = 0;          // frames seguidos pedindo menos que o residente
+  uint32_t pending = ~0u;           // nível pedido à thread de leitura e ainda não chegado (~0 = nenhum)
   bool streamed() const { return !offset.empty(); }
 };
 
@@ -515,7 +516,10 @@ class Scene {
     uint32_t framesLeft;
   };
   std::vector<DeadImage> textureGraveyard_;  // imagens trocadas, destruídas quando nenhum frame em voo as usa
-  rhi::Image uploadTextureFrom(rhi::Context& ctx, const TextureStream& t, uint32_t base);
+  // Leitura dos mips em segundo plano (TextureLoader em scene.cpp): a thread lê do arquivo direto para o buffer de
+  // envio; o frame só cria a imagem e grava a cópia.
+  std::shared_ptr<struct TextureLoader> textureLoader_;
+  void requestTexture(uint32_t texture, uint32_t base);
   std::vector<std::vector<uint32_t>> objectsOfMesh_;
   std::vector<uint32_t> instanceUpdates_;
   struct PendingDestroy {

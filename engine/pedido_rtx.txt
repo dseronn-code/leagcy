@@ -1,7 +1,8 @@
-# Rodada 2 (2/11): qual raio secundário pesa (reflexo nos acertos do GI, do especular, alimentação do cache); Bistro sem streaming de texturas.
+# Rodada 3 (2/11): streaming de texturas em segundo plano (Bistro: CPU gravando o frame); raios secundários separados.
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip espelho
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip espelho-gi
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip cache
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --no-texture-streaming
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality alto --no-texture-streaming
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality alto
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --perf-skip espelho-gi

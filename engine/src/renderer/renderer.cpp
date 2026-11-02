@@ -915,6 +915,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // Streaming de texturas: o que a tela pediu no último frame deste slot (a GPU já terminou com ele) decide os mips
   // que sobem ou descem; depois os descritores deste slot apontam para as imagens novas (as antigas esperam os
   // frames em voo no cemitério da cena).
+  const auto texStart = std::chrono::steady_clock::now();
   {
     rhi::Context& c = *ctx_;
     auto* need = static_cast<uint32_t*>(textureFeedback_[slot].mapped);
@@ -1057,6 +1058,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   profiler_.beginFrame(cmd, slot);
   // ---- 0. Cena dinâmica ----
+  cpuLast_ = texStart;
+  cpuMark("texturas");  // streaming de texturas (leitura do disco e subida dos mips), no começo do frame
   cpuLast_ = std::chrono::steady_clock::now();
   ++cpuFrames_;
   updateDynamicScene(cmd, slot);

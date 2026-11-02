@@ -425,16 +425,94 @@ size_t Scene::textureBytes() const {
   return bytes;
 }
 
-rhi::Image Scene::uploadTextureFrom(rhi::Context& ctx, const TextureStream& t, uint32_t base) {
-  std::ifstream in(texturePack_, std::ios::binary);
-  std::vector<std::vector<uint8_t>> mips(t.size.size() - base);
-  for (size_t m = base; m < t.size.size(); ++m) {
-    mips[m - base].resize(t.size[m]);
-    in.seekg(std::streamoff(t.offset[m]));
-    in.read(reinterpret_cast<char*>(mips[m - base].data()), t.size[m]);
+// Thread de leitura do streaming de texturas: cada pedido (textura, nível) vira um buffer de envio preenchido direto
+// do arquivo (sem cópia intermediária). Antes isso rodava na gravação do frame: no Bistro, 40 a 200 ms por frame de
+// leitura e cópia na RTX 3070 Ti (engasgo a cada passo da câmera).
+struct TextureLoader {
+  struct Job {
+    uint32_t texture, base;
+    std::vector<uint64_t> fileOffset;
+    std::vector<uint32_t> size;
+    rhi::Buffer staging;
+    std::vector<VkDeviceSize> offsets;
+  };
+  rhi::Context& ctx;
+  std::string path;
+  std::mutex mu;
+  std::condition_variable cv;
+  std::deque<Job> requests;
+  std::vector<Job> ready;
+  size_t busy = 0;  // pedidos na fila ou sendo lidos
+  bool quit = false;
+  std::thread worker;
+
+  TextureLoader(rhi::Context& c, std::string p) : ctx(c), path(std::move(p)) { worker = std::thread([this] { run(); }); }
+  ~TextureLoader() {
+    {
+      std::lock_guard<std::mutex> l(mu);
+      quit = true;
+    }
+    cv.notify_all();
+    if (worker.joinable()) worker.join();
+    for (Job& j : ready) rhi::destroyBuffer(ctx, j.staging);
   }
-  if (!in) FATAL("Streaming de texturas: leitura falhou em %s", texturePack_.c_str());
-  return rhi::createCompressedTexture(ctx, t.format, std::max(1u, t.width >> base), std::max(1u, t.height >> base), mips);
+  void push(Job j) {
+    {
+      std::lock_guard<std::mutex> l(mu);
+      requests.push_back(std::move(j));
+      ++busy;
+    }
+    cv.notify_all();
+  }
+  std::vector<Job> take(bool waitAll) {
+    std::unique_lock<std::mutex> l(mu);
+    if (waitAll) cv.wait(l, [&] { return busy == 0; });
+    std::vector<Job> out;
+    out.swap(ready);
+    return out;
+  }
+  void run() {
+    std::ifstream in(path, std::ios::binary);
+    for (;;) {
+      Job j;
+      {
+        std::unique_lock<std::mutex> l(mu);
+        cv.wait(l, [&] { return quit || !requests.empty(); });
+        if (quit) return;
+        j = std::move(requests.front());
+        requests.pop_front();
+      }
+      VkDeviceSize total = 0;
+      for (uint32_t m = j.base; m < j.size.size(); ++m) total += j.size[m];
+      j.staging = rhi::createBuffer(ctx, total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, rhi::MemoryUsage::CpuToGpu);
+      VkDeviceSize offset = 0;
+      for (uint32_t m = j.base; m < j.size.size(); ++m) {
+        in.seekg(std::streamoff(j.fileOffset[m]));
+        in.read(static_cast<char*>(j.staging.mapped) + offset, j.size[m]);
+        j.offsets.push_back(offset);
+        offset += j.size[m];
+      }
+      if (!in) FATAL("Streaming de texturas: leitura falhou em %s", path.c_str());
+      vmaFlushAllocation(ctx.allocator, j.staging.allocation, 0, VK_WHOLE_SIZE);
+      {
+        std::lock_guard<std::mutex> l(mu);
+        ready.push_back(std::move(j));
+        --busy;
+      }
+      cv.notify_all();
+    }
+  }
+};
+
+void Scene::requestTexture(uint32_t texture, uint32_t base) {
+  TextureStream& ts = textureStreams[texture];
+  ts.pending = base;
+  TextureLoader::Job j;
+  j.texture = texture;
+  j.base = base;
+  j.fileOffset = ts.offset;
+  j.size = ts.size;
+  textureLoader_->push(std::move(j));
 }
 
 void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint32_t count) {
@@ -448,7 +526,7 @@ void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint
     }
   }
   if (texturePack_.empty()) return;
-  ctx.beginDeferred();  // subidas e descidas de nível sem esperar a GPU (o 2º beginDeferred abaixo não faz nada)
+  if (!textureLoader_) textureLoader_ = std::make_shared<TextureLoader>(ctx, texturePack_);
   // Nível pedido: o mais grosso que ainda tem os texels que a tela pediu.
   struct Want {
     float priority;
@@ -457,7 +535,7 @@ void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint
   std::vector<Want> up;
   for (uint32_t i = 0; i < count && i < textureStreams.size(); ++i) {
     TextureStream& ts = textureStreams[i];
-    if (!ts.streamed()) continue;
+    if (!ts.streamed() || ts.pending != ~0u) continue;  // já tem leitura a caminho: espera chegar
     const uint32_t full = std::max(ts.width, ts.height);
     uint32_t want = ts.coarsest;
     if (need[i] > 0)
@@ -468,33 +546,38 @@ void Scene::updateTextureStreaming(rhi::Context& ctx, const uint32_t* need, uint
     } else if (want > ts.base) {
       // Devolve os mips finos só depois de ~5 s sem uso (não fica trocando de nível a cada passo da câmera).
       if (++ts.idleFrames > 300) {
-        textureGraveyard_.push_back({textures[i], rhi::kFramesInFlightMax + 1});
-        textures[i] = uploadTextureFrom(ctx, ts, want);
-        ts.base = want;
+        requestTexture(i, want);
         ts.idleFrames = 0;
-        ++texturesVersion;
       }
     } else {
       ts.idleFrames = 0;
     }
   }
-  // Sobe primeiro as que mais ganham (maior salto de resolução), até o orçamento do frame — num lote enviado sem
-  // esperar a GPU.
+  // Pede primeiro as que mais ganham (maior salto de resolução), até o orçamento de leitura do frame.
   std::sort(up.begin(), up.end(), [](const Want& a, const Want& b) { return a.priority > b.priority; });
-  ctx.beginDeferred();
   double budget = double(textureStreamBudgetMB) * 1048576.0;
   for (const Want& w : up) {
-    TextureStream& ts = textureStreams[w.texture];
-    size_t bytes = 0;
-    for (size_t m = w.base; m < ts.size.size(); ++m) bytes += ts.size[m];
     if (budget <= 0.0) break;
-    textureGraveyard_.push_back({textures[w.texture], rhi::kFramesInFlightMax + 1});
-    textures[w.texture] = uploadTextureFrom(ctx, ts, w.base);
-    ts.base = w.base;
-    budget -= double(bytes);
-    ++texturesVersion;
+    const TextureStream& ts = textureStreams[w.texture];
+    for (size_t m = w.base; m < ts.size.size(); ++m) budget -= double(ts.size[m]);
+    requestTexture(w.texture, w.base);
   }
-  ctx.endDeferred();
+  // O que a thread já leu sobe agora, num lote enviado sem esperar a GPU. Com --stream-sync (referências
+  // determinísticas) espera tudo o que foi pedido neste frame.
+  std::vector<TextureLoader::Job> done = textureLoader_->take(streamSync);
+  if (!done.empty()) {
+    ctx.beginDeferred();
+    for (TextureLoader::Job& j : done) {
+      TextureStream& ts = textureStreams[j.texture];
+      textureGraveyard_.push_back({textures[j.texture], rhi::kFramesInFlightMax + 1});
+      textures[j.texture] = rhi::createCompressedTextureFromStaging(ctx, ts.format, std::max(1u, ts.width >> j.base),
+                                                                    std::max(1u, ts.height >> j.base), j.staging, j.offsets);
+      ts.base = j.base;
+      ts.pending = ~0u;
+      ++texturesVersion;
+    }
+    ctx.endDeferred();
+  }
   ctx.collectFinished();
 }
 
@@ -1232,6 +1315,7 @@ void Scene::upload(rhi::Context& ctx) {
 
 void Scene::destroy(rhi::Context& ctx) {
   loader_.reset();  // para a thread de leitura e apaga o arquivo
+  textureLoader_.reset();  // para a leitura de texturas e libera os buffers lidos que não subiram
   for (DeadImage& d : textureGraveyard_) rhi::destroyImage(ctx, d.image);
   textureGraveyard_.clear();
   if (!texturePack_.empty()) std::remove(texturePack_.c_str());

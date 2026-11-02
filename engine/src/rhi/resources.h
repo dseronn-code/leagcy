@@ -48,6 +48,10 @@ Image createTexture(Context& ctx, const uint8_t* rgba, uint32_t width, uint32_t 
 // Textura já comprimida (BC7) com todos os mips prontos: `mips[i]` = blocos do nível i, sem geração na GPU.
 Image createCompressedTexture(Context& ctx, VkFormat format, uint32_t w, uint32_t h,
                               const std::vector<std::vector<uint8_t>>& mips);
+// Idem, com os mips já num buffer de envio (CpuToGpu, preenchido e com flush; mipOffsets em ordem, do maior ao menor),
+// por exemplo por uma thread de leitura. O buffer passa a ser desta função: liberado quando a cópia termina.
+Image createCompressedTextureFromStaging(Context& ctx, VkFormat format, uint32_t w, uint32_t h, Buffer staging,
+                                        const std::vector<VkDeviceSize>& mipOffsets);
 
 // Barreira de memória global (todas as escritas -> todas as leituras). Simples e correta;
 // um render graph poderá refinar isso no futuro.

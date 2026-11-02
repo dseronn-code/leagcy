@@ -335,7 +335,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
   radiance += s.diffuseColor * bc.diffuseWeight * M;
   vec3 hitOrigin = offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t);
   // Indireta especular: superfícies espelhadas refletem por um raio (amostra VNDF); as outras, pelo cache.
-  if (s.roughness < GLOSSY_HIT_ROUGHNESS) {
+  if (s.roughness < GLOSSY_HIT_ROUGHNESS && !(bounce == 0u && perfSkip(PERF_MIRROR_GI))) {
     float a = alphaFromRoughness(s.roughness);
     vec3 T, B;
     orthonormalBasis(bc.N, T, B);
@@ -343,7 +343,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
     vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + bc.N * Ht.z : bc.N;
     vec3 Lr = reflect(-bc.V, H);
     float NoL = dot(bc.N, Lr);
-    if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0 && !perfSkip(PERF_SECONDARY) && !(bounce == 0u && perfSkip(PERF_MIRROR_GI)))
+    if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0 && !perfSkip(PERF_SECONDARY))
       radiance += secondaryRadiance(hitOrigin, Lr, st) * F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) *
                   vndfWeight(bc.NoV, NoL, a) * bc.energyCompensation;
   } else {

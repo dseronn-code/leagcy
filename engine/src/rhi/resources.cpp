@@ -219,26 +219,35 @@ Image createTexture(Context& ctx, const uint8_t* rgba, uint32_t w, uint32_t h, b
 
 Image createCompressedTexture(Context& ctx, VkFormat format, uint32_t w, uint32_t h,
                               const std::vector<std::vector<uint8_t>>& mips) {
-  Image img = createImage2D(ctx, {w, h}, format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-                            uint32_t(mips.size()));
   VkDeviceSize total = 0;
   for (const auto& m : mips) total += m.size();
   Buffer staging = createBuffer(ctx, total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, MemoryUsage::CpuToGpu);
-  std::vector<VkBufferImageCopy> regions;
+  std::vector<VkDeviceSize> offsets;
   VkDeviceSize offset = 0;
+  for (const auto& m : mips) {
+    std::memcpy(static_cast<uint8_t*>(staging.mapped) + offset, m.data(), m.size());
+    offsets.push_back(offset);
+    offset += m.size();
+  }
+  vmaFlushAllocation(ctx.allocator, staging.allocation, 0, VK_WHOLE_SIZE);
+  return createCompressedTextureFromStaging(ctx, format, w, h, staging, offsets);
+}
+
+Image createCompressedTextureFromStaging(Context& ctx, VkFormat format, uint32_t w, uint32_t h, Buffer staging,
+                                        const std::vector<VkDeviceSize>& mipOffsets) {
+  Image img = createImage2D(ctx, {w, h}, format, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                            uint32_t(mipOffsets.size()));
+  std::vector<VkBufferImageCopy> regions;
   uint32_t mw = w, mh = h;
-  for (uint32_t i = 0; i < mips.size(); ++i) {
-    std::memcpy(static_cast<uint8_t*>(staging.mapped) + offset, mips[i].data(), mips[i].size());
+  for (uint32_t i = 0; i < mipOffsets.size(); ++i) {
     VkBufferImageCopy r{};
-    r.bufferOffset = offset;  // múltiplo de 16: o tamanho de um bloco BC7
+    r.bufferOffset = mipOffsets[i];  // múltiplo de 16: o tamanho de um bloco BC7
     r.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, i, 0, 1};
     r.imageExtent = {mw, mh, 1};
     regions.push_back(r);
-    offset += mips[i].size();
     mw = std::max(1u, mw / 2);
     mh = std::max(1u, mh / 2);
   }
-  vmaFlushAllocation(ctx.allocator, staging.allocation, 0, VK_WHOLE_SIZE);
   ctx.immediateSubmit([&](VkCommandBuffer cmd) {
     imageBarrier(cmd, img.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                  VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
