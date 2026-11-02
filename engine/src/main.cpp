@@ -146,7 +146,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--perf-skip") {  // medição: sol,gi,especular,sombras-acerto,secundarios,luz (imagem errada)
       std::string v = std::string(",") + next() + ",";
       const std::pair<const char*, uint32_t> kinds[] = {{"sol", 1u}, {"gi", 2u}, {"especular", 4u}, {"sombras-acerto", 8u},
-                                                        {"secundarios", 16u}, {"luz", 32u}};
+                                                        {"secundarios", 16u | 64u}, {"luz", 32u},
+                                                        {"espelho", 16u}, {"cache", 64u}, {"espelho-gi", 128u}};
       for (auto& [n, b] : kinds)
         if (v.find(std::string(",") + n + ",") != std::string::npos) o.render.perfSkipMask |= b;
     }

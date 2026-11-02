@@ -343,7 +343,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
     vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + bc.N * Ht.z : bc.N;
     vec3 Lr = reflect(-bc.V, H);
     float NoL = dot(bc.N, Lr);
-    if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0 && !perfSkip(PERF_SECONDARY))
+    if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0 && !perfSkip(PERF_SECONDARY) && !(bounce == 0u && perfSkip(PERF_MIRROR_GI)))
       radiance += secondaryRadiance(hitOrigin, Lr, st) * F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) *
                   vndfWeight(bc.NoV, NoL, a) * bc.energyCompensation;
   } else {
@@ -351,7 +351,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
                 (cached ? M : sampleSky(reflect(dir, hit.N)));
   }
   // Alimenta o cache no ponto atingido (fora da tela também): um raio difuso a partir dele.
-  if (bounce == 0u && cacheUpdatePixel() && !perfSkip(PERF_SECONDARY)) {
+  if (bounce == 0u && cacheUpdatePixel() && !perfSkip(PERF_CACHE_FEED)) {
     vec3 d2 = cosineSampleHemisphere(hit.N, rand2(st));
     if (dot(d2, hit.Ng) > 0.0) rcAdd(hit.P, hit.Ng, secondaryRadiance(hitOrigin, d2, st));
   }

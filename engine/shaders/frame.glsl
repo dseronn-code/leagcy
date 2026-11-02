@@ -134,7 +134,7 @@ bool radianceCacheEnabled() { return (frame.quality2.w & 2u) == 0u; }
 bool virtualMotionEnabled() { return (frame.quality2.w & 4u) == 0u; }
 // Medição de custo (--perf-skip): pula um tipo de raio (bits 8+ de quality2.w). A imagem fica errada de propósito.
 const uint PERF_SUN = 0x100u, PERF_GI = 0x200u, PERF_SPEC = 0x400u, PERF_HIT_SHADOWS = 0x800u, PERF_SECONDARY = 0x1000u,
-           PERF_LOCAL = 0x2000u;
+           PERF_LOCAL = 0x2000u, PERF_CACHE_FEED = 0x4000u, PERF_MIRROR_GI = 0x8000u;
 bool perfSkip(uint b) { return (frame.quality2.w & b) != 0u; }
 
 // Conversões YCoCg do NRD (_NRD_LinearToYCoCg / _NRD_YCoCgToLinear).
