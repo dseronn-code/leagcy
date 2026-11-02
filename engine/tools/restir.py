@@ -62,11 +62,12 @@ def main():
     ap.add_argument('--bin', default=os.path.join('build', 'legacy'))
     ap.add_argument('--out')
     ap.add_argument('--quality', default='ultra')
+    ap.add_argument('--extra', default='', help='argumentos extras do motor (ex.: "--restir-candidates 8")')
     a = ap.parse_args()
     pasta = a.out or tempfile.mkdtemp()
     os.makedirs(pasta, exist_ok=True)
     for cena in CENAS:
-        relmse, vies = medir(a.bin, cena, pasta, ['--quality', a.quality])
+        relmse, vies = medir(a.bin, cena, pasta, ['--quality', a.quality] + a.extra.split())
         print(f'{cena:8s} relMSE de 1 frame: {relmse:.4f}   viés: {vies:+.2f}%', flush=True)
 
 
