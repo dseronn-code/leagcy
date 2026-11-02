@@ -1,0 +1,3 @@
+# Comandos que o runner da RTX roda (um por linha, na pasta engine). Linhas com # são ignoradas.
+# Mudar este arquivo e enviar para o branch de trabalho dispara o teste (.github/workflows/rtx.yml).
+build\Release\legacy.exe --headless --width 640 --height 360 --frames 8 --out resultados_pc\runner_ok.png
