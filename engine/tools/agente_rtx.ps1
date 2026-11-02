@@ -12,6 +12,10 @@
 # Controle do PC pelo celular: engine/comando_pc.txt com a palavra "desligar", "reiniciar" ou "cancelar" na primeira
 # linha (as linhas com # são ignoradas). Cada mudança do arquivo vale uma vez. O desligamento é o normal do Windows,
 # com 60 s de aviso na tela ("cancelar", ou shutdown /a no PC, desiste).
+#
+# Sinal de vida: a cada 10 min (e a cada etapa) o agente publica engine/status.txt no branch "status-rtx" com a hora e
+# o que está fazendo, para quem está longe saber se o PC está ligado. Cada comando do pedido tem limite de 20 min:
+# passou disso, é encerrado e o agente segue.
 param(
   [string]$Branch = "ccr-5423dd89-y3br6e",
   [int]$Intervalo = 30
@@ -24,6 +28,36 @@ $env:PYTHONIOENCODING = "utf-8"
 Set-Location $Pasta
 
 function Agora { (Get-Date).ToString("HH:mm:ss") }
+
+$script:UltimoSinal = [datetime]::MinValue
+function SinalDeVida([string]$Estado, [switch]$Forcar) {
+  if (-not $Forcar -and ((Get-Date) - $script:UltimoSinal).TotalMinutes -lt 10) { return }
+  $script:UltimoSinal = Get-Date
+  $dir = Join-Path $env:TEMP "legacy_status_rtx"
+  if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+  New-Item -ItemType Directory $dir | Out-Null
+  "$((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC | $env:COMPUTERNAME | $Estado" |
+    Out-File -Encoding ascii "$dir\status.txt"
+  $url = (git -C $Pasta remote get-url origin)
+  Push-Location $dir
+  git init -q
+  git checkout -q -b status
+  git add -A
+  git -c user.name=agente-rtx -c user.email=agente-rtx@localhost commit -q -m "status" 2>$null | Out-Null
+  git push -q --force $url HEAD:refs/heads/status-rtx 2>$null
+  Pop-Location
+}
+
+# Roda um comando do pedido com limite de tempo (a saída vai para resultados_pc\saida.txt).
+function RodarComLimite([string]$Comando, [int]$Minutos = 20) {
+  $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $Comando >> resultados_pc\saida.txt 2>&1" -NoNewWindow -PassThru
+  $null = $p.Handle  # sem isso o ExitCode pode vir vazio no Windows PowerShell
+  if (-not $p.WaitForExit($Minutos * 60 * 1000)) {
+    cmd /c "taskkill /T /F /PID $($p.Id)" | Out-Null
+    return -999
+  }
+  return $p.ExitCode
+}
 
 function Publicar([string]$ResumoCommit) {
   $out = Join-Path $env:TEMP "legacy_resultados_rtx"
@@ -62,10 +96,12 @@ function ComandoDoPc {
 }
 
 Write-Host "[$(Agora)] Agente da RTX ligado em $Pasta (branch $Branch). Ctrl+C para parar."
+SinalDeVida "agente ligado" -Forcar
 while ($true) {
   git fetch -q origin $Branch 2>$null
   if ($LASTEXITCODE -ne 0) { Write-Host "[$(Agora)] sem conexão com o GitHub; tento de novo"; Start-Sleep $Intervalo; continue }
   ComandoDoPc
+  SinalDeVida "esperando pedido"
   $pedido = (git rev-parse "origin/${Branch}:engine/pedido_rtx.txt" 2>$null)
   $ultimo = if (Test-Path $Estado) { (Get-Content $Estado -Raw).Trim() } else { "" }
   if (-not $pedido -or $pedido -eq $ultimo) { Start-Sleep $Intervalo; continue }
@@ -92,9 +128,11 @@ while ($true) {
       foreach ($c in $comandos) {
         $i++
         Write-Host "[$(Agora)] ($i/$($comandos.Count)) $c"
+        SinalDeVida "rodando $commit ($i/$($comandos.Count))" -Forcar
         [IO.File]::AppendAllText($saida, "`n>>> $c`n")
-        cmd /c "$c >> resultados_pc\saida.txt 2>&1"
-        if ($LASTEXITCODE -ne 0) { [IO.File]::AppendAllText($saida, "!!! código $LASTEXITCODE`n") }
+        $code = RodarComLimite $c
+        if ($code -eq -999) { [IO.File]::AppendAllText($saida, "!!! passou de 20 min: encerrado`n") }
+        elseif ($code -ne 0) { [IO.File]::AppendAllText($saida, "!!! código $code`n") }
       }
     }
   }

@@ -39,6 +39,12 @@ Ligar de longe não é possível por programa, porque com o PC desligado nada ro
 inteligente Wi-Fi com a opção da BIOS "Restore on AC Power Loss" = Power On, ou Wake-on-LAN com um aparelho sempre
 ligado na rede de casa.
 
+## Sinal de vida
+
+A cada 10 minutos, e a cada teste, o agente publica no branch `status-rtx` (arquivo `status.txt`) a hora e o que
+está fazendo. Assim, de longe, dá para saber se o PC está ligado. Cada comando do pedido tem limite de 20 minutos:
+se passar disso, o agente encerra o comando e segue.
+
 ## Cuidados
 
 - O PC não pode estar em suspensão. Ajuste em Configurações → Sistema → Energia.
