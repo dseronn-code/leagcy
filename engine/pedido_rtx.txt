@@ -1,3 +1,18 @@
-# Comandos que o runner da RTX roda (um por linha, na pasta engine). Linhas com # são ignoradas.
-# Mudar este arquivo e enviar para o branch de trabalho dispara o teste (.github/workflows/rtx.yml).
-build\Release\legacy.exe --headless --width 640 --height 360 --frames 8 --out resultados_pc\runner_ok.png
+# Rodada 1 da otimização (2/11): custo de cada tipo de raio e do ReSTIR na Sponza; linha completa do Bistro.
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip sol
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip gi
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip especular
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip sombras-acerto
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip secundarios
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip luz
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --spp 1
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --restir-candidates 8
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --restir-neighbors 4
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --no-restir-bias-rays
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --restir-no-reuse spatial
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --restir-no-reuse temporal
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scale 0.67
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality alto
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio

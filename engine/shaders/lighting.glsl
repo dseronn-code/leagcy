@@ -136,7 +136,8 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
     vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), uSun);
     if (dot(hit.N, Ls) > 0.0) {
       evalBRDF(bc, Ls, sqrt(min(s.roughness * s.roughness + 0.5 * frame.params.x, 1.0)), kd, ks);
-      if (dot(kd + ks, vec3(1.0)) > 0.0) radiance += (kd * s.diffuseColor + ks) * sunE * traceTransmittance(shadowOrigin2, Ls, 1e4);
+      if (dot(kd + ks, vec3(1.0)) > 0.0)
+        radiance += (kd * s.diffuseColor + ks) * sunE * (perfSkip(PERF_HIT_SHADOWS) ? vec3(1.0) : traceTransmittance(shadowOrigin2, Ls, 1e4));
     }
   }
   uint li;
@@ -147,7 +148,8 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
     if (sampleLightForShading(li, hit.P, uLight, L, tSurface, E) && dot(hit.N, L) > 0.0) {
       evalBRDF(bc, L, -1.0, kd, ks);
       if (dot(kd + ks, vec3(1.0)) > 0.0 && dot(E, E) > 0.0)
-        radiance += (kd * s.diffuseColor + ks) * E * (preExposure() / pmf) * traceVisibility(shadowOrigin2, L, tSurface * 0.99999);
+        radiance += (kd * s.diffuseColor + ks) * E * (preExposure() / pmf) *
+                    (perfSkip(PERF_HIT_SHADOWS) ? 1.0 : traceVisibility(shadowOrigin2, L, tSurface * 0.99999));
     }
   }
   return radiance;
@@ -341,7 +343,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
     vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + bc.N * Ht.z : bc.N;
     vec3 Lr = reflect(-bc.V, H);
     float NoL = dot(bc.N, Lr);
-    if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0)
+    if (NoL > 0.0 && dot(Lr, hit.Ng) > 0.0 && !perfSkip(PERF_SECONDARY))
       radiance += secondaryRadiance(hitOrigin, Lr, st) * F_Schlick(s.f0, s.f90, max(dot(bc.V, H), 0.0)) *
                   vndfWeight(bc.NoV, NoL, a) * bc.energyCompensation;
   } else {
@@ -349,7 +351,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
                 (cached ? M : sampleSky(reflect(dir, hit.N)));
   }
   // Alimenta o cache no ponto atingido (fora da tela também): um raio difuso a partir dele.
-  if (bounce == 0u && cacheUpdatePixel()) {
+  if (bounce == 0u && cacheUpdatePixel() && !perfSkip(PERF_SECONDARY)) {
     vec3 d2 = cosineSampleHemisphere(hit.N, rand2(st));
     if (dot(d2, hit.Ng) > 0.0) rcAdd(hit.P, hit.Ng, secondaryRadiance(hitOrigin, d2, st));
   }
@@ -484,6 +486,7 @@ void main() {
 #ifdef RAY_TRACING
       vec3 L = sampleCone(frame.sunDir.xyz, cos(frame.params.x), sample2D(sg, DIM_SUN));
       vec3 vis = frame.shadowParams.y > 0.5 ? vec3(sunShadowMap(g.P, g.Ng))  // --shadow-maps: comparação/desempenho
+                : perfSkip(PERF_SUN) ? vec3(1.0)
                 : (hair || dot(sf.Nb, L) > 0.0) ? traceTransmittance(shadowOrigin, L, 1e4) : vec3(0.0);
 #else
       vec3 vis = vec3(shadowMapsEnabled() ? sunShadowMap(g.P, g.Ng) : 1.0);  // sem ray tracing: shadow maps em cascata
@@ -517,7 +520,7 @@ void main() {
     // GI difusa: amostragem por cosseno => estimador = peso difuso × Li. Direções abaixo da faceta
     // geométrica (possíveis com normal map) atravessariam a superfície: são descartadas.
     vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
-    if (dot(dirD, g.Ng) > 0.0) {
+    if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI)) {
       float t;
       vec3 Li = traceRadiance(origin, dirD, sg, 0u, t, false);
       diffuse += bc.diffuseWeight * Li * aoDiffuse;
@@ -534,7 +537,7 @@ void main() {
     vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + g.N * Ht.z : g.N;
     vec3 Lr = reflect(-g.V, H);
     float NoLr = dot(g.N, Lr);
-    if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0) {
+    if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0 && !perfSkip(PERF_SPEC)) {
       float t;
       specular += traceRadiance(origin, Lr, sg, 1u, t, false) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
                   vndfWeight(bc.NoV, NoLr, a) * bc.energyCompensation * aoSpecular;
@@ -607,7 +610,7 @@ void main() {
     }
     if (lit && (hair || dot(sf.Nb, L) > 0.0)) {
 #ifdef RAY_TRACING
-      float vis = traceVisibility(shadowOrigin, L, dist * 0.99999);
+      float vis = perfSkip(PERF_LOCAL) ? 1.0 : traceVisibility(shadowOrigin, L, dist * 0.99999);
       if (vis == 0.0) reservoirs[resIdx].W = 0.0;  // visibilidade final reaproveitada no próximo frame
 #else
       float vis = 1.0;

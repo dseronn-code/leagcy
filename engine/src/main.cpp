@@ -55,6 +55,8 @@ struct Options {
 Options parseArgs(int argc, char** argv) {
   Options o;
   bool noFireflyClamp = false;
+  int sppOverride = 0, candOverride = 0, neighOverride = -1;  // medição: substituem o preset (--spp, --restir-*)
+  bool noBiasRays = false;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     auto next = [&]() -> const char* { return i + 1 < argc ? argv[++i] : ""; };
@@ -141,6 +143,17 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--fog-reference") o.render.fogReference = true;
     else if (a == "--no-sss") o.render.subsurface = false;
     else if (a == "--all-shader-features") o.render.allShaderFeatures = true;
+    else if (a == "--perf-skip") {  // medição: sol,gi,especular,sombras-acerto,secundarios,luz (imagem errada)
+      std::string v = std::string(",") + next() + ",";
+      const std::pair<const char*, uint32_t> kinds[] = {{"sol", 1u}, {"gi", 2u}, {"especular", 4u}, {"sombras-acerto", 8u},
+                                                        {"secundarios", 16u}, {"luz", 32u}};
+      for (auto& [n, b] : kinds)
+        if (v.find(std::string(",") + n + ",") != std::string::npos) o.render.perfSkipMask |= b;
+    }
+    else if (a == "--spp") sppOverride = int(std::atoi(next()));
+    else if (a == "--restir-candidates") candOverride = int(std::atoi(next()));
+    else if (a == "--restir-neighbors") neighOverride = int(std::atoi(next()));
+    else if (a == "--no-restir-bias-rays") noBiasRays = true;
     else if (a == "--stream-sync") o.streamSync = true;
     else if (a == "--no-texture-streaming") o.textureStreaming = false;
     else if (a == "--texture-streaming") o.textureStreaming = true;
@@ -212,6 +225,11 @@ Options parseArgs(int argc, char** argv) {
     }
   }
   if (o.scaleOverride > 0.0f) o.render.quality.renderScale = o.scaleOverride;
+  // Medição: substituições do preset (valem depois do --quality, em qualquer ordem).
+  if (sppOverride > 0) o.render.quality.samplesPerPixel = uint32_t(sppOverride);
+  if (candOverride > 0) o.render.quality.restirCandidates = uint32_t(candOverride);
+  if (neighOverride >= 0) o.render.quality.restirNeighbors = uint32_t(neighOverride);
+  if (noBiasRays) o.render.quality.restirBiasCorrection = false;
   // Medição: sem o limite de "vagalumes" (o caminho ingênuo sem amostrar luzes perde energia nele).
   if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;
   return o;

@@ -1045,7 +1045,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   const float mipBias = upscalerReady_ ? upscaler_.mipBias() : 0.0f;
   u.quality2 = glm::uvec4(q.restirBiasCorrection ? 1u : 0u, reblurSignal ? 1u : 0u, glm::floatBitsToUint(mipBias),
                           (settings.referencePathTrace ? 1u : 0u) | (settings.radianceCache ? 0u : 2u) |
-                              (settings.virtualMotion ? 0u : 4u));
+                              (settings.virtualMotion ? 0u : 4u) | (settings.perfSkipMask << 8));
   // z: exposição das visualizações de luz (EV100 manual; EV 0 sem --exposure).
   float debugEV = std::isnan(settings.manualEV100) ? 0.0f : settings.manualEV100;
   u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), std::exp2(-debugEV) / 1.2f,
