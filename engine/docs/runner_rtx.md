@@ -25,6 +25,20 @@ powershell -ExecutionPolicy Bypass -File tools\agente_rtx.ps1
 Para parar: Ctrl+C ou fechar a janela. Ao ligar de novo, ele só roda pedidos novos. O último pedido rodado fica
 guardado em `%LOCALAPPDATA%\legacy_agente_rtx.txt`.
 
+## Desligar o PC pelo celular
+
+Com o agente ligado, abra no navegador do celular (logado no GitHub):
+
+https://github.com/dseronn-code/leagcy/edit/ccr-5423dd89-y3br6e/engine/comando_pc.txt
+
+Troque a última linha por **`desligar`** (ou `reiniciar`, ou `cancelar`) e toque em **Commit changes**. Em até 30
+segundos, o Windows mostra o aviso e desliga em 60 segundos, com um desligamento normal. Cada vez que você salva, o
+comando vale uma vez. Na primeira vez que o agente liga, ele só anota o arquivo e não executa nada.
+
+Ligar de longe não é possível por programa, porque com o PC desligado nada roda nele. Para isso, use uma tomada
+inteligente Wi-Fi com a opção da BIOS "Restore on AC Power Loss" = Power On, ou Wake-on-LAN com um aparelho sempre
+ligado na rede de casa.
+
 ## Cuidados
 
 - O PC não pode estar em suspensão. Ajuste em Configurações → Sistema → Energia.

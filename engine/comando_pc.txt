@@ -1,0 +1,3 @@
+# Controle do PC pelo celular (lido pelo agente, tools/agente_rtx.ps1, a cada 30 s).
+# Escreva na linha de baixo: desligar, reiniciar ou cancelar. Cada vez que você salva, o comando vale uma vez.
+nada

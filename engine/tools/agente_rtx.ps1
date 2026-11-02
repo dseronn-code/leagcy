@@ -8,6 +8,10 @@
 # Uso (na pasta engine, numa "Developer PowerShell for VS 2022"):
 #   powershell -ExecutionPolicy Bypass -File tools\agente_rtx.ps1
 # Para parar: Ctrl+C. Ao ligar de novo, ele só roda pedidos novos.
+#
+# Controle do PC pelo celular: engine/comando_pc.txt com a palavra "desligar", "reiniciar" ou "cancelar" na primeira
+# linha (as linhas com # são ignoradas). Cada mudança do arquivo vale uma vez. O desligamento é o normal do Windows,
+# com 60 s de aviso na tela ("cancelar", ou shutdown /a no PC, desiste).
 param(
   [string]$Branch = "ccr-5423dd89-y3br6e",
   [int]$Intervalo = 30
@@ -15,6 +19,7 @@ param(
 
 $Pasta = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path   # a pasta engine
 $Estado = Join-Path $env:LOCALAPPDATA "legacy_agente_rtx.txt"  # último pedido rodado (fora do repositório)
+$EstadoComando = Join-Path $env:LOCALAPPDATA "legacy_agente_comando.txt"  # último comando do PC atendido
 $env:PYTHONIOENCODING = "utf-8"
 Set-Location $Pasta
 
@@ -39,10 +44,28 @@ function Publicar([string]$ResumoCommit) {
   return $ok
 }
 
+function ComandoDoPc {
+  $hash = (git rev-parse "origin/${Branch}:engine/comando_pc.txt" 2>$null)
+  if (-not $hash) { return }
+  if (-not (Test-Path $EstadoComando)) { Set-Content $EstadoComando $hash; return }  # 1ª vez: só anota, não executa
+  if ((Get-Content $EstadoComando -Raw).Trim() -eq $hash) { return }
+  Set-Content $EstadoComando $hash  # antes de executar: depois de reiniciar, o mesmo comando não vale de novo
+  $linha = (git show "origin/${Branch}:engine/comando_pc.txt" 2>$null) | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") } |
+           Select-Object -First 1
+  $cmd = if ($linha) { $linha.Trim().ToLower() } else { "" }
+  switch ($cmd) {
+    "desligar"  { Write-Host "[$(Agora)] Comando do celular: desligar em 60 s"; shutdown /s /t 60 /c "Legacy: desligamento pedido pelo celular (shutdown /a cancela)" }
+    "reiniciar" { Write-Host "[$(Agora)] Comando do celular: reiniciar em 60 s"; shutdown /r /t 60 /c "Legacy: reinício pedido pelo celular (shutdown /a cancela)" }
+    "cancelar"  { Write-Host "[$(Agora)] Comando do celular: cancelar"; shutdown /a }
+    default     { Write-Host "[$(Agora)] Comando do celular ignorado: '$cmd'" }
+  }
+}
+
 Write-Host "[$(Agora)] Agente da RTX ligado em $Pasta (branch $Branch). Ctrl+C para parar."
 while ($true) {
   git fetch -q origin $Branch 2>$null
   if ($LASTEXITCODE -ne 0) { Write-Host "[$(Agora)] sem conexão com o GitHub; tento de novo"; Start-Sleep $Intervalo; continue }
+  ComandoDoPc
   $pedido = (git rev-parse "origin/${Branch}:engine/pedido_rtx.txt" 2>$null)
   $ultimo = if (Test-Path $Estado) { (Get-Content $Estado -Raw).Trim() } else { "" }
   if (-not $pedido -or $pedido -eq $ultimo) { Start-Sleep $Intervalo; continue }
