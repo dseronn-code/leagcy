@@ -1,8 +1,6 @@
-# Rodada 10 (3/11): Bistro a 50% com gi-metade + especular-fosco. TLAS com traçado rápido (novo) x construção rápida
-# (antigo), e ReSTIR mais barato. O caso base vai no começo e no fim para ver a deriva térmica.
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8
-set LEGACY_TLAS_FAST_BUILD=1&& build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8
+# Rodada 11 (3/11): Bistro a 50% com o ReSTIR mais barato combinado (4 vizinhos + 4 ou 6 candidatos).
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8 --restir-neighbors 4
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 4
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,especular-fosco
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 4 --restir-neighbors 4
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 6 --restir-neighbors 4
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 4 --restir-neighbors 4 --no-mesh-lights
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8 --restir-neighbors 4
