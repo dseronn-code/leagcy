@@ -34,6 +34,17 @@ layout(constant_id = 0) const uint SCENE_FEATURES = 0xFFFFFFFFu;
 const uint FEATURE_PATH_REFERENCE = 0x80000000u;  // --reference-pt: path tracing de verdade nos raios
 bool sceneHas(uint f) { return (SCENE_FEATURES & f) != 0u; }
 
+// Economias do preset de qualidade (Quality em renderer.h), fixadas na criação do pipeline: o código que o preset não
+// usa nem entra no shader (menos registradores). SPP_FIXED = amostras por pixel (0 = lê do frame).
+layout(constant_id = 1) const uint QUALITY_FEATURES = 0u;
+layout(constant_id = 2) const uint SPP_FIXED = 0u;
+const uint Q_MIRROR_GI_CACHE = 1u,     // espelho visto pela GI usa o cache em vez de outro raio
+           Q_GI_HALF = 2u,             // raio de GI em metade dos pixels (sorteio por pixel e frame, peso 2: sem viés)
+           Q_ROUGH_SPEC_CACHE = 4u,    // superfície fosca (rugosidade >= 0,5): especular indireto do cache, sem raio
+           Q_CACHE_EIGHTH = 8u,        // cache alimentado por 1 em 8 pixels (em vez de 1 em 4)
+           Q_HIT_SHADOW_OPAQUE = 16u;  // sombras dos pontos atingidos por raios sem teste de alfa (folhas = opacas)
+bool qualityHas(uint f) { return (QUALITY_FEATURES & f) != 0u; }
+
 // Simulação do oceano: oceanDisplacement / oceanSlope / OCEAN_PATCH ficam em frame.glsl (o sol debaixo d'água usa).
 
 // Multidões: endereço dos vértices de cada pose assada (Scene::bakeCrowdClip).

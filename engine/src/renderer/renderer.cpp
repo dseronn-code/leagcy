@@ -171,16 +171,27 @@ VkRenderingAttachmentInfo attachment(VkImageView view, VkImageLayout layout, VkA
 }  // namespace
 
 Quality qualityPreset(QualityPreset preset) {
-  Quality q;  // Ultra
+  Quality q;  // Ultra: qualidade máxima, sem economias
+  // Alto e Médio: os conjuntos medidos na RTX 3070 Ti a 1080p, com a qualidade conferida contra a referência por path
+  // tracing na própria placa (docs/auditoria.md, rodadas 3–15). Alto deixa a Sponza em ~26 ms; Médio põe o Bistro
+  // (cena urbana densa, ~20 mil luzes de malha) dentro dos 33 ms (30 quadros por segundo).
   switch (preset) {
     case QualityPreset::Low:
       q = {0.5f, 1, 4, 3, 3, 1, 3.0f, 8.0f, 256, 128, 5, 24, 8, 4.0f, false};
+      q.mirrorGiCache = q.giHalf = q.roughSpecCache = q.cacheEighth = q.hitShadowOpaque = true;
       break;
     case QualityPreset::Medium:
-      q = {0.6f, 1, 8, 4, 4, 2, 2.0f, 12.0f, 256, 128, 6, 32, 12, 8.0f, false};
+      q.renderScale = 0.5f;
+      q.samplesPerPixel = 1;
+      q.restirCandidates = 8;
+      q.restirNeighbors = 4;
+      q.mirrorGiCache = q.giHalf = q.roughSpecCache = q.cacheEighth = q.hitShadowOpaque = true;
       break;
     case QualityPreset::High:
-      q = {0.75f, 1, 12, 6, 5, 3, 1.0f, 16.0f, 384, 192, 6, 48, 12, 16.0f, true};
+      q.renderScale = 0.67f;
+      q.samplesPerPixel = 1;
+      q.restirCandidates = 8;
+      q.mirrorGiCache = q.roughSpecCache = true;
       break;
     case QualityPreset::Ultra:
       break;
@@ -535,6 +546,10 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     for (const scene::Material& m : scene.materials) features |= m.flags;
   }
   sceneFeatures_ = features;
+  const Quality& sq = settings.quality;
+  const uint32_t qualityFeatures = (sq.mirrorGiCache ? 1u : 0u) | (sq.giHalf ? 2u : 0u) | (sq.roughSpecCache ? 4u : 0u) |
+                                   (sq.cacheEighth ? 8u : 0u) | (sq.hitShadowOpaque ? 16u : 0u);
+  const uint32_t spec[3] = {features, qualityFeatures, std::max(sq.samplesPerPixel, 1u)};
   if (features != 0xFFFFFFFFu) {
     const std::pair<uint32_t, const char*> names[] = {{1u << 1, "terreno"}, {1u << 6, "vidro"}, {1u << 7, "verniz"},
                                                       {1u << 8, "mar"}, {1u << 10, "pele"}, {1u << 12, "olho"},
@@ -544,9 +559,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       if (features & bit) list += std::string(list.empty() ? "" : ", ") + name;
     LOG_INFO("Shaders de luz especializados para a cena: %s", list.empty() ? "nenhum recurso opcional" : list.c_str());
   }
-  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS}, 0, &features);
-  restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS}, 0, &features);
-  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI}, 0, &features);
+  restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS}, 0, spec, 3);
+  restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS}, 0, spec, 3);
+  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI}, 0, spec, 3);
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
   if (settings.fogReference && !rt) {

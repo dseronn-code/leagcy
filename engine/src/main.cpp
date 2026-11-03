@@ -239,6 +239,17 @@ Options parseArgs(int argc, char** argv) {
   if (candOverride > 0) o.render.quality.restirCandidates = uint32_t(candOverride);
   if (neighOverride >= 0) o.render.quality.restirNeighbors = uint32_t(neighOverride);
   if (noBiasRays) o.render.quality.restirBiasCorrection = false;
+  // Economias pedidas por --perf-skip (nomes da medição) viram as opções de qualidade correspondentes.
+  {
+    renderer::Quality& q = o.render.quality;
+    uint32_t& m = o.render.perfSkipMask;
+    if (m & 128u) q.mirrorGiCache = true;
+    if (m & 512u) q.giHalf = true;
+    if (m & 1024u) q.roughSpecCache = true;
+    if (m & 2048u) q.cacheEighth = true;
+    if (m & 4096u) q.hitShadowOpaque = true;
+    m &= ~(128u | 512u | 1024u | 2048u | 4096u);
+  }
   // Medição: sem o limite de "vagalumes" (o caminho ingênuo sem amostrar luzes perde energia nele).
   if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;
   return o;

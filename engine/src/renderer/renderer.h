@@ -37,6 +37,13 @@ struct Quality {
   uint32_t motionBlurSamples = 16;
   float anisotropy = 16.0f;
   bool restirBiasCorrection = true;  // raios que tiram o viés de visibilidade do reuso do ReSTIR (1 + vizinhos)
+  // Economias medidas contra a referência (docs/auditoria.md, rodadas 3–14 na RTX); viram constantes de especialização
+  // do shader de luz (shaders/scene.glsl, QUALITY_FEATURES).
+  bool mirrorGiCache = false;    // espelho visto pela GI: cache em vez de outro raio
+  bool giHalf = false;           // raio de GI em metade dos pixels (peso 2, sem viés)
+  bool roughSpecCache = false;   // rugosidade >= 0,5: especular indireto do cache
+  bool cacheEighth = false;      // cache alimentado por 1 em 8 pixels
+  bool hitShadowOpaque = false;  // sombras dos pontos atingidos sem teste de alfa
 };
 
 enum class QualityPreset { Low, Medium, High, Ultra, Cinema };

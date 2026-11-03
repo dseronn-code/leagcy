@@ -1,9 +1,10 @@
-# Rodada 14 (3/11): Bistro, os últimos 2 ms. Cache alimentado por 1 em 8 pixels e sombras dos pontos atingidos sem
-# teste de alfa; cada caso 2 vezes; qualidade na RTX.
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,sombra-acerto-opaca
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo,sombra-acerto-opaca
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo,sombra-acerto-opaca
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--scale 0.5 --spp 1 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo,sombra-acerto-opaca"
+# Rodada 15 (3/11): presets novos (economias como constantes de especialização do shader). Alto e Médio na Sponza e
+# no Bistro, cada um 2 vezes, e a qualidade de cada preset na RTX contra a referência por path tracing.
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --quality alto
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --quality medio
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality alto
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --quality alto
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--quality alto"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--quality medio"

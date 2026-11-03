@@ -1,5 +1,7 @@
 #include "rhi/pass.h"
 
+#include <algorithm>
+
 #include "rhi/pipeline.h"
 
 namespace rhi {
@@ -54,15 +56,18 @@ void PassLayout::destroy(Context& ctx) {
 }
 
 void ComputePass::init(Context& ctx, const char* shader, VkDescriptorSetLayout globalSet,
-                       std::initializer_list<VkDescriptorType> bindings, uint32_t pushSize, const uint32_t* specConstant0) {
+                       std::initializer_list<VkDescriptorType> bindings, uint32_t pushSize, const uint32_t* specConstants,
+                       uint32_t specCount) {
   ctx_ = &ctx;
   layout.init(ctx, globalSet, bindings, pushSize);
   VkShaderModule m = loadShader(ctx, shader);
   VkComputePipelineCreateInfo ci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
   ci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main"};
-  const VkSpecializationMapEntry entry{0, 0, sizeof(uint32_t)};
-  const VkSpecializationInfo spec{1, &entry, sizeof(uint32_t), specConstant0};
-  if (specConstant0) ci.stage.pSpecializationInfo = &spec;
+  VkSpecializationMapEntry entries[8];
+  specCount = std::min(specCount, 8u);
+  for (uint32_t i = 0; i < specCount; ++i) entries[i] = {i, i * uint32_t(sizeof(uint32_t)), sizeof(uint32_t)};
+  const VkSpecializationInfo spec{specCount, entries, specCount * sizeof(uint32_t), specConstants};
+  if (specConstants && specCount) ci.stage.pSpecializationInfo = &spec;
   ci.layout = layout.pipelineLayout;
   VK_CHECK(vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline_));
   vkDestroyShaderModule(ctx.device, m, nullptr);

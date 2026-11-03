@@ -131,9 +131,9 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
   vec3 kd, ks;
   // Ponto do raio: erro da ordem do epsilon do float × distância percorrida.
   vec3 shadowOrigin2 = offsetRayOrigin(hit.Pshadow, hit.Ng, RAY_BIAS_EXACT * hit.t);
-  // --perf-skip sombra-acerto-opaca: as sombras deste ponto (visto só em reflexos e na luz indireta) não testam o alfa
+  // Q_HIT_SHADOW_OPAQUE: as sombras deste ponto (visto só em reflexos e na luz indireta) não testam o alfa
   // das folhas recortadas.
-  gRayFlagsExtra = perfSkip(PERF_HIT_OPAQUE) ? gl_RayFlagsOpaqueEXT : 0u;
+  gRayFlagsExtra = qualityHas(Q_HIT_SHADOW_OPAQUE) ? gl_RayFlagsOpaqueEXT : 0u;
   vec3 sunE = sunIrradianceAt(hit.P);
   if (dot(sunE, sunE) > 0.0) {
     vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), uSun);
@@ -293,7 +293,7 @@ const float GLOSSY_HIT_ROUGHNESS = 0.3;
 // 1 em cada 4 pixels (rodando a cada frame) alimenta o cache de radiância.
 bool cacheUpdatePixel() {
   uvec2 id = gl_GlobalInvocationID.xy;
-  return ((id.x + 2u * id.y + frame.frameInfo.x) & (perfSkip(PERF_CACHE_EIGHTH) ? 7u : 3u)) == 0u;
+  return ((id.x + 2u * id.y + frame.frameInfo.x) & (qualityHas(Q_CACHE_EIGHTH) ? 7u : 3u)) == 0u;
 }
 
 // Luz indireta que um ponto atingido por raio manda de volta: M do cache (ou, sem dados ainda, o céu aproximado).
@@ -339,7 +339,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
   radiance += s.diffuseColor * bc.diffuseWeight * M;
   vec3 hitOrigin = offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t);
   // Indireta especular: superfícies espelhadas refletem por um raio (amostra VNDF); as outras, pelo cache.
-  if (s.roughness < GLOSSY_HIT_ROUGHNESS && !(bounce == 0u && perfSkip(PERF_MIRROR_GI))) {
+  if (s.roughness < GLOSSY_HIT_ROUGHNESS && !(bounce == 0u && qualityHas(Q_MIRROR_GI_CACHE))) {
     float a = alphaFromRoughness(s.roughness);
     vec3 T, B;
     orthonormalBasis(bc.N, T, B);
@@ -478,7 +478,7 @@ void main() {
 
   // Amostras por pixel (preset de qualidade): a sequência de Sobol do pixel avança spp posições por
   // frame, então as amostras do mesmo frame e de frames seguintes continuam estratificadas entre si.
-  uint spp = max(frame.quality0.x, 1u);
+  uint spp = SPP_FIXED != 0u ? SPP_FIXED : max(frame.quality0.x, 1u);
   float sunVisSum = 0.0;  // só para as visualizações de depuração
   // Distância dos raios indiretos para o NRD: média no difuso, menor acerto no especular (NRD_FrontEnd_SpecHitDistAveraging).
   float diffHitSum = 0.0, diffHitCount = 0.0, specHitMin = HIT_DIST_MISS + 1.0;
@@ -524,9 +524,9 @@ void main() {
     // GI difusa: amostragem por cosseno => estimador = peso difuso × Li. Direções abaixo da faceta
     // geométrica (possíveis com normal map) atravessariam a superfície: são descartadas.
     vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
-    // --perf-skip gi-metade: o raio sai em metade dos pixels (sorteio independente por pixel, amostra e frame) com
+    // Q_GI_HALF: o raio sai em metade dos pixels (sorteio independente por pixel, amostra e frame) com
     // peso 2 — mesma média, metade do custo, mais ruído para o denoiser.
-    const bool giHalf = perfSkip(PERF_GI_HALF);
+    const bool giHalf = qualityHas(Q_GI_HALF);
     const bool giTake = !giHalf || (pcg3d(uvec3(uvec2(id), frame.frameInfo.x * spp + k)).x & 1u) != 0u;
     if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI) && giTake) {
       float t;
@@ -545,10 +545,10 @@ void main() {
     vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + g.N * Ht.z : g.N;
     vec3 Lr = reflect(-g.V, H);
     float NoLr = dot(g.N, Lr);
-    // --perf-skip especular-fosco: lobo largo (rugosidade ≥ 0,5) ≈ irradiância, então o especular indireto vem do
+    // Q_ROUGH_SPEC_CACHE: lobo largo (rugosidade ≥ 0,5) ≈ irradiância, então o especular indireto vem do
     // cache na própria superfície (M × refletância especular esperada), sem raio — o mesmo que os pontos atingidos
     // por raios já fazem acima de GLOSSY_HIT_ROUGHNESS.
-    if (perfSkip(PERF_ROUGH_SPEC) && g.roughness >= 0.5) {
+    if (qualityHas(Q_ROUGH_SPEC_CACHE) && g.roughness >= 0.5) {
       specular += cachedIndirect(g.P, g.Ng, g.N) * specularAlbedo(g.f0, g.f90, bc.dfg) * bc.energyCompensation * aoSpecular;
     } else if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0 && !perfSkip(PERF_SPEC)) {
       float t;
