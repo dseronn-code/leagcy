@@ -185,7 +185,9 @@ Quality qualityPreset(QualityPreset preset) {
       q.samplesPerPixel = 1;
       q.restirCandidates = 8;
       q.restirNeighbors = 4;
-      q.mirrorGiCache = q.giHalf = q.roughSpecCache = q.cacheEighth = q.hitShadowOpaque = true;
+      // Sem cacheEighth: com as economias no shader sobrou folga (Bistro 29 ms), e ele era o corte que mais piorava a
+      // imagem (erro 0,086 -> 0,098 contra a referência).
+      q.mirrorGiCache = q.giHalf = q.roughSpecCache = q.hitShadowOpaque = true;
       break;
     case QualityPreset::High:
       q.renderScale = 0.67f;
