@@ -1,9 +1,4 @@
-# Rodada 4 (3/11): rodada 3 repetida com o PC parado + cortes combinados rumo a 33 ms + modo cinema.
+# Rodada 5 (3/11): BVH de luzes reajustada em vez de refeita (CPU "luzes" era 3,7 ms por frame na Sponza).
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --perf-skip espelho-gi
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality alto
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --perf-skip espelho-gi
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --quality cinema
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --night

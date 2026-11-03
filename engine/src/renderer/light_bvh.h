@@ -28,4 +28,10 @@ static_assert(sizeof(LightBvhNode) == 48);
 // Reconstrói a árvore (as luzes podem ter se movido). Nós em pré-ordem; vazio se não há luzes.
 void buildLightBvh(const std::vector<scene::PointLight>& lights, std::vector<LightBvhNode>& nodes);
 
+// Atualiza caixas, potências e alcances de uma árvore já construída para as mesmas luzes (só posições, cores ou
+// alcances mudaram), sem reordenar: O(N) em vez de O(N log N). A amostragem continua sem viés (a pdf sai da
+// própria árvore); só a qualidade das divisões piora se as luzes andarem muito, por isso o chamador reconstrói de
+// tempos em tempos.
+void refitLightBvh(const std::vector<scene::PointLight>& lights, std::vector<LightBvhNode>& nodes);
+
 }  // namespace renderer

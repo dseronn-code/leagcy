@@ -303,6 +303,7 @@ class Renderer {
   std::array<bool, kFramesInFlight> objectsFull_{};
   bool tlasBuilt_ = false;
   uint64_t lightsVersion_ = 0;
+  uint32_t lightBvhRefits_ = 0;  // reajustes da BVH de luzes desde a última reconstrução
   std::array<uint64_t, kFramesInFlight> slotLightsVersion_{};
   glm::vec3 prevCameraPos_{0.0f};
   glm::vec2 prevJitter_{0.0f};

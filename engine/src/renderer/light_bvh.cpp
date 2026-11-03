@@ -63,4 +63,24 @@ void buildLightBvh(const std::vector<scene::PointLight>& lights, std::vector<Lig
   Builder{lights, centers, order, nodes}.build(0, uint32_t(lights.size()));
 }
 
+void refitLightBvh(const std::vector<scene::PointLight>& lights, std::vector<LightBvhNode>& nodes) {
+  // Pré-ordem: os filhos de um nó vêm sempre depois dele, então de trás para frente cada nó encontra os dois prontos.
+  for (size_t i = nodes.size(); i-- > 0;) {
+    LightBvhNode& n = nodes[i];
+    if (n.leaf) {
+      const scene::PointLight& l = lights[n.rightOrLight];
+      scene::lightBounds(l, n.boundsMin, n.boundsMax);
+      n.power = scene::lightPower(l);
+      n.maxRange = l.range;
+      continue;
+    }
+    const LightBvhNode& a = nodes[i + 1];
+    const LightBvhNode& b = nodes[n.rightOrLight];
+    n.boundsMin = glm::min(a.boundsMin, b.boundsMin);
+    n.boundsMax = glm::max(a.boundsMax, b.boundsMax);
+    n.power = a.power + b.power;
+    n.maxRange = std::max(a.maxRange, b.maxRange);
+  }
+}
+
 }  // namespace renderer
