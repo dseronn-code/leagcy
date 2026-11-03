@@ -136,7 +136,8 @@ bool virtualMotionEnabled() { return (frame.quality2.w & 4u) == 0u; }
 const uint PERF_SUN = 0x100u, PERF_GI = 0x200u, PERF_SPEC = 0x400u, PERF_HIT_SHADOWS = 0x800u, PERF_SECONDARY = 0x1000u,
            PERF_LOCAL = 0x2000u, PERF_CACHE_FEED = 0x4000u, PERF_MIRROR_GI = 0x8000u,
            PERF_OPAQUE = 0x10000u,
-           PERF_GI_HALF = 0x20000u;  // raio de GI em metade dos pixels (sorteio por pixel e frame, peso 2: sem viés)  // todos os raios sem teste de alfa (medição do custo das folhas recortadas)
+           PERF_GI_HALF = 0x20000u,
+           PERF_ROUGH_SPEC = 0x40000u;  // superfícies foscas: especular indireto do cache, sem raio  // raio de GI em metade dos pixels (sorteio por pixel e frame, peso 2: sem viés)  // todos os raios sem teste de alfa (medição do custo das folhas recortadas)
 bool perfSkip(uint b) { return (frame.quality2.w & b) != 0u; }
 
 // Conversões YCoCg do NRD (_NRD_LinearToYCoCg / _NRD_YCoCgToLinear).

@@ -541,7 +541,12 @@ void main() {
     vec3 H = dot(Ht, Ht) > 0.0 ? T * Ht.x + B * Ht.y + g.N * Ht.z : g.N;
     vec3 Lr = reflect(-g.V, H);
     float NoLr = dot(g.N, Lr);
-    if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0 && !perfSkip(PERF_SPEC)) {
+    // --perf-skip especular-fosco: lobo largo (rugosidade ≥ 0,5) ≈ irradiância, então o especular indireto vem do
+    // cache na própria superfície (M × refletância especular esperada), sem raio — o mesmo que os pontos atingidos
+    // por raios já fazem acima de GLOSSY_HIT_ROUGHNESS.
+    if (perfSkip(PERF_ROUGH_SPEC) && g.roughness >= 0.5) {
+      specular += cachedIndirect(g.P, g.Ng, g.N) * specularAlbedo(g.f0, g.f90, bc.dfg) * bc.energyCompensation * aoSpecular;
+    } else if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0 && !perfSkip(PERF_SPEC)) {
       float t;
       specular += traceRadiance(origin, Lr, sg, 1u, t, false) * F_Schlick(g.f0, g.f90, max(dot(g.V, H), 0.0)) *
                   vndfWeight(bc.NoV, NoLr, a) * bc.energyCompensation * aoSpecular;

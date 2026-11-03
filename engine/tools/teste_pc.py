@@ -234,6 +234,57 @@ def gpudriven(binario, rel):
             rel.append(f'{cena} / {nome}: {ms}, {gb}{dif}')
 
 
+def verificacao(binario, rel):
+    """Oclusão, meshlets e HLOD mudam a imagem? Com o streaming de texturas desligado (o que fica na GPU num frame
+    depende do que foi desenhado antes) e a cena repetida duas vezes iguais para medir o piso de diferença."""
+    rel.append('\n== Verificação (1920x1080, 120 frames andando, sem streaming de texturas; dif = maior diferença de pixel, '
+               '% = pixels com diferença > 8)')
+    bistro = os.path.join('assets', 'Bistro', 'bistro.gltf')
+    cenas = [('Bistro', ['--scene', bistro]), ('Cidade', ['--scene', 'city']), ('Sponza', [])]
+    casos = [('tudo ligado', []), ('tudo ligado de novo', []), ('sem oclusão', ['--no-occlusion']),
+             ('sem meshlets', ['--no-meshlets']), ('sem HLOD', ['--no-hlod'])]
+    fixo = ['--no-texture-streaming', '--stream-sync']
+    for cena, extra in cenas:
+        ref = None
+        for nome, args in casos:
+            arq = os.path.join(PASTA, 'verificacao.png')
+            code, out = rodar(binario, ['--headless', '--width', '1920', '--height', '1080', '--frames', '120', '--move', '2',
+                                        '--out', arq] + fixo + extra + args)
+            if code:
+                rel.append(f'{cena} / {nome}: ERRO código {code}')
+                continue
+            gb = linha(out, r'gbuffer [0-9.]+')
+            ms = linha(out, r'[0-9.]+ ms/frame')
+            img = np.asarray(Image.open(arq).convert('RGB')).astype(int)
+            if ref is None:
+                ref = img
+                rel.append(f'{cena} / {nome}: {ms}, {gb}')
+            else:
+                d = np.abs(img - ref).max(axis=2)
+                rel.append(f'{cena} / {nome}: {ms}, {gb}, dif {int(d.max())}, {100.0 * (d > 8).mean():.3f}%')
+    # Mesma comparação com o streaming ligado (o padrão): mostra se a diferença vinha só das texturas.
+    ref = None
+    for nome, args in [('Bistro com streaming', []), ('Bistro com streaming de novo', []),
+                       ('Bistro com streaming, sem oclusão', ['--no-occlusion'])]:
+        arq = os.path.join(PASTA, 'verificacao.png')
+        code, out = rodar(binario, ['--headless', '--width', '1920', '--height', '1080', '--frames', '120', '--move', '2',
+                                    '--out', arq, '--scene', bistro] + args)
+        if code:
+            rel.append(f'{nome}: ERRO código {code}')
+            continue
+        img = np.asarray(Image.open(arq).convert('RGB')).astype(int)
+        if ref is None:
+            ref = img
+            rel.append(f'{nome}: referência')
+        else:
+            d = np.abs(img - ref).max(axis=2)
+            rel.append(f'{nome}: dif {int(d.max())}, {100.0 * (d > 8).mean():.3f}%')
+    # Hera do Bistro (corrigida em 1/11): imagem 1080p da câmera do arquivo, de dia, para conferir as folhas.
+    code, out = rodar(binario, ['--headless', '--width', '1920', '--height', '1080', '--frames', '96', '--scene', bistro,
+                                '--out', os.path.join(PASTA, 'bistro_hera.png')])
+    rel.append('bistro_hera.png: ' + (linha(out, r'[0-9.]+ ms/frame') or f'ERRO código {code}'))
+
+
 def custo(binario, rel):
     """Quanto cada sistema de luz custa na GPU: a mesma cena com um sistema desligado por vez (1080p, 100 frames).
     A diferença para a linha "tudo ligado" é o custo daquele sistema."""
@@ -274,7 +325,7 @@ def main():
     rel.append('DLSS: ' + (linha(out, r'DLSS (ativo|indispon)[^\n]*') or '?'))
 
     # --so secao1,secao2: só algumas seções (suite, desempenho, nitidez, denoisers, reflexos, luzes, galeria, movimento,
-    # gpudriven, custo).
+    # gpudriven, custo, verificacao).
     so = None
     if '--so' in sys.argv:
         so = set(sys.argv[sys.argv.index('--so') + 1].split(','))
@@ -285,7 +336,7 @@ def main():
         suite(binario, rel)
     etapas = [('desempenho', desempenho), ('nitidez', nitidez), ('denoisers', denoisers), ('denoisers', texturas),
               ('reflexos', reflexos), ('luzes', luzes), ('galeria', galeria), ('movimento', movimento),
-              ('gpudriven', gpudriven), ('custo', custo)]
+              ('gpudriven', gpudriven), ('custo', custo), ('verificacao', verificacao)]
     for nome, f in etapas:
         if quer(nome):
             print(f'{nome}...', flush=True)
