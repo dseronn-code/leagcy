@@ -131,6 +131,9 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
   vec3 kd, ks;
   // Ponto do raio: erro da ordem do epsilon do float × distância percorrida.
   vec3 shadowOrigin2 = offsetRayOrigin(hit.Pshadow, hit.Ng, RAY_BIAS_EXACT * hit.t);
+  // --perf-skip sombra-acerto-opaca: as sombras deste ponto (visto só em reflexos e na luz indireta) não testam o alfa
+  // das folhas recortadas.
+  gRayFlagsExtra = perfSkip(PERF_HIT_OPAQUE) ? gl_RayFlagsOpaqueEXT : 0u;
   vec3 sunE = sunIrradianceAt(hit.P);
   if (dot(sunE, sunE) > 0.0) {
     vec3 Ls = sampleCone(frame.sunDir.xyz, cos(frame.params.x), uSun);
@@ -152,6 +155,7 @@ vec3 hitDirectLighting(HitInfo hit, Surface s, BrdfContext bc, vec2 uSun, vec2 u
                     (perfSkip(PERF_HIT_SHADOWS) ? 1.0 : traceVisibility(shadowOrigin2, L, tSurface * 0.99999));
     }
   }
+  gRayFlagsExtra = 0u;
   return radiance;
 }
 
@@ -289,7 +293,7 @@ const float GLOSSY_HIT_ROUGHNESS = 0.3;
 // 1 em cada 4 pixels (rodando a cada frame) alimenta o cache de radiância.
 bool cacheUpdatePixel() {
   uvec2 id = gl_GlobalInvocationID.xy;
-  return ((id.x + 2u * id.y + frame.frameInfo.x) & 3u) == 0u;
+  return ((id.x + 2u * id.y + frame.frameInfo.x) & (perfSkip(PERF_CACHE_EIGHTH) ? 7u : 3u)) == 0u;
 }
 
 // Luz indireta que um ponto atingido por raio manda de volta: M do cache (ou, sem dados ainda, o céu aproximado).

@@ -50,7 +50,9 @@ bool alphaTestPasses(uint inst, uint prim, vec2 bary) {
   }
 
 // Medição (--perf-skip opaco): raios sem teste de alfa, para saber quanto as folhas recortadas custam.
-uint rayFlags(uint f) { return perfSkip(PERF_OPAQUE) ? f | gl_RayFlagsOpaqueEXT : f; }
+// gRayFlagsExtra: bandeiras a mais para os raios traçados enquanto estiver ligada (sombras nos pontos atingidos).
+uint gRayFlagsExtra = 0u;
+uint rayFlags(uint f) { return (perfSkip(PERF_OPAQUE) ? f | gl_RayFlagsOpaqueEXT : f) | gRayFlagsExtra; }
 
 // Raios de sombra veem só instâncias com este bit (rhi::TlasInstance::mask): globos de lâmpada e vidro não bloqueiam.
 const uint RAY_MASK_SHADOW = 0x01u, RAY_MASK_GLASS = 0x04u;

@@ -1,12 +1,9 @@
-# Rodada 13 (3/11): tempos só da segunda metade dos frames (clock estável), cada caso 2 vezes; e a qualidade das
-# economias medida na própria RTX (DLSS-RR) contra a referência por path tracing.
+# Rodada 14 (3/11): Bistro, os últimos 2 ms. Cache alimentado por 1 em 8 pixels e sombras dos pontos atingidos sem
+# teste de alfa; cada caso 2 vezes; qualidade na RTX.
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,espelho
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,sombra-acerto-opaca
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo,sombra-acerto-opaca
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,espelho
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,especular-fosco
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,especular-fosco
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,especular-fosco"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--scale 0.5 --spp 1 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--scale 0.5 --spp 1 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,espelho"
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo,sombra-acerto-opaca
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--scale 0.5 --spp 1 --restir-candidates 8 --restir-neighbors 4 --perf-skip espelho-gi,gi-metade,especular-fosco,cache-oitavo,sombra-acerto-opaca"
