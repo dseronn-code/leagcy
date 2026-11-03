@@ -1,5 +1,5 @@
-# Rodada 7 (3/11): Bistro, custo do teste de alfa nos raios (folhas recortadas) e escala 50% (DLSS desempenho).
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.67 --perf-skip espelho-gi
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.67 --perf-skip espelho-gi,opaco
+# Rodada 8 (3/11): GI em metade dos pixels (gi-metade) no Bistro e na Sponza, com as economias juntas.
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.5 --perf-skip espelho-gi
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.5 --perf-skip espelho-gi,opaco
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.5 --perf-skip espelho-gi,gi-metade
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.67 --perf-skip espelho-gi,gi-metade
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,gi-metade

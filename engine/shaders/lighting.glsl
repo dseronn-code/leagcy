@@ -520,10 +520,14 @@ void main() {
     // GI difusa: amostragem por cosseno => estimador = peso difuso × Li. Direções abaixo da faceta
     // geométrica (possíveis com normal map) atravessariam a superfície: são descartadas.
     vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
-    if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI)) {
+    // --perf-skip gi-metade: o raio sai em metade dos pixels (sorteio independente por pixel, amostra e frame) com
+    // peso 2 — mesma média, metade do custo, mais ruído para o denoiser.
+    const bool giHalf = perfSkip(PERF_GI_HALF);
+    const bool giTake = !giHalf || (pcg3d(uvec3(uvec2(id), frame.frameInfo.x * spp + k)).x & 1u) != 0u;
+    if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI) && giTake) {
       float t;
       vec3 Li = traceRadiance(origin, dirD, sg, 0u, t, false);
-      diffuse += bc.diffuseWeight * Li * aoDiffuse;
+      diffuse += bc.diffuseWeight * Li * aoDiffuse * (giHalf ? 2.0 : 1.0);
       if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
       diffHitSum += t;
       diffHitCount += 1.0;
