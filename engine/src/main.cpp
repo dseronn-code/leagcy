@@ -34,6 +34,9 @@ struct Options {
   std::string out = "frame.png";
   uint32_t saveEvery = 0;  // > 0: salva também a cada N frames (frame_0007.png...)
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
+  std::string cameraPath;  // headless: trajetória de câmera de cinema (arquivo de quadros-chave; ver loadCameraPath)
+  float fps = 30.0f;       // headless: quadros por segundo do tempo simulado (vídeo)
+  uint32_t warmup = 0;     // headless: frames iniciais parados e não salvos (TAA, denoiser e caches se assentam)
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
@@ -70,6 +73,9 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--out") o.out = next();
     else if (a == "--save-every") o.saveEvery = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--move") o.move = float(std::atof(next()));
+    else if (a == "--camera-path") o.cameraPath = next();
+    else if (a == "--fps") o.fps = std::max(1.0f, float(std::atof(next())));
+    else if (a == "--warmup") o.warmup = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
@@ -221,7 +227,8 @@ Options parseArgs(int argc, char** argv) {
           "  --tangent-test arquivo.gltf  tangentes do arquivo contra a aproximação e o MikkTSpace\n"
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
-          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n");
+          "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n"
+          "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n");
       std::exit(0);
     }
   }
@@ -268,6 +275,65 @@ int runAtmosphereTest(const Options& opt) {
   return err < 0.1f ? 0 : 1;
 }
 
+// Câmera de cinema: arquivo de texto, uma linha por quadro-chave, "t px py pz alvox alvoy alvoz [fov]" (t em
+// segundos, fov vertical em graus, padrão 60); linhas vazias e com # são ignoradas. Entre os quadros, Catmull-Rom
+// na posição, no alvo e no fov (a curva passa pelos quadros-chave, sem quinas). Quadro-chave repetido no mesmo
+// lugar = câmera parando suavemente ali.
+struct CameraKey {
+  float t;
+  glm::vec3 pos, target;
+  float fov;
+};
+
+std::vector<CameraKey> loadCameraPath(const std::string& path) {
+  std::vector<CameraKey> keys;
+  FILE* f = std::fopen(path.c_str(), "r");
+  if (!f) FATAL("--camera-path: não abri %s", path.c_str());
+  char line[512];
+  while (std::fgets(line, sizeof(line), f)) {
+    const char* c = line;
+    while (*c == ' ' || *c == '\t') ++c;
+    if (*c == '#' || *c == '\n' || *c == '\r' || *c == 0) continue;
+    CameraKey k{};
+    k.fov = 60.0f;
+    int n = std::sscanf(c, "%f %f %f %f %f %f %f %f", &k.t, &k.pos.x, &k.pos.y, &k.pos.z, &k.target.x, &k.target.y,
+                        &k.target.z, &k.fov);
+    if (n < 7) FATAL("--camera-path: linha inválida em %s: %s", path.c_str(), line);
+    if (!keys.empty() && k.t <= keys.back().t) FATAL("--camera-path: os tempos precisam crescer (%s)", line);
+    keys.push_back(k);
+  }
+  std::fclose(f);
+  if (keys.empty()) FATAL("--camera-path: nenhum quadro-chave em %s", path.c_str());
+  return keys;
+}
+
+template <typename T>
+T catmullRom(const T& p0, const T& p1, const T& p2, const T& p3, float u) {
+  const float u2 = u * u, u3 = u2 * u;
+  return 0.5f * ((2.0f * p1) + (p2 - p0) * u + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * u2 +
+                 (3.0f * p1 - p0 - 3.0f * p2 + p3) * u3);
+}
+
+void applyCameraPath(const std::vector<CameraKey>& keys, float t, scene::Camera& camera) {
+  size_t i = 0;
+  while (i + 1 < keys.size() && keys[i + 1].t <= t) ++i;
+  if (i + 1 >= keys.size() || t <= keys[0].t) {  // antes do primeiro ou depois do último: parada
+    const CameraKey& k = t <= keys[0].t ? keys[0] : keys.back();
+    camera.position = k.pos;
+    camera.lookAt(k.target);
+    camera.fovY = glm::radians(k.fov);
+    return;
+  }
+  const CameraKey& k0 = keys[i == 0 ? 0 : i - 1];
+  const CameraKey& k1 = keys[i];
+  const CameraKey& k2 = keys[i + 1];
+  const CameraKey& k3 = keys[std::min(i + 2, keys.size() - 1)];
+  const float u = (t - k1.t) / (k2.t - k1.t);
+  camera.position = catmullRom(k0.pos, k1.pos, k2.pos, k3.pos, u);
+  camera.lookAt(catmullRom(k0.target, k1.target, k2.target, k3.target, u));
+  camera.fovY = glm::radians(catmullRom(k0.fov, k1.fov, k2.fov, k3.fov, u));
+}
+
 int runHeadless(const Options& opt) {
   rhi::Context ctx;
   ctx.createInstance({opt.validation, opt.rayTracing, {}});
@@ -311,16 +377,25 @@ int runHeadless(const Options& opt) {
     return false;
   };
 
-  const float dt = 1.0f / 30.0f;  // tempo simulado fixo: resultado determinístico
+  const float dt = 1.0f / opt.fps;  // tempo simulado fixo: resultado determinístico
   glm::vec3 moveDir = camera.forward();
+  const std::vector<CameraKey> cameraKeys = opt.cameraPath.empty() ? std::vector<CameraKey>{} : loadCameraPath(opt.cameraPath);
+  if (!cameraKeys.empty()) {
+    LOG_INFO("Câmera de cinema: %zu quadros-chave, %.2f s, %.0f quadros/s, %u de aquecimento", cameraKeys.size(),
+             cameraKeys.back().t, opt.fps, opt.warmup);
+    applyCameraPath(cameraKeys, 0.0f, camera);
+  }
   auto t0 = std::chrono::steady_clock::now();
   double cpuRecordMs = 0.0;  // CPU gravando o frame (atualização da cena, BVH de luzes, chamadas de desenho), sem a GPU
   bool ok = true;
   for (uint32_t f = 0; f < opt.frames; ++f) {
     bool last = f + 1 == opt.frames;
-    bool save = last || (opt.saveEvery && (f + 1) % opt.saveEvery == 0);
+    const bool warming = f < opt.warmup;  // aquecimento: câmera e cena paradas no início, nada salvo
+    const uint32_t shot = warming ? 0 : f - opt.warmup;  // índice do quadro do vídeo
+    bool save = last || (!warming && opt.saveEvery && (shot + 1) % opt.saveEvery == 0);
+    if (!cameraKeys.empty()) applyCameraPath(cameraKeys, float(shot) * dt, camera);
     if (opt.move != 0.0f && (opt.moveStop == 0 || f < opt.moveStop)) camera.position += moveDir * (opt.move * dt);
-    const bool frozen = opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
+    const bool frozen = warming || opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
     scene.update(frozen ? 0.0f : dt);
     scene.stream(ctx, camera.position);  // streaming do mundo (células perto da câmera)
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
@@ -338,9 +413,9 @@ int runHeadless(const Options& opt) {
       vkCmdCopyImageToBuffer(cmd, output.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, readback.handle, 1, &region);
     });
     if (f == 0 || last || (f + 1) % 16 == 0) LOG_INFO("frame %u/%u", f + 1, opt.frames);
-    if (save && !last) {
+    if (save && (!last || opt.saveEvery)) {  // em vídeo (--save-every) o último quadro também entra na sequência
       char name[32];
-      std::snprintf(name, sizeof(name), "_%04u.png", f + 1);
+      std::snprintf(name, sizeof(name), "_%04u.png", shot + 1);
       std::string path = opt.out;
       size_t dot = path.rfind(".png");
       path = (dot == std::string::npos ? path : path.substr(0, dot)) + name;
