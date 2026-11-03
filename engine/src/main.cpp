@@ -388,7 +388,16 @@ int runHeadless(const Options& opt) {
   auto t0 = std::chrono::steady_clock::now();
   double cpuRecordMs = 0.0;  // CPU gravando o frame (atualização da cena, BVH de luzes, chamadas de desenho), sem a GPU
   bool ok = true;
+  // Medição: com 20 frames ou mais, os tempos (GPU, CPU e o total) contam só a segunda metade; a primeira inclui a
+  // placa subindo o clock depois do carregamento (na RTX, a mesma configuração variava até 30% entre execuções).
+  const uint32_t timedFrom = opt.frames >= 20 ? opt.frames / 2 : 0;
   for (uint32_t f = 0; f < opt.frames; ++f) {
+    if (f == timedFrom && timedFrom > 0) {
+      (void)r.gpuTimings();
+      (void)r.cpuTimings();
+      t0 = std::chrono::steady_clock::now();
+      cpuRecordMs = 0.0;
+    }
     bool last = f + 1 == opt.frames;
     const bool warming = f < opt.warmup;  // aquecimento: câmera e cena paradas no início, nada salvo
     const uint32_t shot = warming ? 0 : f - opt.warmup;  // índice do quadro do vídeo
@@ -402,7 +411,7 @@ int runHeadless(const Options& opt) {
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
       auto c0 = std::chrono::steady_clock::now();
       r.record(cmd, f % renderer::Renderer::kFramesInFlight, camera, output.handle, output.view, dt);
-      if (f > 0) cpuRecordMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - c0).count();
+      if (f > timedFrom || (timedFrom == 0 && f > 0)) cpuRecordMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - c0).count();
       if (!save) return;
       rhi::imageBarrier(cmd, output.handle, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                         VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -423,8 +432,10 @@ int runHeadless(const Options& opt) {
     }
   }
   double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-  LOG_INFO("%u frames em %.2fs (%.1f ms/frame, inclui espera da CPU)", opt.frames, secs, secs * 1000.0 / opt.frames);
-  if (opt.frames > 1) LOG_INFO("CPU gravando o frame: %.2f ms/frame", cpuRecordMs / double(opt.frames - 1));
+  const uint32_t timed = opt.frames - timedFrom;
+  LOG_INFO("%u frames em %.2fs (%.1f ms/frame, inclui espera da CPU)%s", timed, secs, secs * 1000.0 / timed,
+           timedFrom ? " — segunda metade" : "");
+  if (timed > 1) LOG_INFO("CPU gravando o frame: %.2f ms/frame", cpuRecordMs / double(timed - 1));
   if (!scene.textures.empty()) LOG_INFO("Texturas na GPU no fim: %.0f MB", double(scene.textureBytes()) / 1048576.0);
   if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
