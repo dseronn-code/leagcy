@@ -1,10 +1,9 @@
-# Rodada 18 (3/11): as duas ressalvas do analista. (1) Qualidade do Bistro contra a referência por path tracing, nos
-# três presets. (2) Medição com janela de verdade (CPU e GPU em paralelo), câmera andando 1,5 m/s, 20 s medidos depois
-# de 60 quadros de aquecimento; sem vsync (tempo bruto) e com vsync (o que o jogador vê). Abre uma janela no PC.
+# Rodada 19 (3/11): por que o Bistro sai ~10% mais escuro que a referência em todos os presets? Variações do Ultra
+# contra a mesma referência; e a Sponza na janela com uma trajetória que fica dentro do prédio.
 python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--quality alto"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--quality medio"
-build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality alto --no-vsync
-build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf --no-vsync
-build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf
-build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf --night --no-vsync
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --frames 256
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-radiance-cache"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-mesh-lights"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-lens-flare"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro-ev13
+build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt

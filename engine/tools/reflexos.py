@@ -27,6 +27,9 @@ CENAS = {  # nome: argumentos (exposição manual: as duas imagens com a mesma)
     # Rua do Bistro ao sol (câmera do arquivo). Texturas inteiras desde o início: com o streaming, a referência e o
     # motor estariam em mips diferentes e o erro mediria isso, não a luz.
     'bistro': ['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf'), '--exposure', '14', '--no-texture-streaming'],
+    # A mesma rua com 1 EV a menos de exposição (imagem 2x mais clara): o viés não pode depender da exposição.
+    'bistro-ev13': ['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf'), '--exposure', '13',
+                    '--no-texture-streaming'],
 }
 
 

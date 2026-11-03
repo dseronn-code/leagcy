@@ -1,0 +1,4 @@
+# Sponza: anda pela nave central de uma ponta à outra, olhando sempre uns 10 m à frente (20 s, fica dentro do prédio).
+0    -9.0 1.7 -0.4    1.0 2.6 0.2
+10   -0.5 1.9  0.0    9.5 3.0 0.3
+20    8.5 1.7  0.3   18.0 2.6 0.5
