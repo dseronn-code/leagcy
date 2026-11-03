@@ -49,12 +49,15 @@ bool alphaTestPasses(uint inst, uint prim, vec2 bary) {
       rayQueryConfirmIntersectionEXT(rq);                                                              \
   }
 
+// Medição (--perf-skip opaco): raios sem teste de alfa, para saber quanto as folhas recortadas custam.
+uint rayFlags(uint f) { return perfSkip(PERF_OPAQUE) ? f | gl_RayFlagsOpaqueEXT : f; }
+
 // Raios de sombra veem só instâncias com este bit (rhi::TlasInstance::mask): globos de lâmpada e vidro não bloqueiam.
 const uint RAY_MASK_SHADOW = 0x01u, RAY_MASK_GLASS = 0x04u;
 
 float traceVisibility(vec3 origin, vec3 dir, float tMax) {
   rayQueryEXT rq;
-  rayQueryInitializeEXT(rq, tlas, gl_RayFlagsTerminateOnFirstHitEXT, RAY_MASK_SHADOW, origin, 0.0, dir, tMax);
+  rayQueryInitializeEXT(rq, tlas, rayFlags(gl_RayFlagsTerminateOnFirstHitEXT), RAY_MASK_SHADOW, origin, 0.0, dir, tMax);
   RESOLVE_CANDIDATES(rq)
   return rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT ? 1.0 : 0.0;
 }
@@ -96,7 +99,7 @@ struct HitInfo {
 
 bool traceHit(vec3 origin, vec3 dir, float tMax, out HitInfo hit) {
   rayQueryEXT rq;
-  rayQueryInitializeEXT(rq, tlas, gl_RayFlagsNoneEXT, 0xFF, origin, 0.0, dir, tMax);
+  rayQueryInitializeEXT(rq, tlas, rayFlags(gl_RayFlagsNoneEXT), 0xFF, origin, 0.0, dir, tMax);
   RESOLVE_CANDIDATES(rq)
   if (rayQueryGetIntersectionTypeEXT(rq, true) == gl_RayQueryCommittedIntersectionNoneEXT) return false;
 

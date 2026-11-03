@@ -1,10 +1,5 @@
-# Rodada 6 (3/11): onde vai o tempo do Bistro com as economias juntas (cada linha desliga uma parte, só medição).
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,gi
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,especular
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,sombras-acerto
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,secundarios
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,luz
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,sol
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,cache
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi --no-mesh-lights
+# Rodada 7 (3/11): Bistro, custo do teste de alfa nos raios (folhas recortadas) e escala 50% (DLSS desempenho).
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.67 --perf-skip espelho-gi
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.67 --perf-skip espelho-gi,opaco
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.5 --perf-skip espelho-gi
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.5 --perf-skip espelho-gi,opaco
