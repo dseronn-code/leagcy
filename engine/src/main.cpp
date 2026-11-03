@@ -37,6 +37,7 @@ struct Options {
   std::string cameraPath;  // headless: trajetória de câmera de cinema (arquivo de quadros-chave; ver loadCameraPath)
   float fps = 30.0f;       // headless: quadros por segundo do tempo simulado (vídeo)
   uint32_t warmup = 0;     // headless: frames iniciais parados e não salvos (TAA, denoiser e caches se assentam)
+  float quitAfter = 0.0f;  // janela: fecha sozinha depois de N segundos e imprime as estatísticas do tempo de quadro
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
@@ -76,6 +77,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--camera-path") o.cameraPath = next();
     else if (a == "--fps") o.fps = std::max(1.0f, float(std::atof(next())));
     else if (a == "--warmup") o.warmup = uint32_t(std::max(0, std::atoi(next())));
+    else if (a == "--quit-after") o.quitAfter = std::max(0.0f, float(std::atof(next())));
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
@@ -231,7 +233,8 @@ Options parseArgs(int argc, char** argv) {
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n"
-          "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n");
+          "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n"
+          "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n");
       std::exit(0);
     }
   }
@@ -554,6 +557,15 @@ int runWindowed(const Options& opt) {
   uint32_t slot = 0;
   double lastTime = glfwGetTime(), fpsTimer = lastTime, lastX = 0, lastY = 0;
   uint32_t fpsFrames = 0;
+  // Medição na janela (--quit-after): câmera automática (--camera-path ou --move), quadros de aquecimento parados
+  // (--warmup) e, ao fechar, média e percentis do tempo de quadro real (do present ao present, com CPU e GPU em
+  // paralelo como num jogo) da segunda metade do tempo medido.
+  const std::vector<CameraKey> cameraKeys = opt.cameraPath.empty() ? std::vector<CameraKey>{} : loadCameraPath(opt.cameraPath);
+  const glm::vec3 moveDir = camera.forward();
+  uint32_t frameCount = 0;
+  double runStart = -1.0;  // início do trecho medido (depois do aquecimento)
+  std::vector<double> frameMs;
+  if (!cameraKeys.empty()) applyCameraPath(cameraKeys, 0.0f, camera);
   bool looking = false;
   float sunElev = std::asin(scene.sunDirection.y);
   float sunAzim = std::atan2(scene.sunDirection.x, -scene.sunDirection.z);
@@ -564,6 +576,14 @@ int runWindowed(const Options& opt) {
     float dt = float(now - lastTime);
     lastTime = now;
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
+    ++frameCount;
+    const bool warming = frameCount <= opt.warmup;
+    if (!warming && runStart < 0.0) runStart = now;
+    const double runTime = runStart < 0.0 ? 0.0 : now - runStart;
+    if (!warming && frameCount > opt.warmup + 1) frameMs.push_back(double(dt) * 1000.0);
+    if (opt.quitAfter > 0.0f && runTime >= opt.quitAfter) glfwSetWindowShouldClose(window, 1);
+    if (!cameraKeys.empty()) applyCameraPath(cameraKeys, float(runTime), camera);
+    else if (opt.move != 0.0f && !warming) camera.position += moveDir * (opt.move * dt);
 
     // ---- Entrada ----
     bool moved = false;
@@ -681,6 +701,18 @@ int runWindowed(const Options& opt) {
   }
 
   vkDeviceWaitIdle(ctx.device);
+  if (opt.quitAfter > 0.0f && frameMs.size() >= 4) {
+    std::vector<double> v(frameMs.begin() + std::ptrdiff_t(frameMs.size() / 2), frameMs.end());  // segunda metade
+    double sum = 0.0;
+    for (double x : v) sum += x;
+    std::sort(v.begin(), v.end());
+    auto pct = [&](double p) { return v[std::min(v.size() - 1, size_t(p * double(v.size() - 1) + 0.5))]; };
+    LOG_INFO("Janela %ux%u (interna %ux%u): %zu quadros medidos, média %.2f ms (%.1f quadros/s), mediana %.2f ms, "
+             "p95 %.2f ms, p99 %.2f ms, pior %.2f ms", swapchain.extent.width, swapchain.extent.height,
+             r.renderExtent().width, r.renderExtent().height, v.size(), sum / double(v.size()),
+             1000.0 * double(v.size()) / sum, pct(0.5), pct(0.95), pct(0.99), v.back());
+    if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
+  }
   for (auto& f : frames) {
     vkDestroySemaphore(ctx.device, f.imageAvailable, nullptr);
     vkDestroyFence(ctx.device, f.inFlight, nullptr);

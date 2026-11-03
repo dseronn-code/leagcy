@@ -1,4 +1,10 @@
-# Rodada 17 (3/11): confirmação final da versão entregue (HLOD desligado por padrão, presets Alto/Médio).
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --quality alto
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene city --quality medio
+# Rodada 18 (3/11): as duas ressalvas do analista. (1) Qualidade do Bistro contra a referência por path tracing, nos
+# três presets. (2) Medição com janela de verdade (CPU e GPU em paralelo), câmera andando 1,5 m/s, 20 s medidos depois
+# de 60 quadros de aquecimento; sem vsync (tempo bruto) e com vsync (o que o jogador vê). Abre uma janela no PC.
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--quality alto"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--quality medio"
+build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality alto --no-vsync
+build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf --no-vsync
+build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf
+build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf --night --no-vsync

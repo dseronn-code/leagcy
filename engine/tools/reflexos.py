@@ -24,6 +24,9 @@ CENAS = {  # nome: argumentos (exposição manual: as duas imagens com a mesma)
     'reflections': ['--scene', 'reflections', '--exposure', '12'],
     'sponza': ['--exposure', '12'],
     'sponza-noite': ['--night', '--exposure', '2'],
+    # Rua do Bistro ao sol (câmera do arquivo). Texturas inteiras desde o início: com o streaming, a referência e o
+    # motor estariam em mips diferentes e o erro mediria isso, não a luz.
+    'bistro': ['--scene', os.path.join('assets', 'Bistro', 'bistro.gltf'), '--exposure', '14', '--no-texture-streaming'],
 }
 
 
