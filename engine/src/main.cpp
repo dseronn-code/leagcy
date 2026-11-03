@@ -144,6 +144,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-occlusion") o.render.occlusionCulling = false;
     else if (a == "--no-meshlets") o.render.meshlets = false;
     else if (a == "--no-hlod") o.render.hlod = false;
+    else if (a == "--hlod") o.render.hlod = true;
     else if (a == "--no-ripples") o.render.ripples = false;
     else if (a == "--clouds-reference") o.render.cloudReference = true;
     else if (a == "--fog-reference") o.render.fogReference = true;
@@ -221,7 +222,8 @@ Options parseArgs(int argc, char** argv) {
           "  --sharpness X              nitidez RCAS na saída (0 a 1; padrão 0,5, ou 0 com DLSS)\n"
           "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
           "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"
-          "  --no-gpu-culling --no-occlusion --no-meshlets --no-hlod   desligam partes do culling/desenho (medição)\n"
+          "  --no-gpu-culling --no-occlusion --no-meshlets   desligam partes do culling/desenho (medição)\n"
+          "  --hlod                   liga os proxies de HLOD (desligados: mais lentos na RTX)\n"
           "  --no-ripples --no-sss --no-texture-streaming --stream-sync  idem (ondulações, pele, texturas, streaming)\n"
           "  --clouds-reference         nuvens por Monte Carlo volumétrico exato (tools/nuvens.py)\n"
           "  --fog-reference            névoa integrada por pixel, sem grade (precisa de ray tracing; tools/nevoa.py)\n"

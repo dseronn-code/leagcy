@@ -215,8 +215,8 @@ def gpudriven(binario, rel):
     cenas = [('Sponza', []), ('Cidade', ['--scene', 'city']), ('Cidade 30 quadras', ['--scene', 'city', '--city-blocks', '30']),
              ('Mundo 8 km', ['--scene', 'world']), ('Bistro', ['--scene', 'assets/Bistro/bistro.gltf'])]
     casos = [('tudo ligado', []), ('sem oclusão', ['--no-occlusion']), ('sem meshlets', ['--no-meshlets']),
-             ('sem HLOD', ['--no-hlod']),
-             ('sem culling', ['--no-gpu-culling', '--no-occlusion', '--no-meshlets', '--no-hlod'])]
+             ('com HLOD', ['--hlod']),
+             ('sem culling', ['--no-gpu-culling', '--no-occlusion', '--no-meshlets'])]
     for cena, extra in cenas:
         ref = None
         for nome, args in casos:
@@ -242,7 +242,7 @@ def verificacao(binario, rel):
     bistro = os.path.join('assets', 'Bistro', 'bistro.gltf')
     cenas = [('Bistro', ['--scene', bistro]), ('Cidade', ['--scene', 'city']), ('Sponza', [])]
     casos = [('tudo ligado', []), ('tudo ligado de novo', []), ('sem oclusão', ['--no-occlusion']),
-             ('sem meshlets', ['--no-meshlets']), ('sem HLOD', ['--no-hlod'])]
+             ('sem meshlets', ['--no-meshlets']), ('com HLOD', ['--hlod'])]
     fixo = ['--no-texture-streaming', '--stream-sync']
     for cena, extra in cenas:
         ref = None

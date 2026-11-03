@@ -1,7 +1,4 @@
-# Rodada 16 (3/11): Médio sem o cache-oitavo (devolve qualidade). Bistro e Sponza 2 vezes, qualidade na RTX, e o
-# Bistro à noite (luzes acesas) no Médio.
+# Rodada 17 (3/11): confirmação final da versão entregue (HLOD desligado por padrão, presets Alto/Médio).
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --quality alto
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --quality medio
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio --night
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas reflections,sponza --extra="--quality medio"
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene city --quality medio

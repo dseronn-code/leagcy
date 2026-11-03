@@ -99,6 +99,8 @@ python tools\teste_pc.py
 ./build/legacy --scene outdoor --dof       # cena externa com profundidade de campo
 ./build/legacy --lights 4000 --night       # teste de estresse de luzes
 ./build/legacy --quality cinema            # presets: baixo | medio | alto | ultra (padrão) | cinema
+./build/legacy --quality alto              # 30+ FPS em 1080p numa RTX 3070 Ti em cenas como a Sponza (25 ms)
+./build/legacy --quality medio             # 30+ FPS em cenas densas como o Bistro (29,6 ms)
 ./build/legacy --fullscreen                # tela cheia na resolução nativa do monitor
 ./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
 ./build/legacy --scale 0.67               # DLSS qualidade em RTX (padrão automático); --scale 1 = DLAA

@@ -75,7 +75,9 @@ struct Settings {
   bool cloudReference = false;   // nuvens da tela por Monte Carlo volumétrico sem aproximação (--clouds-reference)
   bool fogReference = false;     // névoa integrada por pixel com sombra e céu exatos, sem grade (--fog-reference; RT)
   bool ripples = true;           // ondulações de objetos na água (--no-ripples)
-  bool hlod = true;              // proxies de HLOD ao longe, onde a cena montou (--no-hlod: sempre os membros)
+  // Proxies de HLOD ao longe, onde a cena montou. Desligado por padrão: na RTX 3070 Ti o G-buffer da cidade ficou ~1 ms
+  // mais lento com eles (8,9 x 9,9–10,2 ms; o culling por GPU já desenha os membros barato). --hlod liga.
+  bool hlod = false;
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
