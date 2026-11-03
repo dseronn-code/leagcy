@@ -1,6 +1,7 @@
 #include "rhi/accel.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 namespace rhi {
@@ -10,8 +11,14 @@ namespace {
 constexpr VkBuildAccelerationStructureFlagsKHR kStaticFlags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
 constexpr VkBuildAccelerationStructureFlagsKHR kUpdatableFlags =
     VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
-// TLAS muda todo frame: construção rápida vale mais que traçado marginalmente melhor.
-constexpr VkBuildAccelerationStructureFlagsKHR kTlasFlags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+// TLAS: só é reconstruído quando algo se move (cena parada: uma vez), e todos os raios atravessam ele; traçado rápido
+// vale mais que a construção rápida. LEGACY_TLAS_FAST_BUILD=1 volta à construção rápida (comparação).
+VkBuildAccelerationStructureFlagsKHR tlasFlags() {
+  static const VkBuildAccelerationStructureFlagsKHR f = std::getenv("LEGACY_TLAS_FAST_BUILD")
+                                                            ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR
+                                                            : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+  return f;
+}
 
 VkDeviceSize scratchAlignment(Context& ctx) {
   VkPhysicalDeviceAccelerationStructurePropertiesKHR asProps{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR};
@@ -145,7 +152,7 @@ void DynamicTlas::init(Context& ctx, uint32_t maxInstances) {
   VkAccelerationStructureGeometryKHR geom = instanceGeometry(instanceBuffers_[0].address);
   VkAccelerationStructureBuildGeometryInfoKHR build{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
   build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-  build.flags = kTlasFlags;
+  build.flags = tlasFlags();
   build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
   build.geometryCount = 1;
   build.pGeometries = &geom;
@@ -177,7 +184,7 @@ void DynamicTlas::build(VkCommandBuffer cmd, uint32_t slot, uint32_t count) {
   VkAccelerationStructureGeometryKHR geom = instanceGeometry(buf.address);
   VkAccelerationStructureBuildGeometryInfoKHR build{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
   build.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-  build.flags = kTlasFlags;
+  build.flags = tlasFlags();
   build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
   build.dstAccelerationStructure = tlas.handle;
   build.geometryCount = 1;

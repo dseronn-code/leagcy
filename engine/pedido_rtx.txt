@@ -1,9 +1,8 @@
-# Rodada 9 (3/11): especular de superfícies foscas pelo cache (Bistro e Sponza) + verificações pendentes:
-# oclusão/meshlets/HLOD com imagem comparável, hera do Bistro, estabilidade em movimento contra a referência.
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.5 --perf-skip espelho-gi,gi-metade
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --restir-candidates 8 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco
-build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi
+# Rodada 10 (3/11): Bistro a 50% com gi-metade + especular-fosco. TLAS com traçado rápido (novo) x construção rápida
+# (antigo), e ReSTIR mais barato. O caso base vai no começo e no fim para ver a deriva térmica.
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8
+set LEGACY_TLAS_FAST_BUILD=1&& build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8 --restir-neighbors 4
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 4
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --spp 1 --scale 0.5 --perf-skip espelho-gi,gi-metade,especular-fosco --restir-candidates 8
 build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 100 --out resultados_pc\p.png --scale 0.67 --spp 1 --restir-candidates 8 --perf-skip espelho-gi,especular-fosco
-python tools\teste_pc.py --so verificacao
-python tools\denoiser.py --bin build\Release\legacy.exe --candidatos svgf,dlss-rr --cena sponza-noite-animada --out resultados_pc\den
-python tools\denoiser.py --bin build\Release\legacy.exe --candidatos dlss-rr --cena sponza-noite-animada --out resultados_pc\den --extra="--scale 0.67"
