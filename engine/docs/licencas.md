@@ -18,6 +18,9 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [cgltf](https://github.com/jkuhlmann/cgltf) | Leitor glTF | MIT | Manter o aviso |
 | [stb_image](https://github.com/nothings/stb) | Imagens | MIT / domínio público | — |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) | Headers (dentro do NRI) | Apache 2.0 / MIT | — |
+| [Jolt Physics](https://github.com/jrouwe/JoltPhysics) v5.2.0 | Física: corpos rígidos, personagem, colisão por malha | MIT | Manter o aviso |
+| [EnTT](https://github.com/skypjack/entt) v3.13.2 | Entidades e componentes da camada de jogo | MIT | Manter o aviso |
+| [nlohmann/json](https://github.com/nlohmann/json) v3.11.3 | Cenas em arquivo (.json) | MIT | Manter o aviso |
 
 ## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
 
