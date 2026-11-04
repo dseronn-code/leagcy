@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -42,6 +43,8 @@ class Physics {
   uint32_t addBox(glm::vec3 halfExtents, glm::vec3 position, glm::quat rotation, const BodyDesc& desc);
   uint32_t addSphere(float radius, glm::vec3 position, glm::quat rotation, const BodyDesc& desc);
   uint32_t addCapsule(float halfHeight, float radius, glm::vec3 position, glm::quat rotation, const BodyDesc& desc);
+  // Malha de triângulos parada (prédios, terreno, o cenário de um glTF), em coordenadas do mundo.
+  uint32_t addStaticMesh(const std::vector<glm::vec3>& vertices, const std::vector<uint32_t>& indices, float friction);
 
   // Avança o tempo real `dt`: roda os passos fixos que couberem e guarda o resto para o próximo quadro.
   // Prepare os corpos (optimizeBroadphase) depois de criar muitos de uma vez.

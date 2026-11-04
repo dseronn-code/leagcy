@@ -10,6 +10,7 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
@@ -247,6 +248,29 @@ uint32_t Physics::addSphere(float radius, glm::vec3 position, glm::quat rotation
 uint32_t Physics::addCapsule(float halfHeight, float radius, glm::vec3 position, glm::quat rotation,
                              const BodyDesc& desc) {
   return p_->add(new JPH::CapsuleShape(std::max(halfHeight, 1e-3f), std::max(radius, 1e-3f)), position, rotation, desc);
+}
+
+uint32_t Physics::addStaticMesh(const std::vector<glm::vec3>& vertices, const std::vector<uint32_t>& indices,
+                                float friction) {
+  JPH::VertexList verts;
+  verts.reserve(vertices.size());
+  for (const glm::vec3& v : vertices) verts.push_back(JPH::Float3(v.x, v.y, v.z));
+  JPH::IndexedTriangleList tris;
+  tris.reserve(indices.size() / 3);
+  for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+    const glm::vec3 a = vertices[indices[i]], b = vertices[indices[i + 1]], c = vertices[indices[i + 2]];
+    if (glm::dot(glm::cross(b - a, c - a), glm::cross(b - a, c - a)) < 1e-14f) continue;  // degenerado
+    tris.push_back(JPH::IndexedTriangle(indices[i], indices[i + 1], indices[i + 2], 0));
+  }
+  JPH::MeshShapeSettings settings(std::move(verts), std::move(tris));
+  JPH::ShapeSettings::ShapeResult r = settings.Create();
+  if (r.HasError()) {
+    LOG_ERROR("Física: malha de colisão inválida (%s)", r.GetError().c_str());
+    return ~0u;
+  }
+  BodyDesc d;
+  d.friction = friction;
+  return p_->add(r.Get(), glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), d);
 }
 
 void Physics::optimizeBroadphase() { p_->system->OptimizeBroadPhase(); }

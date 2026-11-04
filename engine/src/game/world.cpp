@@ -118,7 +118,44 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
     std::map<int, uint32_t> capsules;
 
     uint32_t created = 0;
+    loadedScene_ = &scene;
+    const std::string sceneDir = [&] {
+      const size_t slash = path.find_last_of("/\\");
+      return slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+    }();
     for (const json& e : doc.value("entidades", json::array())) {
+      if (e.contains("modelo")) {  // glTF: caminho relativo à pasta do motor ou à pasta da cena
+        Model m;
+        m.path = e["modelo"].get<std::string>();
+        m.scale = e.value("escala", 1.0f);
+        Transform t;
+        t.position = vec3Of(e.value("posicao", json()), glm::vec3(0.0f));
+        if (e.contains("rotacao_graus")) t.rotation = glm::quat(glm::radians(vec3Of(e["rotacao_graus"], glm::vec3(0.0f))));
+        if (e.contains("rotacao")) {
+          const json& q = e["rotacao"];
+          t.rotation = glm::normalize(glm::quat(q[0].get<float>(), q[1].get<float>(), q[2].get<float>(), q[3].get<float>()));
+        }
+        std::string file = m.path;
+        if (!std::ifstream(file) && std::ifstream(sceneDir + file)) file = sceneDir + file;
+        const glm::mat4 root = glm::translate(glm::mat4(1.0f), t.position) * glm::mat4_cast(t.rotation) *
+                               glm::scale(glm::mat4(1.0f), glm::vec3(m.scale));
+        m.firstObject = uint32_t(scene.objects.size());
+        if (!scene::loadGltf(scene, file, root)) {
+          LOG_WARN("Cena: não carreguei o modelo %s", file.c_str());
+          continue;
+        }
+        m.objectCount = uint32_t(scene.objects.size()) - m.firstObject;
+        if (e.contains("fisica")) {
+          m.meshCollider = e["fisica"].value("colisao", "malha") == "malha";
+          m.friction = e["fisica"].value("atrito", m.friction);
+        }
+        const entt::entity ent = registry.create();
+        if (e.contains("nome")) registry.emplace<Name>(ent, e["nome"].get<std::string>());
+        registry.emplace<Transform>(ent, t);
+        registry.emplace<Model>(ent, m);
+        ++created;
+        continue;
+      }
       Shape shape;
       const std::string forma = e.contains("personagem") ? "personagem" : e.value("forma", "caixa");
       std::unique_ptr<Character> character;
@@ -251,6 +288,25 @@ void World::start() {
     if (b.bodyId != ~0u && registry.all_of<InitialVelocity>(ent))
       physics->setLinearVelocity(b.bodyId, registry.get<InitialVelocity>(ent).value);
   }
+  // Modelos com colisão pela malha: os triângulos de todos os objetos do modelo, já no mundo, num corpo só.
+  for (auto ent : registry.view<Model>()) {
+    Model& m = registry.get<Model>(ent);
+    if (!m.meshCollider || !loadedScene_) continue;
+    std::vector<glm::vec3> verts;
+    std::vector<uint32_t> idx;
+    for (uint32_t o = m.firstObject; o < m.firstObject + m.objectCount; ++o) {
+      const scene::Object& obj = loadedScene_->objects[o];
+      const scene::MeshData& mesh = loadedScene_->cpuMesh(obj.mesh);
+      if (mesh.skinModel >= 0 || mesh.clothWidth > 0 || mesh.hairStrands > 0) continue;  // deformáveis: fora
+      const uint32_t base = uint32_t(verts.size());
+      for (const scene::Vertex& v : mesh.vertices) verts.push_back(glm::vec3(obj.transform * glm::vec4(v.position, 1.0f)));
+      for (uint32_t i : mesh.indices) idx.push_back(base + i);
+    }
+    if (!idx.empty()) {
+      m.bodyId = physics->addStaticMesh(verts, idx, m.friction);
+      LOG_INFO("Física: colisão de %s com %zu triângulos", m.path.c_str(), idx.size() / 3);
+    }
+  }
   auto chars = registry.view<Transform, Character>();
   for (auto ent : chars) {
     auto [t, c] = chars.get<Transform, Character>(ent);
@@ -321,6 +377,18 @@ bool World::save(const std::string& path) const {
   for (entt::entity ent : registry.view<Transform>()) order.push_back(ent);
   std::sort(order.begin(), order.end(), [](entt::entity a, entt::entity b) { return entt::to_integral(a) < entt::to_integral(b); });
   for (entt::entity ent : order) {
+    if (const Model* m = registry.try_get<Model>(ent)) {
+      const Transform& t = registry.get<Transform>(ent);
+      json e;
+      if (const Name* n = registry.try_get<Name>(ent)) e["nome"] = n->value;
+      e["modelo"] = m->path;
+      e["escala"] = m->scale;
+      e["posicao"] = toJson(t.position);
+      e["rotacao"] = json::array({t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z});
+      if (m->meshCollider) e["fisica"] = {{"tipo", "estatico"}, {"colisao", "malha"}, {"atrito", m->friction}};
+      ents.push_back(e);
+      continue;
+    }
     if (!registry.valid(ent) || !registry.all_of<Transform, Shape>(ent)) continue;
     const Transform& t = registry.get<Transform>(ent);
     const Shape& s = registry.get<Shape>(ent);

@@ -199,9 +199,21 @@ def teste_empurrar(b, pasta):
     return x > 3.0, f'caixa foi de x = 2,0 para {x:.2f} m'
 
 
+def teste_sponza(b, pasta):
+    """Anda dentro da Sponza (colisão pela malha do glTF): fica no chão e para na parede."""
+    cena = {'entidades': [{'nome': 'sponza', 'modelo': os.path.join('assets', 'Sponza', 'Sponza.gltf'),
+                           'fisica': {'tipo': 'estatico', 'colisao': 'malha'}},
+                          personagem([-8.5, 0.5, -0.6], [{'t': 0, 'andar': [1, 0, 0]}])]}
+    est, _ = rodar(b, cena, 10.0, pasta, 'sponza')
+    x, y, z = pes(est)
+    # Limites da Sponza: x de -15,4 a 14,4. Andando 45 m para +x, ele precisa parar dentro, de pé no chão.
+    ok = -1.0 < y < 1.0 and 0.0 < x < 14.4
+    return ok, f'pés em ({x:.2f}, {y:.2f}, {z:.2f}) depois de 10 s andando para +x'
+
+
 TESTES = {'queda': teste_queda, 'quique': teste_quique, 'pilha': teste_pilha, 'tunel': teste_tunel,
           'deterministico': teste_deterministico, 'andar': teste_andar, 'pulo': teste_pulo, 'escada': teste_escada,
-          'rampa': teste_rampa, 'empurrar': teste_empurrar}
+          'rampa': teste_rampa, 'empurrar': teste_empurrar, 'sponza': teste_sponza}
 
 
 def main():

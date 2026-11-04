@@ -351,6 +351,8 @@ class Scene {
   std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
 
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }
+  // Dados de uma malha na CPU (válidos antes do upload; usados, p.ex., para a colisão da física).
+  const MeshData& cpuMesh(uint32_t mesh) const { return cpuMeshes_[mesh]; }
   uint32_t addMaterial(const Material& m) { materials.push_back(m); return uint32_t(materials.size() - 1); }
   uint32_t addTexture(TextureData t) { cpuTextures_.push_back(std::move(t)); return uint32_t(cpuTextures_.size() - 1); }
   // Marca a textura como cor base de material recortado por alfa (antes do upload).

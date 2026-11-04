@@ -44,6 +44,16 @@ struct Renderable {
   std::string material;  // nome no arquivo da cena (para salvar de volta)
 };
 
+// Modelo glTF (cenário, prédios): os objetos que ele criou na scene::Scene. Fica onde foi posto (parado).
+struct Model {
+  std::string path;
+  float scale = 1.0f;
+  uint32_t firstObject = 0, objectCount = 0;
+  bool meshCollider = false;  // colisão pelos triângulos do modelo
+  float friction = 0.6f;
+  uint32_t bodyId = ~0u;
+};
+
 // Simulado pela física. bodyId é preenchido em World::start().
 struct RigidBody {
   BodyDesc desc;
@@ -107,6 +117,7 @@ class World {
   struct FileData;
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
+  scene::Scene* loadedScene_ = nullptr;  // para ler os triângulos dos modelos em start() (antes do upload)
 };
 
 // Cenas .json passam por aqui (scene::buildDemoScene): o mundo fica vivo enquanto a Scene existir e roda dentro do
