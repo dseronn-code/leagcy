@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -523,19 +524,26 @@ int runWindowed(const Options& opt) {
 
   scene::Scene scene;
   scene::Camera camera;
-  scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
-  if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
+  // Monta a cena (no início e quando o editor pede para recarregar depois de criar ou apagar entidades).
+  auto buildScene = [&](const std::string& name) {
+    scene::DemoOptions so = opt.scene;
+    so.name = name;
+    scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
+    if (!scene::buildDemoScene(scene, camera, so)) return false;
+    applySunOverride(opt, scene);
+    scene.compressTextures = opt.compressTextures;
+    scene.meshLights = opt.meshLights;
+    scene.meshLods = opt.meshLods;
+    scene.streamSync = opt.streamSync;
+    scene.textureStreaming = opt.textureStreaming;
+    scene.upload(ctx);
+    return true;
+  };
+  if (!buildScene(opt.scene.name)) return 1;
   if (opt.customCamera) {
     camera.position = opt.cameraPos;
     camera.lookAt(opt.cameraTarget);
   }
-  applySunOverride(opt, scene);
-  scene.compressTextures = opt.compressTextures;
-  scene.meshLights = opt.meshLights;
-  scene.meshLods = opt.meshLods;
-  scene.streamSync = opt.streamSync;
-  scene.textureStreaming = opt.textureStreaming;
-  scene.upload(ctx);
 
   int fbw, fbh;
   glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -744,6 +752,25 @@ int runWindowed(const Options& opt) {
       FATAL("vkQueuePresentKHR: %d", pres);
     }
     slot = (slot + 1) % renderer::Renderer::kFramesInFlight;
+
+    // Editor: entidade criada ou apagada => a cena foi gravada num arquivo temporário e é montada de novo (a GPU
+    // recebe tudo outra vez). A câmera continua onde estava.
+    if (std::string reload; ed.consumeReload(reload)) {
+      vkDeviceWaitIdle(ctx.device);
+      const scene::Camera keep = camera;
+      r.destroy();
+      scene.destroy(ctx);
+      // Objetos refeitos no lugar (mesmo tipo, não constantes): os nomes `scene` e `r` passam a se referir aos novos.
+      scene.~Scene();
+      new (&scene) scene::Scene();
+      r.~Renderer();
+      new (&r) renderer::Renderer();
+      if (!buildScene(reload)) FATAL("Editor: não consegui recarregar %s", reload.c_str());
+      camera = keep;
+      if (game::World* w = game::currentWorld()) w->simulate = false;  // continua no modo de edição
+      r.init(ctx, scene, swapchain.extent, swapchain.format, opt.render);
+      lastTime = glfwGetTime();
+    }
 
     ++fpsFrames;
     if (now - fpsTimer >= 0.5) {

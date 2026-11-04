@@ -34,6 +34,14 @@ class Editor {
   bool capturingMouse() const;
   bool capturingKeyboard() const;
   bool ready() const { return ready_; }
+  // Pedido de recarregar a cena (depois de criar, duplicar ou apagar): o arquivo temporário já foi gravado.
+  bool consumeReload(std::string& path) {
+    if (reload_.empty()) return false;
+    path.swap(reload_);
+    reload_.clear();
+    selected_ = entt::null;
+    return true;
+  }
   // Seleciona a entidade com este nome (--select: testes e capturas de tela).
   void selectByName(game::World& world, const std::string& name);
 
@@ -51,6 +59,8 @@ class Editor {
   bool editModeSet_ = false;
   char savePath_[256] = "cena_salva.json";
   std::string status_;
+  std::string reload_;
+  void requestReload(game::World& world);
 };
 
 }  // namespace editor

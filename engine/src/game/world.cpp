@@ -470,6 +470,38 @@ entt::entity World::entityOfBody(uint32_t body) const {
   return entt::null;
 }
 
+entt::entity World::addPrimitive(ShapeType type, glm::vec3 position, Motion motion, glm::vec3 halfExtents) {
+  const entt::entity e = registry.create();
+  Shape s;
+  s.type = type;
+  s.halfExtents = halfExtents;
+  s.radius = 0.5f;
+  Transform t;
+  t.position = position;
+  const char* base = type == ShapeType::Box ? (motion == Motion::Static ? "parede" : "caixa") : "esfera";
+  registry.emplace<Name>(e, std::string(base) + "_" + std::to_string(entt::to_integral(e)));
+  registry.emplace<Transform>(e, t);
+  registry.emplace<Shape>(e, s);
+  registry.emplace<Renderable>(e, ~0u, std::string());
+  RigidBody b;
+  b.desc.motion = motion;
+  registry.emplace<RigidBody>(e, b);
+  return e;
+}
+
+entt::entity World::duplicate(entt::entity src) {
+  if (!registry.valid(src) || !registry.all_of<Transform, Shape>(src) || registry.all_of<Character>(src)) return entt::null;
+  const entt::entity e = registry.create();
+  Transform t = registry.get<Transform>(src);
+  t.position.x += 1.0f;
+  registry.emplace<Transform>(e, t);
+  registry.emplace<Shape>(e, registry.get<Shape>(src));
+  if (const Name* n = registry.try_get<Name>(src)) registry.emplace<Name>(e, n->value + "_copia");
+  if (const Renderable* r = registry.try_get<Renderable>(src)) registry.emplace<Renderable>(e, ~0u, r->material);
+  if (const RigidBody* b = registry.try_get<RigidBody>(src)) registry.emplace<RigidBody>(e, RigidBody{b->desc, ~0u});
+  return e;
+}
+
 void World::snapshot() {
   snapshot_.clear();
   for (auto e : registry.view<Transform>()) snapshot_.emplace_back(e, registry.get<Transform>(e));

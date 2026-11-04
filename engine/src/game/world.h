@@ -111,6 +111,9 @@ class World {
   // Matriz de desenho de uma entidade (posição, rotação e tamanho da forma).
   glm::mat4 entityMatrix(entt::entity e) const;
   bool simulate = true;  // falso: física parada (editor em pausa)
+  // Editor: cria uma forma básica (aparece no próximo load) e duplica uma entidade (1 m ao lado).
+  entt::entity addPrimitive(ShapeType type, glm::vec3 position, Motion motion, glm::vec3 halfExtents = glm::vec3(0.5f));
+  entt::entity duplicate(entt::entity e);
   // Editor: guarda as poses de todas as entidades ("Jogar") e volta para elas ("Parar"), com velocidades zeradas.
   void snapshot();
   void restore(scene::Scene& scene);

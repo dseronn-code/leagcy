@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 #include <GLFW/glfw3.h>
@@ -92,6 +93,13 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
   ImGui::NewFrame();
   ImGuizmo::BeginFrame();
   if (ImGui::IsKeyPressed(ImGuiKey_F1)) gizmoOperation_ = 1 - gizmoOperation_;
+  // Teste sem mouse (LEGACY_EDITOR_TESTE=caixa): no 3º quadro, aperta "+ Caixa" uma vez.
+  static int frameNo = 0;
+  static const char* autoTest = std::getenv("LEGACY_EDITOR_TESTE");
+  if (world && autoTest && ++frameNo == 3) {
+    world->addPrimitive(game::ShapeType::Box, camera.position + camera.forward() * 4.0f, game::Motion::Dynamic);
+    requestReload(*world);
+  }
 
   // Painel da cena.
   ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
@@ -124,6 +132,24 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
     ImGui::RadioButton("Mover", &gizmoOperation_, 0);
     ImGui::SameLine();
     ImGui::RadioButton("Girar", &gizmoOperation_, 1);
+    if (!playing_) {
+      // Novo objeto 4 m à frente da câmera (dinâmico: cai ao Jogar).
+      const glm::vec3 at = camera.position + camera.forward() * 4.0f;
+      if (ImGui::Button("+ Caixa")) {
+        world->addPrimitive(game::ShapeType::Box, at, game::Motion::Dynamic);
+        requestReload(*world);
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("+ Esfera")) {
+        world->addPrimitive(game::ShapeType::Sphere, at, game::Motion::Dynamic);
+        requestReload(*world);
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("+ Parede")) {
+        world->addPrimitive(game::ShapeType::Box, at, game::Motion::Static, glm::vec3(2.0f, 1.5f, 0.15f));
+        requestReload(*world);
+      }
+    }
     ImGui::InputText("##arquivo", savePath_, sizeof(savePath_));
     ImGui::SameLine();
     if (ImGui::Button("Salvar")) status_ = world->save(savePath_) ? std::string("Salvo em ") + savePath_ : "Falha ao salvar";
@@ -183,6 +209,22 @@ void Editor::properties(game::World& world, scene::Scene& scene) {
       ImGui::Text("Esfera: raio %.2f m", s->radius);
     else
       ImGui::Text("Cápsula: raio %.2f m, altura %.2f m", s->radius, 2 * (s->halfHeight + s->radius));
+  }
+  if (!playing_) {
+    if (ImGui::Button("Duplicar")) {
+      world.duplicate(selected_);
+      requestReload(world);
+      ImGui::End();
+      return;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Apagar")) {
+      reg.destroy(selected_);
+      selected_ = entt::null;
+      requestReload(world);
+      ImGui::End();
+      return;
+    }
   }
   if (game::RigidBody* b = reg.try_get<game::RigidBody>(selected_)) {
     ImGui::SeparatorText("Física");
@@ -246,6 +288,12 @@ void Editor::picking(game::World& world, const scene::Camera& camera, VkExtent2D
   const glm::vec3 dir = glm::normalize(fwd + right * (x * tanHalf * aspect) + up * (y * tanHalf));
   const uint32_t body = world.physics->castRay(camera.position, dir, 2000.0f);
   selected_ = world.entityOfBody(body);
+}
+
+void Editor::requestReload(game::World& world) {
+  const std::string path = ".editor_cena.json";  // na pasta do motor: os caminhos dos modelos continuam valendo
+  if (world.save(path)) reload_ = path;
+  else status_ = "Falha ao gravar a cena temporária";
 }
 
 void Editor::selectByName(game::World& world, const std::string& name) {
