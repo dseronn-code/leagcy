@@ -193,6 +193,7 @@
   .groups h4 { margin: 0 0 4px; font: 900 18px var(--f-display); text-transform: uppercase; }
   .ko { display: grid; gap: 6px; }
   .ko .m { display: flex; align-items: center; gap: 8px; justify-content: space-between; padding: 6px 8px; border-radius: 8px; background: rgba(255,255,255,.04); font-weight: 700; flex-wrap: wrap; }
+  .code { font: 900 34px/1 var(--f-display); letter-spacing: .08em; color: var(--amber); }
   .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
   .sw { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(255,255,255,.25); padding: 0; background: var(--c); }
   .sw[aria-pressed="true"] { border-color: var(--ink); transform: scale(1.15); box-shadow: 0 0 0 2px var(--night); }
@@ -278,7 +279,8 @@
         <li><b>Batedor:</b> toque no canto e pare a barra de força. Verde = no ângulo. Vermelho = isolou. Batedor com over alto tem a faixa verde maior.</li>
         <li><b>Goleiro:</b> escolha o canto e pare o reflexo no meio. Mesmo canto = chance de defesa.</li>
         <li>Fraco no meio de cima = <b>cavadinha</b>. Goleiro parado no meio pega.</li>
-        <li><b>Campanha:</b> crie seu clube. Ele entra no lugar de um dos que subiram para a Série A. 5 grupos de 4, os 5 líderes e os 3 melhores segundos vão para as quartas.</li>
+        <li><b>Campanha:</b> crie seu clube e escolha uma <b>seção</b>. Cada seção tem um código e até 20 jogadores. Para cair junto com seu amigo, entre pelo código da seção dele.</li>
+        <li>Cada clube criado entra no lugar de um da Série A: primeiro os que subiram, depois os de menor força. Com 20 jogadores, não sobra IA. 5 grupos de 4; os 5 líderes e os 3 melhores segundos vão para as quartas.</li>
         <li>Contra a IA você joga na hora. Contra seu amigo, cada um escolhe no próprio celular, ao mesmo tempo, e ninguém vê a escolha do outro.</li>
         <li>O mata-mata só anda quando todo mundo terminar a fase. Quem cai pode assistir, mas só vê o lance depois que os dois escolheram.</li>
         <li>Vitória dá dinheiro. Com dinheiro você contrata batedores e recebe propostas para ser dono de clubes. Cada clube tem um dono só.</li>
@@ -1888,7 +1890,7 @@ function calcSeason(S, RES) {
   const minProg = hTeams.length ? Math.min(...hTeams.map((h) => prog[h])) : 3;
   gm.forEach((m) => {
     if (isH(m.a) || isH(m.b)) m.res = resOf(m.id);
-    else { const gh = S.grupos[m.gi].find(isH); if ((gh ? prog[gh] : minProg) > m.r) m.res = simulate(S.seed + m.id, m.a, m.b); }
+    else { const gh = S.grupos[m.gi].filter(isH); if ((gh.length ? Math.min(...gh.map((h) => prog[h])) : minProg) > m.r) m.res = simulate(S.seed + m.id, m.a, m.b); }
   });
   const tables = S.grupos.map((g, gi) => {
     const rows = g.map((t) => ({ t, j: 0, v: 0, d: 0, gp: 0, gc: 0, pts: 0 })), R = Object.fromEntries(rows.map((r) => [r.t, r]));
@@ -1918,14 +1920,14 @@ function myStatus(C, S, uid) {
   const me = "h_" + uid;
   if (!(S.humanos || []).includes(uid)) return { tipo: "fora" };
   if (C.phase === "grupos") {
-    const nx = C.gm.filter((m) => m.a === me || m.b === me).sort((x, y) => x.r - y.r).find((m) => !m.res);
-    if (nx) return { tipo: "jogar", m: nx };
+    const ms = C.gm.filter((m) => (m.a === me || m.b === me) && !m.res).sort((x, y) => x.r - y.r);
+    if (ms.length) return { tipo: "jogar", ms };
     return { tipo: "esperar", quem: S.humanos.filter((u) => C.prog["h_" + u] < 3), fase: "grupos" };
   }
   if (C.phase === "fim") return { tipo: C.champion === me ? "campeao" : "fim" };
   const round = C.ko[C.phase], m = round.find((x) => x.a === me || x.b === me);
   if (!m) return { tipo: "eliminado" };
-  if (!m.res) return { tipo: "jogar", m, online: isH(m.a) && isH(m.b) };
+  if (!m.res) return { tipo: "jogar", ms: [m] };
   return { tipo: "esperar", quem: round.filter((x) => !x.res).flatMap((x) => [x.a, x.b]).filter(isH).map((t) => t.slice(2)), fase: C.phase };
 }
 function lineupOf(p) {
@@ -1950,9 +1952,14 @@ const teamName = (t) => (isH(t) ? humanClub(t.slice(2)).nome : CLUB[t].nome);
 const presName = (u) => (Camp.perfis[u] && Camp.perfis[u].nome) || (Camp.season && Camp.season.clubes && Camp.season.clubes[u] && Camp.season.clubes[u].presidente) || "seu amigo";
 
 const Camp = {
-  started: false, sid: null, season: null, inscritos: {}, res: {}, perfis: {}, donos: {}, contratos: {}, atual: null, listeners: new Set(), seasonUnsubs: [],
+  started: false, sid: null, secoes: {}, res: {}, perfis: {}, donos: {}, contratos: {}, listeners: new Set(), seasonUnsubs: [],
   get me() { return this.perfis[DB.uid] || null; },
-  emit() { this.listeners.forEach((f) => f()); },
+  get season() { return (this.sid && this.secoes[this.sid]) || null; },
+  emit() {
+    const want = (this.me && this.me.secaoAtual) || null;
+    if (want !== this.sid) this.watchSeason(want);
+    this.listeners.forEach((f) => f());
+  },
   sub(ref, fn, list) {
     try { const u = ref.onSnapshot(fn, (e) => { this.err = (e && e.code) || "erro"; this.emit(); }); if (list) list.push(u); } catch (e) { this.err = "erro"; }
   },
@@ -1960,27 +1967,25 @@ const Camp = {
     await DB.init();
     if (this.started) return;
     this.started = true;
+    const toMap = (s) => { const m = {}; s.docs.forEach((d) => (m[d.id] = d.data())); return m; };
     await new Promise((resolve) => {
       let ok = false; const done = () => { if (!ok) { ok = true; resolve(); } };
-      this.sub(DB.col("perfis"), (s) => { const m = {}; s.docs.forEach((d) => (m[d.id] = d.data())); this.perfis = { ...m, ...(this.pendingMe ? { [DB.uid]: this.pendingMe } : {}) }; this.emit(); done(); });
+      this.sub(DB.col("perfis"), (s) => { this.perfis = { ...toMap(s), ...(this.pendingMe ? { [DB.uid]: this.pendingMe } : {}) }; this.emit(); done(); });
       setTimeout(() => { this.slow = true; done(); }, 10000);
     });
-    const toMap = (s) => { const m = {}; s.docs.forEach((d) => (m[d.id] = d.data())); return m; };
     this.sub(DB.col("donos"), (s) => { this.donos = toMap(s); this.emit(); });
     this.sub(DB.col("contratos"), (s) => { this.contratos = toMap(s); this.emit(); });
-    this.sub(DB.doc("campanha/atual"), (s) => { this.atual = s.exists ? s.data() : null; this.watchSeason(this.atual && this.atual.sid); this.emit(); });
+    this.sub(DB.col("temporadas"), (s) => { this.secoes = toMap(s); this.emit(); });
   },
   watchSeason(sid) {
     if (sid === this.sid) return;
     this.seasonUnsubs.forEach((u) => u()); this.seasonUnsubs = [];
-    this.sid = sid; this.season = null; this.inscritos = {}; this.res = {};
+    this.sid = sid; this.res = {};
     if (!sid) return;
     const toMap = (s) => { const m = {}; s.docs.forEach((d) => (m[d.id] = d.data())); return m; };
-    this.sub(DB.doc(`temporadas/${sid}`), (s) => { this.season = s.exists ? s.data() : null; this.emit(); }, this.seasonUnsubs);
-    this.sub(DB.col(`temporadas/${sid}/inscritos`), (s) => { this.inscritos = toMap(s); this.emit(); }, this.seasonUnsubs);
     this.sub(DB.col(`temporadas/${sid}/res`), (s) => { this.res = { ...toMap(s), ...(this.pendingRes ? { [DB.uid]: this.pendingRes } : {}) }; this.emit(); }, this.seasonUnsubs);
   },
-  calc() { return this.season && this.season.status === "andamento" ? calcSeason(this.season, this.res) : null; },
+  calc() { const S = this.season; return S && S.status === "andamento" ? calcSeason(S, this.res) : null; },
   resolved(mid) { for (const u in this.res) if (this.res[u] && this.res[u].jogos && this.res[u].jogos[mid]) return true; return false; },
 };
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -2016,7 +2021,7 @@ async function claim(path, holderData) {
   await ref.set({ uid: DB.uid, ...holderData, em: Date.now() });
   return "ok";
 }
-const excluded = () => (Camp.season && Camp.season.substitui ? Object.values(Camp.season.substitui) : [SUBSTITUI[0]]);
+const excluded = () => (Camp.season && Camp.season.substitui ? Object.values(Camp.season.substitui).filter((c) => CLUB[c] && CLUB[c].sobe) : [SUBSTITUI[0]]);
 async function comprarBatedor(id) {
   const b = BAT[id], p = clone(Camp.me);
   if ((p.dinheiro || 0) < b.preco) return toast("Dinheiro insuficiente.");
@@ -2045,35 +2050,87 @@ async function comprarClube(cid) {
 }
 const bestOffer = () => { const p = Camp.me; if (!p) return null; return CLUBES.filter((c) => !Camp.donos[c.id] && (p.dinheiro || 0) >= c.preco * 0.7).sort((x, y) => y.preco - x.preco)[0] || null; };
 
-// ----- temporada: criar, entrar, começar -----
-async function criarTemporada() {
-  const sid = "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-  const num = ((Camp.atual && Camp.atual.num) || 0) + 1;
-  try {
-    await DB.doc("temporadas/" + sid).set({ status: "lobby", criador: DB.uid, seed: String(Math.floor(Math.random() * 1e9)), em: Date.now(), num });
-    await DB.doc("campanha/atual").set({ sid, num, em: Date.now() });
-    Camp.watchSeason(sid);
-    await entrarTemporada(sid);
-  } catch (e) { toast("Não deu para criar a temporada. Você precisa de acesso de Editor.", 4000); }
+// ----- seções: cada campanha é uma seção com código, até 20 jogadores -----
+const MAX_SECAO = 20;
+// Ordem em que os clubes criados tomam o lugar dos da Série A: primeiro os que subiram, depois os mais fracos.
+const ORDEM = [...SUBSTITUI, ...CLUBES.filter((c) => !SUBSTITUI.includes(c.id)).sort((x, y) => x.forca - y.forca).map((c) => c.id)];
+class UserErr extends Error {}
+async function withLease(path, fn) {
+  const ref = DB.doc(path);
+  let l = { acquired: false };
+  for (let t = 0; t < 4 && !l.acquired; t++) {
+    try { l = await ref.acquire({ holder: DB.uid, ttlMs: 8000 }); } catch (e) { l = { acquired: false }; }
+    if (!l.acquired) await sleep(500 + Math.random() * 900);
+  }
+  if (!l.acquired) throw new UserErr("A seção está ocupada agora. Tente de novo em alguns segundos.");
+  const snap = await ref.get();
+  return fn(snap.exists ? snap.data() : null, ref);
 }
-async function entrarTemporada(sid = Camp.sid) {
-  const p = Camp.me;
-  await DB.doc(`temporadas/${sid}/inscritos/${DB.uid}`).set({ nome: p.nome, clube: p.clube, em: Date.now() });
+const meJogador = () => { const p = Camp.me; return { uid: DB.uid, nome: p.nome, clube: p.clube, em: Date.now() }; };
+async function usarSecao(code) {
+  const p = clone(Camp.me);
+  p.secoes = [...new Set([...(p.secoes || []), code])]; p.secaoAtual = code;
+  secaoPicker = false;
+  await savePerfil(p);
+}
+async function criarSecao() {
+  const AL = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "";
+  for (let t = 0; t < 6; t++) {
+    code = Array.from({ length: 5 }, () => AL[Math.floor(Math.random() * AL.length)]).join("");
+    if (!Camp.secoes[code] && !(await DB.doc("temporadas/" + code).get()).exists) break;
+  }
+  await DB.doc("temporadas/" + code).set({ codigo: code, status: "lobby", criador: DB.uid, criadorNome: Camp.me.nome, seed: String(Math.floor(Math.random() * 1e9)), em: Date.now(), jogadores: [meJogador()] });
+  await usarSecao(code);
+  toast(`Seção #${code} criada. Passe o código para seu amigo.`, 4000);
+}
+async function entrarSecao(code) {
+  code = (code || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!code) throw new UserErr("Digite o código da seção.");
+  await withLease("temporadas/" + code, async (S, ref) => {
+    if (!S || !S.codigo) throw new UserErr(`Não existe seção com o código #${code}.`);
+    const js = S.jogadores || [];
+    if (js.some((j) => j.uid === DB.uid)) return;
+    if (S.status !== "lobby") throw new UserErr(`A seção #${code} já começou. Entre em outra ou crie uma nova.`);
+    if (js.length >= MAX_SECAO) throw new UserErr(`A seção #${code} está cheia.`);
+    await ref.set({ ...S, jogadores: [...js, meJogador()] });
+  });
+  await usarSecao(code);
+}
+async function autoSecao() {
+  const abertas = Object.values(Camp.secoes).filter((S) => S && S.codigo && S.status === "lobby" && (S.jogadores || []).length < MAX_SECAO).sort((a, b) => a.em - b.em);
+  const ja = abertas.find((S) => (S.jogadores || []).some((j) => j.uid === DB.uid));
+  if (ja) return usarSecao(ja.codigo);
+  for (const S of abertas) {
+    try { await entrarSecao(S.codigo); toast(`Você caiu na seção #${S.codigo}.`); return; } catch (e) { /* encheu ou começou enquanto isso: tenta a próxima */ }
+  }
+  await criarSecao();
+}
+async function sairSecao() {
+  const code = Camp.sid;
+  await withLease("temporadas/" + code, async (S, ref) => {
+    if (!S || S.status !== "lobby") throw new UserErr("Só dá para sair antes da seção começar.");
+    await ref.set({ ...S, jogadores: (S.jogadores || []).filter((j) => j.uid !== DB.uid) });
+  });
+  const p = clone(Camp.me); p.secoes = (p.secoes || []).filter((x) => x !== code); p.secaoAtual = null;
+  await savePerfil(p);
 }
 async function comecarTemporada() {
-  const S = Camp.season;
-  const ins = Object.entries(Camp.inscritos).sort((a, b) => a[1].em - b[1].em).slice(0, 4);
-  if (!ins.length) return;
-  const humanos = ins.map(([u]) => u), substitui = {}, clubes = {};
-  humanos.forEach((u, i) => { substitui[u] = SUBSTITUI[i]; clubes[u] = { ...ins[i][1].clube, presidente: ins[i][1].nome }; });
-  const r = rng(hashStr(S.seed));
-  const ai = shuffle(CLUBES.map((c) => c.id).filter((id) => !Object.values(substitui).includes(id)), r);
-  const grupos = [[], [], [], [], []], order = shuffle([0, 1, 2, 3, 4], r);
-  humanos.forEach((u, i) => grupos[order[i]].push("h_" + u));
-  let gi = 0;
-  for (const t of ai) { while (grupos[gi].length >= 4) gi++; grupos[gi].push(t); }
-  grupos.forEach((g) => shuffle(g, r));
-  await DB.doc("temporadas/" + Camp.sid).set({ ...S, status: "andamento", humanos, substitui, clubes, grupos, inicio: Date.now() });
+  await withLease("temporadas/" + Camp.sid, async (S, ref) => {
+    if (!S || S.status !== "lobby") throw new UserErr("Essa seção já começou.");
+    const js = (S.jogadores || []).slice().sort((a, b) => a.em - b.em).slice(0, MAX_SECAO);
+    if (!js.length) throw new UserErr("Não tem ninguém na seção.");
+    const humanos = js.map((j) => j.uid), substitui = {}, clubes = {};
+    js.forEach((j, i) => { substitui[j.uid] = ORDEM[i]; clubes[j.uid] = { ...j.clube, presidente: j.nome }; });
+    const r = rng(hashStr(S.seed));
+    const ai = shuffle(CLUBES.map((c) => c.id).filter((id) => !Object.values(substitui).includes(id)), r);
+    const grupos = [[], [], [], [], []], order = shuffle([0, 1, 2, 3, 4], r);
+    humanos.forEach((u, i) => grupos[order[i % 5]].push("h_" + u));
+    let gi = 0;
+    for (const t of ai) { while (grupos[gi].length >= 4) gi++; grupos[gi].push(t); }
+    grupos.forEach((g) => shuffle(g, r));
+    await ref.set({ ...S, status: "andamento", humanos, substitui, clubes, grupos, inicio: Date.now() });
+  });
 }
 
 // =====================================================================================
@@ -2082,53 +2139,68 @@ async function comecarTemporada() {
 let hubTab = "temp";
 function renderHub() {
   if ($("sHub").hidden) return;
+  if (document.activeElement && document.activeElement.id === "codeIn") return;
   const p = Camp.me; if (!p) return;
   $("hubHead").innerHTML = `${badge(p.clube)}<div style="min-width:0"><h2>${esc(p.clube.nome)}</h2><p>Presidente ${esc(p.nome)} · ${p.titulos || 0} título${p.titulos === 1 ? "" : "s"}${(p.donos || []).length ? " · dono de " + p.donos.map((c) => CLUB[c].nome).join(", ") : ""}</p></div><div class="money"><span class="eyebrow">Caixa</span><b>${fmtR(p.dinheiro || 0)}</b></div>`;
   [...$("hubTabs").children].forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tab === hubTab)));
   $("hubBody").innerHTML = hubTab === "temp" ? tabTemp() : hubTab === "merc" ? tabMerc() : hubTab === "clubes" ? tabClubes() : tabElenco();
   $("hubNet").textContent = DB.local ? "Offline: salvo só neste aparelho." : Camp.err ? "Sem conexão com o campeonato." : "Online: progresso salvo no jogo.";
 }
+let secaoPicker = false, codigoDigitado = "";
+const statusSecao = (S) => (S.status === "lobby" ? "Inscrições abertas" : "Em andamento");
+function pickerHtml() {
+  const p = Camp.me, S = Camp.season;
+  const abertas = Object.values(Camp.secoes).filter((x) => x && x.codigo && x.status === "lobby" && (x.jogadores || []).length < MAX_SECAO).sort((a, b) => a.em - b.em);
+  const minhas = (p.secoes || []).map((id) => Camp.secoes[id]).filter(Boolean);
+  const quem = (x) => { const js = x.jogadores || []; return js.slice(0, 3).map((j) => `${esc(j.nome)} (${esc(j.clube.nome)})`).join(", ") + (js.length > 3 ? ` e mais ${js.length - 3}` : ""); };
+  let h = `<div class="panel hot"><span class="eyebrow">Escolha uma seção</span><h3>Jogar agora</h3><p>Você entra na seção aberta mais antiga que tiver vaga. Se todas estiverem cheias, uma nova é criada para você.</p><div><button class="btn primary" data-act="auto">Jogar agora</button></div></div>`;
+  h += `<div class="panel"><h3>Cair na seção do seu amigo</h3><p class="note">O código aparece na central do clube dele, no topo da aba Temporada.</p><div class="row" style="flex-wrap:nowrap"><input type="text" id="codeIn" maxlength="6" autocomplete="off" placeholder="Código, ex.: K7P2Q" value="${esc(codigoDigitado)}" style="text-transform:uppercase"><button class="btn go" data-act="entrarCodigo">Entrar</button></div></div>`;
+  if (minhas.length) h += `<div class="panel"><h3>Suas seções</h3>${minhas.map((x) => `<div class="li"><div class="grow"><b>#${esc(x.codigo)}</b><small>${statusSecao(x)} · ${(x.jogadores || []).length}/${MAX_SECAO} · ${quem(x)}</small></div><button class="btn sm" data-act="abrir" data-id="${esc(x.codigo)}">Abrir</button></div>`).join("")}</div>`;
+  h += `<div class="panel"><h3>Seções abertas</h3>${abertas.length ? abertas.map((x) => `<div class="li"><div class="grow"><b>#${esc(x.codigo)}</b><small>${(x.jogadores || []).length}/${MAX_SECAO} · ${quem(x)}</small></div><button class="btn sm go" data-act="entrarId" data-id="${esc(x.codigo)}">Entrar</button></div>`).join("") : `<p class="empty">Nenhuma seção com vaga agora.</p>`}<div><button class="btn sm" data-act="novaSecao">Criar nova seção</button></div></div>`;
+  if (S && secaoPicker) h += `<div><button class="btn sm" data-act="voltar">Voltar para a seção #${esc(S.codigo)}</button></div>`;
+  return h;
+}
 function tabTemp() {
-  const S = Camp.season, p = Camp.me;
+  const S = Camp.season;
   let h = "";
   const off = bestOffer();
   if (off) h += `<div class="panel hot"><span class="eyebrow">Proposta recebida</span><p>A diretoria do <b>${esc(off.nome)}</b> aceita vender o clube para você por <b>${fmtR(off.preco)}</b>.</p><div><button class="btn sm" data-tabgo="clubes">Ver proposta</button></div></div>`;
-  if (!S) {
-    return h + `<div class="panel"><h3>Nenhuma temporada aberta</h3><p>Crie a temporada e chame seu amigo: ele abre este mesmo link, funda o clube dele e entra antes de você começar.</p><div><button class="btn primary" data-act="criarTemp">Criar temporada</button></div></div>`;
-  }
+  if (!S || secaoPicker) return h + pickerHtml();
+  const js = (S.jogadores || []).slice().sort((a, b) => a.em - b.em);
+  h += `<div class="panel"><div class="row" style="justify-content:space-between"><div><span class="eyebrow">Seção</span><div class="code">#${esc(S.codigo)}</div></div><div class="row"><button class="btn sm" data-act="copiar">Copiar código</button><button class="btn sm" data-act="trocar">Trocar</button></div></div><p class="note">${statusSecao(S)} · ${js.length}/${MAX_SECAO} jogadores · criada por ${esc(S.criadorNome || "?")}. Passe o código para seu amigo cair nesta mesma seção.</p></div>`;
   if (S.status === "lobby") {
-    const ins = Object.entries(Camp.inscritos).sort((a, b) => a[1].em - b[1].em);
-    const souInscrito = !!Camp.inscritos[DB.uid], criador = S.criador === DB.uid;
-    h += `<div class="panel"><span class="eyebrow">Temporada ${S.num || 1} · inscrições abertas</span><h3>Quem vai jogar</h3>`;
-    h += ins.length ? ins.map(([u, d], i) => `<div class="li">${badge(d.clube, true)}<div class="grow"><b>${esc(d.clube.nome)}</b><small>${esc(d.nome)} · entra no lugar do ${CLUB[SUBSTITUI[i]] ? CLUB[SUBSTITUI[i]].nome : "?"}</small></div></div>`).join("") : `<p class="empty">Ninguém ainda.</p>`;
-    h += `<p class="note">Até 4 jogadores. Cada clube criado substitui um dos que subiram: Remo, Chapecoense, Coritiba e Athletico, nessa ordem.</p>`;
-    if (!souInscrito) h += `<div><button class="btn primary" data-act="entrar">Entrar nesta temporada</button></div>`;
-    if (criador) h += `<div><button class="btn ${souInscrito ? "primary" : ""}" data-act="comecar" ${ins.length ? "" : "disabled"}>Começar temporada (${ins.length} jogador${ins.length === 1 ? "" : "es"})</button></div>`;
-    else if (souInscrito) h += `<p>Esperando ${esc(presName(S.criador))} começar a temporada.</p>`;
+    const souIn = js.some((j) => j.uid === DB.uid), criador = S.criador === DB.uid, cheia = js.length >= MAX_SECAO;
+    h += `<div class="panel"><h3>Quem vai jogar</h3>`;
+    h += js.length ? js.map((j, i) => `<div class="li">${badge(j.clube, true)}<div class="grow"><b>${esc(j.clube.nome)}</b><small>${esc(j.nome)} · no lugar do ${esc(CLUB[ORDEM[i]].nome)}</small></div></div>`).join("") : `<p class="empty">Ninguém ainda.</p>`;
+    h += `<p class="note">Até ${MAX_SECAO} jogadores. Cada clube criado entra no lugar de um da Série A: primeiro os que subiram, depois os de menor força. Com ${MAX_SECAO}, não sobra IA.</p>`;
+    if (!souIn) h += `<div><button class="btn primary" data-act="entrarId" data-id="${esc(S.codigo)}">Entrar nesta seção</button></div>`;
+    if (criador || cheia) h += `<div><button class="btn ${souIn ? "primary" : ""}" data-act="comecar" ${js.length ? "" : "disabled"}>Começar (${js.length} jogador${js.length === 1 ? "" : "es"})</button></div>`;
+    else if (souIn) h += `<p>Esperando ${esc(S.criadorNome || "o criador")} começar. Se encher, qualquer um pode começar.</p>`;
+    if (souIn) h += `<div><button class="btn sm" data-act="sair">Sair da seção</button></div>`;
     return h + `</div>`;
   }
   const C = Camp.calc(); if (!C) return h;
-  const st = myStatus(C, S, DB.uid);
+  const st = myStatus(C, S, DB.uid), me = "h_" + DB.uid;
   h += `<div class="panel ${st.tipo === "jogar" ? "hot" : ""}">`;
   if (st.tipo === "jogar") {
-    const m = st.m, rival = m.a === "h_" + DB.uid ? m.b : m.a;
-    h += `<span class="eyebrow">${FASE_CURTA[m.fase]}${m.fase === "grupos" ? " · rodada " + (m.r + 1) : ""}</span>`;
-    h += `<div class="vs">${teamBadge(m.a)} ${esc(teamName(m.a))} <span class="eyebrow">×</span> ${teamBadge(m.b)} ${esc(teamName(m.b))}</div>`;
-    if (st.online) h += `<p><span class="live">Ao vivo</span> Você contra <b>${esc(presName(rival.slice(2)))}</b>. Cada um escolhe no próprio celular, ao mesmo tempo.</p>`;
-    else h += `<p class="note">Vitória: ${fmtR(PREMIO[m.fase][0])}. Derrota: ${fmtR(PREMIO[m.fase][1])}.</p>`;
-    h += `<div><button class="btn primary" data-act="jogar">${st.online ? "Entrar na partida" : "Jogar"}</button></div>`;
+    h += `<span class="eyebrow">${FASE_CURTA[st.ms[0].fase]} · seus jogos</span>`;
+    for (const m of st.ms) {
+      const online = isH(m.a) && isH(m.b), rival = m.a === me ? m.b : m.a;
+      h += `<div class="li"><div class="grow"><div class="vs">${teamBadge(m.a, true)} ${esc(teamName(m.a))} <span class="eyebrow">×</span> ${teamBadge(m.b, true)} ${esc(teamName(m.b))}</div><small>${m.fase === "grupos" ? "Rodada " + (m.r + 1) + " · " : ""}${online ? `<span class="live">Ao vivo</span> contra ${esc(presName(rival.slice(2)))}` : `Vitória ${fmtR(PREMIO[m.fase][0])}`}</small></div><button class="btn sm ${online ? "" : "go"}" data-act="jogar" data-mid="${m.id}">${online ? "Entrar" : "Jogar"}</button></div>`;
+    }
   } else if (st.tipo === "esperar") {
     const nomes = st.quem.filter((u) => u !== DB.uid).map((u) => presName(u));
-    h += `<h3>Esperando</h3><p>Você só joga a próxima fase quando ${nomes.length ? "<b>" + nomes.map(esc).join("</b> e <b>") + "</b> terminar" : "todos terminarem"} ${FASE[st.fase] || ""}.</p>`;
+    h += `<h3>Esperando</h3><p>Você só joga a próxima fase quando ${nomes.length ? "<b>" + nomes.map(esc).join("</b>, <b>") + "</b> terminar" : "todos terminarem"} ${FASE[st.fase] || ""}.</p>`;
   } else if (st.tipo === "eliminado") {
     h += `<h3>Você está fora</h3><p>Seu clube caiu. Dá para assistir aos jogos ao vivo, mas você só vê cada lance depois que os dois escolheram.</p>`;
   } else if (st.tipo === "campeao" || st.tipo === "fim") {
-    h += `<span class="eyebrow">Temporada ${S.num || 1} encerrada</span><h3>${st.tipo === "campeao" ? "Você é o campeão!" : "Campeão: " + esc(teamName(C.champion))}</h3><div><button class="btn primary" data-act="criarTemp">Nova temporada</button></div>`;
+    h += `<span class="eyebrow">Seção #${esc(S.codigo)} encerrada</span><h3>${st.tipo === "campeao" ? "Você é o campeão!" : "Campeão: " + esc(teamName(C.champion))}</h3><div><button class="btn primary" data-act="auto">Próxima seção</button></div>`;
   } else {
-    h += `<h3>Temporada em andamento</h3><p>Você não se inscreveu nesta. Assista aos jogos e entre na próxima.</p>`;
+    h += `<h3>Seção em andamento</h3><p>Você não está nesta seção. Assista aos jogos ou troque de seção.</p>`;
   }
   h += `</div>`;
-  const ao = C.phase in C.ko ? C.ko[C.phase].filter((m) => isH(m.a) && isH(m.b) && !m.res && m.a !== "h_" + DB.uid && m.b !== "h_" + DB.uid) : [];
+  const pool = C.phase === "grupos" ? C.gm : C.ko[C.phase] || [];
+  const ao = pool.filter((m) => isH(m.a) && isH(m.b) && !m.res && m.a !== me && m.b !== me);
   if (ao.length) h += `<div class="panel"><span class="live">Ao vivo</span>${ao.map((m) => `<div class="li"><div class="grow"><b>${esc(teamName(m.a))} × ${esc(teamName(m.b))}</b><small>${FASE_CURTA[m.fase]}</small></div><button class="btn sm" data-act="assistir" data-mid="${m.id}">Assistir</button></div>`).join("")}</div>`;
   const ko = ["QF", "SF", "F"].filter((f) => C.ko[f].length);
   if (ko.length) {
@@ -2136,7 +2208,7 @@ function tabTemp() {
     for (const f of ko) h += `<span class="eyebrow">${FASE_CURTA[f]}</span><div class="ko">${C.ko[f].map((m) => `<div class="m"><span>${teamBadge(m.a, true)} ${esc(teamName(m.a))}</span><span>${m.res ? `${m.res.ga} × ${m.res.gb}${m.res.wo ? " (W.O.)" : ""}` : isH(m.a) && isH(m.b) ? '<span class="live">ao vivo</span>' : "×"}</span><span>${esc(teamName(m.b))} ${teamBadge(m.b, true)}</span></div>`).join("")}</div>`;
     h += `</div>`;
   }
-  h += `<div class="groups">${C.tables.map((rows, gi) => `<div class="panel"><h4>Grupo ${"ABCDE"[gi]}</h4><table><thead><tr><th>#</th><th>Clube</th><th>J</th><th>V</th><th>SG</th><th>P</th></tr></thead><tbody>${rows.map((r, i) => `<tr class="${r.t === "h_" + DB.uid ? "me" : ""} ${C.qualified && C.qualified.has(r.t) ? "q" : ""}"><td>${i + 1}</td><td>${teamBadge(r.t, true)} ${esc(teamName(r.t))}</td><td>${r.j}</td><td>${r.v}</td><td>${r.gp - r.gc}</td><td class="v">${r.pts}</td></tr>`).join("")}</tbody></table></div>`).join("")}</div>`;
+  h += `<div class="groups">${C.tables.map((rows, gi) => `<div class="panel"><h4>Grupo ${"ABCDE"[gi]}</h4><table><thead><tr><th>#</th><th>Clube</th><th>J</th><th>V</th><th>SG</th><th>P</th></tr></thead><tbody>${rows.map((r, i) => `<tr class="${r.t === me ? "me" : ""} ${C.qualified && C.qualified.has(r.t) ? "q" : ""}"><td>${i + 1}</td><td>${teamBadge(r.t, true)} ${esc(teamName(r.t))}</td><td>${r.j}</td><td>${r.v}</td><td>${r.gp - r.gc}</td><td class="v">${r.pts}</td></tr>`).join("")}</tbody></table></div>`).join("")}</div>`;
   h += `<p class="note">Os 5 líderes e os 3 melhores segundos vão para as quartas.</p>`;
   return h;
 }
@@ -2164,21 +2236,38 @@ function tabElenco() {
     (resto.length ? `<div class="panel"><h3>Reservas</h3>${resto.map((b) => `<div class="li"><span class="ovr ${ovrTier(b.over)}">${b.over}</span><div class="grow"><b>${esc(b.nome)}</b><small>${CLUB[b.clube].nome}</small></div></div>`).join("")}</div>` : "") +
     `<p class="note">${p.jogos || 0} jogos, ${p.vitorias || 0} vitórias na campanha.</p>`;
 }
+$("hubCard").addEventListener("input", (e) => { if (e.target.id === "codeIn") codigoDigitado = e.target.value.toUpperCase(); });
+$("hubCard").addEventListener("keydown", (e) => { if (e.target.id === "codeIn" && e.key === "Enter") { const b = $("hubCard").querySelector('[data-act="entrarCodigo"]'); if (b) b.click(); } });
 $("hubCard").addEventListener("click", async (e) => {
   const tb = e.target.closest("[data-tab]"); if (tb) { hubTab = tb.dataset.tab; renderHub(); return; }
   const tg = e.target.closest("[data-tabgo]"); if (tg) { hubTab = tg.dataset.tabgo; renderHub(); return; }
   const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;
   Sfx.init();
-  const act = b.dataset.act; b.disabled = true;
+  const act = b.dataset.act;
+  if (act === "jogar") { jogarCampanha(b.dataset.mid); return; }
+  if (act === "assistir") { assistirPartida(b.dataset.mid); return; }
+  if (act === "trocar") { secaoPicker = true; renderHub(); return; }
+  if (act === "voltar") { secaoPicker = false; renderHub(); return; }
+  if (act === "copiar") {
+    const code = Camp.sid || "";
+    try { navigator.clipboard.writeText(code).then(() => toast(`Código #${code} copiado.`), () => toast(`O código é #${code}.`)); } catch (err) { toast(`O código é #${code}.`); }
+    return;
+  }
+  b.disabled = true;
   try {
-    if (act === "criarTemp") await criarTemporada();
-    else if (act === "entrar") await entrarTemporada();
+    if (act === "auto") await autoSecao();
+    else if (act === "novaSecao") await criarSecao();
+    else if (act === "entrarCodigo") { await entrarSecao(codigoDigitado); codigoDigitado = ""; toast("Você entrou na seção do seu amigo."); }
+    else if (act === "entrarId") await entrarSecao(b.dataset.id);
+    else if (act === "abrir") await usarSecao(b.dataset.id);
+    else if (act === "sair") await sairSecao();
     else if (act === "comecar") await comecarTemporada();
-    else if (act === "jogar") { jogarCampanha(); return; }
-    else if (act === "assistir") { assistirPartida(b.dataset.mid); return; }
     else if (act === "comprarBat") await comprarBatedor(b.dataset.id);
     else if (act === "comprarClube") await comprarClube(b.dataset.id);
-  } catch (err) { toast("Não deu certo. Tente de novo.", 3000); console.error(err); }
+  } catch (err) {
+    if (err instanceof UserErr) toast(err.message, 4000);
+    else { toast("Não deu certo. Confira a conexão e se você tem acesso de Editor.", 4000); console.error(err); }
+  }
   b.disabled = false; renderHub();
 });
 Camp.listeners.add(() => renderHub());
@@ -2197,11 +2286,12 @@ function goHome() {
   Cam.mode = "orbit"; resetPoses(); renderH2H(); show("sHome");
 }
 function findMatch(mid) { const C = Camp.calc(); if (!C) return null; return [...C.gm, ...C.ko.QF, ...C.ko.SF, ...C.ko.F].find((m) => m.id === mid) || null; }
-async function jogarCampanha() {
+async function jogarCampanha(mid) {
   const C = Camp.calc(); if (!C) return;
   const st = myStatus(C, Camp.season, DB.uid); if (st.tipo !== "jogar") return;
+  const m = st.ms.find((x) => x.id === mid) || st.ms[0];
   const tok = ++abortToken;
-  try { if (st.online) await jogarOnline(st.m, tok); else await jogarIA(st.m, tok); }
+  try { if (isH(m.a) && isH(m.b)) await jogarOnline(m, tok); else await jogarIA(m, tok); }
   catch (e) {
     if (e instanceof Abort) return;
     if (e instanceof WO) { toast("O rival ganhou por W.O."); openHub(); return; }
@@ -2401,7 +2491,7 @@ $("fGo").addEventListener("click", async () => {
   if (cria.a === cria.b) return err("Escolha duas cores diferentes.");
   err("");
   await savePerfil({ nome, clube: { nome: clube, sigla, a: cria.a, b: cria.b }, dinheiro: 200e3, elenco: [], donos: [], pagos: {}, titulos: 0, jogos: 0, vitorias: 0, criado: Date.now() });
-  Sfx.roar(); burstConfetti({ a: cria.a, b: cria.b }); openHub();
+  hubTab = "temp"; Sfx.roar(); burstConfetti({ a: cria.a, b: cria.b }); openHub();
 });
 async function abrirCampanha() {
   Sfx.init(); show("sLoad");
