@@ -407,6 +407,8 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 <script>
 (() => {
 "use strict";
@@ -738,6 +740,42 @@ function pitchTexture() {
 }
 const pitch = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ map: pitchTexture(), roughness: 0.92, metalness: 0 }));
 pitch.rotation.x = -Math.PI / 2; pitch.position.z = 10; pitch.receiveShadow = true; scene.add(pitch);
+// Máscara do campo (canal R = listras do corte, G = linhas de cal, B = desgaste) sobre a textura real de grama.
+function pitchMask() {
+  const S = 2048, [c, g] = mkCanvas(S, S);
+  const Y = (z) => ((z + 20) / 60) * S, X = (x) => ((x + 30) / 60) * S, M = (m) => (m / 60) * S;
+  for (let i = 0; i < 15; i++) { g.fillStyle = i % 2 ? "rgb(255,0,0)" : "rgb(0,0,0)"; g.fillRect(0, Y(-20 + i * 4), S, M(4) + 1); }
+  g.globalCompositeOperation = "lighter";
+  const wear = (x, z, r, a) => { const gr = g.createRadialGradient(X(x), Y(z), 0, X(x), Y(z), M(r)); gr.addColorStop(0, `rgba(0,0,255,${a})`); gr.addColorStop(1, "rgba(0,0,255,0)"); g.fillStyle = gr; g.fillRect(X(x) - M(r), Y(z) - M(r), M(2 * r), M(2 * r)); };
+  wear(0, 11, 1.4, 0.9); wear(0, 1.0, 2.8, 0.6); wear(-2.5, 0.6, 1.5, 0.4); wear(2.5, 0.6, 1.5, 0.4);
+  g.strokeStyle = "rgb(0,255,0)"; g.fillStyle = "rgb(0,255,0)"; g.lineWidth = M(0.12);
+  g.beginPath(); g.moveTo(X(-30), Y(0)); g.lineTo(X(30), Y(0)); g.stroke();
+  g.strokeRect(X(-20.16), Y(0), M(40.32), M(16.5));
+  g.strokeRect(X(-9.16), Y(0), M(18.32), M(5.5));
+  g.beginPath(); g.arc(X(0), Y(11), M(9.15), 0.645, Math.PI - 0.645); g.stroke();
+  g.beginPath(); g.arc(X(0), Y(11), M(0.13), 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c); t.anisotropy = maxAniso; return t;
+}
+function realPitch(grassTex, nmTex) {
+  for (const t of [grassTex, nmTex]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(40, 40); t.anisotropy = maxAniso; }
+  grassTex.encoding = THREE.sRGBEncoding;
+  const mask = pitchMask();
+  const m = new THREE.MeshStandardMaterial({ map: grassTex, normalMap: nmTex, normalScale: new THREE.Vector2(0.9, 0.9), roughness: 0.86, metalness: 0, color: new THREE.Color(0.55, 0.78, 0.42) });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.lineMap = { value: mask };
+    sh.vertexShader = "varying vec2 vUv0;\n" + sh.vertexShader.replace("#include <uv_vertex>", "#include <uv_vertex>\n vUv0 = uv;");
+    sh.fragmentShader = "uniform sampler2D lineMap;\nvarying vec2 vUv0;\n" + sh.fragmentShader.replace("#include <map_fragment>", `#include <map_fragment>
+      vec4 lm = texture2D(lineMap, vUv0);
+      diffuseColor.rgb *= mix(0.8, 1.1, lm.r);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.30, 0.25, 0.14), lm.b * 0.6);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.82, 0.83, 0.80), lm.g);`);
+  };
+  pitch.material = m;
+}
+{
+  const tl = new THREE.TextureLoader();
+  tl.load("assets/grama.jpg", (gt) => tl.load("assets/grama_nm.jpg", (nt) => realPitch(gt, nt), undefined, () => {}), undefined, () => {});
+}
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: 0x163a1c, roughness: 1 }));
 ground.rotation.x = -Math.PI / 2; ground.position.y = -0.02; scene.add(ground);
 
@@ -811,29 +849,62 @@ buildStand(31, 14, 52, -Math.PI / 2, 13, 2.2);
 
 const crowdUniforms = { uTime: { value: 0 }, uJump: { value: 0.05 }, uRate: { value: 3 } };
 let crowd;
+// Atlas com 8 torcedores: 4 sentados/em pé e 4 com os braços para cima (gol). Verde puro = camisa (tingida por pessoa).
+function crowdAtlas() {
+  const FW = 64, FH = 112, [c, g] = mkCanvas(FW * 8, FH);
+  const skins = ["#8d5524", "#c68642", "#e0ac69", "#5c3a1e", "#f1c27d", "#a86b3c"], hairs = ["#111", "#2b1a0e", "#4a2c12", "#d9b16a"];
+  for (let f = 0; f < 8; f++) {
+    const x0 = f * FW, up = f >= 4, sk = skins[(f * 3) % skins.length], hr = hairs[f % hairs.length], cx = x0 + FW / 2;
+    g.save();
+    // braços
+    g.lineCap = "round"; g.lineWidth = 9;
+    for (const s of [-1, 1]) {
+      g.strokeStyle = "#00ff00"; g.beginPath(); g.moveTo(cx + s * 13, 50);
+      if (up) { g.lineTo(cx + s * 19, 26); g.stroke(); g.strokeStyle = sk; g.lineWidth = 8; g.beginPath(); g.moveTo(cx + s * 19, 26); g.lineTo(cx + s * (16 + (f % 2) * 6), 6); g.stroke(); }
+      else { g.lineTo(cx + s * 17, 78); g.stroke(); g.strokeStyle = sk; g.lineWidth = 8; g.beginPath(); g.moveTo(cx + s * 17, 78); g.lineTo(cx + s * 15, 92); g.stroke(); }
+      g.lineWidth = 9;
+    }
+    // tronco (camisa branca = tingível), ombros arredondados
+    g.fillStyle = "#00ff00"; g.beginPath(); g.moveTo(cx - 17, 112); g.lineTo(cx - 18, 54); g.quadraticCurveTo(cx - 17, 44, cx - 6, 42); g.lineTo(cx + 6, 42); g.quadraticCurveTo(cx + 17, 44, cx + 18, 54); g.lineTo(cx + 17, 112); g.closePath(); g.fill();
+    if (f % 3 === 0) { g.fillStyle = "#1a1a1a"; g.fillRect(cx - 17, 70, 34, 6); }
+    // pescoço, cabeça, cabelo
+    g.fillStyle = sk; g.fillRect(cx - 4, 34, 8, 10);
+    g.beginPath(); g.ellipse(cx, 28, 10, 12, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = hr; g.beginPath(); g.ellipse(cx, 22, 10.5, 7 + (f % 3) * 2, 0, Math.PI, Math.PI * 2); g.fill();
+    if (f === 2 || f === 6) { g.fillStyle = "#ffffff"; g.beginPath(); g.ellipse(cx, 19, 11, 6, 0, Math.PI, Math.PI * 2); g.fill(); }
+    g.restore();
+  }
+  const t = colorTex(c); t.anisotropy = 4; return t;
+}
+const crowdTex = crowdAtlas();
+crowdUniforms.uCheer = { value: 0 };
 function buildCrowd(kitA, kitB) {
   if (crowd) { scene.remove(crowd); crowd.geometry.dispose(); }
-  const geo = new THREE.BoxGeometry(0.42, 0.78, 0.32); geo.translate(0, 0.39, 0);
-  const phase = new Float32Array(crowdSpots.length);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  const geo = new THREE.PlaneGeometry(0.58, 1.0); geo.translate(0, 0.42, 0);
+  const n = crowdSpots.length, phase = new Float32Array(n), frame = new Float32Array(n);
+  const mat = new THREE.MeshLambertMaterial({ map: crowdTex, alphaTest: 0.5, side: THREE.DoubleSide, color: 0xffffff });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, crowdUniforms);
-    sh.vertexShader = "attribute float aPhase;\nuniform float uTime, uJump, uRate;\n" + sh.vertexShader.replace("#include <begin_vertex>",
-      "#include <begin_vertex>\n transformed.y += max(0.0, sin(uTime * uRate + aPhase * 6.2831)) * uJump * (0.6 + 0.8 * fract(aPhase * 7.3));\n transformed.x += sin(uTime * 1.3 + aPhase * 40.0) * 0.03;");
+    sh.vertexShader = "attribute float aPhase;\nattribute float aFrame;\nuniform float uTime, uJump, uRate, uCheer;\n" + sh.vertexShader
+      .replace("#include <uv_vertex>", "#include <uv_vertex>\n float cheer = step(0.5, uCheer * step(0.25, fract(aPhase * 13.7) + uCheer * 0.6));\n vUv = vec2((vUv.x + aFrame + cheer * 4.0) / 8.0, vUv.y);")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\n transformed.y += max(0.0, sin(uTime * uRate + aPhase * 6.2831)) * uJump * (0.6 + 0.8 * fract(aPhase * 7.3));\n transformed.x += sin(uTime * 1.3 + aPhase * 40.0) * 0.03;");
+    // só a camisa (branco no atlas) pega a cor do torcedor
+    sh.fragmentShader = sh.fragmentShader.replace("#include <color_fragment>", "#ifdef USE_COLOR\n float shirt = clamp((texelColor.g - max(texelColor.r, texelColor.b)) * 3.0, 0.0, 1.0);\n diffuseColor.rgb = mix(diffuseColor.rgb, vColor * (texelColor.g * 0.85 + 0.15), shirt);\n#endif");
   };
-  crowd = new THREE.InstancedMesh(geo, mat, crowdSpots.length);
+  crowd = new THREE.InstancedMesh(geo, mat, n);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), col = new THREE.Color();
   const pal = [kitA.a, kitA.b, kitB.a, kitB.b, "#1d1d22", "#e9e4da", "#3a3f55"];
   crowdSpots.forEach((c, i) => {
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), c.rot + rnd(-0.2, 0.2));
-    const h = rnd(0.85, 1.1); s.set(rnd(0.9, 1.1), h, 1);
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), c.rot + rnd(-0.12, 0.12));
+    const h = rnd(0.9, 1.08); s.set(rnd(0.92, 1.08), h, 1);
     m.compose(c.p, q, s); crowd.setMatrixAt(i, m);
     const side = c.p.x < 0 ? 0 : 1;
     const base = Math.random() < 0.72 ? (side === 0 ? pick([kitA.a, kitA.a, kitA.b]) : pick([kitB.a, kitB.a, kitB.b])) : pick(pal);
-    col.set(base).convertSRGBToLinear().multiplyScalar(rnd(0.55, 1.0)); crowd.setColorAt(i, col);
-    phase[i] = Math.random();
+    col.set(base).convertSRGBToLinear().multiplyScalar(rnd(0.6, 1.0)); crowd.setColorAt(i, col);
+    phase[i] = Math.random(); frame[i] = Math.floor(Math.random() * 4);
   });
   geo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phase, 1));
+  geo.setAttribute("aFrame", new THREE.InstancedBufferAttribute(frame, 1));
   scene.add(crowd);
 }
 
@@ -899,7 +970,7 @@ for (const [x, z] of towers) {
 scene.add(new THREE.HemisphereLight(0x6a80c0, 0x0d2a12, 0.75));
 const key = new THREE.DirectionalLight(0xfff1dc, 2.6);
 key.position.set(-14, 30, -8); key.target.position.set(0, 0, 6); scene.add(key, key.target);
-key.castShadow = true; key.shadow.mapSize.set(1024, 1024);
+key.castShadow = true; key.shadow.mapSize.set(/Mobi|Android|iPhone/i.test(navigator.userAgent) ? 1024 : 2048, /Mobi|Android|iPhone/i.test(navigator.userAgent) ? 1024 : 2048);
 Object.assign(key.shadow.camera, { left: -9, right: 9, top: 12, bottom: -12, near: 5, far: 70 }); key.shadow.bias = -0.0008; key.shadow.normalBias = 0.02;
 const fill = new THREE.DirectionalLight(0xc8d8ff, 1.1); fill.position.set(22, 26, 40); scene.add(fill);
 
@@ -1104,7 +1175,9 @@ function makePlayer(isKeeper) {
 }
 const greenish = (h) => { const c = new THREE.Color(h); return c.g > c.r * 1.3 && c.g > c.b * 1.2; };
 function dressPlayer(p, kit, keeper, name = "", num = 10) {
-  const c = (h) => new THREE.Color(h);
+  const c = (h) => new THREE.Color(h).convertSRGBToLinear();
+  p.dressed = { kit, keeper, name, num };
+  if (p.xbot) dressXbot(p);
   if (keeper) {
     const gk = greenish(kit.a) || greenish(kit.b) ? "#ff7a1a" : "#2fd36b";
     p.shirt.draw(kit, name, num, gk);
@@ -1116,6 +1189,92 @@ function dressPlayer(p, kit, keeper, name = "", num = 10) {
   }
 }
 const keeper = makePlayer(true), kicker = makePlayer(false);
+
+// Personagem com esqueleto (mixamo). O rig simples continua calculando a pose, invisível; a cada quadro
+// cada osso do personagem é apontado na mesma direção do membro correspondente do rig.
+const _pa = new THREE.Vector3(), _pb = new THREE.Vector3(), _pd = new THREE.Vector3(), _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion();
+function aimBone(bone, child, dir) {
+  bone.updateWorldMatrix(true, false); child.updateWorldMatrix(false, false);
+  bone.getWorldPosition(_pa); child.getWorldPosition(_pb);
+  _qa.setFromUnitVectors(_pb.sub(_pa).normalize(), _pd.copy(dir).normalize());
+  bone.getWorldQuaternion(_qb); _qa.multiply(_qb);
+  bone.parent.getWorldQuaternion(_qb).invert();
+  bone.quaternion.copy(_qb.multiply(_qa));
+}
+function backTexture() {
+  const [c, g] = mkCanvas(256, 256), tex = colorTex(c);
+  tex.draw = (name, num, color, outline) => {
+    g.clearRect(0, 0, 256, 256); g.textAlign = "center"; g.textBaseline = "middle"; g.lineJoin = "round";
+    g.fillStyle = color; g.strokeStyle = outline; g.lineWidth = 6;
+    g.font = "800 34px 'Saira Condensed', Impact, sans-serif";
+    const nm = (name || "").toUpperCase().slice(0, 14);
+    g.strokeText(nm, 128, 46); g.fillText(nm, 128, 46);
+    g.font = "900 150px 'Saira Condensed', Impact, sans-serif";
+    g.strokeText(String(num), 128, 150); g.fillText(String(num), 128, 150);
+    tex.needsUpdate = true;
+  };
+  return tex;
+}
+const XB = { gltf: null };
+function attachXbot(p) {
+  const root = THREE.SkeletonUtils.clone(XB.gltf.scene), bones = {}, mats = {};
+  root.traverse((o) => {
+    if (o.isBone) bones[o.name.replace("mixamorig", "")] = o;
+    if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; o.material = o.material.clone(); o.material.roughness = 0.62; o.material.metalness = 0.05; mats[o.name] = o.material; }
+  });
+  const mixer = new THREE.AnimationMixer(root);
+  const idle = XB.gltf.animations.find((a) => a.name === "idle");
+  if (idle) mixer.clipAction(idle).play();
+  mixer.update(0); root.updateMatrixWorld(true);
+  // nome e número presos às costas (osso Spine2)
+  const back = backTexture();
+  const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3), new THREE.MeshStandardMaterial({ map: back, transparent: true, alphaTest: 0.4, roughness: 0.8 }));
+  const sp = bones.Spine2, wpos = sp.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.02, -0.135));
+  const ws = sp.getWorldScale(new THREE.Vector3());
+  plate.scale.set(1 / ws.x, 1 / ws.y, 1 / ws.z);
+  plate.position.copy(sp.worldToLocal(wpos));
+  plate.quaternion.copy(sp.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)));
+  sp.add(plate);
+  scene.add(root);
+  p.xbot = { root, bones, mats, mixer, back };
+  p.root.traverse((o) => { if (o.isMesh) o.visible = false; });
+  if (p.dressed) dressXbot(p);
+}
+function dressXbot(p) {
+  const x = p.xbot, d = p.dressed; if (!x || !d) return;
+  const body = x.mats.Beta_Surface, joints = x.mats.Beta_Joints;
+  const shirt = d.keeper ? (greenish(d.kit.a) || greenish(d.kit.b) ? "#ff7a1a" : "#2fd36b") : d.kit.a;
+  const trim = d.keeper ? "#151515" : d.kit.b;
+  if (body) body.color.set(shirt).convertSRGBToLinear();
+  if (joints) joints.color.set(trim).convertSRGBToLinear();
+  const light = new THREE.Color(shirt); const lum = light.r * 0.3 + light.g * 0.59 + light.b * 0.11;
+  x.back.draw(d.name, d.num, trim === shirt ? (lum > 0.5 ? "#111111" : "#ffffff") : trim, lum > 0.5 ? "#ffffff" : "#000000");
+}
+const _dw = new THREE.Vector3(), _q1 = new THREE.Quaternion();
+const limbDir = (obj, x, y, z) => _dw.set(x, y, z).applyQuaternion(obj.getWorldQuaternion(_q1)).clone();
+function syncXbot(p, dt, keeperRig) {
+  const x = p.xbot; if (!x) return;
+  x.root.position.copy(p.root.position); x.root.quaternion.copy(p.root.quaternion);
+  const crouch = 0.95 - p.body.position.y;
+  x.root.position.y += -crouch * 0.55;
+  x.mixer.update(dt);
+  x.root.updateMatrixWorld(true); p.root.updateMatrixWorld(true);
+  const B = x.bones;
+  // rig: arms[0]/legs[0] ficam em -x = lado direito do personagem (ele olha para +z)
+  [["Right", 0], ["Left", 1]].forEach(([S, i]) => {
+    const arm = p.arms[i], leg = p.legs[i];
+    const ad = limbDir(arm, 0, -1, 0);
+    aimBone(B[S + "Arm"], B[S + "ForeArm"], ad);
+    aimBone(B[S + "ForeArm"], B[S + "Hand"], limbDir(arm, 0, -0.96, 0.28));
+    aimBone(B[S + "UpLeg"], B[S + "Leg"], limbDir(leg, 0, -1, keeperRig ? 0.25 + crouch * 0.8 : 0.08));
+    const k = keeperRig ? 0.35 + crouch * 1.4 : 0.18 + 1.25 * Math.max(0, leg.rotation.x);
+    aimBone(B[S + "Leg"], B[S + "Foot"], limbDir(leg, 0, -Math.cos(k), -Math.sin(k)));
+    aimBone(B[S + "Foot"], B[S + "ToeBase"], limbDir(leg, 0, -0.45, 1));
+  });
+}
+if (THREE.GLTFLoader && THREE.SkeletonUtils) {
+  new THREE.GLTFLoader().load("assets/xbot.json", (g) => { XB.gltf = g; attachXbot(keeper); attachXbot(kicker); }, undefined, () => {});
+}
 
 // =====================================================================================
 // pós-processamento portado do Legacy Engine (bloom_down.comp, bloom_up.comp, tonemap.frag)
@@ -1230,18 +1389,42 @@ const finalMat = new THREE.ShaderMaterial({
     c *= 1.0 - (0.35 + slowmo * 0.9) * dot(d, d);
     c += flash;
     if (srgb > 0.5) c = linearToSrgb(clamp(c, 0.0, 1.0));
-    c += (hash12(gl_FragCoord.xy + fract(time) * 100.0) - 0.5) * 0.035;
     gl_FragColor = vec4(c, 1.0);
   }`,
 });
 if (!hdrOK) { finalMat.uniforms.bloomStrength.value = 0.15; }
 
+// Anti-serrilhado FXAA (Lottes) sobre a imagem já em sRGB; o grão de filme entra depois dele.
+const ldrRT = new THREE.WebGLRenderTarget(4, 4, { type: THREE.UnsignedByteType, format: THREE.RGBAFormat, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+const fxaaMat = new THREE.ShaderMaterial({
+  uniforms: { tDiffuse: { value: null }, res: { value: new THREE.Vector2() }, time: { value: 0 } },
+  vertexShader: VS, depthTest: false, depthWrite: false,
+  fragmentShader: COMMON + `
+  uniform sampler2D tDiffuse; uniform vec2 res; uniform float time; varying vec2 vUv;
+  void main() {
+    vec3 nw = texture2D(tDiffuse, vUv + vec2(-1.0, -1.0) * res).rgb, ne = texture2D(tDiffuse, vUv + vec2(1.0, -1.0) * res).rgb;
+    vec3 sw = texture2D(tDiffuse, vUv + vec2(-1.0, 1.0) * res).rgb, se = texture2D(tDiffuse, vUv + vec2(1.0, 1.0) * res).rgb;
+    vec3 m = texture2D(tDiffuse, vUv).rgb, L = vec3(0.299, 0.587, 0.114);
+    float lnw = dot(nw, L), lne = dot(ne, L), lsw = dot(sw, L), lse = dot(se, L), lm = dot(m, L);
+    float lmin = min(lm, min(min(lnw, lne), min(lsw, lse))), lmax = max(lm, max(max(lnw, lne), max(lsw, lse)));
+    vec2 dir = vec2(-((lnw + lne) - (lsw + lse)), (lnw + lsw) - (lne + lse));
+    float red = max((lnw + lne + lsw + lse) * 0.03125, 1.0 / 128.0);
+    float rcp = 1.0 / (min(abs(dir.x), abs(dir.y)) + red);
+    dir = clamp(dir * rcp, vec2(-8.0), vec2(8.0)) * res;
+    vec3 a = 0.5 * (texture2D(tDiffuse, vUv + dir * (1.0 / 3.0 - 0.5)).rgb + texture2D(tDiffuse, vUv + dir * (2.0 / 3.0 - 0.5)).rgb);
+    vec3 b = a * 0.5 + 0.25 * (texture2D(tDiffuse, vUv - dir * 0.5).rgb + texture2D(tDiffuse, vUv + dir * 0.5).rgb);
+    float lb = dot(b, L);
+    vec3 c = (lb < lmin || lb > lmax) ? a : b;
+    c += (hash12(gl_FragCoord.xy + fract(time) * 100.0) - 0.5) * 0.03;
+    gl_FragColor = vec4(c, 1.0);
+  }`,
+});
 let W = 1, H = 1, PR = Math.min(window.devicePixelRatio || 1, 2);
 function resize() {
   W = window.innerWidth; H = window.innerHeight;
   renderer.setPixelRatio(PR); renderer.setSize(W, H, false);
   const w = Math.max(4, Math.floor(W * PR)), h = Math.max(4, Math.floor(H * PR));
-  hdrRT.setSize(w, h);
+  hdrRT.setSize(w, h); ldrRT.setSize(w, h);
   let lw = w, lh = h;
   for (let i = 0; i < LEVELS; i++) { lw = Math.max(2, lw >> 1); lh = Math.max(2, lh >> 1); down[i].setSize(lw, lh); up[i].setSize(lw, lh); }
   camera.aspect = W / H; camera.updateProjectionMatrix();
@@ -1268,6 +1451,8 @@ function renderFrame() {
   }
   quad.material = finalMat;
   finalMat.uniforms.colorIn.value = hdrRT.texture; finalMat.uniforms.bloomIn.value = cur.texture;
+  renderer.setRenderTarget(ldrRT); renderer.render(quadScene, quadCam);
+  quad.material = fxaaMat; fxaaMat.uniforms.tDiffuse.value = ldrRT.texture; fxaaMat.uniforms.res.value.set(1 / ldrRT.width, 1 / ldrRT.height); fxaaMat.uniforms.time.value = finalMat.uniforms.time.value;
   renderer.setRenderTarget(null); renderer.render(quadScene, quadCam);
 }
 
@@ -1414,7 +1599,7 @@ function outcomeFx() {
   s.outcomeAt = s.t;
   if (r.goal) {
     Sfx.roar(); Cam.shake = 0.12; burstConfetti(s.info.kit);
-    crowdUniforms.uJump.value = 0.45; crowdUniforms.uRate.value = 11; flashMat.uniforms.uRate.value = 3.5;
+    crowdUniforms.uJump.value = 0.45; crowdUniforms.uRate.value = 11; crowdUniforms.uCheer.value = 1; flashMat.uniforms.uRate.value = 3.5;
     drawLed(`GOOOOL DE ${s.info.kName.toUpperCase()}!  •  `, "#3ddc84");
     FX.flash = 0.35; FX.chroma = 0.012; FX.exposure = 1.6; FX.bloom = 0.16;
     if (r.type === "angulo" || r.type === "cavadinha") { FX.chroma = 0.02; Cam.shake = 0.18; }
@@ -1546,6 +1731,7 @@ function updateFx(dt) {
   u.exposure.value = FX.exposure; u.bloomStrength.value = hdrOK ? FX.bloom : FX.bloom * 2;
   u.slowmo.value = lerp(u.slowmo.value, timeScale < 0.6 ? 1 : 0, 1 - Math.exp(-dt * 6));
   crowdUniforms.uJump.value = lerp(crowdUniforms.uJump.value, 0.05, 1 - Math.exp(-dt * 0.35));
+  crowdUniforms.uCheer.value = Math.max(0, crowdUniforms.uCheer.value - dt * 0.18);
   crowdUniforms.uRate.value = lerp(crowdUniforms.uRate.value, 3, 1 - Math.exp(-dt * 0.35));
   flashMat.uniforms.uRate.value = lerp(flashMat.uniforms.uRate.value, 0.25, 1 - Math.exp(-dt * 0.3));
 }
@@ -1562,6 +1748,7 @@ function frame(now) {
   crowdUniforms.uTime.value = simT; flashMat.uniforms.uTime.value = simT; finalMat.uniforms.time.value = now / 1000;
   ledTex.offset.x = (now / 1000) * 0.03 % 1; grassU.uTime.value = simT;
   if (Shot) updateShot(dt); else { keeperIdle(simT); kickerIdle(simT); }
+  syncXbot(keeper, dt, true); syncXbot(kicker, dt, false);
   updateNet(dt); updateConfetti(dt); updateFx(real);
   Cam.update(real);
   renderFrame();
