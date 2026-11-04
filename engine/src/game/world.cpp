@@ -120,8 +120,35 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
     uint32_t created = 0;
     for (const json& e : doc.value("entidades", json::array())) {
       Shape shape;
-      const std::string forma = e.value("forma", "caixa");
-      if (forma == "caixa") {
+      const std::string forma = e.contains("personagem") ? "personagem" : e.value("forma", "caixa");
+      std::unique_ptr<Character> character;
+      if (e.contains("personagem")) {  // cápsula em pé com os pés em "posicao"
+        const json& pj = e["personagem"];
+        character = std::make_unique<Character>();
+        Character& c = *character;
+        c.desc.height = pj.value("altura", c.desc.height);
+        c.desc.radius = pj.value("raio", c.desc.radius);
+        c.desc.mass = pj.value("massa", c.desc.mass);
+        c.desc.maxSlopeDeg = pj.value("rampa_maxima", c.desc.maxSlopeDeg);
+        c.desc.stepHeight = pj.value("degrau_maximo", c.desc.stepHeight);
+        c.walkSpeed = pj.value("velocidade", c.walkSpeed);
+        c.runSpeed = pj.value("velocidade_correndo", c.runSpeed);
+        c.jumpSpeed = pj.value("pulo", c.jumpSpeed);
+        c.player = pj.value("controle", "jogador") == "jogador";
+        for (const json& k : pj.value("roteiro", json::array())) {
+          ScriptKey key;
+          key.time = k.value("t", 0.0f);
+          const glm::vec3 m = vec3Of(k.value("andar", json()), glm::vec3(0.0f));
+          key.move = glm::dot(m, m) > 0.0f ? glm::normalize(glm::vec3(m.x, 0.0f, m.z)) : glm::vec3(0.0f);
+          key.jump = k.value("pular", false);
+          key.run = k.value("correr", false);
+          c.script.push_back(key);
+        }
+        if (!c.script.empty()) c.player = pj.value("controle", "roteiro") == "jogador";
+        shape.type = ShapeType::Capsule;
+        shape.radius = c.desc.radius;
+        shape.halfHeight = std::max(0.5f * c.desc.height - c.desc.radius, 0.05f);
+      } else if (forma == "caixa") {
         shape.type = ShapeType::Box;
         shape.halfExtents = vec3Of(e.value("meia_extensao", json()), glm::vec3(0.5f));
       } else if (forma == "esfera") {
@@ -137,6 +164,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       }
       Transform base;
       base.position = vec3Of(e.value("posicao", json()), glm::vec3(0.0f));
+      if (character) base.position.y += 0.5f * character->desc.height;  // arquivo: pés; Transform: centro
       if (e.contains("rotacao")) {  // quaternion [w, x, y, z]
         const json& q = e["rotacao"];
         base.rotation = glm::normalize(glm::quat(q[0].get<float>(), q[1].get<float>(), q[2].get<float>(), q[3].get<float>()));
@@ -192,7 +220,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             registry.emplace<Transform>(ent, t);
             registry.emplace<Shape>(ent, shape);
             registry.emplace<Renderable>(ent, scene.addObject(mesh, drawMatrix(t, shape), mit->second), matName);
-            if (hasBody) {
+            if (character) registry.emplace<Character>(ent, *character);
+            if (hasBody && !character) {
               registry.emplace<RigidBody>(ent, body);
               if (glm::dot(velocity, velocity) > 0.0f) registry.emplace<InitialVelocity>(ent, velocity);
             }
@@ -222,13 +251,55 @@ void World::start() {
     if (b.bodyId != ~0u && registry.all_of<InitialVelocity>(ent))
       physics->setLinearVelocity(b.bodyId, registry.get<InitialVelocity>(ent).value);
   }
+  auto chars = registry.view<Transform, Character>();
+  for (auto ent : chars) {
+    auto [t, c] = chars.get<Transform, Character>(ent);
+    c.id = physics->addCharacter(c.desc, t.position - glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f));
+  }
   physics->optimizeBroadphase();
-  LOG_INFO("Física: %u corpos (%u ativos)", physics->bodyCount(), physics->activeBodyCount());
+  LOG_INFO("Física: %u corpos (%u ativos), %zu personagens", physics->bodyCount(), physics->activeBodyCount(),
+           size_t(chars.size_hint()));
 }
 
 void World::update(scene::Scene& scene, float dt) {
   if (dt <= 0.0f) return;
+  time += dt;
+  // Personagens: velocidade desejada pela entrada do jogador ou pelo roteiro.
+  for (auto ent : registry.view<Character>()) {
+    Character& c = registry.get<Character>(ent);
+    if (c.id == ~0u) continue;
+    glm::vec3 dir(0.0f);
+    bool jump = false, run = false;
+    if (c.player) {
+      // Frente = para onde a câmera olha, no plano do chão.
+      const glm::vec3 fwd(std::cos(input_.cameraYaw), 0.0f, std::sin(input_.cameraYaw));
+      const glm::vec3 right(-fwd.z, 0.0f, fwd.x);
+      dir = fwd * input_.move.y + right * input_.move.x;
+      if (glm::dot(dir, dir) > 1.0f) dir = glm::normalize(dir);
+      jump = input_.jump;
+      run = input_.run;
+    } else if (!c.script.empty()) {
+      size_t k = 0;
+      while (k + 1 < c.script.size() && c.script[k + 1].time <= time) ++k;
+      if (c.script[k].time <= time) {
+        dir = c.script[k].move;
+        run = c.script[k].run;
+        if (c.script[k].jump && c.scriptJumped <= k) {
+          jump = true;
+          c.scriptJumped = k + 1;
+        }
+      }
+    }
+    physics->moveCharacter(c.id, dir * (run ? c.runSpeed : c.walkSpeed), jump, c.jumpSpeed);
+  }
   physics->update(dt);
+  for (auto ent : registry.view<Transform, Shape, Character, Renderable>()) {
+    auto& t = registry.get<Transform>(ent);
+    const Character& c = registry.get<Character>(ent);
+    if (c.id == ~0u) continue;
+    t.position = physics->characterFeet(c.id) + glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
+    scene.setTransform(registry.get<Renderable>(ent).sceneObject, drawMatrix(t, registry.get<Shape>(ent)));
+  }
   // Só os corpos que se movem mudam a pose; parados (dormindo) não reenviam nada à GPU.
   auto view = registry.view<Transform, Shape, RigidBody, Renderable>();
   for (auto ent : view) {
@@ -255,6 +326,30 @@ bool World::save(const std::string& path) const {
     const Shape& s = registry.get<Shape>(ent);
     json e;
     if (const Name* n = registry.try_get<Name>(ent)) e["nome"] = n->value;
+    if (const Character* c = registry.try_get<Character>(ent)) {
+      json pj;
+      pj["altura"] = c->desc.height;
+      pj["raio"] = c->desc.radius;
+      pj["massa"] = c->desc.mass;
+      pj["rampa_maxima"] = c->desc.maxSlopeDeg;
+      pj["degrau_maximo"] = c->desc.stepHeight;
+      pj["velocidade"] = c->walkSpeed;
+      pj["velocidade_correndo"] = c->runSpeed;
+      pj["pulo"] = c->jumpSpeed;
+      pj["controle"] = c->player ? "jogador" : "roteiro";
+      if (!c->script.empty()) {
+        json r = json::array();
+        for (const ScriptKey& k : c->script)
+          r.push_back({{"t", k.time}, {"andar", toJson(k.move)}, {"pular", k.jump}, {"correr", k.run}});
+        pj["roteiro"] = r;
+      }
+      e["personagem"] = pj;
+      e["posicao"] = toJson(t.position - glm::vec3(0.0f, 0.5f * c->desc.height, 0.0f));
+      if (c->id != ~0u) e["velocidade"] = toJson(physics->characterVelocity(c->id));
+      if (const Renderable* r = registry.try_get<Renderable>(ent); r && !r->material.empty()) e["material"] = r->material;
+      ents.push_back(e);
+      continue;
+    }
     e["forma"] = shapeName(s.type);
     if (s.type == ShapeType::Box) e["meia_extensao"] = toJson(s.halfExtents);
     else e["raio"] = s.radius;
@@ -297,5 +392,16 @@ bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera&
 }
 
 World* currentWorld() { return gCurrent; }
+
+bool World::playerFeet(glm::vec3& feet) const {
+  for (auto ent : registry.view<Character>()) {
+    const Character& c = registry.get<Character>(ent);
+    if (c.player && c.id != ~0u) {
+      feet = physics->characterFeet(c.id);
+      return true;
+    }
+  }
+  return false;
+}
 
 }  // namespace game

@@ -7,8 +7,10 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -20,6 +22,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include "core/log.h"
 
@@ -116,6 +119,43 @@ struct Physics::Impl {
   uint64_t steps = 0;
   int subSteps = 2;  // subpassos de colisão por passo fixo
 
+  struct Character {
+    JPH::Ref<JPH::CharacterVirtual> body;
+    glm::vec3 desired{0.0f};
+    float jumpBuffer = 0.0f;  // s em que um pulo pedido ainda vale (pedido um pouco antes de tocar o chão)
+    float jumpSpeed = 5.0f;
+    float stepHeight = 0.4f;
+  };
+  std::vector<Character> characters;
+
+  // Um passo de cada personagem (antes do passo dos corpos rígidos, como no exemplo do Jolt).
+  void stepCharacters(float dt) {
+    const JPH::Vec3 up = JPH::Vec3::sAxisY(), gravity = system->GetGravity();
+    for (Character& c : characters) {
+      JPH::CharacterVirtual& ch = *c.body;
+      ch.UpdateGroundVelocity();
+      const JPH::Vec3 current = ch.GetLinearVelocity();
+      const JPH::Vec3 ground = ch.GetGroundVelocity();
+      const JPH::Vec3 vertical = up * current.Dot(up);
+      // No chão (e não subindo por um pulo): acompanha o chão (plataformas) e pode pular.
+      const bool onGround = ch.GetGroundState() == JPH::CharacterBase::EGroundState::OnGround &&
+                            (current - ground).Dot(up) < 0.1f;
+      JPH::Vec3 v = onGround ? ground : vertical;
+      if (onGround && c.jumpBuffer > 0.0f) {
+        v += up * c.jumpSpeed;
+        c.jumpBuffer = 0.0f;
+      }
+      c.jumpBuffer = std::max(c.jumpBuffer - dt, 0.0f);
+      v += toJolt(c.desired) + gravity * dt;
+      ch.SetLinearVelocity(v);
+      JPH::CharacterVirtual::ExtendedUpdateSettings settings;
+      settings.mWalkStairsStepUp = JPH::Vec3(0.0f, c.stepHeight, 0.0f);
+      ch.ExtendedUpdate(dt, gravity, settings, JPH::DefaultBroadPhaseLayerFilter(objectVsBroadPhase, kLayerMoving),
+                        JPH::DefaultObjectLayerFilter(objectPairs, kLayerMoving), JPH::BodyFilter(), JPH::ShapeFilter(),
+                        *temp);
+    }
+  }
+
   JPH::BodyInterface& bodies() { return system->GetBodyInterface(); }
   const JPH::BodyInterface& bodies() const { return system->GetBodyInterface(); }
 
@@ -172,6 +212,7 @@ Physics::Physics(uint32_t maxBodies) : p_(std::make_unique<Impl>()) {
 }
 
 Physics::~Physics() {
+  p_->characters.clear();  // antes dos corpos: o personagem tem um corpo interno no sistema
   if (p_->system) {
     JPH::BodyIDVector ids;
     p_->system->GetBodies(ids);
@@ -214,6 +255,7 @@ void Physics::update(float dt) {
   // No máximo 0,25 s por quadro: depois de uma travada longa a simulação não tenta recuperar tudo de uma vez.
   p_->accumulator += std::clamp(dt, 0.0f, 0.25f);
   while (p_->accumulator >= kStep) {
+    p_->stepCharacters(kStep);
     p_->system->Update(kStep, p_->subSteps, p_->temp.get(), p_->jobs.get());
     p_->accumulator -= kStep;
     ++p_->steps;
@@ -236,6 +278,48 @@ void Physics::addImpulse(uint32_t body, glm::vec3 impulse) { p_->bodies().AddImp
 
 void Physics::moveKinematic(uint32_t body, glm::vec3 position, glm::quat rotation) {
   p_->bodies().MoveKinematic(bodyId(body), JPH::RVec3(position.x, position.y, position.z), toJolt(rotation), kStep);
+}
+
+uint32_t Physics::addCharacter(const CharacterDesc& d, glm::vec3 feet) {
+  const float radius = std::max(d.radius, 0.05f);
+  const float halfHeight = std::max(0.5f * d.height - radius, 0.05f);
+  // Cápsula com os pés na origem do personagem.
+  JPH::RotatedTranslatedShapeSettings shapeSettings(JPH::Vec3(0.0f, halfHeight + radius, 0.0f), JPH::Quat::sIdentity(),
+                                                    new JPH::CapsuleShape(halfHeight, radius));
+  JPH::ShapeSettings::ShapeResult r = shapeSettings.Create();
+  if (r.HasError()) {
+    LOG_ERROR("Física: personagem inválido (%s)", r.GetError().c_str());
+    return ~0u;
+  }
+  JPH::Ref<JPH::CharacterVirtualSettings> s = new JPH::CharacterVirtualSettings();
+  s->mShape = r.Get();
+  s->mMaxSlopeAngle = glm::radians(d.maxSlopeDeg);
+  s->mMass = d.mass;
+  s->mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -radius);  // só contatos perto dos pés sustentam
+  s->mInnerBodyShape = r.Get();  // corpo interno: caixas e bolas batem no personagem
+  s->mInnerBodyLayer = kLayerMoving;
+  Impl::Character c;
+  c.body = new JPH::CharacterVirtual(s, JPH::RVec3(feet.x, feet.y, feet.z), JPH::Quat::sIdentity(), 0, p_->system.get());
+  c.stepHeight = d.stepHeight;
+  p_->characters.push_back(c);
+  return uint32_t(p_->characters.size() - 1);
+}
+
+void Physics::moveCharacter(uint32_t i, glm::vec3 horizontalVelocity, bool jump, float jumpSpeed) {
+  if (i >= p_->characters.size()) return;
+  Impl::Character& c = p_->characters[i];
+  c.desired = glm::vec3(horizontalVelocity.x, 0.0f, horizontalVelocity.z);
+  if (jump) c.jumpBuffer = 0.15f;
+  c.jumpSpeed = jumpSpeed;
+}
+
+glm::vec3 Physics::characterFeet(uint32_t i) const {
+  const JPH::RVec3 p = p_->characters[i].body->GetPosition();
+  return glm::vec3(float(p.GetX()), float(p.GetY()), float(p.GetZ()));
+}
+glm::vec3 Physics::characterVelocity(uint32_t i) const { return fromJolt(p_->characters[i].body->GetLinearVelocity()); }
+bool Physics::characterOnGround(uint32_t i) const {
+  return p_->characters[i].body->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround;
 }
 
 bool Physics::isActive(uint32_t body) const { return p_->bodies().IsActive(bodyId(body)); }

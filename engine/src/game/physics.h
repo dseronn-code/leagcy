@@ -19,6 +19,15 @@ struct BodyDesc {
   float linearDamping = 0.05f, angularDamping = 0.05f;
 };
 
+// Personagem controlado pelo jogo (não pela simulação): anda, pula, sobe degraus e rampas até maxSlopeDeg, é
+// empurrado por plataformas e empurra caixas. Cápsula com os pés na posição.
+struct CharacterDesc {
+  float height = 1.8f, radius = 0.3f;
+  float mass = 70.0f;           // kg: força com que empurra corpos dinâmicos
+  float maxSlopeDeg = 50.0f;    // rampa mais íngreme que ele sobe
+  float stepHeight = 0.4f;      // degrau mais alto que ele sobe andando
+};
+
 // Física de corpos rígidos sobre o Jolt Physics: passos fixos de 1/60 s com 2 subpassos de colisão (resultado igual em
 // qualquer taxa de quadros e determinístico entre execuções), em várias threads. Os cabeçalhos do Jolt ficam só em
 // physics.cpp.
@@ -48,6 +57,14 @@ class Physics {
   // Corpo cinemático: chega em `position`/`rotation` ao fim do próximo passo (empurra os dinâmicos no caminho).
   void moveKinematic(uint32_t body, glm::vec3 position, glm::quat rotation);
   bool isActive(uint32_t body) const;
+
+  // Personagens (Jolt CharacterVirtual). moveCharacter vale para os passos seguintes: velocidade horizontal desejada
+  // (m/s) e pedido de pulo (atendido no próximo passo com os pés no chão).
+  uint32_t addCharacter(const CharacterDesc& desc, glm::vec3 feet);
+  void moveCharacter(uint32_t character, glm::vec3 horizontalVelocity, bool jump, float jumpSpeed);
+  glm::vec3 characterFeet(uint32_t character) const;
+  glm::vec3 characterVelocity(uint32_t character) const;
+  bool characterOnGround(uint32_t character) const;
 
   uint32_t bodyCount() const;
   uint32_t activeBodyCount() const;

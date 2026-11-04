@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
@@ -49,6 +50,31 @@ struct RigidBody {
   uint32_t bodyId = ~0u;
 };
 
+// Um passo do roteiro de um personagem controlado por arquivo (testes, NPCs simples): a partir de `time` segundos,
+// anda na direção `move` (mundo, normalizada) e pula uma vez se `jump`.
+struct ScriptKey {
+  float time = 0.0f;
+  glm::vec3 move{0.0f};
+  bool jump = false, run = false;
+};
+
+// Personagem: anda, corre, pula. Controle pelo jogador (teclado e mouse na janela) ou por roteiro.
+struct Character {
+  CharacterDesc desc;
+  float walkSpeed = 4.5f, runSpeed = 8.0f, jumpSpeed = 5.0f;  // m/s
+  bool player = false;
+  std::vector<ScriptKey> script;
+  size_t scriptJumped = 0;  // quantos passos do roteiro já tiveram o pulo atendido
+  uint32_t id = ~0u;        // na Physics
+};
+
+// Entrada do jogador neste quadro: movimento relativo à câmera (x = direita, y = frente, -1..1) e a direção da câmera.
+struct PlayerInput {
+  glm::vec2 move{0.0f};
+  float cameraYaw = 0.0f;  // radianos (scene::Camera::yaw)
+  bool jump = false, run = false;
+};
+
 // ---- Mundo ----
 
 // Camada de jogo sobre o renderizador: entidades com componentes (EnTT), física (Jolt) e a cena em arquivo (JSON).
@@ -69,12 +95,18 @@ class World {
   // Avança a física `dt` segundos e move os objetos de desenho.
   void update(scene::Scene& scene, float dt);
 
+  // Jogador (personagem com "controle": "jogador"): entrada do quadro e posição dos pés para a câmera seguir.
+  void setPlayerInput(const PlayerInput& input) { input_ = input; }
+  bool playerFeet(glm::vec3& feet) const;
+
   entt::registry registry;
   std::unique_ptr<Physics> physics;
+  float time = 0.0f;  // segundos de jogo simulados
 
  private:
   struct FileData;
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
+  PlayerInput input_;
 };
 
 // Cenas .json passam por aqui (scene::buildDemoScene): o mundo fica vivo enquanto a Scene existir e roda dentro do

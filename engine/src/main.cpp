@@ -615,7 +615,19 @@ int runWindowed(const Options& opt) {
     if (key(GLFW_KEY_A)) move -= camera.right();
     if (key(GLFW_KEY_E)) move.y += 1.0f;
     if (key(GLFW_KEY_Q)) move.y -= 1.0f;
-    if (glm::length(move) > 0.0f) { camera.position += glm::normalize(move) * speed; moved = true; }
+    // Cena com jogador (personagem com "controle": "jogador"): WASD anda, espaço pula, Shift corre; a câmera segue
+    // atrás dele (botão direito + mouse gira). Sem jogador: câmera livre.
+    game::World* world = game::currentWorld();
+    glm::vec3 playerFeet(0.0f);
+    const bool hasPlayer = world && world->playerFeet(playerFeet);
+    if (hasPlayer) {
+      game::PlayerInput in;
+      in.move = glm::vec2(float(key(GLFW_KEY_D)) - float(key(GLFW_KEY_A)), float(key(GLFW_KEY_W)) - float(key(GLFW_KEY_S)));
+      in.cameraYaw = camera.yaw;
+      in.jump = key(GLFW_KEY_SPACE);
+      in.run = key(GLFW_KEY_LEFT_SHIFT);
+      world->setPlayerInput(in);
+    } else if (glm::length(move) > 0.0f) { camera.position += glm::normalize(move) * speed; moved = true; }
     float sunStep = 0.6f * dt;
     if (key(GLFW_KEY_UP)) { sunElev += sunStep; moved = true; }
     if (key(GLFW_KEY_DOWN)) { sunElev -= sunStep; moved = true; }
@@ -636,6 +648,10 @@ int runWindowed(const Options& opt) {
     (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
 
     scene.update(opt.pause ? 0.0f : glm::clamp(dt, 0.0f, 0.1f));
+    if (hasPlayer && world->playerFeet(playerFeet)) {  // terceira pessoa: 4,5 m atrás da cabeça
+      const glm::vec3 head = playerFeet + glm::vec3(0.0f, 1.6f, 0.0f);
+      camera.position = head - camera.forward() * 4.5f + glm::vec3(0.0f, 0.4f, 0.0f);
+    }
     scene.stream(ctx, camera.position);
 
     // ---- Frame ----

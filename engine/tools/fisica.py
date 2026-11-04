@@ -10,6 +10,12 @@ Cada teste monta uma cena .json pequena, roda o motor sem janela (imagem minúsc
   - pilha: torre de 12 caixas parada 10 s: topo desloca < 2 cm e tudo dorme (velocidade < 1 cm/s).
   - tunel: 200 esferas pequenas a 30 m/s contra o chão fino: nenhuma atravessa.
   - deterministico: cenas/fisica.json rodada duas vezes dá o mesmo arquivo, byte a byte.
+Personagem (Jolt CharacterVirtual, controlado por roteiro):
+  - andar: 3 s a 4,5 m/s no plano = 13,5 m (±0,3 m).
+  - pulo: pulo a 5 m/s sobe v²/2g = 1,274 m (±3 cm).
+  - escada: sobe 8 degraus de 25 cm andando (termina a 2,0 m de altura).
+  - rampa: sobe uma rampa de 35° e não sobe uma de 60°.
+  - empurrar: anda contra uma caixa de 20 kg e a empurra.
 """
 import argparse
 import json
@@ -116,8 +122,86 @@ def teste_deterministico(b, pasta):
     return igual, 'arquivos idênticos' if igual else 'os arquivos diferem'
 
 
+def personagem(pos, roteiro, **extra):
+    p = {'altura': 1.8, 'raio': 0.3, 'velocidade': 4.5, 'pulo': 5.0, 'controle': 'roteiro', 'roteiro': roteiro}
+    p.update(extra)
+    return {'nome': 'heroi', 'personagem': p, 'posicao': pos}
+
+
+def pes(estado):
+    return por_nome(estado, 'heroi')[0]['posicao']
+
+
+def teste_andar(b, pasta):
+    """Anda 3 s em linha reta."""
+    cena = {'entidades': [chao(), personagem([0, 0, 0], [{'t': 0, 'andar': [1, 0, 0]}])]}
+    est, _ = rodar(b, cena, 3.0, pasta, 'andar')
+    x = pes(est)[0]
+    return abs(x - 13.5) < 0.3, f'andou {x:.3f} m (esperado 13,5)'
+
+
+def teste_pulo(b, pasta):
+    """Altura do pulo."""
+    cena = {'entidades': [chao(), personagem([0, 0, 0], [{'t': 0.3, 'pular': True}])]}
+    melhor = 0.0
+    for t in (0.75, 0.8, 0.82, 0.84, 0.86, 0.9):
+        est, _ = rodar(b, cena, t, pasta, f'pulo_{t}')
+        melhor = max(melhor, pes(est)[1])
+    # O personagem integra a 1/60 s (Euler semi-implícito: a gravidade entra antes de mover): o pico discreto é
+    # max_n dt·Σ(v − g·dt·k), ~4 cm abaixo do contínuo v²/2g.
+    dt = 1.0 / 60.0
+    esperado = max(dt * sum(5.0 - G * dt * k for k in range(1, n + 1)) for n in range(1, 60))
+    continuo = 5.0 ** 2 / (2 * G)
+    return abs(melhor - esperado) < 0.01, f'subiu {melhor:.3f} m (integrador {esperado:.3f}; contínuo {continuo:.3f})'
+
+
+def teste_escada(b, pasta):
+    """Sobe uma escada de 8 degraus de 25 cm."""
+    degraus = [{'nome': f'degrau{i}', 'forma': 'caixa', 'meia_extensao': [0.2, 0.125 * (i + 1), 1.5],
+                'posicao': [2 + 0.4 * i, 0.125 * (i + 1), 0], 'fisica': {'tipo': 'estatico'}} for i in range(8)]
+    topo = {'nome': 'patamar', 'forma': 'caixa', 'meia_extensao': [3, 1.0, 1.5], 'posicao': [8.6, 1.0, 0],
+            'fisica': {'tipo': 'estatico'}}
+    cena = {'entidades': [chao()] + degraus + [topo, personagem([0, 0, 0], [{'t': 0, 'andar': [1, 0, 0]}],
+                                                                velocidade=2.0)]}
+    est, _ = rodar(b, cena, 4.0, pasta, 'escada')
+    x, y, _ = pes(est)
+    return abs(y - 2.0) < 0.05 and x > 6.0, f'pés em x = {x:.2f} m, altura {y:.3f} m (topo a 2,0 m)'
+
+
+def teste_rampa(b, pasta):
+    """Sobe 35°, não sobe 60°."""
+    import math
+
+    def rampa(graus, z):
+        comp = 6.0
+        a = math.radians(graus)
+        cx = 2 + 0.5 * comp * math.cos(a)
+        cy = 0.5 * comp * math.sin(a) - 0.1 * math.cos(a)
+        return {'nome': f'rampa{graus}', 'forma': 'caixa', 'meia_extensao': [0.5 * comp, 0.1, 1.0],
+                'posicao': [cx, cy, z], 'rotacao_graus': [0, 0, graus], 'fisica': {'tipo': 'estatico'}}
+
+    cena = {'entidades': [chao(), rampa(35, -4), rampa(60, 4),
+                          personagem([0, 0, -4], [{'t': 0, 'andar': [1, 0, 0]}], velocidade=3.0) | {'nome': 'heroi35'},
+                          personagem([0, 0, 4], [{'t': 0, 'andar': [1, 0, 0]}], velocidade=3.0) | {'nome': 'heroi60'}]}
+    est, _ = rodar(b, cena, 3.0, pasta, 'rampa')
+    y35 = por_nome(est, 'heroi35')[0]['posicao'][1]
+    y60 = por_nome(est, 'heroi60')[0]['posicao'][1]
+    return y35 > 2.0 and y60 < 0.6, f'35°: subiu a {y35:.2f} m; 60°: ficou a {y60:.2f} m'
+
+
+def teste_empurrar(b, pasta):
+    """Empurra uma caixa."""
+    cena = {'entidades': [chao(), {'nome': 'caixa', 'forma': 'caixa', 'meia_extensao': [0.4, 0.4, 0.4],
+                                   'posicao': [2, 0.4, 0], 'fisica': {'tipo': 'dinamico', 'massa': 20}},
+                          personagem([0, 0, 0], [{'t': 0, 'andar': [1, 0, 0]}], velocidade=2.0)]}
+    est, _ = rodar(b, cena, 3.0, pasta, 'empurrar')
+    x = por_nome(est, 'caixa')[0]['posicao'][0]
+    return x > 3.0, f'caixa foi de x = 2,0 para {x:.2f} m'
+
+
 TESTES = {'queda': teste_queda, 'quique': teste_quique, 'pilha': teste_pilha, 'tunel': teste_tunel,
-          'deterministico': teste_deterministico}
+          'deterministico': teste_deterministico, 'andar': teste_andar, 'pulo': teste_pulo, 'escada': teste_escada,
+          'rampa': teste_rampa, 'empurrar': teste_empurrar}
 
 
 def main():
