@@ -105,6 +105,16 @@ class World {
   // Avança a física `dt` segundos e move os objetos de desenho.
   void update(scene::Scene& scene, float dt);
 
+  // Editor: entidade dona de um corpo da física (entt::null se nenhuma) e aplicar uma pose nova (corpo + desenho).
+  entt::entity entityOfBody(uint32_t body) const;
+  void setEntityPose(scene::Scene& scene, entt::entity e, glm::vec3 position, glm::quat rotation);
+  // Matriz de desenho de uma entidade (posição, rotação e tamanho da forma).
+  glm::mat4 entityMatrix(entt::entity e) const;
+  bool simulate = true;  // falso: física parada (editor em pausa)
+  // Editor: guarda as poses de todas as entidades ("Jogar") e volta para elas ("Parar"), com velocidades zeradas.
+  void snapshot();
+  void restore(scene::Scene& scene);
+
   // Jogador (personagem com "controle": "jogador"): entrada do quadro e posição dos pés para a câmera seguir.
   void setPlayerInput(const PlayerInput& input) { input_ = input; }
   bool playerFeet(glm::vec3& feet) const;
@@ -117,6 +127,8 @@ class World {
   struct FileData;
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
+  std::vector<std::pair<entt::entity, Transform>> snapshot_;
+  float snapshotTime_ = 0.0f;
   scene::Scene* loadedScene_ = nullptr;  // para ler os triângulos dos modelos em start() (antes do upload)
 };
 

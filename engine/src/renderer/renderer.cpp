@@ -207,7 +207,8 @@ Quality qualityPreset(QualityPreset preset) {
 bool parseDebugView(const char* name, uint32_t& out) {
   const std::pair<const char*, uint32_t> names[] = {{"sol", kDebugSunVisibility}, {"sol-luz", kDebugSunShading},
                                                     {"normal", kDebugGeometricNormal}, {"nl", kDebugSunCosine},
-                                                    {"luzes", kDebugLocalLights}, {"luzes-ref", kDebugLocalLightsReference}};
+                                                    {"luzes", kDebugLocalLights}, {"luzes-ref", kDebugLocalLightsReference},
+                                                    {"cache", kDebugRadianceCache}, {"gi-raio", kDebugGiSample}};
   for (auto& [n, v] : names)
     if (std::strcmp(name, n) == 0) { out = v; return true; }
   return false;

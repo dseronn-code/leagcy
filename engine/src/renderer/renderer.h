@@ -116,6 +116,10 @@ enum DebugView : uint32_t {
   // estimativa do ReSTIR e referência por força bruta (todas as luzes no alcance, com sombra).
   kDebugLocalLights = 5,          // "luzes"
   kDebugLocalLightsReference = 6, // "luzes-ref"
+  // Cache de radiância no ponto visível (M, sem sol nem luzes locais) e a amostra do raio de GI que o alimenta,
+  // na mesma codificação: a média de muitos quadros de "gi-raio" deve bater com "cache" (diagnóstico do viés).
+  kDebugRadianceCache = 7,        // "cache"
+  kDebugGiSample = 8,             // "gi-raio"
 };
 bool parseDebugView(const char* name, uint32_t& out);
 

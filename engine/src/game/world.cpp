@@ -318,7 +318,7 @@ void World::start() {
 }
 
 void World::update(scene::Scene& scene, float dt) {
-  if (dt <= 0.0f) return;
+  if (dt <= 0.0f || !simulate) return;
   time += dt;
   // Personagens: velocidade desejada pela entrada do jogador ou pelo roteiro.
   for (auto ent : registry.view<Character>()) {
@@ -460,6 +460,54 @@ bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera&
 }
 
 World* currentWorld() { return gCurrent; }
+
+entt::entity World::entityOfBody(uint32_t body) const {
+  if (body == ~0u) return entt::null;
+  for (auto ent : registry.view<RigidBody>())
+    if (registry.get<RigidBody>(ent).bodyId == body) return ent;
+  for (auto ent : registry.view<Model>())
+    if (registry.get<Model>(ent).bodyId == body) return ent;
+  return entt::null;
+}
+
+void World::snapshot() {
+  snapshot_.clear();
+  for (auto e : registry.view<Transform>()) snapshot_.emplace_back(e, registry.get<Transform>(e));
+  snapshotTime_ = time;
+}
+
+void World::restore(scene::Scene& scene) {
+  for (auto& [e, t] : snapshot_) {
+    if (!registry.valid(e)) continue;
+    if (Character* c = registry.try_get<Character>(e); c && c->id != ~0u) {
+      physics->setCharacterFeet(c->id, t.position - glm::vec3(0.0f, 0.5f * c->desc.height, 0.0f));
+      registry.get<Transform>(e) = t;
+      if (const Renderable* r = registry.try_get<Renderable>(e); r && registry.all_of<Shape>(e))
+        scene.setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(e)));
+      continue;
+    }
+    setEntityPose(scene, e, t.position, t.rotation);
+  }
+  time = snapshotTime_;
+}
+
+glm::mat4 World::entityMatrix(entt::entity e) const {
+  if (!registry.valid(e) || !registry.all_of<Transform>(e)) return glm::mat4(1.0f);
+  const Transform& t = registry.get<Transform>(e);
+  if (const Shape* s = registry.try_get<Shape>(e)) return drawMatrix(t, *s);
+  return glm::translate(glm::mat4(1.0f), t.position) * glm::mat4_cast(t.rotation);
+}
+
+void World::setEntityPose(scene::Scene& scene, entt::entity e, glm::vec3 position, glm::quat rotation) {
+  if (!registry.valid(e) || !registry.all_of<Transform>(e)) return;
+  Transform& t = registry.get<Transform>(e);
+  t.position = position;
+  t.rotation = glm::normalize(rotation);
+  if (RigidBody* b = registry.try_get<RigidBody>(e); b && b->bodyId != ~0u) physics->setPose(b->bodyId, t.position, t.rotation);
+  if (const Renderable* r = registry.try_get<Renderable>(e); r && registry.all_of<Shape>(e))
+    scene.setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(e)));
+  // Modelos glTF e personagens: mover no editor fica para depois (o modelo tem vários objetos e colisão por malha).
+}
 
 bool World::playerFeet(glm::vec3& feet) const {
   for (auto ent : registry.view<Character>()) {

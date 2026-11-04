@@ -8,6 +8,8 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
@@ -342,8 +344,35 @@ glm::vec3 Physics::characterFeet(uint32_t i) const {
   return glm::vec3(float(p.GetX()), float(p.GetY()), float(p.GetZ()));
 }
 glm::vec3 Physics::characterVelocity(uint32_t i) const { return fromJolt(p_->characters[i].body->GetLinearVelocity()); }
+void Physics::setCharacterFeet(uint32_t i, glm::vec3 feet) {
+  if (i >= p_->characters.size()) return;
+  JPH::CharacterVirtual& c = *p_->characters[i].body;
+  c.SetPosition(JPH::RVec3(feet.x, feet.y, feet.z));
+  c.SetLinearVelocity(JPH::Vec3::sZero());
+}
+
 bool Physics::characterOnGround(uint32_t i) const {
   return p_->characters[i].body->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround;
+}
+
+void Physics::setPose(uint32_t body, glm::vec3 position, glm::quat rotation) {
+  JPH::BodyInterface& bi = p_->bodies();
+  const JPH::BodyID id = bodyId(body);
+  const bool moving = bi.GetMotionType(id) != JPH::EMotionType::Static;
+  bi.SetPositionAndRotation(id, JPH::RVec3(position.x, position.y, position.z), toJolt(rotation),
+                            moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+  if (moving) {
+    bi.SetLinearVelocity(id, JPH::Vec3::sZero());
+    bi.SetAngularVelocity(id, JPH::Vec3::sZero());
+  }
+}
+
+uint32_t Physics::castRay(glm::vec3 origin, glm::vec3 direction, float maxDistance, float* hitDistance) const {
+  const JPH::RRayCast ray(JPH::RVec3(origin.x, origin.y, origin.z), toJolt(direction * maxDistance));
+  JPH::RayCastResult hit;
+  if (!p_->system->GetNarrowPhaseQuery().CastRay(ray, hit)) return ~0u;
+  if (hitDistance) *hitDistance = hit.mFraction * maxDistance;
+  return hit.mBodyID.GetIndexAndSequenceNumber();
 }
 
 bool Physics::isActive(uint32_t body) const { return p_->bodies().IsActive(bodyId(body)); }

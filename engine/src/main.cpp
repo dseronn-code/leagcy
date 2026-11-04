@@ -15,6 +15,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "editor/editor.h"
 #include "game/world.h"
 #include "renderer/renderer.h"
 #include "rhi/swapchain.h"
@@ -40,6 +41,10 @@ struct Options {
   uint32_t warmup = 0;     // headless: frames iniciais parados e não salvos (TAA, denoiser e caches se assentam)
   float quitAfter = 0.0f;  // janela: fecha sozinha depois de N segundos e imprime as estatísticas do tempo de quadro
   std::string saveWorld;   // cena .json: grava o estado do mundo (poses depois da física) ao terminar
+  bool editor = false;     // janela: editor visual (painéis, seleção, alças)
+  std::string screenshot;  // janela: grava a imagem da janela (com a interface) no último quadro
+  std::string select;      // editor: entidade selecionada ao abrir (testes)
+  bool testRestore = false;  // sem janela: guarda as poses no início e volta a elas antes do --save-world (teste)
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
@@ -81,6 +86,10 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--warmup") o.warmup = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--quit-after") o.quitAfter = std::max(0.0f, float(std::atof(next())));
     else if (a == "--save-world") o.saveWorld = next();
+    else if (a == "--editor") o.editor = true;
+    else if (a == "--screenshot") o.screenshot = next();
+    else if (a == "--select") o.select = next();
+    else if (a == "--test-restore") o.testRestore = true;
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
@@ -238,7 +247,9 @@ Options parseArgs(int argc, char** argv) {
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n"
           "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n"
           "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n"
-          "  --scene cena.json [--save-world saida.json]   cena em arquivo com física (ex.: cenas/fisica.json)\n");
+          "  --scene cena.json [--save-world saida.json]   cena em arquivo com física (ex.: cenas/fisica.json)\n"
+          "  --editor                 editor visual na janela (entidades, propriedades, alças, jogar/pausar, salvar)\n"
+          "  --screenshot arq.png     janela: grava a tela (com a interface) ao fechar (use com --quit-after)\n");
       std::exit(0);
     }
   }
@@ -364,6 +375,7 @@ int runHeadless(const Options& opt) {
   scene::Camera camera;
   scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
   if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
+  if (opt.testRestore && game::currentWorld()) game::currentWorld()->snapshot();  // o "Jogar" do editor
   if (opt.customCamera) {
     camera.position = opt.cameraPos;
     camera.lookAt(opt.cameraTarget);
@@ -462,7 +474,10 @@ int runHeadless(const Options& opt) {
   if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   ok &= savePng(opt.out);
   if (!opt.saveWorld.empty()) {
-    if (game::World* w = game::currentWorld()) ok &= w->save(opt.saveWorld);
+    if (game::World* w = game::currentWorld()) {
+      if (opt.testRestore) w->restore(scene);  // o "Parar" do editor
+      ok &= w->save(opt.saveWorld);
+    }
     else LOG_WARN("--save-world: a cena não é um arquivo .json com mundo");
   }
 
@@ -550,6 +565,12 @@ int runWindowed(const Options& opt) {
   glfwSetWindowUserPointer(window, &resized);
   glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int, int) { *static_cast<bool*>(glfwGetWindowUserPointer(w)) = true; });
 
+  editor::Editor ed;
+  if (opt.editor) ed.init(ctx, window, swapchain.format, uint32_t(swapchain.images.size()));
+  if (ed.ready() && !opt.select.empty() && game::currentWorld()) ed.selectByName(*game::currentWorld(), opt.select);
+  rhi::Buffer shotBuffer{};  // --screenshot: cópia da imagem da janela no último quadro
+  VkExtent2D shotExtent{};
+
   auto recreate = [&]() {
     int w = 0, h = 0;
     glfwGetFramebufferSize(window, &w, &h);
@@ -584,6 +605,7 @@ int runWindowed(const Options& opt) {
     float dt = float(now - lastTime);
     lastTime = now;
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
+    if (ed.ready()) ed.frame(game::currentWorld(), scene, camera, swapchain.extent, dt * 1000.0f);
     ++frameCount;
     const bool warming = frameCount <= opt.warmup;
     if (!warming && runStart < 0.0) runStart = now;
@@ -597,7 +619,7 @@ int runWindowed(const Options& opt) {
     bool moved = false;
     double mx, my;
     glfwGetCursorPos(window, &mx, &my);
-    bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS && !ed.capturingMouse();
     if (rmb && looking && (mx != lastX || my != lastY)) {
       camera.yaw += float(mx - lastX) * 0.0025f;
       camera.pitch = glm::clamp(camera.pitch - float(my - lastY) * 0.0025f, -1.55f, 1.55f);
@@ -607,7 +629,7 @@ int runWindowed(const Options& opt) {
     lastX = mx;
     lastY = my;
     float speed = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ? 40.0f : 6.0f) * dt;
-    auto key = [&](int k) { return glfwGetKey(window, k) == GLFW_PRESS; };
+    auto key = [&](int k) { return !ed.capturingKeyboard() && glfwGetKey(window, k) == GLFW_PRESS; };
     glm::vec3 move(0.0f);
     if (key(GLFW_KEY_W)) move += camera.forward();
     if (key(GLFW_KEY_S)) move -= camera.forward();
@@ -619,7 +641,8 @@ int runWindowed(const Options& opt) {
     // atrás dele (botão direito + mouse gira). Sem jogador: câmera livre.
     game::World* world = game::currentWorld();
     glm::vec3 playerFeet(0.0f);
-    const bool hasPlayer = world && world->playerFeet(playerFeet);
+    // No editor parado (editando), a câmera fica livre mesmo com jogador na cena.
+    const bool hasPlayer = world && world->simulate && world->playerFeet(playerFeet);
     if (hasPlayer) {
       game::PlayerInput in;
       in.move = glm::vec2(float(key(GLFW_KEY_D)) - float(key(GLFW_KEY_A)), float(key(GLFW_KEY_W)) - float(key(GLFW_KEY_S)));
@@ -668,6 +691,22 @@ int runWindowed(const Options& opt) {
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(f.cmd, &bi));
     r.record(f.cmd, slot, camera, swapchain.images[imageIndex], swapchain.views[imageIndex], glm::clamp(dt, 0.0f, 0.1f));
+    ed.render(f.cmd, swapchain.views[imageIndex], swapchain.extent);
+    if (!opt.screenshot.empty() && glfwWindowShouldClose(window) && shotBuffer.handle == VK_NULL_HANDLE) {
+      shotExtent = swapchain.extent;
+      shotBuffer = rhi::createBuffer(ctx, VkDeviceSize(shotExtent.width) * shotExtent.height * 4,
+                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::GpuToCpu);
+      rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageExtent = {shotExtent.width, shotExtent.height, 1};
+      vkCmdCopyImageToBuffer(f.cmd, swapchain.images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shotBuffer.handle, 1, &region);
+      rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    }
     rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT,
                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -725,6 +764,17 @@ int runWindowed(const Options& opt) {
   }
 
   vkDeviceWaitIdle(ctx.device);
+  if (shotBuffer.handle != VK_NULL_HANDLE) {
+    vmaInvalidateAllocation(ctx.allocator, shotBuffer.allocation, 0, VK_WHOLE_SIZE);
+    std::vector<uint8_t> px(static_cast<const uint8_t*>(shotBuffer.mapped),
+                            static_cast<const uint8_t*>(shotBuffer.mapped) + size_t(shotExtent.width) * shotExtent.height * 4);
+    if (swapchain.format == VK_FORMAT_B8G8R8A8_SRGB || swapchain.format == VK_FORMAT_B8G8R8A8_UNORM)
+      for (size_t i = 0; i < px.size(); i += 4) std::swap(px[i], px[i + 2]);  // BGRA -> RGBA
+    for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+    if (util::writePng(opt.screenshot, px.data(), shotExtent.width, shotExtent.height)) LOG_INFO("Tela salva em %s", opt.screenshot.c_str());
+    rhi::destroyBuffer(ctx, shotBuffer);
+  }
+  ed.shutdown();
   if (opt.quitAfter > 0.0f && frameMs.size() >= 4) {
     std::vector<double> v(frameMs.begin() + std::ptrdiff_t(frameMs.size() / 2), frameMs.end());  // segunda metade
     double sum = 0.0;

@@ -189,6 +189,25 @@ FetchContent_Declare(jolt
   SOURCE_SUBDIR Build)
 FetchContent_MakeAvailable(entt nlohmann_json jolt)
 
+# Editor: Dear ImGui (ramo docking: janelas encaixáveis) + ImGuizmo (alças de mover/girar/escalar), MIT.
+FetchContent_Declare(imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG v1.92.8-docking
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_Declare(imguizmo
+  GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
+  GIT_TAG 105e4fde45e4e74aae8973d98750820ef7aca7e2
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(imgui imguizmo)
+add_library(legacy_imgui STATIC
+  ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp ${imgui_SOURCE_DIR}/imgui_tables.cpp
+  ${imgui_SOURCE_DIR}/imgui_widgets.cpp ${imgui_SOURCE_DIR}/imgui_demo.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+  ${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp)
+target_include_directories(legacy_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends ${imguizmo_SOURCE_DIR}/src)
+target_link_libraries(legacy_imgui PUBLIC Vulkan::Vulkan glfw)
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
@@ -196,7 +215,7 @@ add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
-                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt)
+                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui)
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)
   target_link_libraries(legacy PRIVATE mikktspace)

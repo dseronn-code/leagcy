@@ -60,6 +60,10 @@ class Physics {
   // Corpo cinemático: chega em `position`/`rotation` ao fim do próximo passo (empurra os dinâmicos no caminho).
   void moveKinematic(uint32_t body, glm::vec3 position, glm::quat rotation);
   bool isActive(uint32_t body) const;
+  // Editor: põe o corpo numa pose (teletransporte) e zera a velocidade.
+  void setPose(uint32_t body, glm::vec3 position, glm::quat rotation);
+  // Primeiro corpo atingido pelo raio (origem + direção normalizada × até maxDistance); ~0u = nenhum.
+  uint32_t castRay(glm::vec3 origin, glm::vec3 direction, float maxDistance, float* hitDistance = nullptr) const;
 
   // Personagens (Jolt CharacterVirtual). moveCharacter vale para os passos seguintes: velocidade horizontal desejada
   // (m/s) e pedido de pulo (atendido no próximo passo com os pés no chão).
@@ -68,6 +72,7 @@ class Physics {
   glm::vec3 characterFeet(uint32_t character) const;
   glm::vec3 characterVelocity(uint32_t character) const;
   bool characterOnGround(uint32_t character) const;
+  void setCharacterFeet(uint32_t character, glm::vec3 feet);  // editor: teletransporta e zera a velocidade
 
   uint32_t bodyCount() const;
   uint32_t activeBodyCount() const;

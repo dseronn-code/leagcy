@@ -211,9 +211,30 @@ def teste_sponza(b, pasta):
     return ok, f'pés em ({x:.2f}, {y:.2f}, {z:.2f}) depois de 10 s andando para +x'
 
 
+def teste_restaurar(b, pasta):
+    """Jogar e Parar do editor: depois de 3 s de física, todas as poses voltam às do início."""
+    cena = os.path.join('cenas', 'parque.json')
+    # Poses do arquivo: um quadro com a cena congelada (--pause: a física não anda).
+    base = os.path.join(pasta, 'rest_inicio.json')
+    subprocess.run([b, '--headless', '--scene', cena, '--width', '32', '--height', '18', '--frames', '1', '--pause',
+                    '--out', os.path.join(pasta, 'rest0.png'), '--save-world', base], capture_output=True, check=True)
+    with open(base, encoding='utf-8') as f:
+        inicio = json.load(f)
+    saida = os.path.join(pasta, 'rest_fim.json')
+    subprocess.run([b, '--headless', '--scene', cena, '--width', '32', '--height', '18', '--frames', '90',
+                    '--out', os.path.join(pasta, 'rest.png'), '--test-restore', '--save-world', saida],
+                   capture_output=True, check=True)
+    with open(saida, encoding='utf-8') as f:
+        fim = json.load(f)
+    pos0 = {e.get('nome'): e['posicao'] for e in inicio['entidades']}
+    pior = max(max(abs(a - c) for a, c in zip(e['posicao'], pos0[e.get('nome')])) for e in fim['entidades'])
+    return pior < 1e-4, f'maior diferença de posição depois de Parar: {pior:.2e} m ({len(fim["entidades"])} entidades)'
+
+
 TESTES = {'queda': teste_queda, 'quique': teste_quique, 'pilha': teste_pilha, 'tunel': teste_tunel,
           'deterministico': teste_deterministico, 'andar': teste_andar, 'pulo': teste_pulo, 'escada': teste_escada,
-          'rampa': teste_rampa, 'empurrar': teste_empurrar, 'sponza': teste_sponza}
+          'rampa': teste_rampa, 'empurrar': teste_empurrar, 'sponza': teste_sponza,
+          'restaurar': teste_restaurar}
 
 
 def main():
