@@ -159,13 +159,44 @@ foreach(SRC ${SHADER_SOURCES})
 endforeach()
 add_custom_target(shaders DEPENDS ${SPIRV_FILES})
 
+# ---- Camada de jogo (motor completo) ----
+# EnTT: registro de entidades e componentes (ECS), só headers, MIT (usado no Minecraft Bedrock).
+FetchContent_Declare(entt
+  GIT_REPOSITORY https://github.com/skypjack/entt.git
+  GIT_TAG v3.13.2
+  GIT_SHALLOW TRUE)
+# nlohmann/json: formato das cenas em arquivo, só headers, MIT.
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+FetchContent_Declare(nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
+  GIT_SHALLOW TRUE)
+# Jolt Physics: corpos rígidos, personagem e veículos, MIT (o motor de física do Horizon Forbidden West e do
+# Death Stranding 2). Runtime do MSVC dinâmico (/MD), igual ao resto do motor.
+set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(jolt
+  GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+  GIT_TAG v5.2.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR Build)
+FetchContent_MakeAvailable(entt nlohmann_json jolt)
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
 add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
-target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc)
+target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
+                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt)
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)
   target_link_libraries(legacy PRIVATE mikktspace)

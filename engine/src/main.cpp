@@ -15,6 +15,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "game/world.h"
 #include "renderer/renderer.h"
 #include "rhi/swapchain.h"
 #include "scene/demo_scene.h"
@@ -38,6 +39,7 @@ struct Options {
   float fps = 30.0f;       // headless: quadros por segundo do tempo simulado (vídeo)
   uint32_t warmup = 0;     // headless: frames iniciais parados e não salvos (TAA, denoiser e caches se assentam)
   float quitAfter = 0.0f;  // janela: fecha sozinha depois de N segundos e imprime as estatísticas do tempo de quadro
+  std::string saveWorld;   // cena .json: grava o estado do mundo (poses depois da física) ao terminar
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
@@ -78,6 +80,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--fps") o.fps = std::max(1.0f, float(std::atof(next())));
     else if (a == "--warmup") o.warmup = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--quit-after") o.quitAfter = std::max(0.0f, float(std::atof(next())));
+    else if (a == "--save-world") o.saveWorld = next();
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
@@ -234,7 +237,8 @@ Options parseArgs(int argc, char** argv) {
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n"
           "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n"
-          "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n");
+          "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n"
+          "  --scene cena.json [--save-world saida.json]   cena em arquivo com física (ex.: cenas/fisica.json)\n");
       std::exit(0);
     }
   }
@@ -457,6 +461,10 @@ int runHeadless(const Options& opt) {
   if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   ok &= savePng(opt.out);
+  if (!opt.saveWorld.empty()) {
+    if (game::World* w = game::currentWorld()) ok &= w->save(opt.saveWorld);
+    else LOG_WARN("--save-world: a cena não é um arquivo .json com mundo");
+  }
 
   rhi::destroyBuffer(ctx, readback);
   rhi::destroyImage(ctx, output);

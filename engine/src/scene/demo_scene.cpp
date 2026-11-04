@@ -1,5 +1,7 @@
 #include "scene/demo_scene.h"
 
+#include "game/world.h"
+
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -1402,6 +1404,9 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
     return opt.name.size() > n && opt.name.compare(opt.name.size() - n, n, ext) == 0;
   };
   if (endsWith(".gltf") || endsWith(".glb")) return buildFromFile(scene, camera, opt);
+  // Cena em arquivo (.json): entidades com física, criadas pela camada de jogo (src/game/world.h).
+  if (opt.name.size() > 5 && opt.name.compare(opt.name.size() - 5, 5, ".json") == 0)
+    return game::loadWorldScene(opt.name, scene, camera);
   if (opt.name == "outdoor") return buildOutdoor(scene, camera, opt);
   if (opt.name == "furnace") return buildFurnace(scene, camera);
   if (opt.name == "shadows") return buildShadowTest(scene, camera, glm::vec3(0.0f));
