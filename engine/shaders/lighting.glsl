@@ -482,6 +482,7 @@ void main() {
   float sunVisSum = 0.0;  // só para as visualizações de depuração
   // Distância dos raios indiretos para o NRD: média no difuso, menor acerto no especular (NRD_FrontEnd_SpecHitDistAveraging).
   float diffHitSum = 0.0, diffHitCount = 0.0, specHitMin = HIT_DIST_MISS + 1.0;
+  vec3 debugGiSample = vec3(0.0);  // --debug-view gi-raio: radiância que o raio de GI trouxe (a que alimenta o cache)
   for (uint k = 0u; k < spp; ++k) {
     SampleGen sg = makeSampleGen(uvec2(id), frame.frameInfo.x * spp + k);
 
@@ -531,6 +532,7 @@ void main() {
     if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI) && giTake) {
       float t;
       vec3 Li = traceRadiance(origin, dirD, sg, 0u, t, false);
+      debugGiSample = Li;
       diffuse += bc.diffuseWeight * Li * aoDiffuse * (giHalf ? 2.0 : 1.0);
       if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
       diffHitSum += t;
@@ -644,10 +646,15 @@ void main() {
   }
 
   uint debugView = uint(frame.environment.y);
-  if (debugView == 5u || debugView == 6u) {
+  if (debugView >= 5u && debugView <= 8u) {
     vec3 v = localLight;
 #ifdef RAY_TRACING
     if (debugView == 6u) v = localLightsReference(sf, bc);
+    if (debugView == 7u) {  // cache: M guardado na célula do ponto visível (0 se a célula não tem dados)
+      vec3 M;
+      v = rcQuery(g.P, g.Ng, M) ? M : vec3(0.0);
+    }
+    if (debugView == 8u) v = debugGiSample;  // gi-raio: uma amostra por quadro (a média de vários dá E[Li])
 #endif
     v = v / preExposure() * frame.environment.z;
     imageStore(outDiffuse, id, vec4(v / (1.0 + v), 1.0));  // codificação inversível: nada satura no PNG
