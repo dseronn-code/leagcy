@@ -659,7 +659,9 @@ int runWindowed(const Options& opt) {
     game::World* world = game::currentWorld();
     glm::vec3 playerFeet(0.0f);
     // No editor parado (editando), a câmera fica livre mesmo com jogador na cena.
-    const bool hasPlayer = world && world->simulate && world->playerFeet(playerFeet);
+    glm::vec3 carPos(0.0f), carFwd(0.0f, 0.0f, 1.0f);
+    const bool hasCar = world && world->simulate && world->playerVehicle(carPos, carFwd);
+    const bool hasPlayer = world && world->simulate && (hasCar || world->playerFeet(playerFeet));
     if (hasPlayer) {
       game::PlayerInput in;
       in.move = glm::vec2(float(key(GLFW_KEY_D)) - float(key(GLFW_KEY_A)), float(key(GLFW_KEY_W)) - float(key(GLFW_KEY_S)));
@@ -689,7 +691,12 @@ int runWindowed(const Options& opt) {
 
     if (world) world->setListener(camera.position, camera.forward());
     scene.update(opt.pause ? 0.0f : glm::clamp(dt, 0.0f, 0.1f));
-    if (hasPlayer && world->playerFeet(playerFeet)) {  // terceira pessoa: 4,5 m atrás da cabeça
+    if (hasCar && world->playerVehicle(carPos, carFwd)) {  // câmera de perseguição: 7 m atrás, 2,5 m acima
+      const glm::vec3 flat = glm::length(glm::vec3(carFwd.x, 0.0f, carFwd.z)) > 1e-3f
+                                 ? glm::normalize(glm::vec3(carFwd.x, 0.0f, carFwd.z)) : glm::vec3(0.0f, 0.0f, 1.0f);
+      camera.position = carPos - flat * 7.0f + glm::vec3(0.0f, 2.5f, 0.0f);
+      camera.lookAt(carPos + glm::vec3(0.0f, 1.0f, 0.0f));
+    } else if (hasPlayer && world->playerFeet(playerFeet)) {  // terceira pessoa: 4,5 m atrás da cabeça
       const glm::vec3 head = playerFeet + glm::vec3(0.0f, 1.6f, 0.0f);
       camera.position = head - camera.forward() * 4.5f + glm::vec3(0.0f, 0.4f, 0.0f);
     }

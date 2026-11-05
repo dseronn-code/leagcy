@@ -29,6 +29,18 @@ struct CharacterDesc {
   float stepHeight = 0.4f;      // degrau mais alto que ele sobe andando
 };
 
+// Carro de 4 rodas (Jolt WheeledVehicleController): suspensão, motor com curva de torque, câmbio automático,
+// diferencial, direção nas dianteiras, freio de mão nas traseiras. Frente = +Z do carro, para cima = +Y.
+struct VehicleDesc {
+  float length = 4.2f, width = 1.8f, height = 0.9f;  // caixa do chassi (m)
+  float mass = 1300.0f;                               // kg
+  float wheelRadius = 0.35f, wheelWidth = 0.25f;
+  float maxSteerDeg = 35.0f;
+  float engineTorque = 500.0f, maxRpm = 6500.0f;      // Nm, rpm
+  bool rearDrive = false;                             // tração traseira (falso = dianteira)
+  float suspensionMin = 0.25f, suspensionMax = 0.45f; // m
+};
+
 // Física de corpos rígidos sobre o Jolt Physics: passos fixos de 1/60 s com 2 subpassos de colisão (resultado igual em
 // qualquer taxa de quadros e determinístico entre execuções), em várias threads. Os cabeçalhos do Jolt ficam só em
 // physics.cpp.
@@ -73,6 +85,16 @@ class Physics {
   glm::vec3 characterVelocity(uint32_t character) const;
   bool characterOnGround(uint32_t character) const;
   void setCharacterFeet(uint32_t character, glm::vec3 feet);  // editor: teletransporta e zera a velocidade
+
+  // Veículos. drive: acelerador -1..1 (negativo = ré, com câmbio automático), direção -1..1 (+ = direita), freio e
+  // freio de mão 0..1.
+  uint32_t addVehicle(const VehicleDesc& desc, glm::vec3 position, glm::quat rotation);
+  void driveVehicle(uint32_t vehicle, float forward, float right, float brake, float handBrake);
+  uint32_t vehicleBody(uint32_t vehicle) const;  // corpo do chassi (pose(), linearVelocity())
+  glm::mat4 wheelMatrix(uint32_t vehicle, int wheel) const;  // mundo; eixo da roda = +Y da malha
+  float vehicleForwardSpeed(uint32_t vehicle) const;  // m/s na direção da frente
+  float vehicleRpm(uint32_t vehicle) const;
+  int vehicleGear(uint32_t vehicle) const;
 
   uint32_t bodyCount() const;
   uint32_t activeBodyCount() const;

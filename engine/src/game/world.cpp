@@ -45,6 +45,34 @@ scene::MeshData makeCapsule(float ratio) {
   return m;
 }
 
+// Cilindro de raio 1 com eixo em Y de -1 a 1 (rodas: escala (raio, meia largura, raio)).
+scene::MeshData makeCylinder(int segments = 32) {
+  scene::MeshData m;
+  auto vert = [&](glm::vec3 p, glm::vec3 n, glm::vec2 uv) {
+    scene::Vertex v{};
+    v.position = p;
+    v.normal = n;
+    v.uv = uv;
+    v.tangent = glm::vec4(1, 0, 0, 1);
+    m.vertices.push_back(v);
+    return uint32_t(m.vertices.size() - 1);
+  };
+  for (int i = 0; i < segments; ++i) {  // lateral
+    const float a0 = 6.2831853f * float(i) / float(segments), a1 = 6.2831853f * float(i + 1) / float(segments);
+    const glm::vec3 n0(std::cos(a0), 0, std::sin(a0)), n1(std::cos(a1), 0, std::sin(a1));
+    const uint32_t a = vert(n0 + glm::vec3(0, -1, 0), n0, {0, 0}), b = vert(n1 + glm::vec3(0, -1, 0), n1, {1, 0});
+    const uint32_t c = vert(n1 + glm::vec3(0, 1, 0), n1, {1, 1}), d = vert(n0 + glm::vec3(0, 1, 0), n0, {0, 1});
+    m.indices.insert(m.indices.end(), {a, c, b, a, d, c});
+    for (float y : {-1.0f, 1.0f}) {  // tampas
+      const glm::vec3 n(0, y, 0);
+      const uint32_t o = vert(n, n, {0.5f, 0.5f}), p0 = vert(n0 + n, n, {0, 0}), p1 = vert(n1 + n, n, {1, 0});
+      if (y > 0) m.indices.insert(m.indices.end(), {o, p1, p0});
+      else m.indices.insert(m.indices.end(), {o, p0, p1});
+    }
+  }
+  return m;
+}
+
 const char* motionName(Motion m) { return m == Motion::Static ? "estatico" : m == Motion::Dynamic ? "dinamico" : "cinematico"; }
 const char* shapeName(ShapeType t) { return t == ShapeType::Box ? "caixa" : t == ShapeType::Sphere ? "esfera" : "capsula"; }
 
@@ -120,6 +148,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
     const uint32_t cube = scene.addMesh(scene::makeCube());
     const uint32_t sphere = scene.addMesh(scene::makeSphere(48, 24));
     std::map<int, uint32_t> capsules;
+    uint32_t cylinder = ~0u;  // rodas (criado no primeiro veículo)
 
     uint32_t created = 0;
     loadedScene_ = &scene;
@@ -163,7 +192,37 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       Shape shape;
       const std::string forma = e.contains("personagem") ? "personagem" : e.value("forma", "caixa");
       std::unique_ptr<Character> character;
-      if (e.contains("personagem")) {  // cápsula em pé com os pés em "posicao"
+      std::unique_ptr<Vehicle> vehicle;
+      if (e.contains("veiculo")) {  // chassi = caixa do tamanho do carro; a física vem do VehicleDesc
+        const json& vj = e["veiculo"];
+        vehicle = std::make_unique<Vehicle>();
+        VehicleDesc& d = vehicle->desc;
+        d.length = vj.value("comprimento", d.length);
+        d.width = vj.value("largura", d.width);
+        d.height = vj.value("altura", d.height);
+        d.mass = vj.value("massa", d.mass);
+        d.wheelRadius = vj.value("raio_roda", d.wheelRadius);
+        d.wheelWidth = vj.value("largura_roda", d.wheelWidth);
+        d.maxSteerDeg = vj.value("direcao_maxima", d.maxSteerDeg);
+        d.engineTorque = vj.value("torque", d.engineTorque);
+        d.maxRpm = vj.value("rpm_maximo", d.maxRpm);
+        d.rearDrive = vj.value("tracao", "dianteira") == "traseira";
+        vehicle->wheelMaterial = vj.value("material_roda", "");
+        for (const json& k : vj.value("roteiro", json::array())) {
+          DriveKey key;
+          key.time = k.value("t", 0.0f);
+          key.throttle = k.value("acelerar", 0.0f);
+          key.steer = k.value("virar", 0.0f);
+          key.brake = k.value("freio", 0.0f);
+          key.handBrake = k.value("freio_mao", 0.0f);
+          vehicle->script.push_back(key);
+        }
+        vehicle->player = vj.value("controle", vehicle->script.empty() ? "jogador" : "roteiro") == "jogador";
+      }
+      if (vehicle) {
+        shape.type = ShapeType::Box;
+        shape.halfExtents = 0.5f * glm::vec3(vehicle->desc.width, vehicle->desc.height, vehicle->desc.length);
+      } else if (e.contains("personagem")) {  // cápsula em pé com os pés em "posicao"
         const json& pj = e["personagem"];
         character = std::make_unique<Character>();
         Character& c = *character;
@@ -278,9 +337,17 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             registry.emplace<Shape>(ent, shape);
             registry.emplace<Renderable>(ent, scene.addObject(mesh, drawMatrix(t, shape), mit->second), matName);
             if (character) registry.emplace<Character>(ent, *character);
+            if (vehicle) {
+              Vehicle v = *vehicle;
+              auto wm = materials.find(v.wheelMaterial);
+              if (wm == materials.end()) wm = materials.find("");
+              if (cylinder == ~0u) cylinder = scene.addMesh(makeCylinder());
+              for (uint32_t& w : v.wheelObjects) w = scene.addObject(cylinder, glm::mat4(1.0f), wm->second);
+              registry.emplace<Vehicle>(ent, v);
+            }
             if (!script.empty()) registry.emplace<Script>(ent, script);
             if (sound) registry.emplace<SoundSource>(ent, *sound);
-            if (hasBody && !character) {
+            if (hasBody && !character && !vehicle) {
               registry.emplace<RigidBody>(ent, body);
               if (glm::dot(velocity, velocity) > 0.0f) registry.emplace<InitialVelocity>(ent, velocity);
             }
@@ -339,6 +406,11 @@ void World::start() {
     scripting = std::make_unique<Scripting>(*this);
     for (auto ent : registry.view<Script>()) scripting->attach(ent, registry.get<Script>(ent).path);
   }
+  for (auto ent : registry.view<Transform, Vehicle>()) {
+    const Transform& t = registry.get<Transform>(ent);
+    Vehicle& v = registry.get<Vehicle>(ent);
+    v.id = physics->addVehicle(v.desc, t.position, t.rotation);
+  }
   auto chars = registry.view<Transform, Character>();
   for (auto ent : chars) {
     auto [t, c] = chars.get<Transform, Character>(ent);
@@ -382,7 +454,43 @@ void World::update(scene::Scene& scene, float dt) {
     }
     physics->moveCharacter(c.id, dir * (run ? c.runSpeed : c.walkSpeed), jump, c.jumpSpeed);
   }
+  for (auto ent : registry.view<Vehicle>()) {
+    Vehicle& v = registry.get<Vehicle>(ent);
+    if (v.id == ~0u) continue;
+    float throttle = 0.0f, steer = 0.0f, brake = 0.0f, hand = 0.0f;
+    if (v.player) {
+      // W acelera, S freia e depois dá ré, A/D viram, espaço puxa o freio de mão.
+      throttle = input_.move.y;
+      steer = input_.move.x;
+      hand = input_.jump ? 1.0f : 0.0f;
+      const float speed = physics->vehicleForwardSpeed(v.id);
+      if (throttle != 0.0f && speed * throttle < -1.0f) {  // pedal contra o movimento: freia
+        brake = 1.0f;
+        throttle = 0.0f;
+      }
+    } else if (!v.script.empty()) {
+      size_t k = 0;
+      while (k + 1 < v.script.size() && v.script[k + 1].time <= time) ++k;
+      if (v.script[k].time <= time) {
+        throttle = v.script[k].throttle;
+        steer = v.script[k].steer;
+        brake = v.script[k].brake;
+        hand = v.script[k].handBrake;
+      }
+    }
+    physics->driveVehicle(v.id, throttle, steer, brake, hand);
+  }
   physics->update(dt);
+  for (auto ent : registry.view<Vehicle, Transform, Shape, Renderable>()) {  // chassi e rodas
+    const Vehicle& v = registry.get<Vehicle>(ent);
+    if (v.id == ~0u) continue;
+    Transform& t = registry.get<Transform>(ent);
+    physics->pose(physics->vehicleBody(v.id), t.position, t.rotation);
+    scene.setTransform(registry.get<Renderable>(ent).sceneObject, drawMatrix(t, registry.get<Shape>(ent)));
+    for (int w = 0; w < 4; ++w)
+      scene.setTransform(v.wheelObjects[w], physics->wheelMatrix(v.id, w) *
+                                                glm::scale(glm::mat4(1.0f), glm::vec3(v.desc.wheelRadius, 0.5f * v.desc.wheelWidth, v.desc.wheelRadius)));
+  }
   for (auto ent : registry.view<SoundSource, Transform>()) {  // sons seguem as entidades
     const SoundSource& snd = registry.get<SoundSource>(ent);
     if (snd.handle != ~0u) audio->setPosition(snd.handle, registry.get<Transform>(ent).position);
@@ -432,6 +540,27 @@ bool World::save(const std::string& path) const {
     const Shape& s = registry.get<Shape>(ent);
     json e;
     if (const Name* n = registry.try_get<Name>(ent)) e["nome"] = n->value;
+    if (const Vehicle* v = registry.try_get<Vehicle>(ent)) {
+      const VehicleDesc& d = v->desc;
+      json vj = {{"comprimento", d.length}, {"largura", d.width}, {"altura", d.height}, {"massa", d.mass},
+                 {"raio_roda", d.wheelRadius}, {"largura_roda", d.wheelWidth}, {"direcao_maxima", d.maxSteerDeg},
+                 {"torque", d.engineTorque}, {"rpm_maximo", d.maxRpm}, {"tracao", d.rearDrive ? "traseira" : "dianteira"},
+                 {"controle", v->player ? "jogador" : "roteiro"}};
+      if (!v->wheelMaterial.empty()) vj["material_roda"] = v->wheelMaterial;
+      if (!v->script.empty()) {
+        json r = json::array();
+        for (const DriveKey& k : v->script)
+          r.push_back({{"t", k.time}, {"acelerar", k.throttle}, {"virar", k.steer}, {"freio", k.brake}, {"freio_mao", k.handBrake}});
+        vj["roteiro"] = r;
+      }
+      e["veiculo"] = vj;
+      e["posicao"] = toJson(t.position);
+      e["rotacao"] = json::array({t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z});
+      if (v->id != ~0u) e["velocidade"] = toJson(physics->linearVelocity(physics->vehicleBody(v->id)));
+      if (const Renderable* r = registry.try_get<Renderable>(ent); r && !r->material.empty()) e["material"] = r->material;
+      ents.push_back(e);
+      continue;
+    }
     if (const Character* c = registry.try_get<Character>(ent)) {
       json pj;
       pj["altura"] = c->desc.height;
@@ -503,6 +632,18 @@ bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera&
 }
 
 World* currentWorld() { return gCurrent; }
+
+bool World::playerVehicle(glm::vec3& position, glm::vec3& forward) const {
+  for (auto ent : registry.view<Vehicle, Transform>()) {
+    const Vehicle& v = registry.get<Vehicle>(ent);
+    if (!v.player || v.id == ~0u) continue;
+    const Transform& t = registry.get<Transform>(ent);
+    position = t.position;
+    forward = t.rotation * glm::vec3(0.0f, 0.0f, 1.0f);
+    return true;
+  }
+  return false;
+}
 void setAudioOffline(bool offline) { gAudioOffline = offline; }
 
 entt::entity World::entityOfBody(uint32_t body) const {

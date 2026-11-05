@@ -275,11 +275,50 @@ def teste_recarga(b, pasta):
     return abs(y - 20.0) < 1e-3 and recarregou, f'y final = {y:.2f} (versão nova: 20); recarga no log: {recarregou}'
 
 
+def carro(roteiro, pos=(0, 1.2, 0)):
+    return {'nome': 'carro', 'veiculo': {'roteiro': roteiro, 'controle': 'roteiro'}, 'posicao': list(pos)}
+
+
+def teste_carro_reta(b, pasta):
+    """Acelera 5,5 s em linha reta (1.300 kg, 500 Nm): passa de 12 m/s (~0-45 km/h, como um carro popular) e não sai
+    da reta."""
+    cena = {'entidades': [chao(), carro([{'t': 0.5, 'acelerar': 1.0}])]}
+    est, _ = rodar(b, cena, 6.0, pasta, 'carro_reta')
+    c = por_nome(est, 'carro')[0]
+    vel = sum(v * v for v in c['velocidade']) ** 0.5
+    desvio = abs(c['posicao'][0])
+    ok = vel > 12.0 and desvio < 1.0 and c['posicao'][2] > 30.0
+    return ok, f'{vel:.1f} m/s ({3.6 * vel:.0f} km/h), andou {c["posicao"][2]:.1f} m, desvio lateral {desvio:.2f} m'
+
+
+def teste_carro_curva(b, pasta):
+    """Acelera e vira tudo: em 2,5 s a frente gira mais de 90 graus (antes de completar a volta)."""
+    import math
+    cena = {'entidades': [chao(), carro([{'t': 0.5, 'acelerar': 0.6, 'virar': 1.0}])]}
+    est, _ = rodar(b, cena, 3.0, pasta, 'carro_curva')
+    w, x, y, z = por_nome(est, 'carro')[0]['rotacao']
+    fx, fz = 2 * (x * z + w * y), 1 - 2 * (x * x + y * y)  # frente (+Z) girada pelo quaternion
+    giro = math.degrees(math.acos(max(-1.0, min(1.0, fz / max(math.hypot(fx, fz), 1e-9)))))
+    return giro > 90.0, f'a frente girou {giro:.0f} graus'
+
+
+def teste_carro_freio(b, pasta):
+    """Acelera 5 s e freia: para em poucos segundos sem capotar."""
+    cena = {'entidades': [chao(), carro([{'t': 0.5, 'acelerar': 1.0}, {'t': 5.0, 'freio': 1.0}])]}
+    est, _ = rodar(b, cena, 9.0, pasta, 'carro_freio')
+    c = por_nome(est, 'carro')[0]
+    vel = sum(v * v for v in c['velocidade']) ** 0.5
+    w, x, y, z = c['rotacao']
+    em_pe = 1 - 2 * (x * x + z * z) > 0.9  # o "para cima" do carro ainda aponta para cima
+    return vel < 0.5 and em_pe, f'velocidade final {vel:.2f} m/s, em pé: {em_pe}'
+
+
 TESTES = {'queda': teste_queda, 'quique': teste_quique, 'pilha': teste_pilha, 'tunel': teste_tunel,
           'deterministico': teste_deterministico, 'andar': teste_andar, 'pulo': teste_pulo, 'escada': teste_escada,
           'rampa': teste_rampa, 'empurrar': teste_empurrar, 'sponza': teste_sponza,
           'restaurar': teste_restaurar, 'script': teste_script,
-          'recarga': teste_recarga}
+          'recarga': teste_recarga, 'carro_reta': teste_carro_reta, 'carro_curva': teste_carro_curva,
+          'carro_freio': teste_carro_freio}
 
 
 def main():

@@ -13,6 +13,10 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
+#include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
+#include <Jolt/Physics/Vehicle/VehicleConstraint.h>
+#include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
@@ -131,6 +135,12 @@ struct Physics::Impl {
   };
   std::vector<Character> characters;
 
+  struct Vehicle {
+    JPH::BodyID body;
+    JPH::Ref<JPH::VehicleConstraint> constraint;
+  };
+  std::vector<Vehicle> vehicles;
+
   // Um passo de cada personagem (antes do passo dos corpos rígidos, como no exemplo do Jolt).
   void stepCharacters(float dt) {
     const JPH::Vec3 up = JPH::Vec3::sAxisY(), gravity = system->GetGravity();
@@ -215,6 +225,11 @@ Physics::Physics(uint32_t maxBodies) : p_(std::make_unique<Impl>()) {
 }
 
 Physics::~Physics() {
+  for (auto& v : p_->vehicles) {  // restrições antes dos corpos
+    p_->system->RemoveStepListener(v.constraint);
+    p_->system->RemoveConstraint(v.constraint);
+  }
+  p_->vehicles.clear();
   p_->characters.clear();  // antes dos corpos: o personagem tem um corpo interno no sistema
   if (p_->system) {
     JPH::BodyIDVector ids;
@@ -349,6 +364,99 @@ void Physics::setCharacterFeet(uint32_t i, glm::vec3 feet) {
   JPH::CharacterVirtual& c = *p_->characters[i].body;
   c.SetPosition(JPH::RVec3(feet.x, feet.y, feet.z));
   c.SetLinearVelocity(JPH::Vec3::sZero());
+}
+
+uint32_t Physics::addVehicle(const VehicleDesc& d, glm::vec3 position, glm::quat rotation) {
+  const float hw = 0.5f * d.width, hh = 0.5f * d.height, hl = 0.5f * d.length;
+  // Chassi com o centro de massa baixo (estável nas curvas, como um carro de verdade).
+  JPH::OffsetCenterOfMassShapeSettings shapeSettings(JPH::Vec3(0.0f, -hh, 0.0f), new JPH::BoxShape(JPH::Vec3(hw, hh, hl)));
+  JPH::ShapeSettings::ShapeResult r = shapeSettings.Create();
+  if (r.HasError()) {
+    LOG_ERROR("Física: chassi inválido (%s)", r.GetError().c_str());
+    return ~0u;
+  }
+  JPH::BodyCreationSettings bs(r.Get(), JPH::RVec3(position.x, position.y, position.z), toJolt(rotation),
+                               JPH::EMotionType::Dynamic, kLayerMoving);
+  bs.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+  bs.mMassPropertiesOverride.mMass = d.mass;
+  const JPH::BodyID body = p_->bodies().CreateAndAddBody(bs, JPH::EActivation::Activate);
+  if (body.IsInvalid()) return ~0u;
+
+  JPH::VehicleConstraintSettings vs;
+  vs.mMaxPitchRollAngle = JPH::DegreesToRadians(60.0f);  // não capota com facilidade
+  const float wheelY = -0.9f * hh, frontZ = hl - 1.8f * d.wheelRadius, rearZ = -hl + 1.8f * d.wheelRadius;
+  const JPH::Vec3 positions[4] = {{hw, wheelY, frontZ}, {-hw, wheelY, frontZ}, {hw, wheelY, rearZ}, {-hw, wheelY, rearZ}};
+  for (int i = 0; i < 4; ++i) {
+    JPH::WheelSettingsWV* w = new JPH::WheelSettingsWV;
+    w->mPosition = positions[i];
+    w->mRadius = d.wheelRadius;
+    w->mWidth = d.wheelWidth;
+    w->mSuspensionMinLength = d.suspensionMin;
+    w->mSuspensionMaxLength = d.suspensionMax;
+    w->mMaxSteerAngle = i < 2 ? JPH::DegreesToRadians(d.maxSteerDeg) : 0.0f;  // direção só nas dianteiras
+    w->mMaxHandBrakeTorque = i < 2 ? 0.0f : 4000.0f;                          // freio de mão só nas traseiras
+    vs.mWheels.push_back(w);
+  }
+  JPH::WheeledVehicleControllerSettings* controller = new JPH::WheeledVehicleControllerSettings;
+  controller->mEngine.mMaxTorque = d.engineTorque;
+  controller->mEngine.mMaxRPM = d.maxRpm;
+  controller->mDifferentials.resize(1);
+  controller->mDifferentials[0].mLeftWheel = d.rearDrive ? 2 : 0;
+  controller->mDifferentials[0].mRightWheel = d.rearDrive ? 3 : 1;
+  vs.mController = controller;
+  // Barras estabilizadoras nos dois eixos (menos rolagem da carroceria).
+  vs.mAntiRollBars.resize(2);
+  vs.mAntiRollBars[0].mLeftWheel = 0;
+  vs.mAntiRollBars[0].mRightWheel = 1;
+  vs.mAntiRollBars[1].mLeftWheel = 2;
+  vs.mAntiRollBars[1].mRightWheel = 3;
+
+  JPH::BodyLockWrite lock(p_->system->GetBodyLockInterface(), body);
+  if (!lock.Succeeded()) return ~0u;
+  Impl::Vehicle v;
+  v.body = body;
+  v.constraint = new JPH::VehicleConstraint(lock.GetBody(), vs);
+  v.constraint->SetVehicleCollisionTester(new JPH::VehicleCollisionTesterCastCylinder(kLayerMoving));
+  p_->system->AddConstraint(v.constraint);
+  p_->system->AddStepListener(v.constraint);
+  p_->vehicles.push_back(v);
+  return uint32_t(p_->vehicles.size() - 1);
+}
+
+void Physics::driveVehicle(uint32_t i, float forward, float right, float brake, float handBrake) {
+  if (i >= p_->vehicles.size()) return;
+  auto* c = static_cast<JPH::WheeledVehicleController*>(p_->vehicles[i].constraint->GetController());
+  c->SetDriverInput(std::clamp(forward, -1.0f, 1.0f), std::clamp(right, -1.0f, 1.0f), std::clamp(brake, 0.0f, 1.0f),
+                    std::clamp(handBrake, 0.0f, 1.0f));
+  if (forward != 0.0f || right != 0.0f || brake != 0.0f || handBrake != 0.0f) p_->bodies().ActivateBody(p_->vehicles[i].body);
+}
+
+uint32_t Physics::vehicleBody(uint32_t i) const {
+  return i < p_->vehicles.size() ? p_->vehicles[i].body.GetIndexAndSequenceNumber() : ~0u;
+}
+
+glm::mat4 Physics::wheelMatrix(uint32_t i, int wheel) const {
+  const JPH::RMat44 m = p_->vehicles[i].constraint->GetWheelWorldTransform(JPH::uint(wheel), JPH::Vec3::sAxisY(), JPH::Vec3::sAxisX());
+  glm::mat4 out(1.0f);
+  for (int c = 0; c < 4; ++c) {
+    const JPH::Vec4 col = c < 3 ? JPH::Vec4(m.GetColumn3(c), 0.0f) : JPH::Vec4(JPH::Vec3(m.GetTranslation()), 1.0f);
+    out[c] = glm::vec4(col.GetX(), col.GetY(), col.GetZ(), col.GetW());
+  }
+  return out;
+}
+
+float Physics::vehicleForwardSpeed(uint32_t i) const {
+  const JPH::BodyID b = p_->vehicles[i].body;
+  const JPH::Vec3 fwd = p_->bodies().GetRotation(b) * JPH::Vec3::sAxisZ();
+  return p_->bodies().GetLinearVelocity(b).Dot(fwd);
+}
+
+float Physics::vehicleRpm(uint32_t i) const {
+  return static_cast<const JPH::WheeledVehicleController*>(p_->vehicles[i].constraint->GetController())->GetEngine().GetCurrentRPM();
+}
+
+int Physics::vehicleGear(uint32_t i) const {
+  return static_cast<const JPH::WheeledVehicleController*>(p_->vehicles[i].constraint->GetController())->GetTransmission().GetCurrentGear();
 }
 
 bool Physics::characterOnGround(uint32_t i) const {

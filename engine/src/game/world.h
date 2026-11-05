@@ -92,6 +92,22 @@ struct Character {
   uint32_t id = ~0u;        // na Physics
 };
 
+// Um passo do roteiro de um veículo (testes, carros de IA simples): a partir de `time` s, pedais e direção.
+struct DriveKey {
+  float time = 0.0f;
+  float throttle = 0.0f, steer = 0.0f, brake = 0.0f, handBrake = 0.0f;
+};
+
+// Veículo de 4 rodas. O chassi é desenhado pelo Renderable da entidade; as rodas são 4 objetos a mais.
+struct Vehicle {
+  VehicleDesc desc;
+  bool player = false;
+  std::vector<DriveKey> script;
+  uint32_t id = ~0u;  // na Physics
+  uint32_t wheelObjects[4] = {~0u, ~0u, ~0u, ~0u};
+  std::string wheelMaterial;
+};
+
 // Entrada do jogador neste quadro: movimento relativo à câmera (x = direita, y = frente, -1..1) e a direção da câmera.
 struct PlayerInput {
   glm::vec2 move{0.0f};
@@ -135,6 +151,8 @@ class World {
   // Jogador (personagem com "controle": "jogador"): entrada do quadro e posição dos pés para a câmera seguir.
   void setPlayerInput(const PlayerInput& input) { input_ = input; }
   bool playerFeet(glm::vec3& feet) const;
+  // Carro do jogador ("controle": "jogador"): posição e frente para a câmera de perseguição.
+  bool playerVehicle(glm::vec3& position, glm::vec3& forward) const;
 
   entt::registry registry;
   std::unique_ptr<Physics> physics;
