@@ -227,6 +227,14 @@ set_target_properties(legacy_lua PROPERTIES LINKER_LANGUAGE C)
 target_include_directories(legacy_lua SYSTEM PUBLIC ${lua_SOURCE_DIR} ${sol2_SOURCE_DIR}/include)
 target_compile_definitions(legacy_lua PUBLIC SOL_ALL_SAFETIES_ON=1)
 
+# Áudio: miniaudio (domínio público / MIT-0, um arquivo só): mixagem, som 3D com atenuação e Doppler, WAV/MP3/FLAC.
+FetchContent_Declare(miniaudio
+  GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+  GIT_TAG 0.11.24
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(miniaudio)
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
@@ -234,7 +242,8 @@ add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
-                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua)
+                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS})
+target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)
   target_link_libraries(legacy PRIVATE mikktspace)

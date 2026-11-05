@@ -7,7 +7,7 @@ Parte 2 do projeto: completar o Legacy como motor de jogo, além do renderizador
 | 1. Núcleo | Entidades e componentes (EnTT), cenas em arquivo (.json), física (Jolt), personagem, modelos glTF com colisão | ✅ |
 | 2. Editor visual | Dear ImGui + ImGuizmo: entidades, propriedades, alças, seleção por clique, Jogar/Parar, criar/duplicar/apagar, salvar | ✅ |
 | 3. Scripts | Lua 5.4 (sol2) por entidade, com recarga a quente | ✅ |
-| 4. Sistemas de jogo | Áudio 3D, veículos, animação avançada, navegação e IA, interface, exportar o jogo | — |
+| 4. Sistemas de jogo | Áudio 3D ✅; veículos, navegação e IA, interface, animação avançada, exportar o jogo | em andamento |
 
 ## Arquitetura
 
@@ -59,6 +59,16 @@ console uma vez e só aquele script para (teste `script`).
 
 Exemplos: `scripts/elevador.lua` (sobe e desce), `scripts/girar.lua` (gira), `scripts/pulador.lua` (pula sozinho),
 todos em `cenas/parque.json`.
+
+## Áudio 3D (miniaudio)
+
+Na entidade: `"som": {"arquivo": "sons/motor.wav", "volume": 1, "laco": true, "espacial": true, "dist_min": 1,
+"dist_max": 100, "queda": 1, "tocar": true}` (WAV, MP3 ou FLAC). O som segue a entidade; o ouvinte é a câmera
+(atenuação inversa pela distância, panorâmica pela direção, Doppler). Lua: `e:tocar_som()`, `e:parar_som()` e
+`som("arquivo", x, y, z [, volume])` para um som avulso. Sem janela, `--audio-wav saida.wav` grava a mixagem.
+
+Testes (`tools/audio.py`, tom de 440 Hz): a 2 m soa 4,002× mais alto que a 8 m (atenuação inversa prevê 4,0); uma
+fonte à direita sai 5× mais alta no canal direito; sem fonte, silêncio total.
 
 ## Formato das cenas (.json)
 
@@ -126,3 +136,4 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | ImGuizmo | 105e4fd | alças de mover e girar | MIT |
 | Lua | 5.4.7 | scripts | MIT |
 | sol2 | 3.5.0 | ponte C++ ↔ Lua | MIT |
+| miniaudio | 0.11.24 | áudio 3D | domínio público / MIT-0 |

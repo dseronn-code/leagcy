@@ -93,6 +93,16 @@ struct Scripting::Impl {
           }
           return std::make_tuple(v.x, v.y, v.z);
         },
+        "tocar_som", [](const Entidade& h) {
+          if (!h.valid() || !h.world->audio) return;
+          if (const SoundSource* so = h.world->registry.try_get<SoundSource>(h.e); so && so->handle != ~0u)
+            h.world->audio->play(so->handle);
+        },
+        "parar_som", [](const Entidade& h) {
+          if (!h.valid() || !h.world->audio) return;
+          if (const SoundSource* so = h.world->registry.try_get<SoundSource>(h.e); so && so->handle != ~0u)
+            h.world->audio->stop(so->handle);
+        },
         "definir_velocidade", [](const Entidade& h, float x, float y, float z) {
           if (!h.valid()) return;
           if (const RigidBody* b = h.world->registry.try_get<RigidBody>(h.e); b && b->bodyId != ~0u)
@@ -104,6 +114,9 @@ struct Scripting::Impl {
       return sol::lua_nil;
     });
     lua.set_function("tempo", [this]() { return world.time; });
+    lua.set_function("som", [this](const std::string& path, float x, float y, float z, sol::optional<float> volume) {
+      if (world.audio) world.audio->playOnce(path, glm::vec3(x, y, z), volume.value_or(1.0f));
+    });
     lua.set_function("log", [](sol::variadic_args args, sol::this_state s) {
       sol::state_view L(s);
       std::ostringstream out;

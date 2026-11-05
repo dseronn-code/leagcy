@@ -49,6 +49,7 @@ const char* motionName(Motion m) { return m == Motion::Static ? "estatico" : m =
 const char* shapeName(ShapeType t) { return t == ShapeType::Box ? "caixa" : t == ShapeType::Sphere ? "esfera" : "capsula"; }
 
 World* gCurrent = nullptr;
+bool gAudioOffline = false;
 
 // Velocidade inicial lida do arquivo (aplicada ao criar o corpo).
 struct InitialVelocity {
@@ -65,6 +66,7 @@ struct World::FileData {
 World::World() : physics(std::make_unique<Physics>()), file_(std::make_unique<FileData>()) {}
 World::~World() {
   scripting.reset();  // o Lua guarda referências às entidades
+  audio.reset();
   registry.clear();   // antes da física (os corpos são destruídos com ela)
   if (gCurrent == this) gCurrent = nullptr;
 }
@@ -237,6 +239,20 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         body.desc.angularDamping = fis.value("amortecimento_angular", body.desc.angularDamping);
       }
       const glm::vec3 velocity = vec3Of(e.value("velocidade", json()), glm::vec3(0.0f));
+      std::unique_ptr<SoundSource> sound;
+      if (e.contains("som")) {
+        const json& sj = e["som"];
+        sound = std::make_unique<SoundSource>();
+        sound->path = sj.value("arquivo", "");
+        if (!sound->path.empty() && !std::ifstream(sound->path) && std::ifstream(sceneDir + sound->path)) sound->path = sceneDir + sound->path;
+        sound->desc.volume = sj.value("volume", 1.0f);
+        sound->desc.loop = sj.value("laco", false);
+        sound->desc.spatial = sj.value("espacial", true);
+        sound->desc.minDistance = sj.value("dist_min", 1.0f);
+        sound->desc.maxDistance = sj.value("dist_max", 100.0f);
+        sound->desc.rolloff = sj.value("queda", 1.0f);
+        sound->autoplay = sj.value("tocar", true);
+      }
       std::string script = e.value("script", "");
       if (!script.empty() && !std::ifstream(script) && std::ifstream(sceneDir + script)) script = sceneDir + script;
 
@@ -263,6 +279,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             registry.emplace<Renderable>(ent, scene.addObject(mesh, drawMatrix(t, shape), mit->second), matName);
             if (character) registry.emplace<Character>(ent, *character);
             if (!script.empty()) registry.emplace<Script>(ent, script);
+            if (sound) registry.emplace<SoundSource>(ent, *sound);
             if (hasBody && !character) {
               registry.emplace<RigidBody>(ent, body);
               if (glm::dot(velocity, velocity) > 0.0f) registry.emplace<InitialVelocity>(ent, velocity);
@@ -312,6 +329,12 @@ void World::start() {
       LOG_INFO("Física: colisão de %s com %zu triângulos", m.path.c_str(), idx.size() / 3);
     }
   }
+  audio = std::make_unique<Audio>(gAudioOffline);
+  for (auto ent : registry.view<SoundSource, Transform>()) {
+    SoundSource& snd = registry.get<SoundSource>(ent);
+    snd.handle = audio->create(snd.path, snd.desc, registry.get<Transform>(ent).position);
+    if (snd.autoplay) audio->play(snd.handle);
+  }
   if (!registry.view<Script>().empty()) {
     scripting = std::make_unique<Scripting>(*this);
     for (auto ent : registry.view<Script>()) scripting->attach(ent, registry.get<Script>(ent).path);
@@ -327,6 +350,7 @@ void World::start() {
 }
 
 void World::update(scene::Scene& scene, float dt) {
+  if (audio && dt > 0.0f) audio->mix(dt);  // offline: a mixagem anda junto com o tempo do quadro
   if (dt <= 0.0f || !simulate) return;
   time += dt;
   if (scripting) scripting->update(scene, dt);
@@ -359,6 +383,10 @@ void World::update(scene::Scene& scene, float dt) {
     physics->moveCharacter(c.id, dir * (run ? c.runSpeed : c.walkSpeed), jump, c.jumpSpeed);
   }
   physics->update(dt);
+  for (auto ent : registry.view<SoundSource, Transform>()) {  // sons seguem as entidades
+    const SoundSource& snd = registry.get<SoundSource>(ent);
+    if (snd.handle != ~0u) audio->setPosition(snd.handle, registry.get<Transform>(ent).position);
+  }
   for (auto ent : registry.view<Transform, Shape, Character, Renderable>()) {
     auto& t = registry.get<Transform>(ent);
     const Character& c = registry.get<Character>(ent);
@@ -436,6 +464,10 @@ bool World::save(const std::string& path) const {
     e["rotacao"] = json::array({t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z});
     if (const Renderable* r = registry.try_get<Renderable>(ent); r && !r->material.empty()) e["material"] = r->material;
     if (const Script* sc = registry.try_get<Script>(ent)) e["script"] = sc->path;
+    if (const SoundSource* so = registry.try_get<SoundSource>(ent))
+      e["som"] = {{"arquivo", so->path}, {"volume", so->desc.volume}, {"laco", so->desc.loop}, {"espacial", so->desc.spatial},
+                  {"dist_min", so->desc.minDistance}, {"dist_max", so->desc.maxDistance}, {"queda", so->desc.rolloff},
+                  {"tocar", so->autoplay}};
     if (const RigidBody* b = registry.try_get<RigidBody>(ent)) {
       json fis;
       fis["tipo"] = motionName(b->desc.motion);
@@ -471,6 +503,7 @@ bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera&
 }
 
 World* currentWorld() { return gCurrent; }
+void setAudioOffline(bool offline) { gAudioOffline = offline; }
 
 entt::entity World::entityOfBody(uint32_t body) const {
   if (body == ~0u) return entt::null;

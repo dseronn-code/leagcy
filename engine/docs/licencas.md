@@ -25,6 +25,7 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo) | Alças de mover/girar no editor | MIT | Manter o aviso |
 | [Lua](https://github.com/lua/lua) v5.4.7 | Scripts | MIT | Manter o aviso |
 | [sol2](https://github.com/ThePhD/sol2) v3.5.0 | Ponte C++ ↔ Lua | MIT | Manter o aviso |
+| [miniaudio](https://github.com/mackron/miniaudio) 0.11.24 | Áudio 3D | Domínio público ou MIT-0 | — |
 
 ## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
 

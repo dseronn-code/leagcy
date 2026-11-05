@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "game/audio.h"
 #include "game/physics.h"
 
 namespace scene {
@@ -52,6 +53,14 @@ struct Model {
   bool meshCollider = false;  // colisão pelos triângulos do modelo
   float friction = 0.6f;
   uint32_t bodyId = ~0u;
+};
+
+// Som preso à entidade (segue a posição dela). handle é preenchido em World::start().
+struct SoundSource {
+  std::string path;
+  Audio::SoundDesc desc;
+  bool autoplay = true;
+  uint32_t handle = ~0u;
 };
 
 // Comportamento em Lua (src/game/scripting.h): o arquivo roda num ambiente próprio da entidade.
@@ -130,6 +139,11 @@ class World {
   entt::registry registry;
   std::unique_ptr<Physics> physics;
   std::unique_ptr<class Scripting> scripting;  // criado em start() se houver entidades com Script
+  std::unique_ptr<Audio> audio;                 // criado em start()
+  // Ouvinte do áudio (a câmera), a cada quadro antes do update.
+  void setListener(glm::vec3 position, glm::vec3 forward) {
+    if (audio) audio->setListener(position, forward);
+  }
   float time = 0.0f;  // segundos de jogo simulados
 
  private:
@@ -144,6 +158,8 @@ class World {
 // Cenas .json passam por aqui (scene::buildDemoScene): o mundo fica vivo enquanto a Scene existir e roda dentro do
 // Scene::update. currentWorld() dá acesso a ele (ex.: --save-world no fim do modo sem janela).
 bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera& camera);
+// Áudio sem placa de som (modo sem janela): a mixagem fica na memória para --audio-wav. Antes de carregar a cena.
+void setAudioOffline(bool offline);
 World* currentWorld();
 
 }  // namespace game

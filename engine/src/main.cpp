@@ -46,6 +46,7 @@ struct Options {
   std::string screenshot;  // janela: grava a imagem da janela (com a interface) no último quadro
   std::string select;      // editor: entidade selecionada ao abrir (testes)
   bool testRestore = false;  // sem janela: guarda as poses no início e volta a elas antes do --save-world (teste)
+  std::string audioWav;      // sem janela: grava a mixagem do áudio 3D (ouvinte = câmera) em WAV
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
@@ -91,6 +92,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--screenshot") o.screenshot = next();
     else if (a == "--select") o.select = next();
     else if (a == "--test-restore") o.testRestore = true;
+    else if (a == "--audio-wav") o.audioWav = next();
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
@@ -249,6 +251,7 @@ Options parseArgs(int argc, char** argv) {
           "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n"
           "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n"
           "  --scene cena.json [--save-world saida.json]   cena em arquivo com física (ex.: cenas/fisica.json)\n"
+          "  --audio-wav saida.wav    sem janela: grava o áudio 3D da cena .json (ouvinte = câmera)\n"
           "  --editor                 editor visual na janela (entidades, propriedades, alças, jogar/pausar, salvar)\n"
           "  --screenshot arq.png     janela: grava a tela (com a interface) ao fechar (use com --quit-after)\n");
       std::exit(0);
@@ -375,6 +378,7 @@ int runHeadless(const Options& opt) {
   scene::Scene scene;
   scene::Camera camera;
   scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
+  game::setAudioOffline(true);  // sem janela: sem placa de som (a mixagem vai para --audio-wav)
   if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
   if (opt.testRestore && game::currentWorld()) game::currentWorld()->snapshot();  // o "Jogar" do editor
   if (opt.customCamera) {
@@ -439,6 +443,7 @@ int runHeadless(const Options& opt) {
     if (!cameraKeys.empty()) applyCameraPath(cameraKeys, float(shot) * dt, camera);
     if (opt.move != 0.0f && (opt.moveStop == 0 || f < opt.moveStop)) camera.position += moveDir * (opt.move * dt);
     const bool frozen = warming || opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
+    if (game::World* w = game::currentWorld()) w->setListener(camera.position, camera.forward());
     scene.update(frozen ? 0.0f : dt);
     scene.stream(ctx, camera.position);  // streaming do mundo (células perto da câmera)
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
@@ -474,6 +479,10 @@ int runHeadless(const Options& opt) {
   if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   ok &= savePng(opt.out);
+  if (!opt.audioWav.empty()) {
+    if (game::World* w = game::currentWorld(); w && w->audio) ok &= w->audio->writeWav(opt.audioWav);
+    else LOG_WARN("--audio-wav: a cena não é um arquivo .json com mundo");
+  }
   if (!opt.saveWorld.empty()) {
     if (game::World* w = game::currentWorld()) {
       if (opt.testRestore) w->restore(scene);  // o "Parar" do editor
@@ -678,6 +687,7 @@ int runWindowed(const Options& opt) {
     toggle(GLFW_KEY_M, mDown, r.settings.motionBlur);
     (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
 
+    if (world) world->setListener(camera.position, camera.forward());
     scene.update(opt.pause ? 0.0f : glm::clamp(dt, 0.0f, 0.1f));
     if (hasPlayer && world->playerFeet(playerFeet)) {  // terceira pessoa: 4,5 m atrás da cabeça
       const glm::vec3 head = playerFeet + glm::vec3(0.0f, 1.6f, 0.0f);
