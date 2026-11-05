@@ -102,6 +102,7 @@
     "controle": "jogador",
     "material_roda": "pneu"
    },
+   "script": "scripts/velocimetro.lua",
    "posicao": [
     0,
     1.2,

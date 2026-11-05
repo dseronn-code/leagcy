@@ -24,7 +24,8 @@ namespace editor {
 // Desenhado por cima da imagem final, no mesmo passe de apresentação.
 class Editor {
  public:
-  void init(rhi::Context& ctx, GLFWwindow* window, VkFormat format, uint32_t imageCount);
+  // panels = falso: só a interface de jogo (HUD dos scripts), sem os painéis do editor.
+  void init(rhi::Context& ctx, GLFWwindow* window, VkFormat format, uint32_t imageCount, bool panels = true);
   void shutdown();
   // Monta a interface do quadro (antes de ler o teclado e o mouse para a câmera).
   void frame(game::World* world, scene::Scene& scene, const scene::Camera& camera, VkExtent2D extent, float frameMs);
@@ -51,7 +52,10 @@ class Editor {
   void gizmo(game::World& world, scene::Scene& scene, const scene::Camera& camera, VkExtent2D extent);
   void picking(game::World& world, const scene::Camera& camera, VkExtent2D extent);
 
+  void drawHud(const game::World& world, VkExtent2D extent);
+
   bool ready_ = false;
+  bool panels_ = true;
   VkFormat format_ = VK_FORMAT_UNDEFINED;
   entt::entity selected_ = entt::null;
   int gizmoOperation_ = 0;  // 0 = mover, 1 = girar

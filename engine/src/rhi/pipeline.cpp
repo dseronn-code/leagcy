@@ -1,11 +1,54 @@
 #include "rhi/pipeline.h"
 
+#include <filesystem>
 #include <fstream>
+#include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace rhi {
 
+namespace {
+
+// Pasta dos shaders: "shaders/" ao lado do executável (jogo exportado por tools/empacotar.py) ou, sem ela, a pasta
+// do build (SHADER_DIR, caminho fixado na compilação).
+const std::string& shaderDir() {
+  static const std::string dir = [] {
+    std::filesystem::path exe;
+#ifdef _WIN32
+    std::vector<wchar_t> buf(32768);
+    const DWORD n = GetModuleFileNameW(nullptr, buf.data(), DWORD(buf.size()));
+    if (n > 0 && n < buf.size()) exe = std::filesystem::path(std::wstring(buf.data(), n));
+#else
+    std::error_code ec;
+    exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+#endif
+    if (!exe.empty()) {
+      const std::filesystem::path local = exe.parent_path() / "shaders";
+      std::error_code ec2;
+      if (std::filesystem::exists(local / "lighting.comp.spv", ec2) &&
+          !std::filesystem::equivalent(local, std::filesystem::path(SHADER_DIR), ec2)) {
+        LOG_INFO("Shaders do pacote: %s", local.string().c_str());
+        return local.string();
+      }
+    }
+    return std::string(SHADER_DIR);
+  }();
+  return dir;
+}
+
+}  // namespace
+
 VkShaderModule loadShader(Context& ctx, const std::string& name) {
-  std::string path = std::string(SHADER_DIR) + "/" + name + ".spv";
+  std::string path = shaderDir() + "/" + name + ".spv";
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f) FATAL("Shader não encontrado: %s", path.c_str());
   size_t size = size_t(f.tellg());

@@ -583,7 +583,9 @@ int runWindowed(const Options& opt) {
   glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int, int) { *static_cast<bool*>(glfwGetWindowUserPointer(w)) = true; });
 
   editor::Editor ed;
-  if (opt.editor) ed.init(ctx, window, swapchain.format, uint32_t(swapchain.images.size()));
+  // Cena de jogo (.json) sem o editor: só a interface de jogo (HUD dos scripts).
+  if (opt.editor || game::currentWorld())
+    ed.init(ctx, window, swapchain.format, uint32_t(swapchain.images.size()), opt.editor);
   if (ed.ready() && !opt.select.empty() && game::currentWorld()) ed.selectByName(*game::currentWorld(), opt.select);
   rhi::Buffer shotBuffer{};  // --screenshot: cópia da imagem da janela no último quadro
   VkExtent2D shotExtent{};

@@ -235,6 +235,16 @@ FetchContent_Declare(miniaudio
   SOURCE_SUBDIR _sem_cmake)
 FetchContent_MakeAvailable(miniaudio)
 
+# Navegação: Recast (gera a malha de navegação) + Detour (caminhos), zlib (a base da navegação de Unreal e Unity).
+set(RECASTNAVIGATION_DEMO OFF CACHE BOOL "" FORCE)
+set(RECASTNAVIGATION_TESTS OFF CACHE BOOL "" FORCE)
+set(RECASTNAVIGATION_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(recastnavigation
+  GIT_REPOSITORY https://github.com/recastnavigation/recastnavigation.git
+  GIT_TAG v1.6.0
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(recastnavigation)
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
@@ -242,7 +252,8 @@ add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
-                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS})
+                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}
+                                     RecastNavigation::Recast RecastNavigation::Detour)
 target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)

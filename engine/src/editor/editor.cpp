@@ -3,6 +3,7 @@
 #define GLM_ENABLE_EXPERIMENTAL  // glm/gtx (decompose)
 #include <algorithm>
 #include <cmath>
+#include <cfloat>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -43,10 +44,17 @@ std::string entityLabel(const game::World& w, entt::entity e) {
 
 }  // namespace
 
-void Editor::init(rhi::Context& ctx, GLFWwindow* window, VkFormat format, uint32_t imageCount) {
+void Editor::init(rhi::Context& ctx, GLFWwindow* window, VkFormat format, uint32_t imageCount, bool panels) {
+  panels_ = panels;
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
+  // Fonte vetorial (Roboto, Apache 2.0): o ImGui 1.92 gera os glifos no tamanho pedido, então o texto do HUD fica
+  // nítido em qualquer resolução e com acentos. Sem o arquivo, fica a fonte embutida.
+  if (std::FILE* f = std::fopen("fontes/Roboto-Medium.ttf", "rb")) {
+    std::fclose(f);
+    io.Fonts->AddFontFromFileTTF("fontes/Roboto-Medium.ttf", 16.0f);
+  }
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   io.IniFilename = nullptr;  // layout fixo (nada gravado na pasta do motor)
   ImGui::StyleColorsDark();
@@ -71,7 +79,7 @@ void Editor::init(rhi::Context& ctx, GLFWwindow* window, VkFormat format, uint32
   ii.CheckVkResultFn = checkVk;
   ready_ = ImGui_ImplVulkan_Init(&ii);
   if (!ready_) LOG_ERROR("Editor: ImGui_ImplVulkan_Init falhou");
-  else LOG_INFO("Editor ligado: clique num objeto para selecionar; F1 alterna mover/girar");
+  else if (panels_) LOG_INFO("Editor ligado: clique num objeto para selecionar; F1 alterna mover/girar");
 }
 
 void Editor::shutdown() {
@@ -92,6 +100,8 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
   ImGui_ImplGlfw_NewFrame();
   ImGui::NewFrame();
   ImGuizmo::BeginFrame();
+  if (world) drawHud(*world, extent);
+  if (!panels_) return;
   if (ImGui::IsKeyPressed(ImGuiKey_F1)) gizmoOperation_ = 1 - gizmoOperation_;
   // Teste sem mouse (LEGACY_EDITOR_TESTE=caixa): no 3º quadro, aperta "+ Caixa" uma vez.
   static int frameNo = 0;
@@ -299,6 +309,50 @@ void Editor::requestReload(game::World& world) {
 void Editor::selectByName(game::World& world, const std::string& name) {
   for (auto e : world.registry.view<game::Name>())
     if (world.registry.get<game::Name>(e).value == name) selected_ = e;
+}
+
+void Editor::drawHud(const game::World& world, VkExtent2D extent) {
+  if (world.hud.empty()) return;
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImFont* font = ImGui::GetFont();
+  const float W = float(extent.width), H = float(extent.height);
+  // As cores do HUD são sRGB (como num editor de imagem). Numa janela _SRGB a placa codifica o que o ImGui escreve,
+  // então ele precisa receber o valor linear para a cor sair igual à pedida.
+  const bool srgbTarget = format_ == VK_FORMAT_B8G8R8A8_SRGB || format_ == VK_FORMAT_R8G8B8A8_SRGB;
+  auto lin = [&](float c) {
+    c = std::clamp(c, 0.0f, 1.0f);
+    if (!srgbTarget) return c;
+    return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+  };
+  auto col = [&](glm::vec4 c) {
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(lin(c.r), lin(c.g), lin(c.b), std::clamp(c.a, 0.0f, 1.0f)));
+  };
+  for (const game::HudItem& it : world.hud) {
+    const ImVec2 p(it.pos.x * W, it.pos.y * H), s(it.size.x * W, it.size.y * H);
+    switch (it.kind) {
+      case game::HudItem::Kind::Rect:
+        dl->AddRectFilled(p, ImVec2(p.x + s.x, p.y + s.y), col(it.color), 0.15f * std::min(s.x, s.y));
+        break;
+      case game::HudItem::Kind::Bar: {
+        const float r = 0.3f * s.y;
+        dl->AddRectFilled(p, ImVec2(p.x + s.x, p.y + s.y), col(it.back), r);
+        if (it.value > 0.0f) dl->AddRectFilled(p, ImVec2(p.x + s.x * it.value, p.y + s.y), col(it.color), r);
+        break;
+      }
+      case game::HudItem::Kind::Text: {
+        const float size = std::max(it.textSize * H, 4.0f);
+        const ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0.0f, it.text.c_str());
+        ImVec2 at = p;
+        if (it.align == 1) at.x -= 0.5f * ts.x;
+        if (it.align == 2) at.x -= ts.x;
+        const float sh = std::max(1.0f, size * 0.06f);  // sombra para ler sobre qualquer fundo
+        dl->AddText(font, size, ImVec2(at.x + sh, at.y + sh), IM_COL32(0, 0, 0, int(200 * std::clamp(it.color.a, 0.0f, 1.0f))),
+                    it.text.c_str());
+        dl->AddText(font, size, at, col(it.color), it.text.c_str());
+        break;
+      }
+    }
+  }
 }
 
 void Editor::render(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent) {

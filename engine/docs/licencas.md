@@ -26,6 +26,8 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [Lua](https://github.com/lua/lua) v5.4.7 | Scripts | MIT | Manter o aviso |
 | [sol2](https://github.com/ThePhD/sol2) v3.5.0 | Ponte C++ ↔ Lua | MIT | Manter o aviso |
 | [miniaudio](https://github.com/mackron/miniaudio) 0.11.24 | Áudio 3D | Domínio público ou MIT-0 | — |
+| [Recast/Detour](https://github.com/recastnavigation/recastnavigation) 1.6.0 | Navegação dos NPCs | zlib | Não apresentar como próprio; manter o aviso nos fontes |
+| [Roboto](https://fonts.google.com/specimen/Roboto) (fonte, `fontes/Roboto-Medium.ttf`) | Texto do HUD | Apache 2.0 | Manter o aviso de licença |
 
 ## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
 

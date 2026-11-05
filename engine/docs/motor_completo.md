@@ -7,7 +7,7 @@ Parte 2 do projeto: completar o Legacy como motor de jogo, além do renderizador
 | 1. Núcleo | Entidades e componentes (EnTT), cenas em arquivo (.json), física (Jolt), personagem, modelos glTF com colisão | ✅ |
 | 2. Editor visual | Dear ImGui + ImGuizmo: entidades, propriedades, alças, seleção por clique, Jogar/Parar, criar/duplicar/apagar, salvar | ✅ |
 | 3. Scripts | Lua 5.4 (sol2) por entidade, com recarga a quente | ✅ |
-| 4. Sistemas de jogo | Áudio 3D ✅; veículos, navegação e IA, interface, animação avançada, exportar o jogo | em andamento |
+| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅; animação avançada | em andamento |
 
 ## Arquitetura
 
@@ -56,6 +56,10 @@ console uma vez e só aquele script para (teste `script`).
 | `achar("nome")` | outra entidade (ou nil) |
 | `tempo()` | segundos de jogo |
 | `log(...)` | escreve no console |
+| `e:ir_para(x, y, z)`, `e:seguir(outra)` | personagem passa a andar sozinho pela navegação |
+| `e:velocidade_frente()`, `e:marcha()`, `e:rpm()` | carro: m/s para a frente, marcha (−1 ré, 0 neutro), giro |
+| `hud.texto(t, x, y, {tamanho, cor, alinhar})` | texto na tela (ver Interface de jogo) |
+| `hud.retangulo(x, y, l, a, cor)`, `hud.barra(x, y, l, a, fração, cor, fundo)` | retângulo e barra de progresso |
 
 Exemplos: `scripts/elevador.lua` (sobe e desce), `scripts/girar.lua` (gira), `scripts/pulador.lua` (pula sozinho),
 todos em `cenas/parque.json`.
@@ -69,6 +73,58 @@ Na entidade: `"som": {"arquivo": "sons/motor.wav", "volume": 1, "laco": true, "e
 
 Testes (`tools/audio.py`, tom de 440 Hz): a 2 m soa 4,002× mais alto que a 8 m (atenuação inversa prevê 4,0); uma
 fonte à direita sai 5× mais alta no canal direito; sem fonte, silêncio total.
+
+## Veículos (Jolt)
+
+Na entidade: `"veiculo": {"comprimento": 4.2, "largura": 1.8, "altura": 0.9, "massa": 1300, "raio_roda": 0.35,
+"largura_roda": 0.25, "direcao_maxima": 35, "torque": 500, "rpm_maximo": 6500, "tracao": "dianteira",
+"controle": "jogador", "material_roda": "pneu"}`. Quatro rodas com suspensão, diferencial, barras
+estabilizadoras, câmbio automático e freio de mão nas traseiras. Com `controle` `jogador`: W acelera, S freia e depois dá ré, A/D
+vira, espaço é o freio de mão, e a câmera segue o carro. Ou `roteiro` com
+`"roteiro": [{"t": 0, "acelerar": 1, "virar": 0, "freio": 0, "freio_mao": 0}]`. Exemplo: `cenas/carro.json`.
+
+## Navegação e NPCs (Recast/Detour)
+
+Personagem com `"controle": "ia"` anda sozinho pela malha de navegação: `"ia": {"alvo": [x, y, z]}` vai até um
+ponto; `"ia": {"seguir": "nome"}` segue outra entidade; `"parar_a"` é a distância em que para (m). A malha é gerada ao
+começar a partida a partir do cenário parado (caixas estáticas e modelos com `"colisao": "malha"`), no tamanho do
+personagem (altura, raio, degrau e rampa máximos), então desvia de paredes, sobe escadas e evita o que é íngreme. O
+caminho é recalculado a cada 0,5 s (o alvo pode andar). Lua: `e:ir_para(x, y, z)` e `e:seguir(outra)`.
+
+## Interface de jogo (HUD)
+
+Desenhada pelos scripts no `atualizar(e, dt)` de cada quadro, por cima da imagem (Dear ImGui, fonte vetorial
+Roboto: nítida em qualquer resolução, com acentos). Posição e tamanho em fração da tela (0 a 1, a partir do canto de
+cima à esquerda), então a mesma interface serve em 720p ou 4K; `tamanho` do texto em fração da altura da tela; cores
+`{r, g, b, a}` de 0 a 1 em sRGB (as mesmas de um editor de imagem); `alinhar` = `esquerda`, `centro` ou `direita`.
+
+```lua
+function atualizar(e, dt)
+  hud.texto("Vida", 0.03, 0.03, {tamanho = 0.035})
+  hud.barra(0.03, 0.08, 0.25, 0.025, vida / 100, {0.2, 0.9, 0.3}, {1, 1, 1, 0.15})
+end
+```
+
+Exemplo completo: `scripts/velocimetro.lua` (km/h, marcha e giro do motor em `cenas/carro.json`). Teste
+(`tools/hud.py`, janela 800x450): retângulo, barra e fundo saem exatamente nas cores pedidas (255, 0, 0 / 0, 255, 0 /
+0, 0, 255); a barra pela metade troca de cor em x = 0,250 (pedido 0,25); o texto centralizado fica com centro em
+0,498.
+
+## Exportar o jogo (`tools/empacotar.py`)
+
+```
+python tools/empacotar.py --cena cenas/carro.json --saida dist/Carro
+```
+
+Gera uma pasta que roda sem o código nem o build: o executável e as bibliotecas dele (DLSS), os shaders compilados
+(o executável procura `shaders/` na própria pasta antes da pasta do build), a fonte do HUD, as cenas e tudo o que
+elas usam (modelos glTF com os `.bin` e as texturas, scripts, sons e os arquivos citados nos scripts), os textos de
+licença e `jogar.bat` / `jogar.sh`, que abrem a primeira cena em tela cheia (`--janela` para janela, `--qualidade`
+para o preset; `--cena` repetido inclui várias). Arquivo citado que não existe vira aviso e o script sai com erro.
+Na primeira execução o motor comprime as texturas em `texcache/`.
+
+Conferido: a Sponza exportada (cena com `"modelo"`) leva o .gltf, o .bin e as 69 texturas (71 arquivos) e roda de
+dentro da pasta exportada; rastreando os arquivos abertos (strace), o jogo não lê nada da pasta do motor.
 
 ## Formato das cenas (.json)
 
@@ -124,6 +180,9 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | restaurar | Jogar 3 s e Parar no editor | as 36 entidades voltam com diferença 0 |
 | script | Lua sobe uma caixa 1 m/s por 2 s; outro script com erro | y = 3,000 m; o erro não derruba nada |
 | recarga | o .lua muda no disco com o motor rodando | a versão nova vale sem reiniciar |
+| carro_reta / carro_curva / carro_freio | carro acelera em linha reta, vira, freia | 14,1 m/s (desvio lateral 0,01 m); vira 107°; para (0,01 m/s) em pé |
+| npc | parede de 10 m entre o NPC e o alvo | contorna e para a 0,24 m do alvo |
+| npc_seguir | NPC segue um personagem andando | fica a 1,45 m dele (para a 1,5 m) |
 
 ## Bibliotecas (todas gratuitas, de código aberto)
 
@@ -137,3 +196,5 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | Lua | 5.4.7 | scripts | MIT |
 | sol2 | 3.5.0 | ponte C++ ↔ Lua | MIT |
 | miniaudio | 0.11.24 | áudio 3D | domínio público / MIT-0 |
+| Recast/Detour | 1.6.0 | malha de navegação e caminhos | zlib |
+| Roboto (fonte) | — | texto do HUD | Apache 2.0 |

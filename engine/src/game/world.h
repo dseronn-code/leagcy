@@ -90,6 +90,15 @@ struct Character {
   std::vector<ScriptKey> script;
   size_t scriptJumped = 0;  // quantos passos do roteiro já tiveram o pulo atendido
   uint32_t id = ~0u;        // na Physics
+  // IA ("controle": "ia"): anda pela malha de navegação até um ponto ou seguindo outra entidade.
+  bool ai = false;
+  bool aiHasTarget = false;
+  glm::vec3 aiTarget{0.0f};
+  std::string aiFollow;      // nome da entidade seguida (vazio = ponto fixo)
+  float aiStopDistance = 0.5f;
+  std::vector<glm::vec3> aiPath;
+  size_t aiNext = 0;
+  float aiRepath = 0.0f;     // s até recalcular o caminho
 };
 
 // Um passo do roteiro de um veículo (testes, carros de IA simples): a partir de `time` s, pedais e direção.
@@ -113,6 +122,19 @@ struct PlayerInput {
   glm::vec2 move{0.0f};
   float cameraYaw = 0.0f;  // radianos (scene::Camera::yaw)
   bool jump = false, run = false;
+};
+
+// Interface de jogo (HUD): itens desenhados por cima da imagem, montados pelos scripts a cada quadro de jogo.
+// Posição e tamanho em fração da tela (0..1, origem no canto de cima à esquerda); texto com altura em fração da
+// altura da tela. Cores RGBA sRGB de 0 a 1, como num editor de imagem (a = opacidade).
+struct HudItem {
+  enum class Kind { Text, Rect, Bar } kind = Kind::Text;
+  glm::vec2 pos{0.0f}, size{0.0f};
+  float value = 0.0f;   // barra: fração cheia (0..1)
+  float textSize = 0.04f;
+  int align = 0;        // texto: 0 = esquerda, 1 = centro, 2 = direita (em relação a pos.x)
+  glm::vec4 color{1.0f}, back{0.0f, 0.0f, 0.0f, 0.5f};
+  std::string text;
 };
 
 // ---- Mundo ----
@@ -141,6 +163,7 @@ class World {
   // Matriz de desenho de uma entidade (posição, rotação e tamanho da forma).
   glm::mat4 entityMatrix(entt::entity e) const;
   bool simulate = true;  // falso: física parada (editor em pausa)
+  std::vector<HudItem> hud;  // interface de jogo deste quadro (refeita pelos scripts enquanto o jogo roda)
   // Editor: cria uma forma básica (aparece no próximo load) e duplica uma entidade (1 m ao lado).
   entt::entity addPrimitive(ShapeType type, glm::vec3 position, Motion motion, glm::vec3 halfExtents = glm::vec3(0.5f));
   entt::entity duplicate(entt::entity e);
@@ -158,6 +181,7 @@ class World {
   std::unique_ptr<Physics> physics;
   std::unique_ptr<class Scripting> scripting;  // criado em start() se houver entidades com Script
   std::unique_ptr<Audio> audio;                 // criado em start()
+  std::unique_ptr<class Navigation> navigation; // criada em start() se houver personagem com IA
   // Ouvinte do áudio (a câmera), a cada quadro antes do update.
   void setListener(glm::vec3 position, glm::vec3 forward) {
     if (audio) audio->setListener(position, forward);

@@ -1,5 +1,6 @@
 #include "game/scripting.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <sstream>
@@ -93,6 +94,44 @@ struct Scripting::Impl {
           }
           return std::make_tuple(v.x, v.y, v.z);
         },
+        "ir_para", [](const Entidade& h, float x, float y, float z) {  // IA: anda até o ponto pela navegação
+          if (!h.valid()) return;
+          if (Character* c = h.world->registry.try_get<Character>(h.e)) {
+            c->ai = true;
+            c->player = false;
+            c->aiTarget = glm::vec3(x, y, z);
+            c->aiFollow.clear();
+            c->aiHasTarget = true;
+            c->aiRepath = 0.0f;
+          }
+        },
+        "seguir", [](const Entidade& h, const Entidade& alvo) {
+          if (!h.valid() || !alvo.valid()) return;
+          if (Character* c = h.world->registry.try_get<Character>(h.e)) {
+            const Name* n = alvo.world->registry.try_get<Name>(alvo.e);
+            if (!n) return;
+            c->ai = true;
+            c->player = false;
+            c->aiFollow = n->value;
+            c->aiHasTarget = true;
+            c->aiRepath = 0.0f;
+          }
+        },
+        "rpm", [](const Entidade& h) -> float {  // carro: giro do motor
+          if (!h.valid()) return 0.0f;
+          const Vehicle* v = h.world->registry.try_get<Vehicle>(h.e);
+          return v && v->id != ~0u ? h.world->physics->vehicleRpm(v->id) : 0.0f;
+        },
+        "marcha", [](const Entidade& h) -> int {  // carro: marcha engatada (-1 = ré, 0 = neutro)
+          if (!h.valid()) return 0;
+          const Vehicle* v = h.world->registry.try_get<Vehicle>(h.e);
+          return v && v->id != ~0u ? h.world->physics->vehicleGear(v->id) : 0;
+        },
+        "velocidade_frente", [](const Entidade& h) -> float {  // carro: m/s para a frente (negativo = ré)
+          if (!h.valid()) return 0.0f;
+          const Vehicle* v = h.world->registry.try_get<Vehicle>(h.e);
+          return v && v->id != ~0u ? h.world->physics->vehicleForwardSpeed(v->id) : 0.0f;
+        },
         "tocar_som", [](const Entidade& h) {
           if (!h.valid() || !h.world->audio) return;
           if (const SoundSource* so = h.world->registry.try_get<SoundSource>(h.e); so && so->handle != ~0u)
@@ -116,6 +155,46 @@ struct Scripting::Impl {
     lua.set_function("tempo", [this]() { return world.time; });
     lua.set_function("som", [this](const std::string& path, float x, float y, float z, sol::optional<float> volume) {
       if (world.audio) world.audio->playOnce(path, glm::vec3(x, y, z), volume.value_or(1.0f));
+    });
+    // Interface de jogo: hud.texto / hud.retangulo / hud.barra, chamados no atualizar() de cada quadro.
+    auto color = [](const sol::optional<sol::table>& t, glm::vec4 fallback) {
+      if (!t) return fallback;
+      const sol::table& c = *t;
+      return glm::vec4(c.get_or(1, fallback.r), c.get_or(2, fallback.g), c.get_or(3, fallback.b), c.get_or(4, fallback.a));
+    };
+    sol::table hud = lua.create_named_table("hud");
+    hud.set_function("texto", [this, color](const std::string& text, float x, float y, sol::optional<sol::table> opt) {
+      HudItem it;
+      it.kind = HudItem::Kind::Text;
+      it.text = text;
+      it.pos = {x, y};
+      if (opt) {
+        const sol::table& o = *opt;
+        it.textSize = o.get_or("tamanho", it.textSize);
+        it.color = color(o.get<sol::optional<sol::table>>("cor"), it.color);
+        const std::string a = o.get_or<std::string>("alinhar", "esquerda");
+        it.align = a == "centro" ? 1 : a == "direita" ? 2 : 0;
+      }
+      world.hud.push_back(std::move(it));
+    });
+    hud.set_function("retangulo", [this, color](float x, float y, float w, float h, sol::optional<sol::table> c) {
+      HudItem it;
+      it.kind = HudItem::Kind::Rect;
+      it.pos = {x, y};
+      it.size = {w, h};
+      it.color = color(c, glm::vec4(0.0f, 0.0f, 0.0f, 0.5f));
+      world.hud.push_back(std::move(it));
+    });
+    hud.set_function("barra", [this, color](float x, float y, float w, float h, float frac, sol::optional<sol::table> c,
+                                            sol::optional<sol::table> fundo) {
+      HudItem it;
+      it.kind = HudItem::Kind::Bar;
+      it.pos = {x, y};
+      it.size = {w, h};
+      it.value = std::clamp(frac, 0.0f, 1.0f);
+      it.color = color(c, glm::vec4(0.2f, 0.8f, 0.3f, 1.0f));
+      it.back = color(fundo, it.back);
+      world.hud.push_back(std::move(it));
     });
     lua.set_function("log", [](sol::variadic_args args, sol::this_state s) {
       sol::state_view L(s);
@@ -182,6 +261,7 @@ void Scripting::update(scene::Scene& scene, float dt) {
         if (inst.path == path) p_->run(inst);
     }
   }
+  p_->world.hud.clear();  // a interface é refeita pelos scripts a cada quadro de jogo
   for (auto& inst : p_->instances) {
     if (inst.failed || !p_->world.registry.valid(inst.e)) continue;
     const Entidade h{&p_->world, inst.e};

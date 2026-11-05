@@ -313,12 +313,42 @@ def teste_carro_freio(b, pasta):
     return vel < 0.5 and em_pe, f'velocidade final {vel:.2f} m/s, em pé: {em_pe}'
 
 
+def npc(nome, pos, ia, **extra):
+    p = {'altura': 1.8, 'raio': 0.3, 'velocidade': 4.5, 'controle': 'ia', 'ia': ia}
+    p.update(extra)
+    return {'nome': nome, 'personagem': p, 'posicao': pos}
+
+
+def teste_npc(b, pasta):
+    """NPC contorna uma parede de 10 m até o alvo atrás dela (a linha reta está bloqueada)."""
+    parede = {'nome': 'parede', 'forma': 'caixa', 'meia_extensao': [0.25, 1.5, 5], 'posicao': [4, 1.5, 0],
+              'fisica': {'tipo': 'estatico'}}
+    cena = {'entidades': [chao(), parede, npc('npc', [0, 0, 0], {'alvo': [8, 0, 0], 'parar_a': 0.3})]}
+    est, _ = rodar(b, cena, 7.0, pasta, 'npc')
+    x, y, z = por_nome(est, 'npc')[0]['posicao']
+    d = ((x - 8) ** 2 + z ** 2) ** 0.5
+    return d < 0.5, f'parou a {d:.2f} m do alvo (x = {x:.2f}, z = {z:.2f}); sem desviar ficaria preso em x ≈ 3,4'
+
+
+def teste_npc_seguir(b, pasta):
+    """NPC segue outro personagem que anda em linha reta (com um bloco parado perto do caminho)."""
+    bloco = {'nome': 'bloco', 'forma': 'caixa', 'meia_extensao': [1, 1, 1], 'posicao': [4, 1, 0],
+             'fisica': {'tipo': 'estatico'}}
+    lider = personagem([0, 0, 3], [{'t': 0, 'andar': [1, 0, 0]}], velocidade=2.0)
+    cena = {'entidades': [chao(), bloco, lider, npc('npc', [0, 0, 0], {'seguir': 'heroi', 'parar_a': 1.5})]}
+    est, _ = rodar(b, cena, 5.0, pasta, 'npc_seguir')
+    lx, _, lz = pes(est)
+    x, _, z = por_nome(est, 'npc')[0]['posicao']
+    d = ((x - lx) ** 2 + (z - lz) ** 2) ** 0.5
+    return d < 2.2 and x > 5.0, f'líder em x = {lx:.2f}; NPC em x = {x:.2f}, a {d:.2f} m dele (para a 1,5 m)'
+
+
 TESTES = {'queda': teste_queda, 'quique': teste_quique, 'pilha': teste_pilha, 'tunel': teste_tunel,
           'deterministico': teste_deterministico, 'andar': teste_andar, 'pulo': teste_pulo, 'escada': teste_escada,
           'rampa': teste_rampa, 'empurrar': teste_empurrar, 'sponza': teste_sponza,
           'restaurar': teste_restaurar, 'script': teste_script,
           'recarga': teste_recarga, 'carro_reta': teste_carro_reta, 'carro_curva': teste_carro_curva,
-          'carro_freio': teste_carro_freio}
+          'carro_freio': teste_carro_freio, 'npc': teste_npc, 'npc_seguir': teste_npc_seguir}
 
 
 def main():

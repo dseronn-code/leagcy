@@ -1,4 +1,5 @@
 #include "game/world.h"
+#include "game/navigation.h"
 #include "game/scripting.h"
 
 #include <algorithm>
@@ -94,6 +95,7 @@ struct World::FileData {
 World::World() : physics(std::make_unique<Physics>()), file_(std::make_unique<FileData>()) {}
 World::~World() {
   scripting.reset();  // o Lua guarda referências às entidades
+  navigation.reset();
   audio.reset();
   registry.clear();   // antes da física (os corpos são destruídos com ela)
   if (gCurrent == this) gCurrent = nullptr;
@@ -235,6 +237,20 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         c.runSpeed = pj.value("velocidade_correndo", c.runSpeed);
         c.jumpSpeed = pj.value("pulo", c.jumpSpeed);
         c.player = pj.value("controle", "jogador") == "jogador";
+        if (pj.value("controle", "") == "ia") {
+          c.ai = true;
+          c.player = false;
+          if (pj.contains("ia")) {
+            const json& ia = pj["ia"];
+            if (ia.contains("alvo")) {
+              c.aiTarget = vec3Of(ia["alvo"], glm::vec3(0.0f));
+              c.aiHasTarget = true;
+            }
+            c.aiFollow = ia.value("seguir", "");
+            if (!c.aiFollow.empty()) c.aiHasTarget = true;
+            c.aiStopDistance = ia.value("parar_a", c.aiStopDistance);
+          }
+        }
         for (const json& k : pj.value("roteiro", json::array())) {
           ScriptKey key;
           key.time = k.value("t", 0.0f);
@@ -244,7 +260,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           key.run = k.value("correr", false);
           c.script.push_back(key);
         }
-        if (!c.script.empty()) c.player = pj.value("controle", "roteiro") == "jogador";
+        if (!c.script.empty() && !c.ai) c.player = pj.value("controle", "roteiro") == "jogador";
         shape.type = ShapeType::Capsule;
         shape.radius = c.desc.radius;
         shape.halfHeight = std::max(0.5f * c.desc.height - c.desc.radius, 0.05f);
@@ -411,6 +427,49 @@ void World::start() {
     Vehicle& v = registry.get<Vehicle>(ent);
     v.id = physics->addVehicle(v.desc, t.position, t.rotation);
   }
+  bool anyAi = false;
+  for (auto ent : registry.view<Character>()) anyAi |= registry.get<Character>(ent).ai;
+  if (anyAi) {
+    // Cenário parado para a navegação: caixas estáticas e modelos com colisão pela malha.
+    std::vector<glm::vec3> verts;
+    std::vector<uint32_t> idx;
+    for (auto ent : registry.view<Transform, Shape, RigidBody>()) {
+      if (registry.get<RigidBody>(ent).desc.motion != Motion::Static) continue;
+      const Shape& sh = registry.get<Shape>(ent);
+      if (sh.type != ShapeType::Box) continue;
+      const glm::mat4 m = drawMatrix(registry.get<Transform>(ent), sh);
+      const uint32_t base = uint32_t(verts.size());
+      for (int c = 0; c < 8; ++c)
+        verts.push_back(glm::vec3(m * glm::vec4((c & 1) ? 1.0f : -1.0f, (c & 2) ? 1.0f : -1.0f, (c & 4) ? 1.0f : -1.0f, 1.0f)));
+      const uint32_t faces[12][3] = {{0, 2, 1}, {1, 2, 3}, {4, 5, 6}, {5, 7, 6}, {0, 1, 4}, {1, 5, 4},
+                                     {2, 6, 3}, {3, 6, 7}, {0, 4, 2}, {2, 4, 6}, {1, 3, 5}, {3, 7, 5}};
+      for (auto& f : faces)
+        for (uint32_t k : f) idx.push_back(base + k);
+    }
+    for (auto ent : registry.view<Model>()) {
+      const Model& m = registry.get<Model>(ent);
+      if (!m.meshCollider || !loadedScene_) continue;
+      for (uint32_t o = m.firstObject; o < m.firstObject + m.objectCount; ++o) {
+        const scene::Object& obj = loadedScene_->objects[o];
+        const scene::MeshData& mesh = loadedScene_->cpuMesh(obj.mesh);
+        if (mesh.skinModel >= 0 || mesh.clothWidth > 0 || mesh.hairStrands > 0) continue;
+        const uint32_t base = uint32_t(verts.size());
+        for (const scene::Vertex& v : mesh.vertices) verts.push_back(glm::vec3(obj.transform * glm::vec4(v.position, 1.0f)));
+        for (uint32_t i : mesh.indices) idx.push_back(base + i);
+      }
+    }
+    navigation = std::make_unique<Navigation>();
+    NavSettings ns;
+    for (auto ent : registry.view<Character>())
+      if (const Character& c = registry.get<Character>(ent); c.ai) {
+        ns.agentHeight = c.desc.height;
+        ns.agentRadius = c.desc.radius;
+        ns.agentClimb = c.desc.stepHeight;
+        ns.agentMaxSlopeDeg = c.desc.maxSlopeDeg;
+        break;
+      }
+    if (!navigation->build(verts, idx, ns)) navigation.reset();
+  }
   auto chars = registry.view<Transform, Character>();
   for (auto ent : chars) {
     auto [t, c] = chars.get<Transform, Character>(ent);
@@ -440,6 +499,33 @@ void World::update(scene::Scene& scene, float dt) {
       if (glm::dot(dir, dir) > 1.0f) dir = glm::normalize(dir);
       jump = input_.jump;
       run = input_.run;
+    } else if (c.ai && c.aiHasTarget && navigation) {
+      const glm::vec3 feet = physics->characterFeet(c.id);
+      glm::vec3 target = c.aiTarget;
+      if (!c.aiFollow.empty()) {
+        for (auto other : registry.view<Name, Transform>())
+          if (registry.get<Name>(other).value == c.aiFollow) {
+            target = registry.get<Transform>(other).position;
+            if (const Character* oc = registry.try_get<Character>(other)) target.y -= 0.5f * oc->desc.height;
+          }
+      }
+      // Caminho recalculado a cada 0,5 s (o alvo pode andar) ou quando acabou.
+      c.aiRepath -= dt;
+      if (c.aiRepath <= 0.0f || c.aiNext >= c.aiPath.size()) {
+        c.aiRepath = 0.5f;
+        navigation->findPath(feet, target, c.aiPath);
+        c.aiNext = c.aiPath.size() > 1 ? 1 : c.aiPath.size();
+      }
+      const glm::vec2 toTarget(target.x - feet.x, target.z - feet.z);
+      if (glm::length(toTarget) > c.aiStopDistance) {
+        while (c.aiNext < c.aiPath.size() &&
+               glm::length(glm::vec2(c.aiPath[c.aiNext].x - feet.x, c.aiPath[c.aiNext].z - feet.z)) < 0.25f)
+          ++c.aiNext;
+        if (c.aiNext < c.aiPath.size()) {
+          const glm::vec3 d(c.aiPath[c.aiNext].x - feet.x, 0.0f, c.aiPath[c.aiNext].z - feet.z);
+          if (glm::length(d) > 1e-3f) dir = glm::normalize(d);
+        }
+      }
     } else if (!c.script.empty()) {
       size_t k = 0;
       while (k + 1 < c.script.size() && c.script[k + 1].time <= time) ++k;
@@ -571,7 +657,14 @@ bool World::save(const std::string& path) const {
       pj["velocidade"] = c->walkSpeed;
       pj["velocidade_correndo"] = c->runSpeed;
       pj["pulo"] = c->jumpSpeed;
-      pj["controle"] = c->player ? "jogador" : "roteiro";
+      pj["controle"] = c->ai ? "ia" : c->player ? "jogador" : "roteiro";
+      if (c->ai) {
+        json ia;
+        if (!c->aiFollow.empty()) ia["seguir"] = c->aiFollow;
+        else if (c->aiHasTarget) ia["alvo"] = toJson(c->aiTarget);
+        ia["parar_a"] = c->aiStopDistance;
+        pj["ia"] = ia;
+      }
       if (!c->script.empty()) {
         json r = json::array();
         for (const ScriptKey& k : c->script)
