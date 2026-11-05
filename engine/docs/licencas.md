@@ -21,6 +21,10 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [Jolt Physics](https://github.com/jrouwe/JoltPhysics) v5.2.0 | Física: corpos rígidos, personagem, colisão por malha | MIT | Manter o aviso |
 | [EnTT](https://github.com/skypjack/entt) v3.13.2 | Entidades e componentes da camada de jogo | MIT | Manter o aviso |
 | [nlohmann/json](https://github.com/nlohmann/json) v3.11.3 | Cenas em arquivo (.json) | MIT | Manter o aviso |
+| [Dear ImGui](https://github.com/ocornut/imgui) v1.92.8 (docking) | Interface do editor | MIT | Manter o aviso |
+| [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo) | Alças de mover/girar no editor | MIT | Manter o aviso |
+| [Lua](https://github.com/lua/lua) v5.4.7 | Scripts | MIT | Manter o aviso |
+| [sol2](https://github.com/ThePhD/sol2) v3.5.0 | Ponte C++ ↔ Lua | MIT | Manter o aviso |
 
 ## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
 

@@ -5,8 +5,8 @@ Parte 2 do projeto: completar o Legacy como motor de jogo, além do renderizador
 | Fase | O que entra | Situação |
 |---|---|---|
 | 1. Núcleo | Entidades e componentes (EnTT), cenas em arquivo (.json), física (Jolt), personagem, modelos glTF com colisão | ✅ |
-| 2. Editor visual | Dear ImGui: hierarquia, inspetor, gizmos, salvar e carregar, botão Jogar | próxima |
-| 3. Scripts | Lua com recarga a quente | — |
+| 2. Editor visual | Dear ImGui + ImGuizmo: entidades, propriedades, alças, seleção por clique, Jogar/Parar, criar/duplicar/apagar, salvar | ✅ |
+| 3. Scripts | Lua 5.4 (sol2) por entidade, com recarga a quente | ✅ |
 | 4. Sistemas de jogo | Áudio 3D, veículos, animação avançada, navegação e IA, interface, exportar o jogo | — |
 
 ## Arquitetura
@@ -25,6 +25,40 @@ funciona igual no modo sem janela e na janela.
 **Física:** passo fixo de 1/60 s com 2 subpassos de colisão (1/120 s) e 20/4 iterações do solver: o padrão do Jolt
 deixava uma torre de 12 caixas inclinar 46 cm; assim ela fica a 0,17 cm. O resultado não depende da taxa de quadros e
 é determinístico: a mesma cena dá o mesmo arquivo byte a byte, em várias threads.
+
+## Editor (`--editor`)
+
+`legacy --scene cenas/parque.json --editor` abre a cena em **modo de edição**: física parada, câmera livre (botão
+direito + mouse olha, WASD anda). Clique num objeto para selecionar; arraste as alças para mover (F1 alterna para
+girar) ou digite posição e rotação no painel Propriedades. **+ Caixa / + Esfera / + Parede** criam à frente da câmera;
+**Duplicar** e **Apagar** agem na selecionada (a cena é gravada num arquivo temporário e montada de novo). **Jogar**
+guarda todas as poses e liga a física (com jogador na cena, a câmera passa a segui-lo); **Parar** volta exatamente ao
+que estava (teste `restaurar`: diferença 0 nas 36 entidades). **Salvar** grava a cena no arquivo indicado.
+
+Captura para testes e documentação: `--screenshot tela.png --quit-after 10` (grava a janela com a interface) e
+`--select nome`.
+
+## Scripts em Lua
+
+Na entidade: `"script": "scripts/elevador.lua"`. Cada entidade roda o arquivo no seu próprio ambiente (as variáveis
+do script são só dela). O motor chama `iniciar(e)` uma vez e `atualizar(e, dt)` a cada quadro de jogo. Salvar o
+arquivo com o jogo rodando recarrega na hora, mantendo as variáveis (teste `recarga`). Erro num script: aparece no
+console uma vez e só aquele script para (teste `script`).
+
+| API | O que faz |
+|---|---|
+| `e.nome`, `e:valida()` | nome da entidade; se ela ainda existe |
+| `e:posicao()` | devolve x, y, z |
+| `e:mover_para(x, y, z)` | põe a entidade na posição (corpo da física junto) |
+| `e:girar(gx, gy, gz)` | gira em graus nos eixos do mundo |
+| `e:impulso(x, y, z)` | empurrão (N·s) num corpo dinâmico |
+| `e:velocidade()`, `e:definir_velocidade(x, y, z)` | velocidade em m/s (corpo ou personagem) |
+| `achar("nome")` | outra entidade (ou nil) |
+| `tempo()` | segundos de jogo |
+| `log(...)` | escreve no console |
+
+Exemplos: `scripts/elevador.lua` (sobe e desce), `scripts/girar.lua` (gira), `scripts/pulador.lua` (pula sozinho),
+todos em `cenas/parque.json`.
 
 ## Formato das cenas (.json)
 
@@ -77,6 +111,9 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | rampa | sobe 35°, não sobe 60° | 3,24 m / 0,00 m |
 | empurrar | anda contra caixa de 20 kg | a caixa anda 2,8 m |
 | sponza | 10 s andando na Sponza com colisão pela malha | no chão (y = −0,02 m), para na parede (x = 9,94) |
+| restaurar | Jogar 3 s e Parar no editor | as 36 entidades voltam com diferença 0 |
+| script | Lua sobe uma caixa 1 m/s por 2 s; outro script com erro | y = 3,000 m; o erro não derruba nada |
+| recarga | o .lua muda no disco com o motor rodando | a versão nova vale sem reiniciar |
 
 ## Bibliotecas (todas gratuitas, de código aberto)
 
@@ -85,3 +122,7 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | Jolt Physics | 5.2.0 | física (Horizon Forbidden West, Death Stranding 2) | MIT |
 | EnTT | 3.13.2 | entidades e componentes (Minecraft Bedrock) | MIT |
 | nlohmann/json | 3.11.3 | cenas em arquivo | MIT |
+| Dear ImGui (docking) | 1.92.8 | interface do editor | MIT |
+| ImGuizmo | 105e4fd | alças de mover e girar | MIT |
+| Lua | 5.4.7 | scripts | MIT |
+| sol2 | 3.5.0 | ponte C++ ↔ Lua | MIT |

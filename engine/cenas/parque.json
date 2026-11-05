@@ -1,4 +1,5 @@
 // Parque de testes jogável: WASD anda, espaço pula, Shift corre, botão direito + mouse gira a câmera.
+// Scripts (scripts/*.lua): elevador sobe e desce, carrossel gira, bola azul pula sozinha.
 // --scene cenas/parque.json
 {
  "sol": {
@@ -59,6 +60,14 @@
     0.8
    ],
    "rugosidade": 0.4
+  },
+  "amarelo": {
+   "cor": [
+    0.85,
+    0.65,
+    0.1
+   ],
+   "rugosidade": 0.5
   }
  },
  "entidades": [
@@ -407,6 +416,60 @@
      0,
      0
     ]
+   }
+  },
+  {
+   "nome": "elevador",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.2,
+    0.15,
+    1.2
+   ],
+   "posicao": [
+    -3,
+    0.15,
+    6
+   ],
+   "material": "amarelo",
+   "script": "scripts/elevador.lua",
+   "fisica": {
+    "tipo": "cinematico"
+   }
+  },
+  {
+   "nome": "carrossel",
+   "forma": "caixa",
+   "meia_extensao": [
+    2.0,
+    0.1,
+    0.4
+   ],
+   "posicao": [
+    6,
+    0.6,
+    -6
+   ],
+   "material": "amarelo",
+   "script": "scripts/girar.lua",
+   "fisica": {
+    "tipo": "cinematico"
+   }
+  },
+  {
+   "nome": "pulador",
+   "forma": "esfera",
+   "raio": 0.4,
+   "posicao": [
+    -4,
+    0.4,
+    -2
+   ],
+   "material": "azul",
+   "script": "scripts/pulador.lua",
+   "fisica": {
+    "tipo": "dinamico",
+    "quique": 0.3
    }
   }
  ]

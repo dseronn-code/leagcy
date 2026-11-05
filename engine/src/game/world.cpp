@@ -1,4 +1,5 @@
 #include "game/world.h"
+#include "game/scripting.h"
 
 #include <algorithm>
 #include <cmath>
@@ -63,7 +64,8 @@ struct World::FileData {
 
 World::World() : physics(std::make_unique<Physics>()), file_(std::make_unique<FileData>()) {}
 World::~World() {
-  registry.clear();  // antes da física (os corpos são destruídos com ela)
+  scripting.reset();  // o Lua guarda referências às entidades
+  registry.clear();   // antes da física (os corpos são destruídos com ela)
   if (gCurrent == this) gCurrent = nullptr;
 }
 
@@ -235,6 +237,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         body.desc.angularDamping = fis.value("amortecimento_angular", body.desc.angularDamping);
       }
       const glm::vec3 velocity = vec3Of(e.value("velocidade", json()), glm::vec3(0.0f));
+      std::string script = e.value("script", "");
+      if (!script.empty() && !std::ifstream(script) && std::ifstream(sceneDir + script)) script = sceneDir + script;
 
       // "repetir": {"quantidade": [nx, ny, nz], "passo": [dx, dy, dz]} cria uma grade de cópias.
       glm::ivec3 count(1);
@@ -258,6 +262,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             registry.emplace<Shape>(ent, shape);
             registry.emplace<Renderable>(ent, scene.addObject(mesh, drawMatrix(t, shape), mit->second), matName);
             if (character) registry.emplace<Character>(ent, *character);
+            if (!script.empty()) registry.emplace<Script>(ent, script);
             if (hasBody && !character) {
               registry.emplace<RigidBody>(ent, body);
               if (glm::dot(velocity, velocity) > 0.0f) registry.emplace<InitialVelocity>(ent, velocity);
@@ -307,6 +312,10 @@ void World::start() {
       LOG_INFO("Física: colisão de %s com %zu triângulos", m.path.c_str(), idx.size() / 3);
     }
   }
+  if (!registry.view<Script>().empty()) {
+    scripting = std::make_unique<Scripting>(*this);
+    for (auto ent : registry.view<Script>()) scripting->attach(ent, registry.get<Script>(ent).path);
+  }
   auto chars = registry.view<Transform, Character>();
   for (auto ent : chars) {
     auto [t, c] = chars.get<Transform, Character>(ent);
@@ -320,6 +329,7 @@ void World::start() {
 void World::update(scene::Scene& scene, float dt) {
   if (dt <= 0.0f || !simulate) return;
   time += dt;
+  if (scripting) scripting->update(scene, dt);
   // Personagens: velocidade desejada pela entrada do jogador ou pelo roteiro.
   for (auto ent : registry.view<Character>()) {
     Character& c = registry.get<Character>(ent);
@@ -425,6 +435,7 @@ bool World::save(const std::string& path) const {
     e["posicao"] = toJson(t.position);
     e["rotacao"] = json::array({t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z});
     if (const Renderable* r = registry.try_get<Renderable>(ent); r && !r->material.empty()) e["material"] = r->material;
+    if (const Script* sc = registry.try_get<Script>(ent)) e["script"] = sc->path;
     if (const RigidBody* b = registry.try_get<RigidBody>(ent)) {
       json fis;
       fis["tipo"] = motionName(b->desc.motion);

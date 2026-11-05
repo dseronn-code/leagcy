@@ -208,6 +208,25 @@ add_library(legacy_imgui STATIC
 target_include_directories(legacy_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends ${imguizmo_SOURCE_DIR}/src)
 target_link_libraries(legacy_imgui PUBLIC Vulkan::Vulkan glfw)
 
+# Scripts: Lua 5.4 (MIT, a linguagem de Roblox, WoW e Defold) + sol2 (MIT, ponte C++ <-> Lua, só headers).
+FetchContent_Declare(lua
+  GIT_REPOSITORY https://github.com/lua/lua.git
+  GIT_TAG v5.4.7
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_Declare(sol2
+  GIT_REPOSITORY https://github.com/ThePhD/sol2.git
+  GIT_TAG v3.5.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(lua sol2)
+file(GLOB LUA_SOURCES ${lua_SOURCE_DIR}/*.c)
+list(FILTER LUA_SOURCES EXCLUDE REGEX "/(lua|luac|onelua|ltests)\\.c$")
+add_library(legacy_lua STATIC ${LUA_SOURCES})
+set_target_properties(legacy_lua PROPERTIES LINKER_LANGUAGE C)
+target_include_directories(legacy_lua SYSTEM PUBLIC ${lua_SOURCE_DIR} ${sol2_SOURCE_DIR}/include)
+target_compile_definitions(legacy_lua PUBLIC SOL_ALL_SAFETIES_ON=1)
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
@@ -215,7 +234,7 @@ add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
-                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui)
+                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua)
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)
   target_link_libraries(legacy PRIVATE mikktspace)

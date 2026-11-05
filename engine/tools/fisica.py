@@ -231,10 +231,55 @@ def teste_restaurar(b, pasta):
     return pior < 1e-4, f'maior diferença de posição depois de Parar: {pior:.2e} m ({len(fim["entidades"])} entidades)'
 
 
+def teste_script(b, pasta):
+    """Scripts em Lua: um sobe a caixa 1 m/s, outro quebra (o motor segue e o primeiro continua)."""
+    sobe = os.path.join(pasta, 'sobe.lua')
+    with open(sobe, 'w', encoding='utf-8') as f:
+        f.write('local x, y0, z\nfunction iniciar(e) x, y0, z = e:posicao() end\n'
+                'function atualizar(e, dt) e:mover_para(x, y0 + tempo(), z) end\n')
+    quebrado = os.path.join(pasta, 'quebrado.lua')
+    with open(quebrado, 'w', encoding='utf-8') as f:
+        f.write('function atualizar(e, dt) chama_funcao_que_nao_existe() end\n')
+    cena = {'entidades': [chao(),
+                          {'nome': 'caixa', 'forma': 'caixa', 'posicao': [0, 1, 0], 'script': sobe,
+                           'fisica': {'tipo': 'cinematico'}},
+                          {'nome': 'outra', 'forma': 'caixa', 'posicao': [3, 1, 0], 'script': quebrado,
+                           'fisica': {'tipo': 'cinematico'}}]}
+    est, _ = rodar(b, cena, 2.0, pasta, 'script')
+    y = por_nome(est, 'caixa')[0]['posicao'][1]
+    return abs(y - 3.0) < 0.05, f'caixa subiu para y = {y:.3f} m em 2 s (esperado 3,0); script quebrado não derrubou o motor'
+
+
+def teste_recarga(b, pasta):
+    """Recarga a quente: o script muda no disco com o motor rodando e passa a valer sem reiniciar."""
+    import time
+    scr = os.path.join(pasta, 'altura.lua')
+    with open(scr, 'w', encoding='utf-8') as f:
+        f.write('function atualizar(e, dt) e:mover_para(0, 10, 0) end\n')
+    cena = {'entidades': [chao(), {'nome': 'caixa', 'forma': 'caixa', 'posicao': [0, 1, 0], 'script': scr,
+                                   'fisica': {'tipo': 'cinematico'}}]}
+    caminho = os.path.join(pasta, 'recarga.json')
+    with open(caminho, 'w', encoding='utf-8') as f:
+        json.dump(cena, f)
+    saida = os.path.join(pasta, 'recarga_fim.json')
+    p = subprocess.Popen([b, '--headless', '--scene', caminho, '--width', '32', '--height', '18', '--frames', '400',
+                          '--out', os.path.join(pasta, 'recarga.png'), '--save-world', saida],
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    time.sleep(3)  # o motor já está rodando a primeira versão
+    with open(scr, 'w', encoding='utf-8') as f:
+        f.write('function atualizar(e, dt) e:mover_para(0, 20, 0) end\n')
+    out, _ = p.communicate(timeout=600)
+    with open(saida, encoding='utf-8') as f:
+        y = por_nome(json.load(f), 'caixa')[0]['posicao'][1]
+    recarregou = 'recarregando' in out
+    return abs(y - 20.0) < 1e-3 and recarregou, f'y final = {y:.2f} (versão nova: 20); recarga no log: {recarregou}'
+
+
 TESTES = {'queda': teste_queda, 'quique': teste_quique, 'pilha': teste_pilha, 'tunel': teste_tunel,
           'deterministico': teste_deterministico, 'andar': teste_andar, 'pulo': teste_pulo, 'escada': teste_escada,
           'rampa': teste_rampa, 'empurrar': teste_empurrar, 'sponza': teste_sponza,
-          'restaurar': teste_restaurar}
+          'restaurar': teste_restaurar, 'script': teste_script,
+          'recarga': teste_recarga}
 
 
 def main():

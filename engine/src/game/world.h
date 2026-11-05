@@ -54,6 +54,11 @@ struct Model {
   uint32_t bodyId = ~0u;
 };
 
+// Comportamento em Lua (src/game/scripting.h): o arquivo roda num ambiente próprio da entidade.
+struct Script {
+  std::string path;
+};
+
 // Simulado pela física. bodyId é preenchido em World::start().
 struct RigidBody {
   BodyDesc desc;
@@ -124,6 +129,7 @@ class World {
 
   entt::registry registry;
   std::unique_ptr<Physics> physics;
+  std::unique_ptr<class Scripting> scripting;  // criado em start() se houver entidades com Script
   float time = 0.0f;  // segundos de jogo simulados
 
  private:
