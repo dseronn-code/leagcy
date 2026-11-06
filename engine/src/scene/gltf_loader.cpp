@@ -3,6 +3,7 @@
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
 #include <meshoptimizer.h>
+#include <basisu_transcoder.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
@@ -19,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -77,8 +79,54 @@ struct Loader {
     return nullptr;
   }
 
+  // Textura KTX2 (KHR_texture_basisu: ETC1S ou UASTC, com zstd) decodificada para RGBA8 pelo Basis Universal; o resto
+  // do caminho é o de sempre (mipmaps e BC7 do motor).
+  static bool decodeKtx2(const std::vector<uint8_t>& bytes, int& w, int& h, std::vector<uint8_t>& rgba) {
+    static const bool init = [] { basist::basisu_transcoder_init(); return true; }();
+    (void)init;
+    basist::ktx2_transcoder tr;
+    if (!tr.init(bytes.data(), uint32_t(bytes.size())) || !tr.start_transcoding()) return false;
+    w = int(tr.get_width());
+    h = int(tr.get_height());
+    if (w <= 0 || h <= 0) return false;
+    rgba.resize(size_t(w) * h * 4);
+    return tr.transcode_image_level(0, 0, 0, rgba.data(), uint32_t(w * h), basist::transcoder_texture_format::cTFRGBA32);
+  }
+  std::vector<uint8_t> imageBytes(const cgltf_image* img) const {
+    if (img->buffer_view) {
+      const uint8_t* src = static_cast<const uint8_t*>(img->buffer_view->buffer->data) + img->buffer_view->offset;
+      return std::vector<uint8_t>(src, src + img->buffer_view->size);
+    }
+    if (!img->uri) return {};
+    std::string uri = img->uri;
+    cgltf_decode_uri(uri.data());
+    uri.resize(std::strlen(uri.c_str()));
+    std::ifstream f(dir / uri, std::ios::binary);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  }
+
   int32_t texture(const cgltf_texture_view& view, bool srgb, bool normalMap = false) {
-    if (!view.texture || !view.texture->image) return -1;
+    if (!view.texture) return -1;
+    if (view.texture->has_basisu && view.texture->basisu_image) {
+      const cgltf_image* img = view.texture->basisu_image;
+      const cgltf_sampler* smp = view.texture->sampler;
+      auto key = std::make_tuple(img, srgb, smp ? smp->wrap_s : 10497, smp ? smp->wrap_t : 10497);
+      if (auto it = textureCache.find(key); it != textureCache.end()) return it->second;
+      TextureData t;
+      int w = 0, h = 0;
+      if (decodeKtx2(imageBytes(img), w, h, t.rgba)) {
+        t.width = uint32_t(w);
+        t.height = uint32_t(h);
+        t.srgb = srgb;
+        t.normalMap = normalMap;
+        t.name = img->uri ? img->uri : (img->name ? img->name : "(ktx2 embutida)");
+        setWrap(t, smp);
+        return textureCache[key] = int32_t(scene.addTexture(std::move(t)));
+      }
+      LOG_WARN("Textura KTX2 não decodificada: %s", img->uri ? img->uri : "(embutida)");
+      if (!view.texture->image) return textureCache[key] = -1;  // sem alternativa PNG/JPG
+    }
+    if (!view.texture->image) return -1;
     const cgltf_image* img = view.texture->image;
     const cgltf_sampler* smp = view.texture->sampler;
     auto key = std::make_tuple(img, srgb, smp ? smp->wrap_s : 10497, smp ? smp->wrap_t : 10497);

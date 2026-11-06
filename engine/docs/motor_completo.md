@@ -235,13 +235,18 @@ Ainda não tem: previsão no cliente (no LAN o atraso é de poucos ms; pela inte
 atraso da conexão), animação replicada dos personagens com `"visual"` (aparecem na pose parada) e rodas dos carros
 no cliente (o chassi vem certo). Os scripts rodam nos dois lados (no cliente servem para a interface).
 
-## Malhas comprimidas (glTF do gltfpack)
+## Malhas comprimidas e texturas KTX2 (glTF do gltfpack)
 
 O carregador lê `EXT_meshopt_compression` (malhas comprimidas, o formato que o gltfpack gera; descompressão pela
 meshoptimizer, MIT) e `KHR_mesh_quantization` (normais, UV e posições em inteiros normalizados). Teste: o
 DamagedHelmet convertido por `tools/gltf_meshopt.cpp` (comprime a geometria com o codificador da meshoptimizer e
 ZERA os dados originais no .bin, então só aparece algo se o motor descomprimir) sai igual ao original — diferença
 máxima de 1/255 por pixel, só comprimido e também quantizado; a geometria cai para 64% (60% quantizada).
+
+**Texturas KTX2** (`KHR_texture_basisu`, ETC1S ou UASTC com zstd, o formato do gltfpack e do Sketchfab):
+decodificadas pelo transcodificador Basis Universal (Apache 2.0) e depois seguem o caminho normal (mipmaps e BC7).
+Teste: o StainedGlassLamp da Khronos na versão KTX2 contra a versão PNG — diferença média de 0,03/255 por pixel
+(19 texturas; a versão KTX2 do arquivo tem 1/3 dos texels e cabe em 24 MB de vídeo contra 78 MB).
 
 ## Exportar o jogo (`tools/empacotar.py`)
 
@@ -334,3 +339,4 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | Raposa (modelo de exemplo) | — | personagem animado | CC-BY 4.0 (PixelMannen, tomkranis) |
 | ENet | 1.3.18 | multijogador (UDP) | MIT |
 | meshoptimizer | 0.22 | malhas comprimidas dos glTF | MIT |
+| Basis Universal (transcodificador) + zstd | 1.60 | texturas KTX2 | Apache 2.0 / BSD |

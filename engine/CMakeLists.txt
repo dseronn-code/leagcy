@@ -265,6 +265,21 @@ FetchContent_Declare(meshoptimizer
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(meshoptimizer)
 
+# Basis Universal (Apache 2.0): texturas KTX2 dos glTF (KHR_texture_basisu, ETC1S e UASTC, com zstd). Só o
+# transcodificador (o CMake do projeto, que monta o codificador, fica de fora).
+FetchContent_Declare(basisu
+  GIT_REPOSITORY https://github.com/BinomialLLC/basis_universal.git
+  GIT_TAG v1_60
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _so_o_transcodificador)
+FetchContent_MakeAvailable(basisu)
+add_library(legacy_basisu STATIC ${basisu_SOURCE_DIR}/transcoder/basisu_transcoder.cpp ${basisu_SOURCE_DIR}/zstd/zstddeclib.c)
+target_include_directories(legacy_basisu SYSTEM PUBLIC ${basisu_SOURCE_DIR}/transcoder ${basisu_SOURCE_DIR}/zstd)
+target_compile_definitions(legacy_basisu PUBLIC BASISD_SUPPORT_KTX2=1 BASISD_SUPPORT_KTX2_ZSTD=1)
+if(NOT MSVC)
+  target_compile_options(legacy_basisu PRIVATE -w)
+endif()
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
@@ -273,7 +288,7 @@ target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
                                      EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}
-                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet meshoptimizer)
+                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet meshoptimizer legacy_basisu)
 target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)
