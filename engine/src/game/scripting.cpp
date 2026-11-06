@@ -317,7 +317,7 @@ struct Scripting::Impl {
     };
     auto confirm = [this]() { return world.gameInput.hit("enter") || world.gameInput.hit("pad_a"); };
     const glm::vec4 kBg(0.08f, 0.09f, 0.12f, 0.82f), kFocus(0.20f, 0.45f, 0.90f, 0.95f), kText(1.0f);
-    hud.set_function("botao", [=](const std::string& text, float x, float y, float w, float h, sol::optional<sol::table> o) {
+    hud.set_function("botao", [=, this](const std::string& text, float x, float y, float w, float h, sol::optional<sol::table> o) {
       bool focused, hovered;
       widget(x, y, w, h, focused, hovered);
       const bool clicked = (hovered && world.gameInput.mousePressed) || (focused && confirm());
@@ -325,7 +325,7 @@ struct Scripting::Impl {
       label(text, x + 0.5f * w, y, h, optNum(o, "tamanho", 0.5f * h), optColor(o, "cor_texto", kText), 1);
       return clicked;
     });
-    hud.set_function("alternar", [=](const std::string& text, float x, float y, float w, float h, bool value,
+    hud.set_function("alternar", [=, this](const std::string& text, float x, float y, float w, float h, bool value,
                                      sol::optional<sol::table> o) {
       bool focused, hovered;
       widget(x, y, w, h, focused, hovered);
@@ -336,7 +336,7 @@ struct Scripting::Impl {
       label(value ? "Sim" : "Não", x + 0.97f * w, y, h, size, value ? glm::vec4(0.45f, 1.0f, 0.5f, 1.0f) : glm::vec4(1.0f, 0.55f, 0.5f, 1.0f), 2);
       return value;
     });
-    hud.set_function("deslizar", [=](const std::string& text, float x, float y, float w, float h, float value, float lo,
+    hud.set_function("deslizar", [=, this](const std::string& text, float x, float y, float w, float h, float value, float lo,
                                      float hi, sol::optional<sol::table> o) {
       bool focused, hovered;
       const int idx = widget(x, y, w, h, focused, hovered);

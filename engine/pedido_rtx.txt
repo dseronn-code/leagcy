@@ -1,11 +1,13 @@
-# Rodada 20 (6/11). Parte A: o motor completo no Windows (física, veículos, NPCs, áudio, animação, HUD, exportar).
-# Parte B: o Bistro ~10% mais escuro que a referência. Achado aqui (sem a RTX): a luz do motor está certa (modo
-# acumulação: +1%); o escurecimento vem do TAA (corte do histórico e pesos de Karis em imagem com ruído) e do
-# denoiser. TAA corrigido (-22,8% -> -6,1% em 240x136). Na RTX: quanto disso existe com DLSS-RR, e em 1080p.
+# Rodada 20 (6/11). Parte A: o motor completo no Windows (física, veículos, NPCs, áudio, animação, HUD, menus,
+# salvar, partículas, multijogador, exportar). Parte B: o Bistro ~10% mais escuro que a referência. Achado aqui:
+# a luz do motor está certa (acumulação: +1%); escurecia no TAA (corte e pesos de Karis em imagem com ruído) e no
+# denoiser. TAA revisto (-22,8% -> -11,5% em 240x136). Na RTX: quanto disso existe com DLSS-RR, e em 1080p.
 python tools\fisica.py --bin build\Release\legacy.exe
 python tools\audio.py --bin build\Release\legacy.exe
 python tools\animacao.py --bin build\Release\legacy.exe
 python tools\hud.py --bin build\Release\legacy.exe
+python tools\jogo.py --bin build\Release\legacy.exe
+python tools\rede.py --bin build\Release\legacy.exe
 python tools\empacotar.py --cena cenas\parque.json --cena cenas\carro.json --saida %TEMP%\legacy_pacote --janela --testar
 build\Release\legacy.exe --scene cenas\parque.json --width 1920 --height 1080 --quit-after 12 --screenshot resultados_pc\parque.png
 build\Release\legacy.exe --scene cenas\parque.json --editor --select raposa --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\editor.png

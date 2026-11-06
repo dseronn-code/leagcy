@@ -17,6 +17,7 @@
 #include <GLFW/glfw3.h>
 
 #include "editor/editor.h"
+#include "game/network.h"
 #include "game/world.h"
 #include "renderer/renderer.h"
 #include "rhi/swapchain.h"
@@ -80,6 +81,25 @@ game::RawInput readRawInput(GLFWwindow* window, bool keyboard, bool mouse) {
   return raw;
 }
 
+// Multijogador: --host abre o anfitrião, --conectar liga como cliente (cena .json com "multijogador").
+std::unique_ptr<game::Network> startNetwork(int hostPort, const std::string& connectTo) {
+  game::World* w = game::currentWorld();
+  if (!w || (hostPort == 0 && connectTo.empty())) return nullptr;
+  auto net = std::make_unique<game::Network>();
+  if (hostPort > 0) {
+    if (!net->host(*w, uint16_t(hostPort))) return nullptr;
+  } else {
+    std::string addr = connectTo;
+    uint16_t port = 7777;
+    if (const size_t c = addr.rfind(':'); c != std::string::npos) {
+      port = uint16_t(std::atoi(addr.substr(c + 1).c_str()));
+      addr = addr.substr(0, c);
+    }
+    if (!net->connect(*w, addr, port)) return nullptr;
+  }
+  return net;
+}
+
 // Personagem/carro do jogador: WASD ou analógico esquerdo andam; espaço ou A pula (no carro: freio de mão, também
 // B); Shift, L3 ou LB correm; no carro, RT acelera e LT freia (somados ao W/S).
 game::PlayerInput playerInputFrom(const game::GameInput& in, float cameraYaw) {
@@ -130,6 +150,8 @@ struct Options {
   bool testRestore = false;  // sem janela: guarda as poses no início e volta a elas antes do --save-world (teste)
   std::string audioWav;      // sem janela: grava a mixagem do áudio 3D (ouvinte = câmera) em WAV
   std::string simulate;      // entradas simuladas (teclas, cliques, controle) para testes: ver game/input.h
+  int hostPort = 0;          // --host [porta]: anfitrião de multijogador
+  std::string connectTo;     // --conectar ip[:porta]: cliente
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
@@ -177,6 +199,11 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--test-restore") o.testRestore = true;
     else if (a == "--audio-wav") o.audioWav = next();
     else if (a == "--simular") o.simulate = next();
+    else if (a == "--host") {
+      o.hostPort = 7777;
+      if (i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0]))) o.hostPort = std::atoi(argv[++i]);
+    }
+    else if (a == "--conectar") o.connectTo = next();
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
@@ -339,6 +366,8 @@ Options parseArgs(int argc, char** argv) {
           "  --scene cena.json [--save-world saida.json]   cena em arquivo com física (ex.: cenas/fisica.json)\n"
           "  --audio-wav saida.wav    sem janela: grava o áudio 3D da cena .json (ouvinte = câmera)\n"
           "  --simular \"t:evento;...\"  entradas simuladas para testes (tecla, segurar, clique, mouse, eixo)\n"
+          "  --host [porta]           multijogador: anfitrião (padrão 7777; cena com \"multijogador\")\n"
+          "  --conectar ip[:porta]    multijogador: entra no jogo de outro computador\n"
           "  --editor                 editor visual na janela (entidades, propriedades, alças, jogar/pausar, salvar)\n"
           "  --screenshot arq.png     janela: grava a tela (com a interface) ao fechar (use com --quit-after)\n");
       std::exit(0);
@@ -504,6 +533,7 @@ int runHeadless(const Options& opt) {
 
   const float dt = 1.0f / opt.fps;  // tempo simulado fixo: resultado determinístico
   const std::vector<game::SimEvent> simEvents = game::parseSimulated(opt.simulate);
+  std::unique_ptr<game::Network> net = startNetwork(opt.hostPort, opt.connectTo);
   glm::vec3 moveDir = camera.forward();
   const std::vector<CameraKey> cameraKeys = opt.cameraPath.empty() ? std::vector<CameraKey>{} : loadCameraPath(opt.cameraPath);
   if (!cameraKeys.empty()) {
@@ -536,6 +566,7 @@ int runHeadless(const Options& opt) {
       // Sem janela não há teclado nem controle: só as entradas simuladas (--simular), no tempo do quadro.
       game::updateInput(w->gameInput, game::RawInput{}, simEvents, (float(f) - 1.0f) * dt, float(f) * dt);
       w->setPlayerInput(playerInputFrom(w->gameInput, camera.yaw));
+      if (net) net->update(*w, scene, dt, playerInputFrom(w->gameInput, camera.yaw));
       applyGameOptions(*w, r.settings);
       w->qualityRequest.clear();  // sem janela a qualidade fica a da linha de comando
     }
@@ -713,6 +744,7 @@ int runWindowed(const Options& opt) {
   const double startTime = glfwGetTime();
   float tPrevInput = -1.0f;
   const std::vector<game::SimEvent> simEvents = game::parseSimulated(opt.simulate);
+  std::unique_ptr<game::Network> net = startNetwork(opt.hostPort, opt.connectTo);
   float sunElev = std::asin(scene.sunDirection.y);
   float sunAzim = std::atan2(scene.sunDirection.x, -scene.sunDirection.z);
 
@@ -778,6 +810,7 @@ int runWindowed(const Options& opt) {
     const bool hasPlayer = world && world->simulate && (hasCar || world->playerFeet(playerFeet));
     if (hasPlayer) {
       world->setPlayerInput(playerInputFrom(world->gameInput, camera.yaw));
+      if (net) net->update(*world, scene, glm::clamp(dt, 0.0f, 0.1f), playerInputFrom(world->gameInput, camera.yaw));
     } else if (glm::length(move) > 0.0f) { camera.position += glm::normalize(move) * speed; moved = true; }
     float sunStep = world ? 0.0f : 0.6f * dt;  // controles de desenvolvimento (sol, exposição): só fora de um jogo
     if (key(GLFW_KEY_UP)) { sunElev += sunStep; moved = true; }

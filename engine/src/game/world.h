@@ -116,6 +116,7 @@ struct Character {
   size_t scriptJumped = 0;  // quantos passos do roteiro já tiveram o pulo atendido
   uint32_t id = ~0u;        // na Physics
   // IA ("controle": "ia"): anda pela malha de navegação até um ponto ou seguindo outra entidade.
+  int remoteSlot = -1;  // multijogador: vaga de jogador remoto (entrada vem da rede)
   bool ai = false;
   bool aiHasTarget = false;
   glm::vec3 aiTarget{0.0f};
@@ -235,6 +236,16 @@ class World {
   bool explode(glm::vec3 position, float scale);
   std::vector<uint32_t> explosionSlots;
   size_t nextExplosion = 0;
+  // Multijogador ("multijogador": {"vagas": N} na cena): o jogador é copiado em N vagas estacionadas fora do mapa;
+  // o anfitrião ativa uma vaga quando alguém conecta (no ponto "nascer") e move o personagem dela pela entrada que
+  // chega pela rede. No cliente (netClient) a física não roda: as poses vêm do anfitrião.
+  std::vector<PlayerInput> remoteInputs;
+  std::vector<bool> slotActive;
+  std::vector<glm::vec3> slotSpawn;
+  bool netClient = false;
+  int localSlot = -1;  // cliente: a vaga deste jogador (a câmera segue ela)
+  void activateSlot(int slot, bool on);
+  entt::entity slotEntity(int slot) const;
   bool saveGame(const std::string& name, const std::string& dataJson) const;
   bool loadGame(const std::string& name, std::string& dataJson);
   static bool gameExists(const std::string& name);

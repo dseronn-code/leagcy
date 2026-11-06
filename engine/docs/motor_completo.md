@@ -7,7 +7,7 @@ Parte 2 do projeto: completar o Legacy como motor de jogo, além do renderizador
 | 1. Núcleo | Entidades e componentes (EnTT), cenas em arquivo (.json), física (Jolt), personagem, modelos glTF com colisão | ✅ |
 | 2. Editor visual | Dear ImGui + ImGuizmo: entidades, propriedades, alças, seleção por clique, Jogar/Parar, criar/duplicar/apagar, salvar | ✅ |
 | 3. Scripts | Lua 5.4 (sol2) por entidade, com recarga a quente | ✅ |
-| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅, animação avançada ✅, entrada (teclado, mouse, controle), menus, pausa e salvar ✅ | ✅ |
+| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅, animação avançada ✅, entrada (teclado, mouse, controle), menus, pausa e salvar ✅, partículas de jogo ✅, multijogador ✅ | ✅ |
 
 ## Arquitetura
 
@@ -164,6 +164,7 @@ corre com Shift, L3 ou LB; no carro, RT acelera e LT freia. Nos scripts:
 | `hud.botao(t, x, y, l, a)` | botão: verdadeiro no quadro em que é acionado (clique, Enter ou A com foco) |
 | `hud.deslizar(t, x, y, l, a, valor, min, max)` | controle deslizante (arrastar, ou ←/→ com foco); devolve o valor |
 | `hud.alternar(t, x, y, l, a, valor)` | Sim/Não; devolve o valor |
+| `e:particulas(sim)`, `explosao(x, y, z, escala)` | liga/desliga as partículas da entidade; explosão na hora |
 | `pausar(sim)`, `pausado()`, `tempo_real()` | pausa o jogo (física, personagens e `tempo()` param; os scripts continuam) |
 | `volume(v)`, `opcao("motion_blur", sim)`, `opcao("dof", sim)`, `opcao("exposicao", ev)` | opções na hora |
 | `qualidade("medio")` | troca o preset com o jogo rodando (o renderizador é refeito, a cena continua na GPU) |
@@ -196,6 +197,43 @@ mundo atual e devolve os dados.
 
 Na janela (Xvfb): o menu aparece por cima do jogo, Opções abre pelo clique e a troca para Média refaz o renderizador
 sem fechar o jogo.
+
+## Partículas de jogo
+
+Na entidade: `"particulas": {"tipo": "fogo", "raio": 0.3, "escala": 1, "quantidade": 900, "desvio": [0, 0.3, 0],
+"ligado": true}` (`fogo`, `fumaca` ou `faiscas`; o fogo acende uma luz que tremula). O efeito acompanha a entidade
+(uma tocha carregada, um carro pegando fogo) e `e:particulas(false)` / `e:particulas(true)` desliga e liga (a luz
+junto). `explosao(x, y, z [, escala])` dispara uma explosão na hora: bola de fogo que esfria de ~2500 K, fragmentos
+incandescentes balísticos, fumaça de fuligem e o clarão de luz (4 explosões simultâneas por cena; só reservadas se
+algum script chama `explosao`). As partículas marcam uma máscara reativa para o TAA: fogo andando não deixa rastro.
+
+Teste (`tools/jogo.py particulas`, imagem 480x270 à noite): o brilho do fogo de uma tocha que anda de x = −2 a
++1,6 m vai junto (centro do brilho de 0,41 a 0,54 da tela); desligado, a região cai de 0,631 para 0,088; a
+explosão em t = 1 s leva a região dela de 0,000 a 0,520 em 0,1 s.
+
+## Multijogador (ENet)
+
+Na cena: `"multijogador": {"vagas": 3, "nascer": [[3, 0, 0], [-3, 0, 0]]}`. O jogador da cena (`"controle":
+"jogador"`) é copiado nas vagas (`heroi_2`, `heroi_3`...), estacionadas fora do mapa até alguém entrar.
+
+```
+legacy --scene cenas/parque.json --host            (anfitrião, porta 7777)
+legacy --scene cenas/parque.json --conectar 192.168.0.10
+```
+
+Anfitrião autoritativo: ele simula tudo (física, personagens, carros, scripts) e manda as poses do que se mexe 30
+vezes por segundo (UDP não confiável: o próximo estado substitui o perdido); cada cliente manda só a entrada (andar,
+pular, correr, direção da câmera; o anfitrião limita o tamanho do vetor) e mostra o mundo interpolado 100 ms atrás,
+liso mesmo com pacotes perdidos. Quem entra ocupa uma vaga livre e nasce no ponto dela; quem sai libera a vaga.
+A câmera do cliente segue o boneco dele.
+
+Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina): o cliente segura W por 1,5 s e o boneco
+dele anda 6,30 m no anfitrião; no fim, o boneco e a bola aparecem no cliente na mesma posição que no anfitrião
+(diferença 0,00 cm) e a bola parada no chão.
+
+Ainda não tem: previsão no cliente (no LAN o atraso é de poucos ms; pela internet o próprio boneco responde com o
+atraso da conexão), animação replicada dos personagens com `"visual"` (aparecem na pose parada) e rodas dos carros
+no cliente (o chassi vem certo). Os scripts rodam nos dois lados (no cliente servem para a interface).
 
 ## Exportar o jogo (`tools/empacotar.py`)
 
@@ -286,3 +324,4 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | Recast/Detour | 1.6.0 | malha de navegação e caminhos | zlib |
 | Roboto (fonte) | — | texto do HUD | Apache 2.0 |
 | Raposa (modelo de exemplo) | — | personagem animado | CC-BY 4.0 (PixelMannen, tomkranis) |
+| ENet | 1.3.18 | multijogador (UDP) | MIT |

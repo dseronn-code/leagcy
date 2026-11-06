@@ -195,7 +195,38 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       const size_t slash = path.find_last_of("/\\");
       return slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
     }();
-    for (const json& e : doc.value("entidades", json::array())) {
+    // Multijogador: o jogador da cena vira o modelo das vagas remotas (cópias estacionadas fora do mapa).
+    json entities = doc.value("entidades", json::array());
+    if (doc.contains("multijogador")) {
+      const json& mj = doc["multijogador"];
+      const int slots = std::clamp(mj.value("vagas", 3), 0, 16);
+      const json* tmpl = nullptr;
+      for (const json& e : entities)
+        if (e.contains("personagem") && e["personagem"].value("controle", "jogador") == "jogador" &&
+            !e["personagem"].contains("roteiro"))
+          tmpl = &e;
+      if (tmpl) {
+        const glm::vec3 base = vec3Of(tmpl->value("posicao", json()), glm::vec3(0.0f));
+        const json spawns = mj.value("nascer", json::array());
+        json extra = json::array();
+        for (int i = 0; i < slots; ++i) {
+          json c = *tmpl;
+          c["nome"] = tmpl->value("nome", std::string("jogador")) + "_" + std::to_string(i + 2);
+          c["personagem"]["controle"] = "remoto";
+          c["personagem"]["vaga"] = i;
+          c["posicao"] = json::array({base.x, -1000.0f - 10.0f * float(i), base.z});
+          extra.push_back(c);
+          slotSpawn.push_back(i < int(spawns.size()) ? vec3Of(spawns[size_t(i)], base)
+                                                     : base + glm::vec3(1.5f * float(i + 1), 0.0f, 0.0f));
+        }
+        for (auto& c : extra) entities.push_back(c);
+        remoteInputs.assign(size_t(slots), PlayerInput{});
+        slotActive.assign(size_t(slots), false);
+      } else {
+        LOG_WARN("Cena: \"multijogador\" sem personagem com \"controle\": \"jogador\" para copiar");
+      }
+    }
+    for (const json& e : entities) {
       if (e.contains("modelo")) {  // glTF: caminho relativo à pasta do motor ou à pasta da cena
         Model m;
         m.path = e["modelo"].get<std::string>();
@@ -298,6 +329,10 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           c.script.push_back(key);
         }
         if (!c.script.empty() && !c.ai) c.player = pj.value("controle", "roteiro") == "jogador";
+        if (pj.value("controle", "") == "remoto") {
+          c.player = false;
+          c.remoteSlot = pj.value("vaga", 0);
+        }
         if (pj.contains("visual")) {  // modelo glTF animado no lugar da cápsula
           const json& vj = pj["visual"];
           CharacterVisual& v = c.visual;
@@ -634,13 +669,26 @@ void World::update(scene::Scene& scene, float dt) {
   time += dt;
   if (scripting) scripting->update(scene, dt);
   if (paused) return;  // um script pausou agora: a pausa já vale neste quadro (nada se move)
+  if (netClient) return;  // cliente de rede: as poses vêm do anfitrião (game/network)
   // Personagens: velocidade desejada pela entrada do jogador ou pelo roteiro.
   for (auto ent : registry.view<Character>()) {
     Character& c = registry.get<Character>(ent);
     if (c.id == ~0u) continue;
     glm::vec3 dir(0.0f);
     bool jump = false, run = false;
-    if (c.player) {
+    if (c.remoteSlot >= 0) {  // vaga de jogador remoto
+      if (size_t(c.remoteSlot) >= slotActive.size() || !slotActive[size_t(c.remoteSlot)]) {
+        physics->setCharacterFeet(c.id, glm::vec3(0.0f, -1000.0f - 10.0f * float(c.remoteSlot), 0.0f));  // estacionada
+        continue;
+      }
+      const PlayerInput& in = remoteInputs[size_t(c.remoteSlot)];
+      const glm::vec3 fwd(std::cos(in.cameraYaw), 0.0f, std::sin(in.cameraYaw));
+      const glm::vec3 right(-fwd.z, 0.0f, fwd.x);
+      dir = fwd * in.move.y + right * in.move.x;
+      if (glm::dot(dir, dir) > 1.0f) dir = glm::normalize(dir);
+      jump = in.jump;
+      run = in.run;
+    } else if (c.player) {
       // Frente = para onde a câmera olha, no plano do chão.
       const glm::vec3 fwd(std::cos(input_.cameraYaw), 0.0f, std::sin(input_.cameraYaw));
       const glm::vec3 right(-fwd.z, 0.0f, fwd.x);
@@ -988,6 +1036,7 @@ bool World::save(const std::string& path) const {
       continue;
     }
     if (const Character* c = registry.try_get<Character>(ent)) {
+      if (c->remoteSlot >= 0) continue;  // vagas do multijogador: saem do "multijogador" da cena
       json pj;
       pj["altura"] = c->desc.height;
       pj["raio"] = c->desc.radius;
@@ -1157,6 +1206,27 @@ void World::restore(scene::Scene& scene) {
   time = snapshotTime_;
 }
 
+entt::entity World::slotEntity(int slot) const {
+  if (slot < 0) return entt::null;
+  for (auto ent : registry.view<Character, Transform>())
+    if (registry.get<Character>(ent).remoteSlot == slot) return ent;
+  return entt::null;
+}
+
+void World::activateSlot(int slot, bool on) {
+  if (slot < 0 || size_t(slot) >= slotActive.size()) return;
+  slotActive[size_t(slot)] = on;
+  remoteInputs[size_t(slot)] = PlayerInput{};
+  const entt::entity e = slotEntity(slot);
+  if (e == entt::null) return;
+  Character& c = registry.get<Character>(e);
+  if (c.id == ~0u) return;
+  const glm::vec3 feet = on ? slotSpawn[size_t(slot)] : glm::vec3(0.0f, -1000.0f - 10.0f * float(slot), 0.0f);
+  physics->setCharacterFeet(c.id, feet);
+  registry.get<Transform>(e).position = feet + glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
+  LOG_INFO("Multijogador: vaga %d %s", slot, on ? "ocupada" : "livre");
+}
+
 bool World::explode(glm::vec3 position, float scale) {
   if (explosionSlots.empty() || !scene) return false;
   scene->triggerExplosion(explosionSlots[nextExplosion++ % explosionSlots.size()], position, scale);
@@ -1216,6 +1286,13 @@ void World::setEntityPose(scene::Scene& scene, entt::entity e, glm::vec3 positio
 }
 
 bool World::playerFeet(glm::vec3& feet) const {
+  if (netClient) {  // a câmera do cliente segue a vaga dele (pose replicada)
+    const entt::entity e = slotEntity(localSlot);
+    if (e == entt::null) return false;
+    const Character& c = registry.get<Character>(e);
+    feet = registry.get<Transform>(e).position - glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
+    return true;
+  }
   for (auto ent : registry.view<Character>()) {
     const Character& c = registry.get<Character>(ent);
     if (c.player && c.id != ~0u) {

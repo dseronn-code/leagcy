@@ -245,6 +245,19 @@ FetchContent_Declare(recastnavigation
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(recastnavigation)
 
+# Rede: ENet (MIT; UDP confiável/não confiável por canais, a base de rede de vários jogos e motores).
+FetchContent_Declare(enet
+  GIT_REPOSITORY https://github.com/lsalzman/enet.git
+  GIT_TAG v1.3.18
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(enet)  # alvo "enet" (o CMake dele já liga ws2_32/winmm no Windows)
+add_library(legacy_enet INTERFACE)
+target_link_libraries(legacy_enet INTERFACE enet)
+target_include_directories(legacy_enet SYSTEM INTERFACE ${enet_SOURCE_DIR}/include)
+if(WIN32)
+  target_link_libraries(legacy_enet INTERFACE ws2_32 winmm)
+endif()
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
@@ -253,7 +266,7 @@ target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
                                      EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}
-                                     RecastNavigation::Recast RecastNavigation::Detour)
+                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet)
 target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)
