@@ -331,7 +331,7 @@ void Editor::drawHud(const game::World& world, VkExtent2D extent) {
     const ImVec2 p(it.pos.x * W, it.pos.y * H), s(it.size.x * W, it.size.y * H);
     switch (it.kind) {
       case game::HudItem::Kind::Rect:
-        dl->AddRectFilled(p, ImVec2(p.x + s.x, p.y + s.y), col(it.color), 0.15f * std::min(s.x, s.y));
+        dl->AddRectFilled(p, ImVec2(p.x + s.x, p.y + s.y), col(it.color), std::min(0.15f * std::min(s.x, s.y), 0.012f * H));
         break;
       case game::HudItem::Kind::Bar: {
         const float r = 0.3f * s.y;

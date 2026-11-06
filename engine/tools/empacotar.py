@@ -118,6 +118,9 @@ class Pacote:
         pasta = os.path.dirname(os.path.join(MOTOR, rel))
         with open(os.path.join(MOTOR, rel), encoding='utf-8') as f:
             doc = json.loads(sem_comentarios(f.read()))
+        menu = doc.get('menu', 'scripts/menu_padrao.lua')  # menu de pausa: o padrão do motor, outro ou nenhum
+        if isinstance(menu, str):
+            self.exigir(menu, f'{rel} (menu)', pasta)
         for e in doc.get('entidades', []):
             quem = f'{rel} ({e.get("nome", "sem nome")})'
             if 'modelo' in e:

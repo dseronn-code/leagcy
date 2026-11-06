@@ -1,6 +1,9 @@
 #include "game/scripting.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <tuple>
 #include <filesystem>
 #include <map>
 #include <sstream>
@@ -10,6 +13,7 @@
 #include <sol/sol.hpp>
 
 #include <glm/gtc/quaternion.hpp>
+#include <nlohmann/json.hpp>
 
 #include "core/log.h"
 #include "game/world.h"
@@ -25,6 +29,60 @@ struct Entidade {
   entt::entity e;
   bool valid() const { return world && world->registry.valid(e); }
 };
+
+// Tabela Lua <-> JSON (salvar_jogo / carregar_jogo). Tabela com chaves 1..n vira lista; o resto, objeto.
+nlohmann::json luaToJson(const sol::object& o, int depth = 0) {
+  if (depth > 32) return nullptr;
+  switch (o.get_type()) {
+    case sol::type::boolean: return o.as<bool>();
+    case sol::type::number: {
+      const double d = o.as<double>();
+      if (std::floor(d) == d && std::abs(d) < 9e15) return int64_t(d);
+      return d;
+    }
+    case sol::type::string: return o.as<std::string>();
+    case sol::type::table: {
+      sol::table t = o.as<sol::table>();
+      const size_t n = t.size();
+      size_t count = 0;
+      for (auto& kv : t) { (void)kv; ++count; }
+      if (n > 0 && n == count) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (size_t i = 1; i <= n; ++i) arr.push_back(luaToJson(t[i], depth + 1));
+        return arr;
+      }
+      nlohmann::json obj = nlohmann::json::object();
+      for (auto& [k, v] : t) {
+        std::string key = k.get_type() == sol::type::string ? k.as<std::string>() : luaToJson(k, depth + 1).dump();
+        obj[key] = luaToJson(v, depth + 1);
+      }
+      return obj;
+    }
+    default: return nullptr;
+  }
+}
+
+sol::object jsonToLua(const nlohmann::json& j, sol::this_state st) {
+  sol::state_view L(st);
+  switch (j.type()) {
+    case nlohmann::json::value_t::boolean: return sol::make_object(L, j.get<bool>());
+    case nlohmann::json::value_t::number_integer:
+    case nlohmann::json::value_t::number_unsigned: return sol::make_object(L, j.get<int64_t>());
+    case nlohmann::json::value_t::number_float: return sol::make_object(L, j.get<double>());
+    case nlohmann::json::value_t::string: return sol::make_object(L, j.get<std::string>());
+    case nlohmann::json::value_t::array: {
+      sol::table t = L.create_table();
+      for (size_t i = 0; i < j.size(); ++i) t[i + 1] = jsonToLua(j[i], st);
+      return t;
+    }
+    case nlohmann::json::value_t::object: {
+      sol::table t = L.create_table();
+      for (auto& [k, v] : j.items()) t[k] = jsonToLua(v, st);
+      return t;
+    }
+    default: return sol::make_object(L, sol::lua_nil);
+  }
+}
 
 std::filesystem::file_time_type modified(const std::string& path) {
   std::error_code ec;
@@ -135,6 +193,13 @@ struct Scripting::Impl {
           }
           return r;
         },
+        "particulas", [](const Entidade& h, sol::optional<bool> on) -> bool {  // liga/desliga; devolve o estado
+          if (!h.valid()) return false;
+          ParticleSource* ps = h.world->registry.try_get<ParticleSource>(h.e);
+          if (!ps) return false;
+          if (on) ps->enabled = *on;
+          return ps->enabled;
+        },
         "rpm", [](const Entidade& h) -> float {  // carro: giro do motor
           if (!h.valid()) return 0.0f;
           const Vehicle* v = h.world->registry.try_get<Vehicle>(h.e);
@@ -214,6 +279,137 @@ struct Scripting::Impl {
       it.back = color(fundo, it.back);
       world.hud.push_back(std::move(it));
     });
+    // ---- Controles de interface (modo imediato): mouse, teclado (setas + Enter) e controle (direcional + A) ----
+    auto inside = [this](float x, float y, float w, float h) {
+      const glm::vec2 m = world.gameInput.mouse;
+      return m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h;
+    };
+    auto optNum = [](const sol::optional<sol::table>& o, const char* k, float d) { return o ? o->get_or(k, d) : d; };
+    auto optColor = [color](const sol::optional<sol::table>& o, const char* k, glm::vec4 d) {
+      return o ? color(o->get<sol::optional<sol::table>>(k), d) : d;
+    };
+    auto label = [this](const std::string& text, float cx, float y, float h, float size, glm::vec4 c, int align) {
+      HudItem it;
+      it.kind = HudItem::Kind::Text;
+      it.text = text;
+      it.textSize = size;
+      it.pos = {cx, y + 0.5f * (h - 1.15f * size)};
+      it.color = c;
+      it.align = align;
+      world.hud.push_back(std::move(it));
+    };
+    auto box = [this](float x, float y, float w, float h, glm::vec4 c) {
+      HudItem it;
+      it.kind = HudItem::Kind::Rect;
+      it.pos = {x, y};
+      it.size = {w, h};
+      it.color = c;
+      world.hud.push_back(std::move(it));
+    };
+    // Um controle novo: índice na ordem do quadro, foco pelo mouse (quando ele se mexe) ou pela navegação.
+    auto widget = [this, inside](float x, float y, float w, float h, bool& focused, bool& hovered) {
+      UiState& ui = world.ui;
+      const int idx = ui.count++;
+      hovered = inside(x, y, w, h);
+      if (hovered && (ui.mouseMoved || world.gameInput.mousePressed)) ui.hoverFocus = idx;  // vale no próximo quadro
+      focused = ui.focus == idx;
+      return idx;
+    };
+    auto confirm = [this]() { return world.gameInput.hit("enter") || world.gameInput.hit("pad_a"); };
+    const glm::vec4 kBg(0.08f, 0.09f, 0.12f, 0.82f), kFocus(0.20f, 0.45f, 0.90f, 0.95f), kText(1.0f);
+    hud.set_function("botao", [=](const std::string& text, float x, float y, float w, float h, sol::optional<sol::table> o) {
+      bool focused, hovered;
+      widget(x, y, w, h, focused, hovered);
+      const bool clicked = (hovered && world.gameInput.mousePressed) || (focused && confirm());
+      box(x, y, w, h, focused ? optColor(o, "cor_foco", kFocus) : optColor(o, "cor", kBg));
+      label(text, x + 0.5f * w, y, h, optNum(o, "tamanho", 0.5f * h), optColor(o, "cor_texto", kText), 1);
+      return clicked;
+    });
+    hud.set_function("alternar", [=](const std::string& text, float x, float y, float w, float h, bool value,
+                                     sol::optional<sol::table> o) {
+      bool focused, hovered;
+      widget(x, y, w, h, focused, hovered);
+      if ((hovered && world.gameInput.mousePressed) || (focused && confirm())) value = !value;
+      box(x, y, w, h, focused ? optColor(o, "cor_foco", kFocus) : optColor(o, "cor", kBg));
+      const float size = optNum(o, "tamanho", 0.5f * h);
+      label(text, x + 0.03f * w, y, h, size, optColor(o, "cor_texto", kText), 0);
+      label(value ? "Sim" : "Não", x + 0.97f * w, y, h, size, value ? glm::vec4(0.45f, 1.0f, 0.5f, 1.0f) : glm::vec4(1.0f, 0.55f, 0.5f, 1.0f), 2);
+      return value;
+    });
+    hud.set_function("deslizar", [=](const std::string& text, float x, float y, float w, float h, float value, float lo,
+                                     float hi, sol::optional<sol::table> o) {
+      bool focused, hovered;
+      const int idx = widget(x, y, w, h, focused, hovered);
+      UiState& ui = world.ui;
+      const GameInput& in = world.gameInput;
+      if (hovered && in.mousePressed) ui.dragging = idx;
+      if (ui.dragging == idx && in.mouseDown) value = lo + glm::clamp((in.mouse.x - x) / std::max(w, 1e-4f), 0.0f, 1.0f) * (hi - lo);
+      if (focused) {
+        const float step = (hi - lo) / 20.0f;
+        if (in.hit("direita") || in.hit("pad_direita")) value += step;
+        if (in.hit("esquerda") || in.hit("pad_esquerda")) value -= step;
+      }
+      value = glm::clamp(value, std::min(lo, hi), std::max(lo, hi));
+      const float f = hi != lo ? (value - lo) / (hi - lo) : 0.0f;
+      box(x, y, w, h, focused ? optColor(o, "cor_foco", kFocus) : optColor(o, "cor", kBg));
+      HudItem bar;
+      bar.kind = HudItem::Kind::Bar;
+      bar.pos = {x + 0.02f * w, y + 0.72f * h};
+      bar.size = {0.96f * w, 0.14f * h};
+      bar.value = f;
+      bar.color = glm::vec4(0.95f, 0.95f, 1.0f, 1.0f);
+      bar.back = glm::vec4(1.0f, 1.0f, 1.0f, 0.18f);
+      world.hud.push_back(bar);
+      const float size = optNum(o, "tamanho", 0.42f * h);
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%d%%", int(std::lround(100.0f * f)));
+      label(text, x + 0.03f * w, y - 0.12f * h, h, size, optColor(o, "cor_texto", kText), 0);
+      label(buf, x + 0.97f * w, y - 0.12f * h, h, size, optColor(o, "cor_texto", kText), 2);
+      return value;
+    });
+
+    // ---- Entrada ----
+    lua.set_function("tecla", [this](const std::string& k) { return world.gameInput.down(k); });
+    lua.set_function("tecla_apertada", [this](const std::string& k) { return world.gameInput.hit(k); });
+    lua.set_function("mouse", [this]() { return std::make_tuple(world.gameInput.mouse.x, world.gameInput.mouse.y); });
+    lua.set_function("clique", [this]() { return world.gameInput.mousePressed; });
+    lua.set_function("mouse_segurado", [this]() { return world.gameInput.mouseDown; });
+    lua.set_function("controle", [this](const std::string& b) { return world.gameInput.down("pad_" + b); });
+    lua.set_function("controle_apertado", [this](const std::string& b) { return world.gameInput.hit("pad_" + b); });
+    lua.set_function("eixo", [this](const std::string& a) { return world.gameInput.axis(a); });
+    lua.set_function("tem_controle", [this]() { return world.gameInput.pad; });
+
+    // ---- Jogo: pausa, sair, opções ----
+    lua.set_function("pausar", [this](sol::optional<bool> on) { world.paused = on.value_or(true); });
+    lua.set_function("pausado", [this]() { return world.paused; });
+    lua.set_function("sair", [this]() { world.quitRequested = true; });
+    lua.set_function("explosao", [this](float x, float y, float z, sol::optional<float> scale) {
+      return world.explode(glm::vec3(x, y, z), scale.value_or(1.0f));
+    });
+    lua.set_function("tempo_real", [this]() { return world.realTime; });
+    lua.set_function("volume", [this](sol::optional<float> v) {
+      if (!world.audio) return v.value_or(1.0f);
+      if (v) world.audio->setMasterVolume(glm::clamp(*v, 0.0f, 1.0f));
+      return world.audio->masterVolume();
+    });
+    lua.set_function("opcao", [this](const std::string& name, sol::object value) {
+      float v = value.is<bool>() ? (value.as<bool>() ? 1.0f : 0.0f) : value.is<double>() ? float(value.as<double>()) : 0.0f;
+      world.optionRequests.emplace_back(name, v);
+    });
+    lua.set_function("qualidade", [this](const std::string& preset) { world.qualityRequest = preset; });
+
+    // ---- Salvar e carregar (saves/<nome>.json) ----
+    lua.set_function("salvar_jogo", [this](const std::string& name, sol::object data) {
+      return world.saveGame(name, data.valid() && data.get_type() != sol::type::lua_nil ? luaToJson(data).dump() : std::string());
+    });
+    lua.set_function("carregar_jogo", [this](const std::string& name, sol::this_state st) -> sol::object {
+      std::string data;
+      if (!world.loadGame(name, data)) return sol::make_object(st, sol::lua_nil);
+      if (data.empty()) return sol::make_object(st, sol::lua_nil);
+      return jsonToLua(nlohmann::json::parse(data), st);
+    });
+    lua.set_function("existe_jogo", [](const std::string& name) { return World::gameExists(name); });
+
     lua.set_function("log", [](sol::variadic_args args, sol::this_state s) {
       sol::state_view L(s);
       std::ostringstream out;
@@ -280,6 +476,24 @@ void Scripting::update(scene::Scene& scene, float dt) {
     }
   }
   p_->world.hud.clear();  // a interface é refeita pelos scripts a cada quadro de jogo
+  {  // controles de interface: quadro novo (foco por teclado/direcional entre os controles do quadro anterior)
+    UiState& ui = p_->world.ui;
+    const GameInput& in = p_->world.gameInput;
+    ui.prevCount = ui.count;
+    ui.count = 0;
+    ui.mouseMoved = ui.lastMouse.x >= 0.0f && glm::length(in.mouse - ui.lastMouse) > 1e-4f;
+    ui.lastMouse = in.mouse;
+    if (!in.mouseDown) ui.dragging = -1;
+    if (ui.hoverFocus >= 0) ui.focus = ui.hoverFocus;
+    ui.hoverFocus = -1;
+    if (ui.prevCount > 0) {
+      if (in.hit("baixo") || in.hit("pad_baixo") || in.hit("tab")) ui.focus = (ui.focus + 1) % ui.prevCount;
+      if (in.hit("cima") || in.hit("pad_cima")) ui.focus = (ui.focus + ui.prevCount - 1) % ui.prevCount;
+      ui.focus = std::min(ui.focus, ui.prevCount - 1);
+    } else {
+      ui.focus = 0;
+    }
+  }
   for (auto& inst : p_->instances) {
     if (inst.failed || !p_->world.registry.valid(inst.e)) continue;
     const Entidade h{&p_->world, inst.e};

@@ -9,6 +9,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "game/audio.h"
+#include "game/input.h"
 #include "game/physics.h"
 
 namespace scene {
@@ -161,6 +162,30 @@ struct HudItem {
   std::string text;
 };
 
+// Estado dos controles de interface (hud.botao, hud.deslizar, hud.alternar): foco para teclado e controle.
+struct UiState {
+  int focus = 0;       // controle com foco (ordem de criação no quadro)
+  int count = 0;       // controles criados neste quadro
+  int prevCount = 0;   // ... e no anterior (navegação com setas / direcional)
+  int dragging = -1;   // controle deslizante sendo arrastado pelo mouse
+  int hoverFocus = -1; // controle sob o mouse (que se mexeu) no quadro anterior: vira o foco no começo do quadro
+  glm::vec2 lastMouse{-1.0f};
+  bool mouseMoved = false;
+};
+// Partículas presas a uma entidade ("particulas": fogo, fumaça ou faíscas): o emissor acompanha a posição dela e o
+// script liga e desliga (e:particulas(sim)).
+struct ParticleSource {
+  uint32_t emitter = ~0u;
+  std::string type;
+  glm::vec3 offset{0.0f};
+  float radius = 0.3f, scale = 1.0f;
+  uint32_t count = 400;
+  bool enabled = true;
+};
+
+// Marca entidades do sistema (o menu padrão): ficam fora do arquivo salvo e do editor.
+struct SystemEntity {};
+
 // ---- Mundo ----
 
 // Camada de jogo sobre o renderizador: entidades com componentes (EnTT), física (Jolt) e a cena em arquivo (JSON).
@@ -194,6 +219,25 @@ class World {
   bool bonePosition(entt::entity e, const std::string& bone, glm::vec3& out) const;
   scene::Scene* scene = nullptr;  // a cena deste mundo (consultas dos scripts: ossos, animação)
   std::vector<HudItem> hud;  // interface de jogo deste quadro (refeita pelos scripts enquanto o jogo roda)
+  GameInput gameInput;       // teclado, mouse e controle neste quadro (preenchido pelo main)
+  UiState ui;
+  // Pausa do JOGO (pausar() no script, menu de pausa): física, personagens e o tempo de jogo param; os scripts
+  // continuam rodando (o menu). Diferente de `simulate` (o editor parado, sem scripts).
+  bool paused = false;
+  bool quitRequested = false;        // sair() no script
+  float realTime = 0.0f;             // s desde o início, mesmo pausado (tempo_real())
+  std::string qualityRequest;        // qualidade("medio"): o main recria o renderizador com o preset
+  std::vector<std::pair<std::string, float>> optionRequests;  // opcao("motion_blur", 1): aplicadas pelo main
+  // Salvar e carregar o jogo (saves/<nome>.json): poses e velocidades das entidades com nome que se movem, o tempo de
+  // jogo e os dados do script (JSON). Carregar aplica no mundo atual (a mesma cena) e devolve os dados.
+  // Explosão de um tiro (explosao() no script): bola de fogo, fragmentos, fumaça e o clarão de luz. Usa um dos
+  // emissores reservados na carga (só quando algum script da cena chama explosao).
+  bool explode(glm::vec3 position, float scale);
+  std::vector<uint32_t> explosionSlots;
+  size_t nextExplosion = 0;
+  bool saveGame(const std::string& name, const std::string& dataJson) const;
+  bool loadGame(const std::string& name, std::string& dataJson);
+  static bool gameExists(const std::string& name);
   // Editor: cria uma forma básica (aparece no próximo load) e duplica uma entidade (1 m ao lado).
   entt::entity addPrimitive(ShapeType type, glm::vec3 position, Motion motion, glm::vec3 halfExtents = glm::vec3(0.5f));
   entt::entity duplicate(entt::entity e);

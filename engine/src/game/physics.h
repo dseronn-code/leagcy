@@ -68,6 +68,8 @@ class Physics {
   void pose(uint32_t body, glm::vec3& position, glm::quat& rotation) const;
   glm::vec3 linearVelocity(uint32_t body) const;
   void setLinearVelocity(uint32_t body, glm::vec3 v);
+  glm::vec3 angularVelocity(uint32_t body) const;
+  void setAngularVelocity(uint32_t body, glm::vec3 v);
   void addImpulse(uint32_t body, glm::vec3 impulse);
   // Corpo cinemático: chega em `position`/`rotation` ao fim do próximo passo (empurra os dinâmicos no caminho).
   void moveKinematic(uint32_t body, glm::vec3 position, glm::quat rotation);
@@ -88,6 +90,7 @@ class Physics {
   glm::vec3 characterFeet(uint32_t character) const;
   glm::vec3 characterVelocity(uint32_t character) const;
   bool characterOnGround(uint32_t character) const;
+  void setCharacterVelocity(uint32_t character, glm::vec3 v);
   void setCharacterFeet(uint32_t character, glm::vec3 feet);  // editor: teletransporta e zera a velocidade
 
   // Veículos. drive: acelerador -1..1 (negativo = ré, com câmbio automático), direção -1..1 (+ = direita), freio e

@@ -918,26 +918,64 @@ void Scene::addWallDecal(int32_t texture, glm::vec3 center, glm::vec3 wallNormal
   decals.push_back(d);
 }
 
-void Scene::addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count) {
+uint32_t Scene::addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count) {
+  const uint32_t idx = uint32_t(emitters.size());
   emitters.push_back({position, uint32_t(type), radius, scale, particleCount, count});
+  emitterLight.push_back(-1);
+  emitterScale0.push_back(scale);
   particleCount += count;
+  ++emitterVersion;
   if (type == kParticleExplosion) {  // clarão: luz forte que decai em ~0,3 s, no mesmo ciclo das partículas
     const uint32_t light = addLight({position, 1.0f * scale, glm::vec3(0.0f), 80.0f * scale});
-    addAnimator([light, scale](Scene& s, float t, float) {
-      const float k = std::fmod(t, 5.0f);  // == EXPLOSION_PERIOD em shaders/particles.glsl
-      s.lights[light].intensity = glm::vec3(1.0f, 0.6f, 0.25f) * (400000.0f * scale * std::exp(-k * 7.0f));
+    emitterLight[idx] = int32_t(light);
+    addAnimator([light, idx](Scene& s, float t, float) {
+      const ParticleEmitter& e = s.emitters[idx];
+      // Periódica (radius >= 0: a cada EXPLOSION_PERIOD) ou de um tiro (radius = -(início + 1), ver particles.glsl).
+      const float k = e.radius < 0.0f ? t - (-e.radius - 1.0f) : std::fmod(t, 5.0f);  // 5 == EXPLOSION_PERIOD
+      const bool on = k >= 0.0f && k < 5.0f && e.scale > 0.0f;
+      s.lights[light].position = e.position;
+      s.lights[light].intensity = on ? glm::vec3(1.0f, 0.6f, 0.25f) * (400000.0f * e.scale * std::exp(-k * 7.0f)) : glm::vec3(0.0f);
     });
-    return;
+    return idx;
   }
-  if (type != kParticleFire) return;
+  if (type != kParticleFire) return idx;
   // Chama ~1800 K: ~1000 cd por metro de altura, centro um pouco acima da base, tremulando.
   const uint32_t light = addLight({position + glm::vec3(0.0f, 0.5f * scale, 0.0f), 0.3f * scale,
                                    glm::vec3(1.0f, 0.55f, 0.2f) * 1000.0f * scale, 30.0f * scale});
+  emitterLight[idx] = int32_t(light);
   const glm::vec3 base = lights[light].intensity;
-  addAnimator([light, base](Scene& s, float t, float) {
+  addAnimator([light, base, idx](Scene& s, float t, float) {
     const float flicker = 0.85f + 0.1f * std::sin(t * 13.0f) + 0.05f * std::sin(t * 31.7f + 1.3f);
-    s.lights[light].intensity = base * flicker;
+    const float k = s.emitters[idx].scale / std::max(s.emitterScale0[idx], 1e-6f);  // 0 = apagado
+    s.lights[light].intensity = base * flicker * k;
   });
+  return idx;
+}
+
+void Scene::setEmitter(uint32_t i, glm::vec3 position, float scale) {
+  if (i >= emitters.size()) return;
+  ParticleEmitter& e = emitters[i];
+  if (e.position == position && e.scale == scale) return;
+  e.position = position;
+  e.scale = scale;
+  ++emitterVersion;
+  if (const int32_t l = emitterLight[i]; l >= 0 && e.type == kParticleFire)
+    lights[size_t(l)].position = position + glm::vec3(0.0f, 0.5f * emitterScale0[i], 0.0f);
+}
+
+uint32_t Scene::addExplosionSlot(uint32_t count) {
+  const uint32_t i = addEmitter(kParticleExplosion, glm::vec3(0.0f, -1e4f, 0.0f), 0.0f, 0.0f, count);
+  emitters[i].radius = -1e9f;  // de um tiro, "disparada" num passado distante: invisível
+  return i;
+}
+
+void Scene::triggerExplosion(uint32_t i, glm::vec3 position, float scale) {
+  if (i >= emitters.size()) return;
+  ParticleEmitter& e = emitters[i];
+  e.position = position;
+  e.scale = scale;
+  e.radius = -(time + 1.0f);  // começa agora
+  ++emitterVersion;
 }
 
 glm::vec3 lightCenter(const PointLight& l) {

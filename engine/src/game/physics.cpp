@@ -317,6 +317,11 @@ void Physics::pose(uint32_t body, glm::vec3& position, glm::quat& rotation) cons
 
 glm::vec3 Physics::linearVelocity(uint32_t body) const { return fromJolt(p_->bodies().GetLinearVelocity(bodyId(body))); }
 void Physics::setLinearVelocity(uint32_t body, glm::vec3 v) { p_->bodies().SetLinearVelocity(bodyId(body), toJolt(v)); }
+glm::vec3 Physics::angularVelocity(uint32_t body) const { return fromJolt(p_->bodies().GetAngularVelocity(bodyId(body))); }
+void Physics::setAngularVelocity(uint32_t body, glm::vec3 v) { p_->bodies().SetAngularVelocity(bodyId(body), toJolt(v)); }
+void Physics::setCharacterVelocity(uint32_t i, glm::vec3 v) {
+  if (i < p_->characters.size()) p_->characters[i].body->SetLinearVelocity(toJolt(v));
+}
 void Physics::addImpulse(uint32_t body, glm::vec3 impulse) { p_->bodies().AddImpulse(bodyId(body), toJolt(impulse)); }
 
 void Physics::moveKinematic(uint32_t body, glm::vec3 position, glm::quat rotation) {

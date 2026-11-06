@@ -35,6 +35,8 @@ class Audio {
   void playOnce(const std::string& path, glm::vec3 position, float volume = 1.0f);
 
   void setListener(glm::vec3 position, glm::vec3 forward, glm::vec3 velocity = glm::vec3(0.0f));
+  void setMasterVolume(float volume);  // 0..1 (opções do jogo)
+  float masterVolume() const;
   // Offline: mistura `seconds` de áudio (guardado para writeWav). Com placa de som, o miniaudio toca sozinho.
   void mix(float seconds);
   bool writeWav(const std::string& path) const;  // estéreo 48 kHz, 16 bits

@@ -173,6 +173,7 @@ class Renderer {
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
+    rhi::Image reactive;  // máscara reativa das partículas (o TAA corta o histórico onde elas passam)
     std::array<rhi::Image, 2> taa;
     std::array<rhi::Image, 2> clouds;  // nuvens da vista principal em meia resolução (atual / anterior)
     std::array<rhi::Image, 2> fogInject;  // névoa volumétrica: células da grade 3D (atual / anterior)
@@ -285,7 +286,9 @@ class Renderer {
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;
   rhi::PassLayout gbufferLayout_, tonemapLayout_, particleLayout_;
   VkPipeline particlePipeline_ = VK_NULL_HANDLE;
-  rhi::Buffer emitterBuffer_;  // scene::ParticleEmitter (só com partículas na cena)
+  rhi::Buffer emitterBuffer_[kFramesInFlight];  // scene::ParticleEmitter por slot (o jogo move e dispara emissores)
+  uint64_t emitterVersion_[kFramesInFlight] = {};
+  bool reactiveCleared_ = false;
   VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
   VkPipeline gbufferBlendPipeline_ = VK_NULL_HANDLE;  // decals BLEND: mistura na cor, normal e especular
 

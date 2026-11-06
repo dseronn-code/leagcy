@@ -573,7 +573,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   }
   if (settings.fogReference) fogReferencePass_.init(ctx, "fog_reference.comp", g, {CIS, SI, CIS}, sizeof(uint32_t));
   compositePass_.init(ctx, settings.fogReference ? "composite_fog_reference.comp" : "composite.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, CIS, CIS, CIS});
-  taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI});
+  taaPass_.init(ctx, "taa.comp", g, {CIS, CIS, CIS, CIS, SI, CIS});
   rrGuidesPass_.init(ctx, "rr_guides.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   accumulatePass_.init(ctx, "accumulate.comp", g, {CIS, CIS, CIS, CIS, CIS, SI, SI}, sizeof(uint32_t));
   radianceCacheResolvePass_.init(ctx, "radiance_cache_resolve.comp", g, {});
@@ -646,14 +646,29 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   // compara com a profundidade da cena).
   particleLayout_.init(ctx, g, {SB, CIS}, sizeof(ParticlePush));
   if (!scene.emitters.empty()) {
-    emitterBuffer_ = rhi::createBufferWithData(ctx, scene.emitters.data(), scene.emitters.size() * sizeof(scene::ParticleEmitter),
-                                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    for (uint32_t i = 0; i < kFramesInFlight; ++i) {
+      emitterBuffer_[i] = rhi::createBuffer(ctx, scene.emitters.size() * sizeof(scene::ParticleEmitter),
+                                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+      std::memcpy(emitterBuffer_[i].mapped, scene.emitters.data(), scene.emitters.size() * sizeof(scene::ParticleEmitter));
+      vmaFlushAllocation(ctx.allocator, emitterBuffer_[i].allocation, 0, VK_WHOLE_SIZE);
+      emitterVersion_[i] = scene.emitterVersion;
+    }
     rhi::GraphicsPipelineDesc pd;
     pd.vertexShader = ctx.rayTracing ? "particles_rt.vert" : "particles.vert";
     pd.fragmentShader = "particles.frag";
     pd.layout = particleLayout_.pipelineLayout;
-    pd.colorFormats = {kHdrFormat};
-    pd.blendPremultiplied = true;
+    pd.colorFormats = {kHdrFormat, VK_FORMAT_R16_SFLOAT};
+    VkPipelineColorBlendAttachmentState pre{}, add{};
+    pre.blendEnable = add.blendEnable = VK_TRUE;
+    pre.colorWriteMask = add.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                              VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    pre.srcColorBlendFactor = pre.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;  // pré-multiplicada
+    pre.dstColorBlendFactor = pre.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    pre.colorBlendOp = pre.alphaBlendOp = VK_BLEND_OP_ADD;
+    add.srcColorBlendFactor = add.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;  // soma (máscara)
+    add.dstColorBlendFactor = add.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    add.colorBlendOp = add.alphaBlendOp = VK_BLEND_OP_ADD;
+    pd.blendStates = {pre, add};
     particlePipeline_ = rhi::createGraphicsPipeline(ctx, pd);
   }
 
@@ -825,6 +840,9 @@ void Renderer::createTargets() {
                           &t_.tmpB, &t_.tmpC})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.sceneColor = rhi::createImage2D(ctx, R, kHdrFormat, storage | upscalerIo | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+  t_.reactive = rhi::createImage2D(ctx, R, VK_FORMAT_R16_SFLOAT,
+                                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+  reactiveCleared_ = false;
   t_.viewZ = rhi::createImage2D(ctx, R, VK_FORMAT_R32_SFLOAT, storage);
   t_.nrdNormalRoughness = rhi::createImage2D(ctx, R, VK_FORMAT_A2B10G10R10_UNORM_PACK32, storage);
   t_.diffuseDenoised = rhi::createImage2D(ctx, R, kHdrFormat, storage);
@@ -864,7 +882,7 @@ void Renderer::createTargets() {
         toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
     for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
-                            &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
+                            &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.reactive, &t_.postA,
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                             &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
@@ -904,7 +922,7 @@ void Renderer::destroyTargets() {
     rhi::destroyBuffer(ctx, t_.reservoirs[i]);
   }
   for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
-                          &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.postA,
+                          &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.reactive, &t_.postA,
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                           &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
                             &t_.rrSpecularAlbedo, &t_.rrHitDistance, &t_.rrNormalRoughness, &t_.accumulation, &t_.clouds[0],
@@ -1437,20 +1455,34 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                                     settings.fogReference ? Binding::sampled(t_.fogReference[cur].view, nearest_) : Binding::sampled(t_.fogIntegrated.view, linear_)}, R);
   barrier();
   if (particlePipeline_ != VK_NULL_HANDLE) {
-    VkRenderingAttachmentInfo color = attachment(t_.sceneColor.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD);
+    // Duas saídas: a cor da cena (mistura pré-multiplicada) e a máscara reativa (soma), zerada a cada quadro.
+    VkRenderingAttachmentInfo colors[2] = {attachment(t_.sceneColor.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD),
+                                           attachment(t_.reactive.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR)};
+    colors[1].clearValue.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
     VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea = {{0, 0}, R};
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 1;
-    ri.pColorAttachments = &color;
+    ri.colorAttachmentCount = 2;
+    ri.pColorAttachments = colors;
     vkCmdBeginRendering(cmd, &ri);
     setViewport(cmd, R);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, particlePipeline_);
     const ParticlePush pp{uint32_t(scene_->emitters.size()), ctx_->rayTracing ? 1u : 0u, scene_->time, 0};
+    if (emitterVersion_[slot] != scene_->emitterVersion) {  // o jogo moveu, ligou/desligou ou disparou um emissor
+      std::memcpy(emitterBuffer_[slot].mapped, scene_->emitters.data(), scene_->emitters.size() * sizeof(scene::ParticleEmitter));
+      vmaFlushAllocation(ctx_->allocator, emitterBuffer_[slot].allocation, 0, VK_WHOLE_SIZE);
+      emitterVersion_[slot] = scene_->emitterVersion;
+    }
     particleLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs,
-                         {Binding::storageBuffer(emitterBuffer_), Binding::sampled(t_.depth[cur].view, nearest_)}, &pp);
+                         {Binding::storageBuffer(emitterBuffer_[slot]), Binding::sampled(t_.depth[cur].view, nearest_)}, &pp);
     vkCmdDraw(cmd, 6, scene_->particleCount, 0, 0);
     vkCmdEndRendering(cmd);
+    barrier();
+  } else if (!reactiveCleared_) {  // sem partículas: a máscara fica zerada
+    VkClearColorValue zero{};
+    VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    vkCmdClearColorImage(cmd, t_.reactive.handle, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &range);
+    reactiveCleared_ = true;
     barrier();
   }
   profiler_.mark(cmd, "composicao");
@@ -1474,7 +1506,8 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     uf.projNoJitter = cam.projection(aspect);
     upscaler_.dispatch(cmd, uf);
   } else {
-    taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur])}, O);
+    taaPass_.dispatch(cmd, gs, {texLinear(t_.sceneColor), gDepth, gMotion, texLinear(t_.taa[prev]), storage(t_.taa[cur]),
+                                Binding::sampled(t_.reactive.view, nearest_)}, O);
   }
   barrier();
   profiler_.mark(cmd, "taa");
@@ -1897,7 +1930,7 @@ void Renderer::destroy() {
   vkDestroyPipeline(ctx.device, gbufferBlendPipeline_, nullptr);
   if (gbufferMeshPipeline_) vkDestroyPipeline(ctx.device, gbufferMeshPipeline_, nullptr);
   if (particlePipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(ctx.device, particlePipeline_, nullptr);
-  rhi::destroyBuffer(ctx, emitterBuffer_);
+  for (rhi::Buffer& b : emitterBuffer_) rhi::destroyBuffer(ctx, b);
   particleLayout_.destroy(ctx);
   vkDestroyPipeline(ctx.device, tonemapPipeline_, nullptr);
   gbufferLayout_.destroy(ctx);

@@ -7,7 +7,7 @@ Parte 2 do projeto: completar o Legacy como motor de jogo, além do renderizador
 | 1. Núcleo | Entidades e componentes (EnTT), cenas em arquivo (.json), física (Jolt), personagem, modelos glTF com colisão | ✅ |
 | 2. Editor visual | Dear ImGui + ImGuizmo: entidades, propriedades, alças, seleção por clique, Jogar/Parar, criar/duplicar/apagar, salvar | ✅ |
 | 3. Scripts | Lua 5.4 (sol2) por entidade, com recarga a quente | ✅ |
-| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅, animação avançada ✅ | ✅ |
+| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅, animação avançada ✅, entrada (teclado, mouse, controle), menus, pausa e salvar ✅ | ✅ |
 
 ## Arquitetura
 
@@ -149,6 +149,53 @@ Exemplo completo: `scripts/velocimetro.lua` (km/h, marcha e giro do motor em `ce
 (`tools/hud.py`, janela 800x450): retângulo, barra e fundo saem exatamente nas cores pedidas (255, 0, 0 / 0, 255, 0 /
 0, 0, 255); a barra pela metade troca de cor em x = 0,250 (pedido 0,25); o texto centralizado fica com centro em
 0,498.
+
+## Entrada, menus, pausa e salvar o jogo
+
+**Entrada** (teclado, mouse e controle; layout Xbox, qualquer controle que o GLFW reconheça): o jogador anda com WASD
+ou o analógico esquerdo, gira a câmera com o mouse (botão direito) ou o analógico direito, pula com espaço ou A,
+corre com Shift, L3 ou LB; no carro, RT acelera e LT freia. Nos scripts:
+
+| API | O que faz |
+|---|---|
+| `tecla("w")`, `tecla_apertada("esc")` | segurada / apertada neste quadro (`a`..`z`, `0`..`9`, `espaco`, `esc`, `enter`, `tab`, `shift`, `ctrl`, `alt`, `cima`, `baixo`, `esquerda`, `direita`, `f1`..`f12`) |
+| `mouse()`, `clique()`, `mouse_segurado()` | posição em fração da tela; clique neste quadro; botão segurado |
+| `controle("a")`, `controle_apertado("start")`, `eixo("esquerdo_x")`, `tem_controle()` | botões `a b x y lb rb back start l3 r3 cima baixo esquerda direita`; eixos `esquerdo_x/y`, `direito_x/y`, `lt`, `rt` |
+| `hud.botao(t, x, y, l, a)` | botão: verdadeiro no quadro em que é acionado (clique, Enter ou A com foco) |
+| `hud.deslizar(t, x, y, l, a, valor, min, max)` | controle deslizante (arrastar, ou ←/→ com foco); devolve o valor |
+| `hud.alternar(t, x, y, l, a, valor)` | Sim/Não; devolve o valor |
+| `pausar(sim)`, `pausado()`, `tempo_real()` | pausa o jogo (física, personagens e `tempo()` param; os scripts continuam) |
+| `volume(v)`, `opcao("motion_blur", sim)`, `opcao("dof", sim)`, `opcao("exposicao", ev)` | opções na hora |
+| `qualidade("medio")` | troca o preset com o jogo rodando (o renderizador é refeito, a cena continua na GPU) |
+| `salvar_jogo(nome, dados)`, `carregar_jogo(nome)`, `existe_jogo(nome)`, `sair()` | ver abaixo |
+
+O foco dos controles anda com as setas, Tab ou o direcional; o mouse em cima de um controle também dá o foco.
+
+**Menu de pausa padrão** (`scripts/menu_padrao.lua`, em toda cena com mundo): Esc ou Start abre Continuar, Salvar
+jogo, Carregar jogo, Opções (volume, motion blur, qualidade Baixa/Média/Alta/Ultra) e Sair. `"menu": "meu.lua"` na
+cena troca por outro script; `"menu": false` tira. Fora de um jogo com menu, Esc fecha o programa como antes.
+
+**Salvar e carregar:** `salvar_jogo("slot", {pontos = 42, inventario = {...}})` grava `saves/slot.json` com a
+posição, rotação e velocidade (linear e angular) de toda entidade com nome que se mexe (corpos, personagens, carros),
+o tempo de jogo e os dados do script (números, textos, listas, tabelas). `carregar_jogo("slot")` aplica tudo no
+mundo atual e devolve os dados.
+
+**Testes sem janela:** `--simular "t:evento;..."` (`tecla`, `segurar`, `clique`, `mouse`, `eixo`) em segundos.
+`tools/jogo.py`:
+
+| Teste | Resultado |
+|---|---|
+| botao | clique no meio do botão B aciona só o B; clique fora, nada |
+| teclado | ↓ + Enter aciona o 2º botão; Tab + Tab + Enter, o 3º |
+| controle | direcional ↓ + A aciona o 2º botão |
+| deslizar | clique a 75% da barra → 0,75; → com foco → 0,80 |
+| alternar | clique inverte; Enter inverte de novo |
+| pausa | Esc pelo menu padrão: 30 quadros com a bola parada no ar e o tempo de jogo congelado (o real andou 0,97 s); Continuar, e a queda segue |
+| salvar | salvo a y = 28,921 m (vy −4,52); 1 s depois em 19,178; carregado: y = 28,921, vy −4,52; dados iguais (incluindo "ação") |
+| analogico | analógico para a frente: 8,85 m em 2 s (4,5 m/s); W por 1 s: 4,65 m |
+
+Na janela (Xvfb): o menu aparece por cima do jogo, Opções abre pelo clique e a troca para Média refaz o renderizador
+sem fechar o jogo.
 
 ## Exportar o jogo (`tools/empacotar.py`)
 

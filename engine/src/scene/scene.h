@@ -468,7 +468,15 @@ class Scene {
   void addWallDecal(int32_t texture, glm::vec3 center, glm::vec3 wallNormal, float width, float height, float roughness = 0.6f);
   uint32_t particleCount = 0;
   // Acrescenta um emissor com `count` partículas. Fogo também cria uma luz que tremula (a chama ilumina a cena).
-  void addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count);
+  // Devolve o índice do emissor. Emissores podem ser movidos/apagados depois (setEmitter: escala 0 = apagado) e as
+  // explosões de um tiro (addExplosionSlot + triggerExplosion) disparadas a qualquer momento pelo jogo.
+  uint32_t addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count);
+  void setEmitter(uint32_t emitter, glm::vec3 position, float scale);
+  uint32_t addExplosionSlot(uint32_t count);
+  void triggerExplosion(uint32_t emitter, glm::vec3 position, float scale);
+  std::vector<int32_t> emitterLight;  // luz de cada emissor (fogo e explosão), -1 sem luz
+  std::vector<float> emitterScale0;   // escala de criação (a luz do fogo acompanha escala / escala0)
+  uint64_t emitterVersion = 0;        // muda quando um emissor muda (o renderizador reenvia)
   std::vector<Model> models;
   std::vector<GpuMesh> meshes;
   std::vector<rhi::Image> textures;

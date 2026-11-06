@@ -81,7 +81,15 @@ ParticleState particleState(ParticleEmitter e, uint i, float time) {
   if (e.type == PARTICLE_EXPLOSION) {
     // Explosão: bola de fogo que se expande desacelerando (arrasto do ar), esfria de ~2500 K a ~1000 K em ~0,6 s e
     // vira fumaça escura que sobe; um terço das partículas são fragmentos/faíscas balísticos.
-    float t = mod(time, EXPLOSION_PERIOD);
+    // radius < 0: explosão de um tiro, que começou em -radius - 1 (Scene::triggerExplosion); senão, periódica.
+    float t = e.radius < 0.0 ? time - (-e.radius - 1.0) : mod(time, EXPLOSION_PERIOD);
+    if (t < 0.0 || t > EXPLOSION_PERIOD || e.scale <= 0.0) {
+      p.position = e.position;
+      p.velocity = vec3(0.0);
+      p.size = 0.0;
+      p.alpha = 0.0;
+      return p;
+    }
     vec3 dir = normalize(vec3(h.x - 0.5, 0.25 + 0.75 * h.y, h.z - 0.5));
     if (g.y < 0.33) {  // fragmentos incandescentes
       vec3 v0 = dir * (10.0 + 14.0 * g.z) * e.scale;

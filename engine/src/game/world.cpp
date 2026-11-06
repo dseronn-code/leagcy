@@ -3,6 +3,8 @@
 #include "game/scripting.h"
 
 #include <algorithm>
+#include <cctype>
+#include <filesystem>
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -384,6 +386,21 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         sound->desc.rolloff = sj.value("queda", 1.0f);
         sound->autoplay = sj.value("tocar", true);
       }
+      std::unique_ptr<ParticleSource> particles;
+      if (e.contains("particulas")) {
+        const json& pj = e["particulas"];
+        particles = std::make_unique<ParticleSource>();
+        particles->type = pj.value("tipo", "fogo");
+        particles->radius = pj.value("raio", particles->radius);
+        particles->scale = pj.value("escala", particles->scale);
+        particles->count = pj.value("quantidade", particles->type == "fogo" ? 900u : particles->type == "fumaca" ? 500u : 150u);
+        particles->offset = vec3Of(pj.value("desvio", json()), particles->offset);
+        particles->enabled = pj.value("ligado", true);
+        if (particles->type != "fogo" && particles->type != "fumaca" && particles->type != "faiscas") {
+          LOG_WARN("Cena: partículas '%s' desconhecidas (fogo, fumaca, faiscas)", particles->type.c_str());
+          particles.reset();
+        }
+      }
       std::string script = e.value("script", "");
       if (!script.empty() && !std::ifstream(script) && std::ifstream(sceneDir + script)) script = sceneDir + script;
 
@@ -458,12 +475,43 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             }
             if (!script.empty()) registry.emplace<Script>(ent, script);
             if (sound) registry.emplace<SoundSource>(ent, *sound);
+            if (particles) {
+              ParticleSource ps = *particles;
+              const scene::ParticleType type = ps.type == "fogo" ? scene::kParticleFire
+                                               : ps.type == "fumaca" ? scene::kParticleSmoke : scene::kParticleSparks;
+              ps.emitter = scene.addEmitter(type, t.position + ps.offset, ps.radius, ps.scale, ps.count);
+              if (!ps.enabled) scene.setEmitter(ps.emitter, t.position + ps.offset, 0.0f);
+              registry.emplace<ParticleSource>(ent, ps);
+            }
             if (hasBody && !character && !vehicle) {
               registry.emplace<RigidBody>(ent, body);
               if (glm::dot(velocity, velocity) > 0.0f) registry.emplace<InitialVelocity>(ent, velocity);
             }
             ++created;
           }
+    }
+    // Menu de pausa (Esc / Start): o padrão do motor, outro script ("menu": "caminho.lua") ou nenhum ("menu": false).
+    // Roda numa entidade de sistema (sem forma, fora do arquivo salvo e do editor).
+    if (const json menu = doc.contains("menu") ? doc["menu"] : json("scripts/menu_padrao.lua"); menu.is_string()) {
+      std::string mpath = menu.get<std::string>();
+      if (!std::ifstream(mpath) && std::ifstream(sceneDir + mpath)) mpath = sceneDir + mpath;
+      if (std::ifstream(mpath)) {
+        const entt::entity ent = registry.create();
+        registry.emplace<Name>(ent, "_menu");
+        registry.emplace<SystemEntity>(ent);
+        registry.emplace<Script>(ent, mpath);
+      } else if (doc.contains("menu")) {
+        LOG_WARN("Cena: menu %s não encontrado", mpath.c_str());
+      }
+    }
+    // Explosões de um tiro: 4 emissores reservados só se algum script da cena chama explosao().
+    for (auto ent : registry.view<Script>()) {
+      std::ifstream sf(registry.get<Script>(ent).path);
+      const std::string text((std::istreambuf_iterator<char>(sf)), std::istreambuf_iterator<char>());
+      if (text.find("explosao(") != std::string::npos) {
+        for (int i = 0; i < 4; ++i) explosionSlots.push_back(scene.addExplosionSlot(1500));
+        break;
+      }
     }
     // Campos que o motor ainda não usa voltam iguais no save().
     for (auto& [k, v] : doc.items())
@@ -578,8 +626,14 @@ void World::start() {
 void World::update(scene::Scene& scene, float dt) {
   if (audio && dt > 0.0f) audio->mix(dt);  // offline: a mixagem anda junto com o tempo do quadro
   if (dt <= 0.0f || !simulate) return;
+  realTime += dt;
+  if (paused) {  // jogo pausado: só os scripts (o menu); física, personagens e o tempo de jogo parados
+    if (scripting) scripting->update(scene, dt);
+    return;
+  }
   time += dt;
   if (scripting) scripting->update(scene, dt);
+  if (paused) return;  // um script pausou agora: a pausa já vale neste quadro (nada se move)
   // Personagens: velocidade desejada pela entrada do jogador ou pelo roteiro.
   for (auto ent : registry.view<Character>()) {
     Character& c = registry.get<Character>(ent);
@@ -694,6 +748,11 @@ void World::update(scene::Scene& scene, float dt) {
     physics->pose(b.bodyId, t.position, t.rotation);
     scene.setTransform(r.sceneObject, drawMatrix(t, s));
   }
+  for (auto ent : registry.view<Transform, ParticleSource>()) {  // partículas acompanham a entidade
+    const ParticleSource& ps = registry.get<ParticleSource>(ent);
+    const Transform& t = registry.get<Transform>(ent);
+    scene.setEmitter(ps.emitter, t.position + t.rotation * ps.offset, ps.enabled ? ps.scale : 0.0f);
+  }
 }
 
 void World::animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt) {
@@ -757,6 +816,126 @@ void World::animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, 
       return true;
     };
   }
+}
+
+namespace {
+std::string savePath(const std::string& name) {
+  std::string clean;
+  for (char ch : name)
+    if (std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-') clean += ch;
+  if (clean.empty()) clean = "jogo";
+  return "saves/" + clean + ".json";
+}
+}  // namespace
+
+bool World::gameExists(const std::string& name) { return bool(std::ifstream(savePath(name))); }
+
+bool World::saveGame(const std::string& name, const std::string& dataJson) const {
+  json doc;
+  doc["versao"] = 1;
+  doc["tempo"] = time;
+  json ents = json::array();
+  for (auto ent : registry.view<Name, Transform>()) {
+    if (registry.all_of<SystemEntity>(ent)) continue;
+    const Transform& t = registry.get<Transform>(ent);
+    json e;
+    e["nome"] = registry.get<Name>(ent).value;
+    if (const Character* c = registry.try_get<Character>(ent); c && c->id != ~0u) {
+      e["pes"] = toJson(physics->characterFeet(c->id));
+      e["velocidade"] = toJson(physics->characterVelocity(c->id));
+    } else if (const Vehicle* v = registry.try_get<Vehicle>(ent); v && v->id != ~0u) {
+      const uint32_t b = physics->vehicleBody(v->id);
+      e["posicao"] = toJson(t.position);
+      e["rotacao"] = json::array({t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z});
+      e["velocidade"] = toJson(physics->linearVelocity(b));
+      e["velocidade_angular"] = toJson(physics->angularVelocity(b));
+    } else if (const RigidBody* rb = registry.try_get<RigidBody>(ent); rb && rb->bodyId != ~0u && rb->desc.motion != Motion::Static) {
+      e["posicao"] = toJson(t.position);
+      e["rotacao"] = json::array({t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z});
+      e["velocidade"] = toJson(physics->linearVelocity(rb->bodyId));
+      e["velocidade_angular"] = toJson(physics->angularVelocity(rb->bodyId));
+    } else {
+      continue;  // parado: vem da própria cena
+    }
+    ents.push_back(e);
+  }
+  doc["entidades"] = ents;
+  try {
+    doc["dados"] = dataJson.empty() ? json() : json::parse(dataJson);
+  } catch (const json::exception&) {
+    doc["dados"] = json();
+  }
+  std::error_code ec;
+  std::filesystem::create_directories("saves", ec);
+  const std::string path = savePath(name);
+  std::ofstream f(path);
+  if (!f) {
+    LOG_ERROR("Não consegui gravar %s", path.c_str());
+    return false;
+  }
+  f << doc.dump(1);
+  LOG_INFO("Jogo salvo em %s (%zu entidades)", path.c_str(), ents.size());
+  return bool(f);
+}
+
+bool World::loadGame(const std::string& name, std::string& dataJson) {
+  const std::string path = savePath(name);
+  std::ifstream f(path);
+  if (!f) return false;
+  json doc;
+  try {
+    doc = json::parse(f);
+  } catch (const json::exception& e) {
+    LOG_ERROR("%s inválido (%s)", path.c_str(), e.what());
+    return false;
+  }
+  std::map<std::string, entt::entity> byName;
+  for (auto ent : registry.view<Name>()) byName[registry.get<Name>(ent).value] = ent;
+  size_t applied = 0;
+  for (const json& e : doc.value("entidades", json::array())) {
+    auto it = byName.find(e.value("nome", ""));
+    if (it == byName.end()) continue;
+    const entt::entity ent = it->second;
+    const glm::vec3 vel = vec3Of(e.value("velocidade", json()), glm::vec3(0.0f));
+    const glm::vec3 ang = vec3Of(e.value("velocidade_angular", json()), glm::vec3(0.0f));
+    glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
+    if (e.contains("rotacao")) {
+      const json& q = e["rotacao"];
+      rot = glm::normalize(glm::quat(q[0].get<float>(), q[1].get<float>(), q[2].get<float>(), q[3].get<float>()));
+    }
+    if (Character* c = registry.try_get<Character>(ent); c && c->id != ~0u && e.contains("pes")) {
+      const glm::vec3 feet = vec3Of(e["pes"], glm::vec3(0.0f));
+      physics->setCharacterFeet(c->id, feet);
+      physics->setCharacterVelocity(c->id, vel);
+      registry.get<Transform>(ent).position = feet + glm::vec3(0.0f, 0.5f * c->desc.height, 0.0f);
+    } else if (Vehicle* v = registry.try_get<Vehicle>(ent); v && v->id != ~0u) {
+      const uint32_t b = physics->vehicleBody(v->id);
+      Transform& t = registry.get<Transform>(ent);
+      t.position = vec3Of(e.value("posicao", json()), t.position);
+      t.rotation = rot;
+      physics->setPose(b, t.position, t.rotation);
+      physics->setLinearVelocity(b, vel);
+      physics->setAngularVelocity(b, ang);
+    } else if (RigidBody* rb = registry.try_get<RigidBody>(ent); rb && rb->bodyId != ~0u) {
+      Transform& t = registry.get<Transform>(ent);
+      t.position = vec3Of(e.value("posicao", json()), t.position);
+      t.rotation = rot;
+      physics->setPose(rb->bodyId, t.position, t.rotation);
+      if (rb->desc.motion == Motion::Dynamic) {
+        physics->setLinearVelocity(rb->bodyId, vel);
+        physics->setAngularVelocity(rb->bodyId, ang);
+      }
+      if (const Renderable* r = registry.try_get<Renderable>(ent); r && scene && registry.all_of<Shape>(ent))
+        scene->setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(ent)));
+    } else {
+      continue;
+    }
+    ++applied;
+  }
+  time = doc.value("tempo", time);
+  dataJson = doc.contains("dados") ? doc["dados"].dump() : std::string();
+  LOG_INFO("Jogo carregado de %s (%zu entidades)", path.c_str(), applied);
+  return true;
 }
 
 bool World::save(const std::string& path) const {
@@ -860,6 +1039,9 @@ bool World::save(const std::string& path) const {
     e["rotacao"] = json::array({t.rotation.w, t.rotation.x, t.rotation.y, t.rotation.z});
     if (const Renderable* r = registry.try_get<Renderable>(ent); r && !r->material.empty()) e["material"] = r->material;
     if (const Script* sc = registry.try_get<Script>(ent)) e["script"] = sc->path;
+    if (const ParticleSource* ps = registry.try_get<ParticleSource>(ent))
+      e["particulas"] = {{"tipo", ps->type}, {"raio", ps->radius}, {"escala", ps->scale}, {"quantidade", ps->count},
+                         {"desvio", toJson(ps->offset)}, {"ligado", ps->enabled}};
     if (const SoundSource* so = registry.try_get<SoundSource>(ent))
       e["som"] = {{"arquivo", so->path}, {"volume", so->desc.volume}, {"laco", so->desc.loop}, {"espacial", so->desc.spatial},
                   {"dist_min", so->desc.minDistance}, {"dist_max", so->desc.maxDistance}, {"queda", so->desc.rolloff},
@@ -973,6 +1155,12 @@ void World::restore(scene::Scene& scene) {
     setEntityPose(scene, e, t.position, t.rotation);
   }
   time = snapshotTime_;
+}
+
+bool World::explode(glm::vec3 position, float scale) {
+  if (explosionSlots.empty() || !scene) return false;
+  scene->triggerExplosion(explosionSlots[nextExplosion++ % explosionSlots.size()], position, scale);
+  return true;
 }
 
 bool World::playAction(entt::entity e, const std::string& clip, float fade, bool loop) {

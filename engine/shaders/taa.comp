@@ -12,6 +12,7 @@ layout(set = 1, binding = 1) uniform sampler2D gDepth;       // resolução inte
 layout(set = 1, binding = 2) uniform sampler2D gMotion;      // resolução interna
 layout(set = 1, binding = 3) uniform sampler2D history;      // saída do frame anterior (sampler linear)
 layout(set = 1, binding = 4, rgba16f) uniform writeonly image2D outColor;
+layout(set = 1, binding = 5) uniform sampler2D reactiveMask;  // partículas neste quadro (resolução interna)
 
 vec3 rgbToYCoCg(vec3 c) {
   return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25)));
@@ -57,14 +58,17 @@ void main() {
   // contra a referência por path tracing (240x136, SVGF): -23,2% com elas sempre ligadas; sem elas, +2,9% sem
   // denoiser. Em movimento elas voltam por inteiro.
   vec3 rgbs[9];
-  float maxMove = 0.0;
+  float maxMove = 0.0, reactive = 0.0;
   for (int y = -1; y <= 1; ++y)
     for (int x = -1; x <= 1; ++x) {
       ivec2 q = clamp(rp + ivec2(x, y), ivec2(0), maxP);
       rgbs[(y + 1) * 3 + x + 1] = texelFetch(sceneColor, q, 0).rgb;
       maxMove = max(maxMove, length(texelFetch(gMotion, q, 0).xy * frame.outputSize.xy));
+      reactive = max(reactive, texelFetch(reactiveMask, q, 0).r);
     }
-  float moving = perfSkip(PERF_DIAG_TAA_OLD) ? 1.0 : smoothstep(0.05, 0.5, maxMove);
+  // Partícula no pixel (máscara reativa): mexe sem vetor de movimento; vale como "em movimento" (corte firme).
+  reactive = clamp(reactive * 50.0, 0.0, 1.0);  // qualquer partícula no pixel conta (até as pontas fracas da chama)
+  float moving = perfSkip(PERF_DIAG_TAA_OLD) ? 1.0 : max(smoothstep(0.05, 0.5, maxMove), reactive);
 
   // Reconstrução da amostra atual por kernel (Karis, "High Quality Temporal Supersampling", 2014): os 3x3
   // pixels internos vizinhos pesados por uma gaussiana da distância até o centro do pixel
@@ -100,25 +104,44 @@ void main() {
 
   vec2 prevUv = uv - texelFetch(gMotion, closestP, 0).xy;
   vec3 result = current;
+  float yCur = rgbToYCoCg(current).x;
+  float m2Out = yCur * yCur;  // 2º momento do brilho (Y), guardado no alfa do histórico
   if (historyValid() && all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0)))) {
-    // Clipping de variância em YCoCg: descarta histórico que não "cabe" na vizinhança (anti-ghosting).
-    vec3 h = rgbToYCoCg(sampleHistory(prevUv) * historyExposureScale());
-    // Corte em 1,25σ (anti-rastro) só na medida do movimento: parada, a vizinhança de 3x3 com ruído assimétrico
-    // costuma sair toda escura e com σ quase zero, e qualquer caixa cortaria o histórico já convergido para baixo.
-    vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
+    // Clipping de variância em YCoCg: descarta histórico que não "cabe" na vizinhança (anti-rastro).
+    float es = historyExposureScale();
+    vec3 h = rgbToYCoCg(sampleHistory(prevUv) * es);
+    float m2h = max(textureLod(history, prevUv, 0.0).a, 0.0) * es * es;
+    // Caixa: σ da vizinhança 3x3 deste quadro e, com a imagem parada, também o σ do próprio pixel no tempo (2º
+    // momento guardado no histórico). O ruído do path tracing é assimétrico (poucas amostras muito claras): a
+    // vizinhança costuma sair toda escura com σ quase zero e cortava o histórico já convergido para baixo (o Bistro
+    // ficava ~20% mais escuro na escala de teste). Com o σ temporal, ruído não corta; uma mudança de verdade sem
+    // vetor de movimento (partícula que passou, sombra que andou, luz que apagou) sai de uma variação pequena e corta.
+    float sigmaT = sqrt(max(m2h - h.x * h.x, 0.0));
+    vec3 sig = mix(max(sigma, vec3(sigmaT, 0.5 * sigmaT, 0.5 * sigmaT)), sigma, moving);
+    vec3 lo = mean - 1.25 * sig, hi = mean + 1.25 * sig;
     vec3 center = 0.5 * (lo + hi), ext = max(0.5 * (hi - lo), vec3(1e-4));
     vec3 rel = (h - center) / ext;
     float maxRel = max(abs(rel.x), max(abs(rel.y), abs(rel.z)));
-    if (maxRel > 1.0) h = mix(h, center + (h - center) / maxRel, moving);
+    if (maxRel > 1.0) {
+      float yBefore = h.x;
+      h = center + (h - center) / maxRel;
+      m2h += h.x * h.x - yBefore * yBefore;  // o 2º momento acompanha a média cortada (a variância fica)
+    }
     vec3 hist = yCoCgToRgb(h);
 
     // Upscaling: confia mais no frame atual quando alguma amostra caiu perto do centro do pixel de saída.
     float alpha = mix(0.04, 0.15, wmax);
-    // Pesos por luminância (Karis): evita que pontos muito brilhantes cintilem.
+    // Pesos por luminância (Karis) em movimento: evita que pontos muito brilhantes cintilem. Parada, puxariam a
+    // média para baixo (mesmo motivo do corte).
     float wc = alpha / (1.0 + moving * luminance(current));
     float wh = (1.0 - alpha) / (1.0 + moving * luminance(hist));
     result = (current * wc + hist * wh) / (wc + wh);
+    m2Out = mix(m2h, yCur * yCur, alpha);
+    // Onde há partícula, a variação no tempo não é ruído: zera (quando ela sair dali, o rastro é cortado).
+    float yRes = rgbToYCoCg(result).x;
+    m2Out = mix(m2Out, yRes * yRes, reactive);  // variância zero em volta do que foi gravado
   }
   if (any(isnan(result)) || any(isinf(result))) result = vec3(0.0);
-  imageStore(outColor, id, vec4(result, 1.0));
+  if (isnan(m2Out) || isinf(m2Out)) m2Out = 0.0;
+  imageStore(outColor, id, vec4(result, m2Out));
 }

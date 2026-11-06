@@ -119,6 +119,11 @@ void Audio::playOnce(const std::string& path, glm::vec3 position, float volume) 
   ma_sound_start(&s);
 }
 
+void Audio::setMasterVolume(float volume) {
+  if (p_->ready) ma_engine_set_volume(&p_->engine, volume < 0.0f ? 0.0f : volume);
+}
+float Audio::masterVolume() const { return p_->ready ? ma_engine_get_volume(&p_->engine) : 1.0f; }
+
 void Audio::setListener(glm::vec3 p, glm::vec3 f, glm::vec3 v) {
   if (!p_->ready) return;
   ma_engine_listener_set_position(&p_->engine, 0, p.x, p.y, p.z);
