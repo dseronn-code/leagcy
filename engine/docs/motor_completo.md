@@ -7,7 +7,7 @@ Parte 2 do projeto: completar o Legacy como motor de jogo, além do renderizador
 | 1. Núcleo | Entidades e componentes (EnTT), cenas em arquivo (.json), física (Jolt), personagem, modelos glTF com colisão | ✅ |
 | 2. Editor visual | Dear ImGui + ImGuizmo: entidades, propriedades, alças, seleção por clique, Jogar/Parar, criar/duplicar/apagar, salvar | ✅ |
 | 3. Scripts | Lua 5.4 (sol2) por entidade, com recarga a quente | ✅ |
-| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅; animação avançada | em andamento |
+| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅, animação avançada ✅ | ✅ |
 
 ## Arquitetura
 
@@ -58,6 +58,8 @@ console uma vez e só aquele script para (teste `script`).
 | `log(...)` | escreve no console |
 | `e:ir_para(x, y, z)`, `e:seguir(outra)` | personagem passa a andar sozinho pela navegação |
 | `e:velocidade_frente()`, `e:marcha()`, `e:rpm()` | carro: m/s para a frente, marcha (−1 ré, 0 neutro), giro |
+| `e:animar(clipe, transicao, laco)`, `e:parar_animacao(transicao)` | ação de animação com transição suave |
+| `e:osso("nome")` | posição no mundo de um osso do modelo (x, y, z) |
 | `hud.texto(t, x, y, {tamanho, cor, alinhar})` | texto na tela (ver Interface de jogo) |
 | `hud.retangulo(x, y, l, a, cor)`, `hud.barra(x, y, l, a, fração, cor, fundo)` | retângulo e barra de progresso |
 
@@ -82,6 +84,44 @@ Na entidade: `"veiculo": {"comprimento": 4.2, "largura": 1.8, "altura": 0.9, "ma
 estabilizadoras, câmbio automático e freio de mão nas traseiras. Com `controle` `jogador`: W acelera, S freia e depois dá ré, A/D
 vira, espaço é o freio de mão, e a câmera segue o carro. Ou `roteiro` com
 `"roteiro": [{"t": 0, "acelerar": 1, "virar": 0, "freio": 0, "freio_mao": 0}]`. Exemplo: `cenas/carro.json`.
+
+## Animação avançada (personagem com `"visual"`)
+
+Um modelo glTF animado no lugar da cápsula do personagem:
+
+```json
+"personagem": {"altura": 0.8, "raio": 0.2, "velocidade": 1.5, "velocidade_correndo": 2.7,
+  "visual": {"modelo": "assets/Fox/Fox.gltf", "escala": 0.01, "parado": "Survey", "andar": "Walk", "correr": "Run",
+             "velocidade_andar": 1.5, "velocidade_correr": 2.7, "transicao": 0.2, "ik_pes": true,
+             "pernas": [["b_LeftLeg01_015", "b_LeftLeg02_016", "b_LeftFoot01_017"], ...]}}
+```
+
+- **Mistura pela velocidade** (blend space 1D): parado → andar → correr, com pesos pela velocidade real do
+  personagem. Andar e correr compartilham a fase (as patas batem juntas na transição) e tocam acelerados por
+  velocidade/`velocidade_andar` (ou `_correr`), a velocidade em que o clipe foi feito: o pé apoiado não patina. A
+  rotação acompanha a direção do movimento, suavizada.
+- **Ações por script** com transição: `e:animar("nome", transicao, laco)` e `e:parar_animacao(transicao)`; sem laço,
+  a ação sai sozinha no fim do clipe.
+- **IK dos pés** (duas juntas por perna, analítico): cada pé desce ou sobe até o chão de verdade (raio da física
+  abaixo dele, ignorando a própria cápsula), mantendo a altura que a animação dá ao pé; a bacia desce o necessário
+  para o pé mais baixo alcançar, suavizada. Desligado no ar (as pernas seguem a animação).
+- Sem `"desvio"`, o modelo é posto com o ponto mais baixo da pose parada no pé da cápsula.
+- `e:osso("nome")` devolve a posição de um osso no mundo (para prender objetos, testes, efeitos).
+
+Exemplo: a raposa de `cenas/parque.json` segue o jogador. Testes (`tools/animacao.py`, 120 quadros/s):
+
+| Teste | Critério | Resultado |
+|---|---|---|
+| frente | andando para +X, a cabeça à frente da bacia | 1,000 (cosseno) |
+| patinar | pata apoiada escorrega só o que o próprio clipe escorrega (previsto pelo clipe tocado no lugar) | andar 0,09/0,26 m/s (previsto 0,09/0,04); correr 0,13/0,79 (previsto 0,17/0,77) |
+| mistura | andar → correr sem saltos maiores que os da corrida normal | 4,0 cm por quadro (andando 3,4; correndo 3,8) |
+| acao | entrar e sair de uma ação no meio da caminhada | 2,5 / 3,4 cm por quadro (andando 3,4) |
+| degrau | patas da frente sobre um degrau de 15 cm | com IK todas no chão (0,0 cm); sem IK, 15,0 cm dentro do degrau |
+| rampa | parada numa rampa de 15° | com IK, pior pata a 1,4 cm; sem IK, 8,8 cm |
+
+A raposa (modelo gratuito) tem limites do próprio clipe: na corrida a pata traseira direita pisa a 1,9 m/s e a
+esquerda a 2,9 m/s, então nenhuma velocidade deixa as duas paradas; e o IK posiciona o tornozelo, sem girar o pé
+para acompanhar a rampa (daí 1,4 cm nas patas de trás).
 
 ## Navegação e NPCs (Recast/Detour)
 
@@ -198,3 +238,4 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | miniaudio | 0.11.24 | áudio 3D | domínio público / MIT-0 |
 | Recast/Detour | 1.6.0 | malha de navegação e caminhos | zlib |
 | Roboto (fonte) | — | texto do HUD | Apache 2.0 |
+| Raposa (modelo de exemplo) | — | personagem animado | CC-BY 4.0 (PixelMannen, tomkranis) |

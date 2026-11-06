@@ -50,6 +50,7 @@ def main():
         subprocess.run([a.bin, '--scene', caminho, '--width', str(W), '--height', str(H), '--quit-after', '2',
                         '--screenshot', tela], check=True, capture_output=True)
         img = Image.open(tela).convert('RGB')
+        W, H = img.size  # a janela pode sair maior que o pedido (escala de tela do Windows)
         px = lambda fx, fy: img.getpixel((int(fx * W), int(fy * H)))
         ok_todos = True
 

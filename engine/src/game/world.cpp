@@ -92,6 +92,40 @@ struct World::FileData {
   json sun, camera, materials, extra;
 };
 
+namespace {
+
+// Põe o modelo de um personagem nos pés dele, virado para `v.yaw` (radianos; 0 = +Z).
+void placeVisual(scene::Model& m, const CharacterVisual& v, glm::vec3 feet) {
+  const glm::quat facing = glm::angleAxis(v.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+  m.root = glm::translate(glm::mat4(1.0f), feet + facing * v.offset) *
+           glm::mat4_cast(facing * glm::angleAxis(glm::radians(v.yawDeg), glm::vec3(0.0f, 1.0f, 0.0f))) *
+           glm::scale(glm::mat4(1.0f), glm::vec3(v.scale));
+  m.groundBase = feet.y;
+  if (m.layers.empty() && v.idleA >= 0) m.layers.push_back({v.idleA, 0.0f, 1.0f});
+}
+
+// Pesos de uma mistura 1D por velocidade: pontos (0, parado), (walkRef, andar), (runRef, correr), só os que existem.
+void locomotionWeights(const CharacterVisual& v, float speed, float& wIdle, float& wWalk, float& wRun) {
+  struct P { float s; float* w; };
+  std::vector<P> pts;
+  wIdle = wWalk = wRun = 0.0f;
+  if (v.idleA >= 0) pts.push_back({0.0f, &wIdle});
+  if (v.walkA >= 0) pts.push_back({v.walkRef, &wWalk});
+  if (v.runA >= 0) pts.push_back({v.runRef, &wRun});
+  if (pts.empty()) return;
+  if (speed <= pts.front().s) { *pts.front().w = 1.0f; return; }
+  if (speed >= pts.back().s) { *pts.back().w = 1.0f; return; }
+  for (size_t i = 0; i + 1 < pts.size(); ++i)
+    if (speed <= pts[i + 1].s) {
+      const float f = (speed - pts[i].s) / std::max(pts[i + 1].s - pts[i].s, 1e-4f);
+      *pts[i].w = 1.0f - f;
+      *pts[i + 1].w = f;
+      return;
+    }
+}
+
+}  // namespace
+
 World::World() : physics(std::make_unique<Physics>()), file_(std::make_unique<FileData>()) {}
 World::~World() {
   scripting.reset();  // o Lua guarda referências às entidades
@@ -102,6 +136,7 @@ World::~World() {
 }
 
 bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& camera) {
+  this->scene = &scene;
   std::ifstream f(path);
   if (!f) {
     LOG_ERROR("Cena: não abri %s", path.c_str());
@@ -261,6 +296,27 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           c.script.push_back(key);
         }
         if (!c.script.empty() && !c.ai) c.player = pj.value("controle", "roteiro") == "jogador";
+        if (pj.contains("visual")) {  // modelo glTF animado no lugar da cápsula
+          const json& vj = pj["visual"];
+          CharacterVisual& v = c.visual;
+          v.enabled = true;
+          v.path = vj.value("modelo", "");
+          if (!v.path.empty() && !std::ifstream(v.path) && std::ifstream(sceneDir + v.path)) v.path = sceneDir + v.path;
+          v.scale = vj.value("escala", v.scale);
+          v.offset = vec3Of(vj.value("desvio", json()), v.offset);
+          v.autoOffset = !vj.contains("desvio");
+          v.yawDeg = vj.value("girar_graus", v.yawDeg);
+          v.idle = vj.value("parado", "");
+          v.walk = vj.value("andar", "");
+          v.run = vj.value("correr", "");
+          v.walkRef = vj.value("velocidade_andar", v.walkRef);
+          v.runRef = vj.value("velocidade_correr", v.runRef);
+          v.fade = vj.value("transicao", v.fade);
+          v.ik = vj.value("ik_pes", v.ik);
+          for (const json& leg : vj.value("pernas", json::array()))
+            if (leg.is_array() && leg.size() == 3)
+              v.legs.push_back({leg[0].get<std::string>(), leg[1].get<std::string>(), leg[2].get<std::string>()});
+        }
         shape.type = ShapeType::Capsule;
         shape.radius = c.desc.radius;
         shape.halfHeight = std::max(0.5f * c.desc.height - c.desc.radius, 0.05f);
@@ -351,8 +407,47 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               registry.emplace<Name>(ent, many ? name + "_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z) : name);
             registry.emplace<Transform>(ent, t);
             registry.emplace<Shape>(ent, shape);
-            registry.emplace<Renderable>(ent, scene.addObject(mesh, drawMatrix(t, shape), mit->second), matName);
-            if (character) registry.emplace<Character>(ent, *character);
+            if (character && character->visual.enabled) {
+              Character ch = *character;
+              CharacterVisual& v = ch.visual;
+              int model = -1;
+              if (scene::loadGltf(scene, v.path, glm::mat4(1.0f), &model) && model >= 0) {
+                v.model = model;
+                scene::Model& sm = scene.models[size_t(model)];
+                v.idleA = sm.findAnimation(v.idle);
+                v.walkA = sm.findAnimation(v.walk);
+                v.runA = sm.findAnimation(v.run);
+                for (const auto& leg : v.legs) {
+                  const int a = sm.findNode(leg[0]), b = sm.findNode(leg[1]), f = sm.findNode(leg[2]);
+                  if (a < 0 || b < 0 || f < 0) {
+                    LOG_WARN("Personagem %s: perna %s/%s/%s não existe no modelo", name.c_str(), leg[0].c_str(),
+                             leg[1].c_str(), leg[2].c_str());
+                    continue;
+                  }
+                  sm.legs.push_back({uint32_t(a), uint32_t(b), uint32_t(f)});
+                }
+                const glm::vec3 feet = t.position - glm::vec3(0.0f, 0.5f * ch.desc.height, 0.0f);
+                placeVisual(sm, v, feet);
+                if (v.autoOffset) {  // sem "desvio": o ponto mais baixo da pose parada fica no pé da cápsula
+                  scene.poseModel(model);
+                  glm::vec3 lo, hi;
+                  scene.modelBounds(model, lo, hi);
+                  v.offset.y = feet.y - lo.y;
+                  v.autoOffset = false;
+                  placeVisual(sm, v, feet);
+                }
+                scene.poseModel(model);
+                registry.emplace<Character>(ent, ch);
+              } else {
+                LOG_WARN("Personagem %s: não carreguei o modelo %s; fica a cápsula", name.c_str(), v.path.c_str());
+                ch.visual.enabled = false;
+                registry.emplace<Renderable>(ent, scene.addObject(mesh, drawMatrix(t, shape), mit->second), matName);
+                registry.emplace<Character>(ent, ch);
+              }
+            } else {
+              registry.emplace<Renderable>(ent, scene.addObject(mesh, drawMatrix(t, shape), mit->second), matName);
+              if (character) registry.emplace<Character>(ent, *character);
+            }
             if (vehicle) {
               Vehicle v = *vehicle;
               auto wm = materials.find(v.wheelMaterial);
@@ -581,12 +676,15 @@ void World::update(scene::Scene& scene, float dt) {
     const SoundSource& snd = registry.get<SoundSource>(ent);
     if (snd.handle != ~0u) audio->setPosition(snd.handle, registry.get<Transform>(ent).position);
   }
-  for (auto ent : registry.view<Transform, Shape, Character, Renderable>()) {
+  for (auto ent : registry.view<Transform, Shape, Character>()) {
     auto& t = registry.get<Transform>(ent);
-    const Character& c = registry.get<Character>(ent);
+    Character& c = registry.get<Character>(ent);
     if (c.id == ~0u) continue;
-    t.position = physics->characterFeet(c.id) + glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
-    scene.setTransform(registry.get<Renderable>(ent).sceneObject, drawMatrix(t, registry.get<Shape>(ent)));
+    const glm::vec3 feet = physics->characterFeet(c.id);
+    t.position = feet + glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
+    if (const Renderable* r = registry.try_get<Renderable>(ent))
+      scene.setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(ent)));
+    if (c.visual.enabled && c.visual.model >= 0) animateCharacter(scene, c, feet, dt);
   }
   // Só os corpos que se movem mudam a pose; parados (dormindo) não reenviam nada à GPU.
   auto view = registry.view<Transform, Shape, RigidBody, Renderable>();
@@ -595,6 +693,69 @@ void World::update(scene::Scene& scene, float dt) {
     if (b.bodyId == ~0u || b.desc.motion == Motion::Static || !physics->isActive(b.bodyId)) continue;
     physics->pose(b.bodyId, t.position, t.rotation);
     scene.setTransform(r.sceneObject, drawMatrix(t, s));
+  }
+}
+
+void World::animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt) {
+  CharacterVisual& v = c.visual;
+  scene::Model& m = scene.models[size_t(v.model)];
+  const glm::vec3 vel = physics->characterVelocity(c.id);
+  const float hs = glm::length(glm::vec2(vel.x, vel.z));
+  const bool onGround = physics->characterOnGround(c.id);
+  // Velocidade e direção suavizadas (sem trancos de um quadro para o outro).
+  const float k = 1.0f - std::exp(-dt * 10.0f);
+  v.speed += ((onGround ? hs : v.speed) - v.speed) * k;
+  if (hs > 0.2f) {
+    const float want = std::atan2(vel.x, vel.z);
+    float d = std::remainder(want - v.yaw, glm::two_pi<float>());
+    v.yaw += d * (1.0f - std::exp(-dt * 12.0f));
+  }
+  // Locomoção: mistura parado/andar/correr; andar e correr com a mesma fase (os pés batem juntos na transição) e
+  // tocados na velocidade real (s / velocidade de referência), sem o pé patinar no chão.
+  float wIdle, wWalk, wRun;
+  locomotionWeights(v, v.speed, wIdle, wWalk, wRun);
+  auto duration = [&](int a) { return a >= 0 ? std::max(m.animations[size_t(a)].duration, 1e-3f) : 1.0f; };
+  float rate = 0.0f, moving = wWalk + wRun;
+  if (moving > 0.0f) {
+    if (v.walkA >= 0) rate += wWalk * glm::clamp(v.speed / v.walkRef, 0.25f, 2.0f) / duration(v.walkA);
+    if (v.runA >= 0) rate += wRun * glm::clamp(v.speed / v.runRef, 0.25f, 2.0f) / duration(v.runA);
+    rate /= moving;
+  }
+  v.phase = std::fmod(v.phase + dt * rate, 1.0f);
+  v.idleTime += dt;
+  // Ação pedida por script (e:animar): entra e sai com transição; sem laço, sai sozinha no fim.
+  if (v.action >= 0) {
+    v.actionTime += dt;
+    if (!v.actionLoop && v.actionTime >= duration(v.action) - v.actionFade) v.actionOn = false;
+    const float step = dt / std::max(v.actionFade, 1e-3f);
+    v.actionWeight = glm::clamp(v.actionWeight + (v.actionOn ? step : -step), 0.0f, 1.0f);
+    if (!v.actionOn && v.actionWeight <= 0.0f) v.action = -1;
+  }
+  const float loco = 1.0f - (v.action >= 0 ? v.actionWeight : 0.0f);
+  m.layers.clear();
+  if (wIdle > 0.0f) m.layers.push_back({v.idleA, v.idleTime, wIdle * loco});
+  if (wWalk > 0.0f) m.layers.push_back({v.walkA, v.phase * duration(v.walkA), wWalk * loco});
+  if (wRun > 0.0f) m.layers.push_back({v.runA, v.phase * duration(v.runA), wRun * loco});
+  if (v.action >= 0) m.layers.push_back({v.action, v.actionTime, v.actionWeight});
+  if (m.layers.empty()) m.layers.push_back({-1, 0.0f, 1.0f});
+  placeVisual(m, v, feet);
+  // IK dos pés: só no chão (no ar, as pernas seguem a animação), entrando e saindo devagar.
+  const float ikTarget = (v.ik && onGround) ? 1.0f : 0.0f;
+  m.ikWeight += (ikTarget - m.ikWeight) * (1.0f - std::exp(-dt * 8.0f));
+  m.maxPelvisDrop = 0.5f * c.desc.height;
+  if (!m.ground && !m.legs.empty()) {
+    const uint32_t id = c.id;
+    const float step = c.desc.stepHeight;
+    Physics* ph = physics.get();
+    m.ground = [ph, id, step](glm::vec3 from, float& groundY) {
+      const float above = step + 0.2f;  // começa acima de um degrau que o personagem consegue subir
+      float dist = 0.0f;
+      if (!ph->castRayIgnoringCharacter(from + glm::vec3(0.0f, above, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f),
+                                        above + 1.0f, id, &dist))
+        return false;
+      groundY = from.y + above - dist;
+      return true;
+    };
   }
 }
 
@@ -658,6 +819,19 @@ bool World::save(const std::string& path) const {
       pj["velocidade_correndo"] = c->runSpeed;
       pj["pulo"] = c->jumpSpeed;
       pj["controle"] = c->ai ? "ia" : c->player ? "jogador" : "roteiro";
+      if (c->visual.enabled) {
+        const CharacterVisual& v = c->visual;
+        json vj = {{"modelo", v.path}, {"escala", v.scale}, {"desvio", toJson(v.offset)}, {"girar_graus", v.yawDeg},
+                   {"velocidade_andar", v.walkRef}, {"velocidade_correr", v.runRef}, {"transicao", v.fade},
+                   {"ik_pes", v.ik}};
+        if (!v.idle.empty()) vj["parado"] = v.idle;
+        if (!v.walk.empty()) vj["andar"] = v.walk;
+        if (!v.run.empty()) vj["correr"] = v.run;
+        json legs = json::array();
+        for (const auto& l : v.legs) legs.push_back({l[0], l[1], l[2]});
+        if (!legs.empty()) vj["pernas"] = legs;
+        pj["visual"] = vj;
+      }
       if (c->ai) {
         json ia;
         if (!c->aiFollow.empty()) ia["seguir"] = c->aiFollow;
@@ -799,6 +973,40 @@ void World::restore(scene::Scene& scene) {
     setEntityPose(scene, e, t.position, t.rotation);
   }
   time = snapshotTime_;
+}
+
+bool World::playAction(entt::entity e, const std::string& clip, float fade, bool loop) {
+  Character* c = registry.try_get<Character>(e);
+  if (!c || !c->visual.enabled || c->visual.model < 0 || !scene) return false;
+  const int a = scene->models[size_t(c->visual.model)].findAnimation(clip);
+  if (a < 0) return false;
+  CharacterVisual& v = c->visual;
+  if (v.action != a) {
+    v.action = a;
+    v.actionTime = 0.0f;
+    v.actionWeight = 0.0f;
+  }
+  v.actionOn = true;
+  v.actionLoop = loop;
+  v.actionFade = std::max(fade, 0.0f);
+  return true;
+}
+
+void World::stopAction(entt::entity e, float fade) {
+  if (Character* c = registry.try_get<Character>(e); c && c->visual.action >= 0) {
+    c->visual.actionOn = false;
+    c->visual.actionFade = std::max(fade, 0.0f);
+  }
+}
+
+bool World::bonePosition(entt::entity e, const std::string& bone, glm::vec3& out) const {
+  const Character* c = registry.try_get<Character>(e);
+  if (!c || !c->visual.enabled || c->visual.model < 0 || !scene) return false;
+  const scene::Model& m = scene->models[size_t(c->visual.model)];
+  const int n = m.findNode(bone);
+  if (n < 0 || size_t(n) >= m.nodeWorld.size()) return false;
+  out = glm::vec3(m.nodeWorld[size_t(n)][3]);
+  return true;
 }
 
 glm::mat4 World::entityMatrix(entt::entity e) const {

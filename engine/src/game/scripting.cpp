@@ -117,6 +117,24 @@ struct Scripting::Impl {
             c->aiRepath = 0.0f;
           }
         },
+        "animar", [](const Entidade& h, const std::string& clip, sol::optional<float> fade, sol::optional<bool> loop) {
+          return h.valid() && h.world->playAction(h.e, clip, fade.value_or(0.2f), loop.value_or(false));
+        },
+        "parar_animacao", [](const Entidade& h, sol::optional<float> fade) {
+          if (h.valid()) h.world->stopAction(h.e, fade.value_or(0.2f));
+        },
+        "osso", [](const Entidade& h, const std::string& bone, sol::this_state s) -> sol::variadic_results {
+          sol::variadic_results r;
+          glm::vec3 p;
+          if (h.valid() && h.world->bonePosition(h.e, bone, p)) {
+            r.push_back({s, sol::in_place, p.x});
+            r.push_back({s, sol::in_place, p.y});
+            r.push_back({s, sol::in_place, p.z});
+          } else {
+            r.push_back({s, sol::in_place, sol::lua_nil});
+          }
+          return r;
+        },
         "rpm", [](const Entidade& h) -> float {  // carro: giro do motor
           if (!h.valid()) return 0.0f;
           const Vehicle* v = h.world->registry.try_get<Vehicle>(h.e);

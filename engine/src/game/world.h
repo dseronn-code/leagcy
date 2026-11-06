@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -83,8 +84,31 @@ struct ScriptKey {
 };
 
 // Personagem: anda, corre, pula. Controle pelo jogador (teclado e mouse na janela) ou por roteiro.
+// Aparência animada de um personagem ("visual": modelo glTF no lugar da cápsula): mistura parado/andar/correr pela
+// velocidade (passos sincronizados), ações por script com transição suave e IK dos pés no chão de verdade.
+struct CharacterVisual {
+  bool enabled = false;
+  std::string path;
+  float scale = 1.0f;
+  glm::vec3 offset{0.0f};  // do pé da cápsula até a origem do modelo (no espaço do personagem)
+  float yawDeg = 0.0f;     // giro para a frente do modelo apontar para +Z
+  bool autoOffset = false;  // calcular offset.y para os pés da pose parada ficarem no chão
+  std::string idle, walk, run;
+  float walkRef = 1.5f, runRef = 4.5f;  // m/s em que os clipes andar/correr foram feitos (sem patinar)
+  float fade = 0.2f;                    // s de transição
+  bool ik = true;
+  std::vector<std::array<std::string, 3>> legs;  // quadril, joelho, tornozelo
+  // Estado.
+  int model = -1, idleA = -1, walkA = -1, runA = -1;
+  float speed = 0.0f, yaw = 0.0f, phase = 0.0f, idleTime = 0.0f;
+  int action = -1;
+  bool actionOn = false, actionLoop = false;
+  float actionTime = 0.0f, actionWeight = 0.0f, actionFade = 0.2f;
+};
+
 struct Character {
   CharacterDesc desc;
+  CharacterVisual visual;
   float walkSpeed = 4.5f, runSpeed = 8.0f, jumpSpeed = 5.0f;  // m/s
   bool player = false;
   std::vector<ScriptKey> script;
@@ -163,6 +187,12 @@ class World {
   // Matriz de desenho de uma entidade (posição, rotação e tamanho da forma).
   glm::mat4 entityMatrix(entt::entity e) const;
   bool simulate = true;  // falso: física parada (editor em pausa)
+  // Ação de animação num personagem com "visual" (e:animar): clipe pelo nome, transição em s, em laço ou não.
+  bool playAction(entt::entity e, const std::string& clip, float fade, bool loop);
+  void stopAction(entt::entity e, float fade);
+  // Posição no mundo de um osso (nó do glTF) do modelo de um personagem com "visual"; falso se não existe.
+  bool bonePosition(entt::entity e, const std::string& bone, glm::vec3& out) const;
+  scene::Scene* scene = nullptr;  // a cena deste mundo (consultas dos scripts: ossos, animação)
   std::vector<HudItem> hud;  // interface de jogo deste quadro (refeita pelos scripts enquanto o jogo roda)
   // Editor: cria uma forma básica (aparece no próximo load) e duplica uma entidade (1 m ao lado).
   entt::entity addPrimitive(ShapeType type, glm::vec3 position, Motion motion, glm::vec3 halfExtents = glm::vec3(0.5f));
@@ -192,6 +222,7 @@ class World {
   struct FileData;
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
+  void animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt);
   std::vector<std::pair<entt::entity, Transform>> snapshot_;
   float snapshotTime_ = 0.0f;
   scene::Scene* loadedScene_ = nullptr;  // para ler os triângulos dos modelos em start() (antes do upload)

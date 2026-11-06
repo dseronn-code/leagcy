@@ -148,6 +148,8 @@ def main():
     ap.add_argument('--bin', help='executável (padrão: o do build)')
     ap.add_argument('--qualidade', default='alto', help='baixo, medio, alto, ultra (padrão: alto)')
     ap.add_argument('--janela', action='store_true', help='abrir em janela em vez de tela cheia')
+    ap.add_argument('--testar', action='store_true',
+                    help='depois de exportar, roda o jogo exportado sem janela (de dentro da pasta dele) e confere')
     a = ap.parse_args()
 
     binario = achar_binario(a.bin)
@@ -202,7 +204,22 @@ def main():
     print('Para jogar: jogar.bat (Windows) ou ./jogar.sh (Linux)')
     for aviso in pac.avisos:
         print(f'AVISO: {aviso}')
-    sys.exit(1 if pac.avisos else 0)
+    ok = not pac.avisos
+    if a.testar:
+        import subprocess
+        p = subprocess.run([os.path.join(saida, exe), '--headless', '--scene', cenas[0], '--width', '160', '--height',
+                            '90', '--frames', '30', '--out', 'teste.png'], cwd=saida, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace')
+        log = p.stdout + p.stderr
+        do_pacote = 'Shaders do pacote' in log
+        imagem = os.path.isfile(os.path.join(saida, 'teste.png'))
+        passou = p.returncode == 0 and do_pacote and imagem
+        print(f'teste do jogo exportado {"PASSOU" if passou else "FALHOU"}: código {p.returncode}, shaders do pacote: '
+              f'{do_pacote}, imagem gravada: {imagem}')
+        if not passou:
+            print(log[-1500:])
+        ok &= passou
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == '__main__':

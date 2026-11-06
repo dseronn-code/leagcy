@@ -271,12 +271,38 @@ struct Skin {
   std::vector<glm::mat4> inverseBind;
 };
 
-// Instância de um glTF animado. O jogo controla root/animation/speed; o motor faz o resto.
+// Uma camada de animação: clipe, instante (s) e peso. Com `layers` preenchido, a pose é a média ponderada das
+// camadas (os pesos são normalizados) e animation/time/speed deixam de valer.
+struct AnimLayer {
+  int animation = -1;
+  float time = 0.0f;
+  float weight = 1.0f;
+};
+// Perna para o IK dos pés: três juntas em cadeia (quadril, joelho, tornozelo).
+struct LegIK {
+  uint32_t upper = 0, lower = 0, foot = 0;
+};
+
+// Instância de um glTF animado. O jogo controla root/animation/speed (ou layers); o motor faz o resto.
 struct Model {
   glm::mat4 root{1.0f};
   int animation = 0;  // clipe ativo (-1 = pose de repouso)
   float speed = 1.0f;
   float time = 0.0f;
+  std::vector<AnimLayer> layers;  // mistura de clipes (vazio = um clipe só, o de `animation`)
+
+  // IK dos pés: depois da animação, cada pé desce ou sobe até o chão de verdade (raio `ground`, em coordenadas do
+  // mundo: devolve a altura do chão abaixo de um ponto). A altura de cada pé acima de `groundBase` (o plano em que
+  // a animação foi feita, no mundo) é mantida acima do chão encontrado; a bacia desce o necessário para o pé mais
+  // baixo alcançar, suavizada no tempo.
+  std::vector<LegIK> legs;
+  std::function<bool(glm::vec3 from, float& groundY)> ground;
+  float groundBase = 0.0f;
+  float ikWeight = 1.0f;
+  float pelvisOffset = 0.0f;   // m (estado: suavizado entre quadros)
+  float maxPelvisDrop = 0.4f;  // m
+
+  std::vector<glm::mat4> nodeWorld;  // saída: matriz de cada nó no mundo (root incluído), depois do IK
 
   std::vector<ModelNode> nodes;
   std::vector<Animation> animations;
@@ -286,6 +312,8 @@ struct Model {
   std::vector<std::vector<glm::mat4>> jointMatrices;       // saída por skin: global(junta) * inverseBind
 
   int findAnimation(const std::string& name) const;
+  int findNode(const std::string& name) const;
+  std::vector<std::string> nodeNames;  // nome de cada nó do glTF
 };
 
 struct GpuMesh {
@@ -372,6 +400,7 @@ class Scene {
   void bounds(glm::vec3& lo, glm::vec3& hi) const;
   // Caixa envolvente da pose de repouso de um modelo (válida antes do upload).
   void modelBounds(int model, glm::vec3& lo, glm::vec3& hi) const;
+  void poseModel(int model) { animateModel(models[size_t(model)], 0.0f); }  // calcula a pose agora (sem avançar)
 
   // Envia tudo para a GPU e constrói BLAS/TLAS (se houver ray tracing).
   void upload(rhi::Context& ctx);

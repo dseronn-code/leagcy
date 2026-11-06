@@ -7,6 +7,8 @@
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyFilter.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/RayCast.h>
@@ -481,6 +483,24 @@ uint32_t Physics::castRay(glm::vec3 origin, glm::vec3 direction, float maxDistan
   if (!p_->system->GetNarrowPhaseQuery().CastRay(ray, hit)) return ~0u;
   if (hitDistance) *hitDistance = hit.mFraction * maxDistance;
   return hit.mBodyID.GetIndexAndSequenceNumber();
+}
+
+bool Physics::castRayIgnoringCharacter(glm::vec3 origin, glm::vec3 direction, float maxDistance, uint32_t character,
+                                       float* hitDistance, glm::vec3* hitNormal) const {
+  const JPH::RRayCast ray(JPH::RVec3(origin.x, origin.y, origin.z), toJolt(direction * maxDistance));
+  JPH::RayCastResult hit;
+  JPH::BodyID ignore;
+  if (character < p_->characters.size()) ignore = p_->characters[character].body->GetInnerBodyID();
+  const JPH::IgnoreSingleBodyFilter filter(ignore);
+  if (!p_->system->GetNarrowPhaseQuery().CastRay(ray, hit, {}, {}, filter)) return false;
+  if (hitDistance) *hitDistance = hit.mFraction * maxDistance;
+  if (hitNormal) {
+    JPH::BodyLockRead lock(p_->system->GetBodyLockInterface(), hit.mBodyID);
+    *hitNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+    if (lock.Succeeded())
+      *hitNormal = fromJolt(lock.GetBody().GetWorldSpaceSurfaceNormal(hit.mSubShapeID2, ray.GetPointOnRay(hit.mFraction)));
+  }
+  return true;
 }
 
 bool Physics::isActive(uint32_t body) const { return p_->bodies().IsActive(bodyId(body)); }

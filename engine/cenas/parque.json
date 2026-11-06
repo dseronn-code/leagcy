@@ -471,6 +471,24 @@
     "tipo": "dinamico",
     "quique": 0.3
    }
+  },
+  // Raposa animada (modelo glTF CC-BY 4.0): segue o jogador pela navegação; parada/andando/correndo misturados pela
+  // velocidade e as patas pousadas no chão de verdade (IK) nos degraus e na rampa.
+  {
+   "nome": "raposa",
+   "posicao": [2, 0, 6],
+   "personagem": {
+    "altura": 0.8, "raio": 0.2, "velocidade": 1.5, "velocidade_correndo": 2.7, "degrau_maximo": 0.3,
+    "controle": "ia", "ia": {"seguir": "jogador", "parar_a": 1.5},
+    "visual": {
+     "modelo": "assets/Fox/Fox.gltf", "escala": 0.01,
+     "parado": "Survey", "andar": "Walk", "correr": "Run", "velocidade_andar": 1.5, "velocidade_correr": 2.7,
+     "pernas": [["b_LeftLeg01_015", "b_LeftLeg02_016", "b_LeftFoot01_017"],
+                ["b_RightLeg01_019", "b_RightLeg02_020", "b_RightFoot01_021"],
+                ["b_LeftUpperArm_09", "b_LeftForeArm_010", "b_LeftHand_011"],
+                ["b_RightUpperArm_06", "b_RightForeArm_07", "b_RightHand_08"]]
+    }
+   }
   }
  ]
 }

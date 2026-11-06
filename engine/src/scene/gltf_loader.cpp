@@ -279,9 +279,11 @@ struct Loader {
     m.root = root;
     auto nodeIndex = [&](const cgltf_node* n) { return uint32_t(n - data->nodes); };
     m.nodes.resize(data->nodes_count);
+    m.nodeNames.resize(data->nodes_count);
     for (size_t i = 0; i < data->nodes_count; ++i) {
       const cgltf_node& n = data->nodes[i];
       ModelNode& mn = m.nodes[i];
+      if (n.name) m.nodeNames[i] = n.name;
       mn.parent = n.parent ? int(nodeIndex(n.parent)) : -1;
       if (n.has_matrix) {
         glm::mat4 mat = glm::make_mat4(n.matrix);

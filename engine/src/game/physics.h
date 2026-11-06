@@ -76,6 +76,10 @@ class Physics {
   void setPose(uint32_t body, glm::vec3 position, glm::quat rotation);
   // Primeiro corpo atingido pelo raio (origem + direção normalizada × até maxDistance); ~0u = nenhum.
   uint32_t castRay(glm::vec3 origin, glm::vec3 direction, float maxDistance, float* hitDistance = nullptr) const;
+  // Raio que ignora o corpo interno de um personagem (pés de quem anda: o raio sai de dentro da própria cápsula).
+  // Devolve se acertou; hitDistance e hitNormal opcionais.
+  bool castRayIgnoringCharacter(glm::vec3 origin, glm::vec3 direction, float maxDistance, uint32_t character,
+                                float* hitDistance = nullptr, glm::vec3* hitNormal = nullptr) const;
 
   // Personagens (Jolt CharacterVirtual). moveCharacter vale para os passos seguintes: velocidade horizontal desejada
   // (m/s) e pedido de pulo (atendido no próximo passo com os pés no chão).

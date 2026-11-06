@@ -59,30 +59,104 @@ int Model::findAnimation(const std::string& name) const {
   return -1;
 }
 
+int Model::findNode(const std::string& name) const {
+  for (size_t i = 0; i < nodeNames.size(); ++i)
+    if (nodeNames[i] == name) return int(i);
+  return -1;
+}
+
+namespace {
+
+// Pose de um clipe no instante t (em laço): só os canais do clipe mudam `pose`.
+void samplePose(const Animation& a, float t, std::vector<ModelNode>& pose) {
+  t = a.duration > 0.0f ? std::fmod(t, a.duration) : 0.0f;
+  if (t < 0.0f) t += a.duration;
+  for (const AnimationChannel& ch : a.channels) {
+    const AnimationSampler& s = a.samplers[ch.sampler];
+    if (s.times.empty() || ch.node >= pose.size()) continue;
+    size_t i1 = size_t(std::upper_bound(s.times.begin(), s.times.end(), t) - s.times.begin());
+    size_t i0 = i1 == 0 ? 0 : i1 - 1;
+    i1 = std::min(i1, s.times.size() - 1);
+    float span = s.times[i1] - s.times[i0];
+    float f = (s.step || span <= 0.0f) ? 0.0f : glm::clamp((t - s.times[i0]) / span, 0.0f, 1.0f);
+    const glm::vec4 &v0 = s.values[i0], &v1 = s.values[i1];
+    ModelNode& n = pose[ch.node];
+    if (ch.path == AnimationChannel::kRotation) {
+      n.rotation = glm::normalize(glm::slerp(glm::quat(v0.w, v0.x, v0.y, v0.z), glm::quat(v1.w, v1.x, v1.y, v1.z), f));
+    } else {
+      glm::vec3 v = glm::mix(glm::vec3(v0), glm::vec3(v1), f);
+      (ch.path == AnimationChannel::kTranslation ? n.translation : n.scale) = v;
+    }
+  }
+}
+
+glm::quat rotationOf(const glm::mat4& m) {
+  return glm::normalize(glm::quat_cast(glm::mat3(glm::normalize(glm::vec3(m[0])), glm::normalize(glm::vec3(m[1])),
+                                                 glm::normalize(glm::vec3(m[2])))));
+}
+
+// IK analítico de duas juntas (Holden, "Simple Two Joint IK"): gira o quadril e o joelho, no mundo, para o
+// tornozelo chegar a `target`, mantendo o plano em que a perna dobra. Devolve as rotações locais novas.
+void twoBoneIk(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c, glm::vec3 target, const glm::quat& aWorld,
+               const glm::quat& bWorld, glm::quat& aLocal, glm::quat& bLocal) {
+  const float eps = 1e-4f;
+  const float lab = glm::length(b - a), lcb = glm::length(b - c);
+  if (lab < eps || lcb < eps) return;
+  const float lat = glm::clamp(glm::length(target - a), eps, lab + lcb - 1e-3f);
+  auto angle = [](glm::vec3 u, glm::vec3 v) {
+    return std::acos(glm::clamp(glm::dot(glm::normalize(u), glm::normalize(v)), -1.0f, 1.0f));
+  };
+  const float acab0 = angle(c - a, b - a), babc0 = angle(a - b, c - b), acat0 = angle(c - a, target - a);
+  const float acab1 = std::acos(glm::clamp((lcb * lcb - lab * lab - lat * lat) / (-2.0f * lab * lat), -1.0f, 1.0f));
+  const float babc1 = std::acos(glm::clamp((lat * lat - lab * lab - lcb * lcb) / (-2.0f * lab * lcb), -1.0f, 1.0f));
+  glm::vec3 axis0 = glm::cross(c - a, b - a);
+  if (glm::length(axis0) < 1e-6f) return;  // perna reta: sem plano de dobra conhecido
+  axis0 = glm::normalize(axis0);
+  const glm::quat r0 = glm::angleAxis(acab1 - acab0, axis0);
+  const glm::quat r1 = glm::angleAxis(babc1 - babc0, axis0);
+  glm::quat r2(1.0f, 0.0f, 0.0f, 0.0f);
+  const glm::vec3 axis1 = glm::cross(c - a, target - a);
+  if (glm::length(axis1) > 1e-6f) r2 = glm::angleAxis(acat0, glm::normalize(axis1));
+  aLocal = glm::normalize(aLocal * (glm::inverse(aWorld) * r2 * r0 * aWorld));
+  bLocal = glm::normalize(bLocal * (glm::inverse(bWorld) * r1 * bWorld));
+}
+
+}  // namespace
+
 void Scene::animateModel(Model& m, float dt) {
   m.time += dt * m.speed;
   std::vector<ModelNode> pose = m.nodes;
-  if (m.animation >= 0 && size_t(m.animation) < m.animations.size()) {
-    const Animation& a = m.animations[size_t(m.animation)];
-    float t = a.duration > 0.0f ? std::fmod(m.time, a.duration) : 0.0f;
-    if (t < 0.0f) t += a.duration;
-    for (const AnimationChannel& ch : a.channels) {
-      const AnimationSampler& s = a.samplers[ch.sampler];
-      if (s.times.empty() || ch.node >= pose.size()) continue;
-      size_t i1 = size_t(std::upper_bound(s.times.begin(), s.times.end(), t) - s.times.begin());
-      size_t i0 = i1 == 0 ? 0 : i1 - 1;
-      i1 = std::min(i1, s.times.size() - 1);
-      float span = s.times[i1] - s.times[i0];
-      float f = (s.step || span <= 0.0f) ? 0.0f : glm::clamp((t - s.times[i0]) / span, 0.0f, 1.0f);
-      const glm::vec4 &v0 = s.values[i0], &v1 = s.values[i1];
-      ModelNode& n = pose[ch.node];
-      if (ch.path == AnimationChannel::kRotation) {
-        n.rotation = glm::normalize(glm::slerp(glm::quat(v0.w, v0.x, v0.y, v0.z), glm::quat(v1.w, v1.x, v1.y, v1.z), f));
-      } else {
-        glm::vec3 v = glm::mix(glm::vec3(v0), glm::vec3(v1), f);
-        (ch.path == AnimationChannel::kTranslation ? n.translation : n.scale) = v;
+  if (!m.layers.empty()) {
+    // Mistura: média ponderada de cada clipe (translação e escala lineares; rotação somando quaternions no mesmo
+    // hemisfério e normalizando, a média de rotações próximas usada em motores de jogo).
+    float total = 0.0f;
+    for (const AnimLayer& l : m.layers)
+      if (l.weight > 0.0f) total += l.weight;
+    if (total > 0.0f) {
+      std::vector<glm::vec3> tr(pose.size(), glm::vec3(0.0f)), sc(pose.size(), glm::vec3(0.0f));
+      std::vector<glm::quat> ro(pose.size(), glm::quat(0.0f, 0.0f, 0.0f, 0.0f));
+      std::vector<ModelNode> one;
+      for (const AnimLayer& l : m.layers) {
+        if (l.weight <= 0.0f) continue;
+        one = m.nodes;
+        if (l.animation >= 0 && size_t(l.animation) < m.animations.size()) samplePose(m.animations[size_t(l.animation)], l.time, one);
+        const float w = l.weight / total;
+        for (size_t i = 0; i < pose.size(); ++i) {
+          tr[i] += w * one[i].translation;
+          sc[i] += w * one[i].scale;
+          glm::quat q = one[i].rotation;
+          if (glm::dot(q, m.nodes[i].rotation) < 0.0f) q = -q;
+          ro[i] += w * q;
+        }
+      }
+      for (size_t i = 0; i < pose.size(); ++i) {
+        pose[i].translation = tr[i];
+        pose[i].scale = sc[i];
+        pose[i].rotation = glm::length(ro[i]) > 1e-8f ? glm::normalize(ro[i]) : m.nodes[i].rotation;
       }
     }
+  } else if (m.animation >= 0 && size_t(m.animation) < m.animations.size()) {
+    samplePose(m.animations[size_t(m.animation)], m.time, pose);
   }
 
   // Matrizes globais (pai antes do filho, com memoização).
@@ -96,8 +170,47 @@ void Scene::animateModel(Model& m, float dt) {
     }
     return global[i];
   };
-  for (auto [node, object] : m.rigidObjects) setTransform(object, m.root * resolve(node));
-  for (uint32_t object : m.skinnedObjects) setTransform(object, m.root);
+  glm::mat4 root = m.root;
+
+  // IK dos pés.
+  if (!m.legs.empty() && m.ground && m.ikWeight > 0.0f) {
+    const glm::vec3 up(0.0f, 1.0f, 0.0f);
+    std::vector<float> offsets(m.legs.size(), 0.0f);
+    std::vector<uint8_t> found(m.legs.size(), 0);
+    float lowest = 0.0f;
+    for (size_t k = 0; k < m.legs.size(); ++k) {
+      const LegIK& leg = m.legs[k];
+      if (leg.foot >= pose.size()) continue;
+      const glm::vec3 foot = glm::vec3(root * resolve(leg.foot)[3]);
+      float groundY = 0.0f;
+      if (!m.ground(foot, groundY)) continue;
+      // Altura do pé na animação (acima do plano em que ela foi feita) mantida acima do chão encontrado.
+      const float lift = std::max(foot.y - m.groundBase, 0.0f);
+      offsets[k] = (groundY + lift - foot.y) * m.ikWeight;
+      found[k] = 1;
+      lowest = std::min(lowest, offsets[k]);
+    }
+    // Bacia: desce o suficiente para o pé que precisa ir mais para baixo (suavizado: ~10 quadros a 60/s).
+    const float wanted = std::max(lowest, -m.maxPelvisDrop);
+    const float blend = dt > 0.0f ? 1.0f - std::exp(-dt * 12.0f) : 1.0f;
+    m.pelvisOffset += (wanted - m.pelvisOffset) * blend;
+    root = glm::translate(glm::mat4(1.0f), up * m.pelvisOffset) * m.root;
+    for (size_t k = 0; k < m.legs.size(); ++k) {
+      if (!found[k]) continue;
+      const LegIK& leg = m.legs[k];
+      if (leg.upper >= pose.size() || leg.lower >= pose.size()) continue;
+      const glm::mat4 ga = root * resolve(leg.upper), gb = root * resolve(leg.lower), gc = root * resolve(leg.foot);
+      const glm::vec3 a(ga[3]), b(gb[3]), c(gc[3]);
+      const glm::vec3 target = c + up * (offsets[k] - m.pelvisOffset);
+      twoBoneIk(a, b, c, target, rotationOf(ga), rotationOf(gb), pose[leg.upper].rotation, pose[leg.lower].rotation);
+      std::fill(done.begin(), done.end(), 0);  // as juntas abaixo do quadril mudaram
+    }
+  }
+
+  m.nodeWorld.resize(pose.size());
+  for (size_t i = 0; i < pose.size(); ++i) m.nodeWorld[i] = root * resolve(i);
+  for (auto [node, object] : m.rigidObjects) setTransform(object, root * resolve(node));
+  for (uint32_t object : m.skinnedObjects) setTransform(object, root);
   m.jointMatrices.resize(m.skins.size());
   for (size_t s = 0; s < m.skins.size(); ++s) {
     const Skin& skin = m.skins[s];

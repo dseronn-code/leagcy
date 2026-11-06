@@ -1,5 +1,14 @@
-# Rodada 19 (3/11): por que o Bistro sai ~10% mais escuro que a referência em todos os presets? Variações do Ultra
-# contra a mesma referência; e a Sponza na janela com uma trajetória que fica dentro do prédio.
+# Rodada 20 (6/11). Parte A: o motor completo no Windows (física, veículos, NPCs, áudio, animação, HUD, exportar).
+# Parte B: a rodada 19, que não rodou (o PC estava desligado): por que o Bistro sai ~10% mais escuro que a
+# referência, e a Sponza na janela com uma trajetória que fica dentro do prédio.
+python tools\fisica.py --bin build\Release\legacy.exe
+python tools\audio.py --bin build\Release\legacy.exe
+python tools\animacao.py --bin build\Release\legacy.exe
+python tools\hud.py --bin build\Release\legacy.exe
+python tools\empacotar.py --cena cenas\parque.json --cena cenas\carro.json --saida %TEMP%\legacy_pacote --janela --testar
+build\Release\legacy.exe --scene cenas\parque.json --width 1920 --height 1080 --quit-after 12 --screenshot resultados_pc\parque.png
+build\Release\legacy.exe --scene cenas\parque.json --editor --select raposa --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\editor.png
+build\Release\legacy.exe --scene cenas\carro.json --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\carro.png
 python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro
 python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --frames 256
 python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-radiance-cache"
