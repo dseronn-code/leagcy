@@ -2,6 +2,7 @@
 //   legacy                      janela interativa (WASD + botão direito do mouse)
 //   legacy --headless --frames 32 --out frame.png
 //   legacy --scene outdoor --night --lights 1000
+#include <cctype>
 #include <algorithm>
 #include <array>
 #include <chrono>

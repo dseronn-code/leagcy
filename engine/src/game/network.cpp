@@ -6,6 +6,14 @@
 #include <map>
 #include <vector>
 
+#ifdef _WIN32  // o enet.h inclui o windows.h: sem as macros min/max e o resto do Win32 que não usamos
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#endif
 #include <enet/enet.h>
 #include <glm/gtc/quaternion.hpp>
 
