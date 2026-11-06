@@ -83,7 +83,7 @@ FetchContent_Declare(vulkan_headers  # usados só dentro do NRI
   SOURCE_SUBDIR _sem_cmake)
 FetchContent_Declare(nri
   GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRI.git
-  GIT_TAG v190
+  GIT_TAG v191
   GIT_SHALLOW TRUE)
 FetchContent_Declare(nrd
   GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRD.git
