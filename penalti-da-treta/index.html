@@ -55,13 +55,13 @@
   label.eyebrow { display: block; margin-bottom: 6px; }
   .players { display: grid; gap: 12px; }
   .pl { display: grid; gap: 8px; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: rgba(255,255,255,.03); }
-  input[type="text"], select {
+  input[type="text"], input[type="password"], select {
     font: 700 18px var(--f-body); color: var(--ink); background: var(--panel-solid);
     border: 2px solid var(--line); border-radius: 8px; padding: 10px 12px; width: 100%; box-sizing: border-box;
     user-select: text; -webkit-user-select: text;
   }
   select { font-size: 16px; }
-  input[type="text"]:focus, select:focus { outline: none; border-color: var(--amber); }
+  input[type="text"]:focus, input[type="password"]:focus, select:focus { outline: none; border-color: var(--amber); }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; background: transparent; color: var(--muted); font-weight: 700; padding: 8px 14px; }
@@ -295,6 +295,23 @@
     <button class="btn sm" id="skip">Pular</button>
   </section>
 
+  <section class="screen center" id="sLogin" hidden>
+    <div class="card">
+      <span class="eyebrow">Modo campanha</span>
+      <h2 class="final">Entre com seu usuário</h2>
+      <p class="tag">Cada jogador tem o seu usuário, mesmo usando a mesma conta do Claude: dois usuários são dois clubes diferentes e podem se enfrentar.</p>
+      <div><label class="eyebrow" for="lUser">Usuário</label><input type="text" id="lUser" maxlength="16" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Ex.: davi10"></div>
+      <div><label class="eyebrow" for="lPass">Senha</label><input type="password" id="lPass" maxlength="64" autocomplete="current-password" placeholder="Mínimo 4 caracteres"></div>
+      <p class="err" id="lErr"></p>
+      <div class="btns">
+        <button class="btn primary" id="lEntrar">Entrar</button>
+        <button class="btn" id="lCriar" style="grid-column:1/-1">Criar conta nova</button>
+        <button class="btn" data-home style="grid-column:1/-1">Voltar</button>
+      </div>
+      <p class="note">Usuário: 3 a 16 letras ou números. A senha não é guardada: o jogo guarda só uma versão embaralhada dela (hash).</p>
+    </div>
+  </section>
+
   <section class="screen center" id="sCriar" hidden>
     <div class="card">
       <span class="eyebrow">Antes de começar</span>
@@ -321,7 +338,7 @@
       </div>
       <div id="hubBody" style="display:grid;gap:12px"></div>
       <div class="row" style="justify-content:space-between">
-        <button class="btn sm" data-home>Menu</button>
+        <div class="row"><button class="btn sm" data-home>Menu</button><button class="btn sm" id="hubSair">Sair da conta</button></div>
         <span class="note" id="hubNet"></span>
       </div>
     </div>
@@ -551,6 +568,67 @@ const DB = {
   },
   doc(p) { return this.real.doc(p); },
   col(p) { return this.real.collection(p); },
+};
+
+// =====================================================================================
+// contas do jogo: usuário e senha próprios, independentes da conta do Claude. Duas pessoas na mesma conta do Claude
+// entram com usuários diferentes e viram dois jogadores (clube, dinheiro, seção) — e podem se enfrentar.
+// =====================================================================================
+const Conta = {
+  user: null,  // { key, usuario }
+  KEY: "ptd-login",
+  normalize: (s) => normName(s).replace(/[^a-z0-9_]/g, ""),
+  // PBKDF2-SHA256 com sal aleatório: a senha em si nunca é gravada.
+  async hash(password, salt) {
+    const enc = new TextEncoder();
+    const base = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: enc.encode(salt), iterations: 120000, hash: "SHA-256" }, base, 256);
+    return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  },
+  use(key, usuario, hash) {
+    this.user = { key, usuario };
+    DB.uid = "u_" + key;
+    try { localStorage.setItem(this.KEY, JSON.stringify({ key, usuario, hash })); } catch (e) {}
+  },
+  // Login lembrado neste aparelho: vale enquanto o hash guardado bater com o da conta (trocou a senha = sai).
+  async restore() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(this.KEY) || "null"); } catch (e) {}
+    if (!saved || !saved.key) return false;
+    const s = await DB.doc("contas/" + saved.key).get();
+    const c = s.exists ? s.data() : null;
+    if (!c || c.hash !== saved.hash) { this.logout(); return false; }
+    this.use(saved.key, c.usuario, c.hash);
+    return true;
+  },
+  logout() { this.user = null; try { localStorage.removeItem(this.KEY); } catch (e) {} },
+  check(usuario, senha) {
+    const key = this.normalize(usuario);
+    if (key.length < 3 || key.length > 16) throw new UserErr("O usuário precisa ter de 3 a 16 letras ou números.");
+    if ((senha || "").length < 4) throw new UserErr("A senha precisa ter pelo menos 4 caracteres.");
+    if (!(window.crypto && crypto.subtle)) throw new UserErr("Este navegador não permite criar senha com segurança.");
+    return key;
+  },
+  async criar(usuario, senha) {
+    const key = this.check(usuario, senha);
+    const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const hash = await this.hash(senha, salt);
+    const ref = DB.doc("contas/" + key);
+    let l; try { l = await ref.acquire({ holder: "conta-" + salt, ttlMs: 5000 }); } catch (e) { l = { acquired: false }; }
+    if (!l.acquired) throw new UserErr("Alguém está criando esse usuário agora. Tente outro.");
+    const s = await ref.get();
+    if (s.exists && s.data() && s.data().hash) throw new UserErr(`O usuário "${usuario}" já existe. Escolha outro ou entre com a senha.`);
+    await ref.set({ usuario: usuario.trim().slice(0, 16), salt, hash, criado: Date.now() });
+    this.use(key, usuario.trim().slice(0, 16), hash);
+  },
+  async entrar(usuario, senha) {
+    const key = this.check(usuario, senha);
+    const s = await DB.doc("contas/" + key).get();
+    const c = s.exists ? s.data() : null;
+    if (!c || !c.hash) throw new UserErr("Usuário não encontrado. Confira ou crie uma conta nova.");
+    if ((await this.hash(senha, c.salt)) !== c.hash) throw new UserErr("Senha errada.");
+    this.use(key, c.usuario, c.hash);
+  },
 };
 
 // =====================================================================================
@@ -1801,7 +1879,7 @@ function aiSave(q, hist) {
 // =====================================================================================
 // telas
 // =====================================================================================
-const screens = ["sLoad", "sHome", "sAmistoso", "sRegras", "sTrailer", "sCriar", "sHub", "sPassa", "sEspera", "sEscolha", "sRes", "sFim", "sFimJogo", "sRanking"];
+const screens = ["sLoad", "sLogin", "sHome", "sAmistoso", "sRegras", "sTrailer", "sCriar", "sHub", "sPassa", "sEspera", "sEscolha", "sRes", "sFim", "sFimJogo", "sRanking"];
 function show(id) { screens.forEach((s) => ($(s).hidden = s !== id)); }
 let G = null;
 let abortToken = 0;
@@ -2376,8 +2454,9 @@ function tabTemp() {
       h += `<div class="li"><div class="grow"><div class="vs">${teamBadge(m.a, true)} ${esc(teamName(m.a))} <span class="eyebrow">×</span> ${teamBadge(m.b, true)} ${esc(teamName(m.b))}</div><small>${m.fase === "grupos" ? "Rodada " + (m.r + 1) + " · " : ""}${online ? `<span class="live">Ao vivo</span> contra ${esc(presName(rival.slice(2)))}` : `Vitória ${fmtR(PREMIO[m.fase][0])}`}</small></div><button class="btn sm ${online ? "" : "go"}" data-act="jogar" data-mid="${m.id}">${online ? "Entrar" : "Jogar"}</button></div>`;
     }
   } else if (st.tipo === "esperar") {
-    const nomes = st.quem.filter((u) => u !== DB.uid).map((u) => presName(u));
-    h += `<h3>Esperando</h3><p>Você só joga a próxima fase quando ${nomes.length ? "<b>" + nomes.map(esc).join("</b>, <b>") + "</b> terminar" : "todos terminarem"} ${FASE[st.fase] || ""}.</p>`;
+    const faltam = st.quem.filter((u) => u !== DB.uid);
+    h += `<h3>Esperando a seção</h3><p>Você já terminou ${FASE[st.fase] || "a fase"}. A próxima fase só começa quando <b>todos</b> da seção terminarem.</p>`;
+    h += faltam.map((u) => `<div class="li"><div class="grow"><b>${esc(presName(u))}</b><small>${st.fase === "grupos" ? `${C.prog["h_" + u] || 0} de 3 jogos da fase de grupos` : "ainda não jogou " + (FASE[st.fase] || "esta fase")}</small></div><span class="tagx off">Falta</span></div>`).join("");
   } else if (st.tipo === "eliminado") {
     h += `<h3>Você está fora</h3><p>Seu clube caiu. Dá para assistir aos jogos ao vivo, mas você só vê cada lance depois que os dois escolheram.</p>`;
   } else if (st.tipo === "campeao" || st.tipo === "fim") {
@@ -2683,11 +2762,46 @@ $("fGo").addEventListener("click", async () => {
 async function abrirCampanha() {
   Sfx.init(); show("sLoad");
   $("loadNote").textContent = "Conectando ao campeonato.";
+  await DB.init();
+  if (!Conta.user) {
+    let ok = false;
+    try { ok = await Conta.restore(); } catch (e) {}
+    if (!ok) { $("lErr").textContent = ""; show("sLogin"); return; }
+  }
   await Camp.init();
+  Camp.emit();
   if (Camp.slow) toast("A conexão está lenta; os dados podem estar desatualizados.", 4000);
-  if (!Camp.me) { await trailer(); show("sCriar"); renderCriar(); return; }
+  if (!Camp.me) {
+    await trailer();
+    if (!$("fTec").value && Conta.user) $("fTec").value = Conta.user.usuario;
+    show("sCriar"); renderCriar(); return;
+  }
   openHub();
 }
+async function loginAcao(criar) {
+  const u = $("lUser").value, p = $("lPass").value;
+  $("lErr").textContent = "";
+  for (const b of [$("lEntrar"), $("lCriar")]) b.disabled = true;
+  try {
+    await (criar ? Conta.criar(u, p) : Conta.entrar(u, p));
+    $("lPass").value = "";
+    toast(criar ? `Conta ${Conta.user.usuario} criada.` : `Bem-vindo, ${Conta.user.usuario}.`);
+    await abrirCampanha();
+  } catch (e) {
+    $("lErr").textContent = e instanceof UserErr ? e.message : "Não deu para entrar. Confira a conexão e tente de novo.";
+    if (!(e instanceof UserErr)) console.error(e);
+  } finally {
+    for (const b of [$("lEntrar"), $("lCriar")]) b.disabled = false;
+  }
+}
+$("lEntrar").addEventListener("click", () => loginAcao(false));
+$("lCriar").addEventListener("click", () => loginAcao(true));
+$("lPass").addEventListener("keydown", (e) => { if (e.key === "Enter") loginAcao(false); });
+$("hubSair").addEventListener("click", () => {
+  Conta.logout(); DB.uid = null; Camp.emit();
+  toast("Você saiu da conta. Outro jogador pode entrar com o usuário dele.");
+  goHome();
+});
 
 // =====================================================================================
 // menu e início
