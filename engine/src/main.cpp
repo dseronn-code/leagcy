@@ -172,7 +172,9 @@ Options parseArgs(int argc, char** argv) {
       const std::pair<const char*, uint32_t> kinds[] = {{"sol", 1u}, {"gi", 2u}, {"especular", 4u}, {"sombras-acerto", 8u},
                                                         {"secundarios", 16u | 64u}, {"luz", 32u},
                                                         {"espelho", 16u}, {"cache", 64u}, {"espelho-gi", 128u}, {"opaco", 256u}, {"gi-metade", 512u}, {"especular-fosco", 1024u}, {"cache-oitavo", 2048u},
-                                                        {"sombra-acerto-opaca", 4096u}};
+                                                        {"sombra-acerto-opaca", 4096u},
+                                                        {"diag-cache-direto", 16384u}, {"diag-cache-ref2", 32768u},
+                                                        {"diag-taa-antigo", 65536u}};
       for (auto& [n, b] : kinds)
         if (v.find(std::string(",") + n + ",") != std::string::npos) o.render.perfSkipMask |= b;
     }

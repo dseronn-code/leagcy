@@ -1,6 +1,7 @@
 # Rodada 20 (6/11). Parte A: o motor completo no Windows (física, veículos, NPCs, áudio, animação, HUD, exportar).
-# Parte B: a rodada 19, que não rodou (o PC estava desligado): por que o Bistro sai ~10% mais escuro que a
-# referência, e a Sponza na janela com uma trajetória que fica dentro do prédio.
+# Parte B: o Bistro ~10% mais escuro que a referência. Achado aqui (sem a RTX): a luz do motor está certa (modo
+# acumulação: +1%); o escurecimento vem do TAA (corte do histórico e pesos de Karis em imagem com ruído) e do
+# denoiser. TAA corrigido (-22,8% -> -6,1% em 240x136). Na RTX: quanto disso existe com DLSS-RR, e em 1080p.
 python tools\fisica.py --bin build\Release\legacy.exe
 python tools\audio.py --bin build\Release\legacy.exe
 python tools\animacao.py --bin build\Release\legacy.exe
@@ -10,9 +11,16 @@ build\Release\legacy.exe --scene cenas\parque.json --width 1920 --height 1080 --
 build\Release\legacy.exe --scene cenas\parque.json --editor --select raposa --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\editor.png
 build\Release\legacy.exe --scene cenas\carro.json --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\carro.png
 python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --frames 256
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-radiance-cache"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-mesh-lights"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-lens-flare"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro-ev13
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--reference"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--denoiser relax --upscaler taau"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-antigo"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--denoiser relax --upscaler dlss"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-denoiser --upscaler taau"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas sponza,reflections
+python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos svgf,relax,dlss-rr --cena sponza-noite-animada
+python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos svgf,relax --cena sponza-noite-animada --extra="--perf-skip diag-taa-antigo"
+python tools\taa.py --bin build\Release\legacy.exe --out resultados_pc\taa --scale 0.67 --extra="--upscaler taau"
+python tools\taa.py --bin build\Release\legacy.exe --out resultados_pc\taa --scale 0.67 --extra="--upscaler taau --perf-skip diag-taa-antigo"
 build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt

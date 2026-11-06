@@ -135,6 +135,9 @@ bool virtualMotionEnabled() { return (frame.quality2.w & 4u) == 0u; }
 // Medição de custo (--perf-skip): pula um tipo de raio (bits 8+ de quality2.w). A imagem fica errada de propósito.
 const uint PERF_SUN = 0x100u, PERF_GI = 0x200u, PERF_SPEC = 0x400u, PERF_HIT_SHADOWS = 0x800u, PERF_SECONDARY = 0x1000u,
            PERF_LOCAL = 0x2000u, PERF_CACHE_FEED = 0x4000u,
+           // Diagnóstico do viés (tools/reflexos.py --extra "--perf-skip diag-..."): o cache trocado por uma amostra
+           // nova / o resto do caminho por path tracing; o TAA de antes (corte e Karis sempre ligados).
+           PERF_DIAG_CACHE_DIRECT = 0x400000u, PERF_DIAG_CACHE_REF2 = 0x800000u, PERF_DIAG_TAA_OLD = 0x1000000u,
            PERF_OPAQUE = 0x10000u;  // todos os raios sem teste de alfa (medição do custo das folhas recortadas)
 bool perfSkip(uint b) { return (frame.quality2.w & b) != 0u; }
 

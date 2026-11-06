@@ -51,11 +51,26 @@ void main() {
   ivec2 rp = ivec2(floor(renderPos + 0.5));
   ivec2 maxP = ivec2(frame.renderSize.xy) - 1;
 
+  // Quanto a vizinhança se mexe (em pixels de saída): parada, o histórico já convergido é a melhor estimativa e as
+  // defesas contra rastro e cintilação (corte do histórico e pesos de Karis) só atrapalham — com a imagem ainda com
+  // ruído do path tracing (poucas amostras muito claras) as duas puxavam a média para baixo. Medido no Bistro
+  // contra a referência por path tracing (240x136, SVGF): -23,2% com elas sempre ligadas; sem elas, +2,9% sem
+  // denoiser. Em movimento elas voltam por inteiro.
+  vec3 rgbs[9];
+  float maxMove = 0.0;
+  for (int y = -1; y <= 1; ++y)
+    for (int x = -1; x <= 1; ++x) {
+      ivec2 q = clamp(rp + ivec2(x, y), ivec2(0), maxP);
+      rgbs[(y + 1) * 3 + x + 1] = texelFetch(sceneColor, q, 0).rgb;
+      maxMove = max(maxMove, length(texelFetch(gMotion, q, 0).xy * frame.outputSize.xy));
+    }
+  float moving = perfSkip(PERF_DIAG_TAA_OLD) ? 1.0 : smoothstep(0.05, 0.5, maxMove);
+
   // Reconstrução da amostra atual por kernel (Karis, "High Quality Temporal Supersampling", 2014): os 3x3
   // pixels internos vizinhos pesados por uma gaussiana da distância até o centro do pixel
-  // de saída — no lugar da leitura bilinear, que borrava a imagem a cada frame. Peso extra 1/(1+L) para um
-  // ponto muito brilhante não dominar (vagalumes). A mesma vizinhança dá os limites do histórico e o pixel mais
-  // próximo (vetor de movimento dilatado).
+  // de saída — no lugar da leitura bilinear, que borrava a imagem a cada frame. Em movimento, peso extra 1/(1+L)
+  // para um ponto muito brilhante não dominar (vagalumes). A mesma vizinhança dá os limites do histórico e o pixel
+  // mais próximo (vetor de movimento dilatado).
   vec3 m1 = vec3(0.0), m2 = vec3(0.0), sum = vec3(0.0);
   float wsum = 0.0, wmax = 0.0;
   float closest = -1.0;
@@ -63,7 +78,7 @@ void main() {
   for (int y = -1; y <= 1; ++y) {
     for (int x = -1; x <= 1; ++x) {
       ivec2 q = clamp(rp + ivec2(x, y), ivec2(0), maxP);
-      vec3 rgb = texelFetch(sceneColor, q, 0).rgb;
+      vec3 rgb = rgbs[(y + 1) * 3 + x + 1];
       vec3 c = rgbToYCoCg(rgb);
       m1 += c;
       m2 += c * c;
@@ -72,7 +87,7 @@ void main() {
       // (exp(-2,29 d²)) amolecia a imagem; k = 8 dá a maior nitidez com o menor erro contra a referência 4x.
       float w = exp(-8.0 * dot(dq, dq));
       wmax = max(wmax, w);
-      w /= 1.0 + luminance(rgb);
+      w /= 1.0 + moving * luminance(rgb);
       sum += rgb * w;
       wsum += w;
       float d = texelFetch(gDepth, q, 0).r;
@@ -88,18 +103,20 @@ void main() {
   if (historyValid() && all(greaterThanEqual(prevUv, vec2(0.0))) && all(lessThanEqual(prevUv, vec2(1.0)))) {
     // Clipping de variância em YCoCg: descarta histórico que não "cabe" na vizinhança (anti-ghosting).
     vec3 h = rgbToYCoCg(sampleHistory(prevUv) * historyExposureScale());
+    // Corte em 1,25σ (anti-rastro) só na medida do movimento: parada, a vizinhança de 3x3 com ruído assimétrico
+    // costuma sair toda escura e com σ quase zero, e qualquer caixa cortaria o histórico já convergido para baixo.
     vec3 lo = mean - 1.25 * sigma, hi = mean + 1.25 * sigma;
     vec3 center = 0.5 * (lo + hi), ext = max(0.5 * (hi - lo), vec3(1e-4));
     vec3 rel = (h - center) / ext;
     float maxRel = max(abs(rel.x), max(abs(rel.y), abs(rel.z)));
-    if (maxRel > 1.0) h = center + (h - center) / maxRel;
+    if (maxRel > 1.0) h = mix(h, center + (h - center) / maxRel, moving);
     vec3 hist = yCoCgToRgb(h);
 
     // Upscaling: confia mais no frame atual quando alguma amostra caiu perto do centro do pixel de saída.
     float alpha = mix(0.04, 0.15, wmax);
     // Pesos por luminância (Karis): evita que pontos muito brilhantes cintilem.
-    float wc = alpha / (1.0 + luminance(current));
-    float wh = (1.0 - alpha) / (1.0 + luminance(hist));
+    float wc = alpha / (1.0 + moving * luminance(current));
+    float wh = (1.0 - alpha) / (1.0 + moving * luminance(hist));
     result = (current * wc + hist * wh) / (wc + wh);
   }
   if (any(isnan(result)) || any(isinf(result))) result = vec3(0.0);

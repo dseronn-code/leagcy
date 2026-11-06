@@ -304,18 +304,22 @@ vec3 cachedIndirect(vec3 P, vec3 Ng, vec3 N) {
 
 // Radiância que chega por um raio de 2º rebote: luz direta no ponto atingido + indireta pelo cache (difusa e,
 // aproximada pelo mesmo M, especular). Ruído branco.
+vec3 secondaryRadianceAt(HitInfo h, vec3 dir, inout uint st) {
+  Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv, h.color);
+  BrdfContext c = makeBrdfContext(h.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
+  vec2 uSun = rand2(st), uLight = rand2(st);
+  vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st), false);
+  if (perfSkip(PERF_DIAG_CACHE_REF2)) return L + pathContinue(h, s, c, st);  // diagnóstico: o resto por path tracing
+  L += (s.diffuseColor * c.diffuseWeight + specularAlbedo(s.f0, s.f90, c.dfg) * c.energyCompensation) * cachedIndirect(h.P, h.Ng, h.N);
+  return L;
+}
 vec3 secondaryRadiance(vec3 origin, vec3 dir, inout uint st) {
   HitInfo h;
   vec3 Tg;
   bool blocked;
   if (!traceHitThroughGlass(origin, dir, 1e4, h, Tg, blocked)) return clampFirefly(Tg * sampleSky(dir));
   if (blocked) return vec3(0.0);
-  Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv, h.color);
-  BrdfContext c = makeBrdfContext(h.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
-  vec2 uSun = rand2(st), uLight = rand2(st);
-  vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st), false);
-  L += (s.diffuseColor * c.diffuseWeight + specularAlbedo(s.f0, s.f90, c.dfg) * c.energyCompensation) * cachedIndirect(h.P, h.Ng, h.N);
-  return clampFirefly(Tg * L);
+  return clampFirefly(Tg * secondaryRadianceAt(h, dir, st));
 }
 
 // Radiância que sai de `hit` para a origem do raio (ver traceRadiance, logo abaixo).
@@ -336,6 +340,11 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
   vec3 M;
   bool cached = rcQuery(hit.P, hit.Ng, M);
   if (!cached) M = sampleSky(normalize(hit.N + vec3(0, 1, 0))) * 0.5;  // célula nova: céu aproximado
+  if (perfSkip(PERF_DIAG_CACHE_DIRECT)) {  // diagnóstico: uma amostra nova no lugar do cache (sem reuso espacial)
+    vec3 dd = cosineSampleHemisphere(hit.N, rand2(st));
+    M = dot(dd, hit.Ng) > 0.0 ? secondaryRadiance(offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t), dd, st) : vec3(0.0);
+    cached = true;
+  }
   radiance += s.diffuseColor * bc.diffuseWeight * M;
   vec3 hitOrigin = offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t);
   // Indireta especular: superfícies espelhadas refletem por um raio (amostra VNDF); as outras, pelo cache.
