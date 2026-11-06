@@ -382,7 +382,7 @@ int runHeadless(const Options& opt) {
   r.init(ctx, scene, extent, outFormat, opt.render);
   game::PenaltiGame penalti;
   const bool playing = opt.scene.name == "penalti";
-  if (playing) penalti.init(scene, r, opt.autoplay);
+  if (playing) penalti.init(scene, r, opt.autoplay, ctx.rayTracing);
   LOG_INFO("Resolução interna %ux%u -> saída %ux%u", r.renderExtent().width, r.renderExtent().height, extent.width,
            extent.height);
 
@@ -531,7 +531,7 @@ int runWindowed(const Options& opt) {
   r.init(ctx, scene, swapchain.extent, swapchain.format, opt.render);
   game::PenaltiGame penalti;
   const bool playing = opt.scene.name == "penalti";
-  if (playing) penalti.init(scene, r, opt.autoplay);
+  if (playing) penalti.init(scene, r, opt.autoplay, ctx.rayTracing);
   bool mouseWasDown = false;
 
   std::array<FrameSync, renderer::Renderer::kFramesInFlight> frames;

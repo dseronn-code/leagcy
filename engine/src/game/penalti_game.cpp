@@ -101,8 +101,16 @@ std::vector<PenaltiGame::Seg> PenaltiGame::segments(bool kick, int over) const {
 
 // ------------------------------------------------------------------------------------------------- início
 
-void PenaltiGame::init(Scene& s, renderer::Renderer& r, bool autoplay) {
+void PenaltiGame::init(Scene& s, renderer::Renderer& r, bool autoplay, bool rayTracing) {
   autoplay_ = autoplay;
+  rayTracing_ = rayTracing;
+  // Sem ray tracing as luzes do estádio não fazem sombra. O motor ainda faz sombra do sol (shadow maps em cascata):
+  // um "sol" fraco vindo da torre de refletores do fundo à esquerda dá sombra de verdade a jogadores, bola e grama,
+  // sem clarear o céu da noite.
+  if (!rayTracing) {
+    s.sunDirection = glm::normalize(glm::vec3(-27.0f, 36.0f, -22.0f));
+    s.sunIlluminance = 1800.0f;
+  }
   if (ui_.load()) r.setUiAtlas(ui_.atlas(), ui_.atlasSize(), ui_.atlasSize());
   team_[0] = {"Treta FC", "TFC", {1.0f, 0.42f, 0.01f}, {0.01f, 0.01f, 0.012f}, {0.02f, 0.22f, 0.65f},
               {{"Neymar", 99}, {"Gabigol", 95}, {"Memphis", 94}, {"Hulk", 93}, {"Kaio Jorge", 92}}};

@@ -30,7 +30,8 @@ struct Team {
 class PenaltiGame {
  public:
   // autoplay: as escolhas do jogador são feitas sozinhas (vídeos e testes sem tela).
-  void init(scene::Scene& s, renderer::Renderer& r, bool autoplay);
+  // rayTracing: o dispositivo tem sombras das luzes; sem ele, sombra de um refletor pelos shadow maps do motor.
+  void init(scene::Scene& s, renderer::Renderer& r, bool autoplay, bool rayTracing = true);
   // Avança o jogo `realDt` segundos; atualiza câmera, jogadores, bola e o HUD (r.ui). Devolve o dt da simulação da
   // cena (câmera lenta no lance).
   float update(float realDt, const Pointer& p, scene::Scene& s, scene::Camera& cam, renderer::Renderer& r, glm::vec2 screen);
@@ -69,7 +70,7 @@ class PenaltiGame {
   void nextTurn(scene::Scene& s);
 
   Ui ui_;
-  bool autoplay_ = false;
+  bool autoplay_ = false, rayTracing_ = true;
   bool startRequested_ = false, shotPending_ = false;  // pedidos do toque, atendidos no update (que tem a cena)
   State state_ = State::Menu;
   float stateTime_ = 0.0f, simTime_ = 0.0f;

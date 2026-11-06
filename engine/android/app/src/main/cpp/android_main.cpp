@@ -110,7 +110,7 @@ struct Engine {
     rs.lensFlare = 0.6f;
     r.init(ctx, scene, swapchain.extent, swapchain.format, rs);
     rendererReady = true;
-    game.init(scene, r, false);
+    game.init(scene, r, false, ctx.rayTracing);
 
     for (auto& f : frames) {
       VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
