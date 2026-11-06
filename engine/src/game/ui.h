@@ -14,7 +14,7 @@ enum class Align { Left, Center, Right };
 
 class Ui {
  public:
-  // Lê as fontes de GAME_DIR e monta o atlas (RGBA, cobertura no R). false = sem fontes (texto não aparece).
+  // Lê as fontes de core::gameDir() e monta o atlas (RGBA, cobertura no R). false = sem fontes (texto não aparece).
   bool load();
   const std::vector<uint8_t>& atlas() const { return atlas_; }
   uint32_t atlasSize() const { return kAtlas; }

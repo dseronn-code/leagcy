@@ -2,7 +2,24 @@
 #include <cstdio>
 #include <cstdlib>
 
+#if defined(__ANDROID__)
+// Android: o console é o logcat; e, como no celular ninguém vê o log, o erro fatal vira exceção, que o android_main
+// mostra numa caixa de diálogo antes de fechar o app.
+#include <android/log.h>
+#include <stdexcept>
+#define LOG_INFO(...)  __android_log_print(ANDROID_LOG_INFO, "Legacy", __VA_ARGS__)
+#define LOG_WARN(...)  __android_log_print(ANDROID_LOG_WARN, "Legacy", __VA_ARGS__)
+#define LOG_ERROR(...) __android_log_print(ANDROID_LOG_ERROR, "Legacy", __VA_ARGS__)
+#define FATAL(...)                                                         \
+  do {                                                                     \
+    char fatalMessage_[1024];                                              \
+    std::snprintf(fatalMessage_, sizeof(fatalMessage_), __VA_ARGS__);      \
+    LOG_ERROR("%s", fatalMessage_);                                        \
+    throw std::runtime_error(fatalMessage_);                               \
+  } while (0)
+#else
 #define LOG_INFO(...)  do { std::fprintf(stdout, "[info] "  __VA_ARGS__); std::fputc('\n', stdout); } while (0)
 #define LOG_WARN(...)  do { std::fprintf(stderr, "[warn] "  __VA_ARGS__); std::fputc('\n', stderr); } while (0)
 #define LOG_ERROR(...) do { std::fprintf(stderr, "[error] " __VA_ARGS__); std::fputc('\n', stderr); } while (0)
 #define FATAL(...)     do { LOG_ERROR(__VA_ARGS__); std::abort(); } while (0)
+#endif

@@ -11,6 +11,7 @@
 #include "stb_truetype.h"
 
 #include "core/log.h"
+#include "core/paths.h"
 
 namespace game {
 
@@ -34,7 +35,7 @@ uint32_t nextCodepoint(const std::string& s, size_t& i) {
 }  // namespace
 
 bool Ui::load() {
-  const std::string files[2] = {std::string(GAME_DIR) + "/SairaCondensed-ExtraBold.ttf", std::string(GAME_DIR) + "/Barlow-SemiBold.ttf"};
+  const std::string files[2] = {core::gameDir() + "/SairaCondensed-ExtraBold.ttf", core::gameDir() + "/Barlow-SemiBold.ttf"};
   std::vector<uint8_t> ttf[2];
   for (int f = 0; f < 2; ++f) {
     ttf[f] = readFile(files[f]);

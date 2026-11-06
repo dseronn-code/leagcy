@@ -53,6 +53,13 @@ endif()
 # nosso VkDevice). Licença "NVIDIA RTX SDKs" (uso comercial permitido, crédito à NVIDIA obrigatório — ver
 # docs/auditoria.md). As dependências do NRD são declaradas aqui por git (têm prioridade sobre os .zip que o
 # NRD declara). O ShaderMake baixa o DXC da Microsoft para compilar os shaders HLSL do NRD em SPIR-V.
+# LEGACY_NRD=OFF (Android): sem NRD, NRI, upscalers dos fabricantes e DLSS; o motor usa o SVGF e o TAAU próprios.
+option(LEGACY_NRD "NVIDIA NRD + NRI (denoisers ReLAX/ReBLUR e upscalers DLSS/FSR/NIS)" ON)
+if(NOT LEGACY_NRD)
+  set(LEGACY_DLSS OFF CACHE BOOL "" FORCE)
+  set(LEGACY_FSR OFF CACHE BOOL "" FORCE)
+endif()
+if(LEGACY_NRD)
 set(NRD_STATIC_LIBRARY ON CACHE BOOL "" FORCE)
 set(NRD_NRI ON CACHE BOOL "" FORCE)
 set(NRD_EMBEDS_SPIRV_SHADERS ON CACHE BOOL "" FORCE)
@@ -109,6 +116,7 @@ if(LEGACY_DLSS)
     SOURCE_SUBDIR _sem_cmake)
 endif()
 FetchContent_MakeAvailable(nrd)
+endif()  # LEGACY_NRD
 
 # Compressão de texturas BC7/BC5 (bc7enc_rdo, Rich Geldreich — MIT ou domínio público). Só os codificadores e o
 # decodificador; o CMakeLists do projeto (ferramenta de linha de comando, ISPC) não é usado.
@@ -161,12 +169,19 @@ add_custom_target(shaders DEPENDS ${SPIRV_FILES})
 
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
+if(NOT LEGACY_NRD)
+  list(REMOVE_ITEM ENGINE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/nrd_denoiser.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/upscaler.cpp)
+  list(APPEND ENGINE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/sem_nrd/sem_nrd.cpp)
+endif()
 add_executable(legacy ${ENGINE_SOURCES})
 add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
-target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc)
-target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
+target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw bc7enc)
+if(LEGACY_NRD)
+  target_link_libraries(legacy PRIVATE NRD NRI)
+  target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
+endif()
 if(LEGACY_MIKKTSPACE)
   target_link_libraries(legacy PRIVATE mikktspace)
   target_compile_definitions(legacy PRIVATE LEGACY_MIKKTSPACE=1)

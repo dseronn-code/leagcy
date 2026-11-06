@@ -1,11 +1,13 @@
 #include "rhi/pipeline.h"
 
+#include "core/paths.h"
+
 #include <fstream>
 
 namespace rhi {
 
 VkShaderModule loadShader(Context& ctx, const std::string& name) {
-  std::string path = std::string(SHADER_DIR) + "/" + name + ".spv";
+  std::string path = core::shaderDir() + "/" + name + ".spv";
   std::ifstream f(path, std::ios::binary | std::ios::ate);
   if (!f) FATAL("Shader não encontrado: %s", path.c_str());
   size_t size = size_t(f.tellg());

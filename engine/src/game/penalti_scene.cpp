@@ -12,6 +12,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "core/log.h"
+#include "core/paths.h"
 #include "stb_easy_font.h"
 
 namespace game {
@@ -119,7 +120,7 @@ TextureData netTexture() {
     for (int x = 0; x < S; ++x) {
       const float u = float(x) / S, w = float(y) / S;
       const float d1 = std::abs(std::fmod(u + w + 1.0f, 1.0f) - 0.5f), d2 = std::abs(std::fmod(u - w + 1.0f, 1.0f) - 0.5f);
-      if (std::min(d1, d2) > 0.43f) t.rgba[(size_t(y) * S + size_t(x)) * 4 + 3] = 255;
+      if (std::max(d1, d2) > 0.44f) t.rgba[(size_t(y) * S + size_t(x)) * 4 + 3] = 255;
     }
   return t;
 }
@@ -283,7 +284,7 @@ void aimBone(std::vector<ModelNode>& pose, const glm::mat4& root, int bone, int 
 
 int loadPlayer(Scene& s, Player& p) {
   int model = -1;
-  if (!loadGltf(s, std::string(GAME_DIR) + "/xbot.gltf", glm::mat4(1.0f), &model) || model < 0) return -1;
+  if (!loadGltf(s, core::gameDir() + "/xbot.gltf", glm::mat4(1.0f), &model) || model < 0) return -1;
   Model& m = s.models[size_t(model)];
   p.model = model;
   auto node = [&](const char* name) { return m.findNode(std::string("mixamorig:") + name); };
@@ -353,8 +354,8 @@ bool buildPenaltiScene(Scene& s, Camera& camera, const DemoOptions& opt) {
     Material g;
     g.baseColor = glm::vec4(0.62f, 0.86f, 0.5f, 1.0f);
     g.roughness = 0.88f;
-    if (loadImageFile(std::string(GAME_DIR) + "/grama.jpg", true, false, albedo)) g.baseColorTex = int32_t(s.addTexture(std::move(albedo)));
-    if (loadImageFile(std::string(GAME_DIR) + "/grama_nm.jpg", false, true, normal)) g.normalTex = int32_t(s.addTexture(std::move(normal)));
+    if (loadImageFile(core::gameDir() + "/grama.jpg", true, false, albedo)) g.baseColorTex = int32_t(s.addTexture(std::move(albedo)));
+    if (loadImageFile(core::gameDir() + "/grama_nm.jpg", false, true, normal)) g.normalTex = int32_t(s.addTexture(std::move(normal)));
     g.uvScale = glm::vec2(60.0f);
     s.addObject(cube, trs({0.0f, -0.1f, 10.0f}, {120.0f, 0.1f, 120.0f}), s.addMaterial(g));
     const int32_t field = int32_t(s.addTexture(fieldTexture()));
@@ -544,7 +545,7 @@ bool buildPenaltiScene(Scene& s, Camera& camera, const DemoOptions& opt) {
 
   // ---- jogadores ----
   if (loadPlayer(s, W.kicker) < 0 || loadPlayer(s, W.keeper) < 0) {
-    LOG_ERROR("Pênalti: não achei o personagem em %s/xbot.gltf", GAME_DIR);
+    LOG_ERROR("Pênalti: não achei o personagem em %s/xbot.gltf", core::gameDir().c_str());
     return false;
   }
   setKit(s, W.kicker, {0.62f, 0.03f, 0.05f}, {0.02f, 0.02f, 0.02f});
