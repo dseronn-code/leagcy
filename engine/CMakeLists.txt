@@ -258,6 +258,13 @@ if(WIN32)
   target_link_libraries(legacy_enet INTERFACE ws2_32 winmm)
 endif()
 
+# meshoptimizer (MIT): decodifica malhas comprimidas dos glTF (EXT_meshopt_compression, o formato do gltfpack).
+FetchContent_Declare(meshoptimizer
+  GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+  GIT_TAG v0.22
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(meshoptimizer)
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 add_executable(legacy ${ENGINE_SOURCES})
@@ -266,7 +273,7 @@ target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
                                      EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}
-                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet)
+                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet meshoptimizer)
 target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)

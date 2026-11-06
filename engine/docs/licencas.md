@@ -30,6 +30,7 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [Roboto](https://fonts.google.com/specimen/Roboto) (fonte, `fontes/Roboto-Medium.ttf`) | Texto do HUD | Apache 2.0 | Manter o aviso de licença |
 | Raposa (`assets/Fox`, glTF Sample Models) | Personagem animado de exemplo (`cenas/parque.json`) | CC-BY 4.0 | Créditos: PixelMannen, @tomkranis, AsoboStudio e @scurest |
 | [ENet](https://github.com/lsalzman/enet) 1.3.18 | Multijogador (UDP) | MIT | Manter o aviso de copyright |
+| [meshoptimizer](https://github.com/zeux/meshoptimizer) 0.22 | Malhas comprimidas dos glTF | MIT | Manter o aviso de copyright |
 
 ## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
 

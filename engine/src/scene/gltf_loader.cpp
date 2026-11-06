@@ -2,6 +2,7 @@
 // materiais PBR e texturas (com espaço de cor correto por uso).
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
+#include <meshoptimizer.h>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
@@ -522,6 +523,44 @@ bool loadImageFile(const std::string& path, bool srgb, bool normalMap, TextureDa
   return true;
 }
 
+// EXT_meshopt_compression (gltfpack): descomprime cada buffer view comprimido para a memória que o cgltf lê
+// (buffer_view->data, liberado pelo cgltf_free). Atributos quantizados (KHR_mesh_quantization) o cgltf já converte na
+// leitura (cgltf_accessor_read_float entende inteiros normalizados).
+bool decodeMeshopt(cgltf_data* data, const std::string& path) {
+  for (size_t i = 0; i < data->buffer_views_count; ++i) {
+    cgltf_buffer_view& bv = data->buffer_views[i];
+    if (!bv.has_meshopt_compression) continue;
+    const cgltf_meshopt_compression& mc = bv.meshopt_compression;
+    if (!mc.buffer || !mc.buffer->data) {
+      LOG_ERROR("%s: buffer comprimido (meshopt) sem dados", path.c_str());
+      return false;
+    }
+    const auto* src = static_cast<const unsigned char*>(mc.buffer->data) + mc.offset;
+    void* dst = std::malloc(mc.count * mc.stride);
+    if (!dst) return false;
+    int rc = -1;
+    switch (mc.mode) {
+      case cgltf_meshopt_compression_mode_attributes: rc = meshopt_decodeVertexBuffer(dst, mc.count, mc.stride, src, mc.size); break;
+      case cgltf_meshopt_compression_mode_triangles: rc = meshopt_decodeIndexBuffer(dst, mc.count, mc.stride, src, mc.size); break;
+      case cgltf_meshopt_compression_mode_indices: rc = meshopt_decodeIndexSequence(dst, mc.count, mc.stride, src, mc.size); break;
+      default: break;
+    }
+    if (rc != 0) {
+      std::free(dst);
+      LOG_ERROR("%s: falha ao descomprimir a malha (meshopt, view %zu)", path.c_str(), i);
+      return false;
+    }
+    switch (mc.filter) {
+      case cgltf_meshopt_compression_filter_octahedral: meshopt_decodeFilterOct(dst, mc.count, mc.stride); break;
+      case cgltf_meshopt_compression_filter_quaternion: meshopt_decodeFilterQuat(dst, mc.count, mc.stride); break;
+      case cgltf_meshopt_compression_filter_exponential: meshopt_decodeFilterExp(dst, mc.count, mc.stride); break;
+      default: break;
+    }
+    bv.data = dst;
+  }
+  return true;
+}
+
 bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform, int* modelOut) {
   cgltf_options options{};
   cgltf_data* data = nullptr;
@@ -531,6 +570,10 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
   }
   if (cgltf_load_buffers(&options, data, path.c_str()) != cgltf_result_success) {
     LOG_ERROR("Buffers de %s não carregados", path.c_str());
+    cgltf_free(data);
+    return false;
+  }
+  if (!decodeMeshopt(data, path)) {
     cgltf_free(data);
     return false;
   }
