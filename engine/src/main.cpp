@@ -19,6 +19,7 @@
 #include "rhi/swapchain.h"
 #include "scene/demo_scene.h"
 #include "util/png.h"
+#include "game/penalti_game.h"
 
 namespace {
 
@@ -40,6 +41,7 @@ struct Options {
   float quitAfter = 0.0f;  // janela: fecha sozinha depois de N segundos e imprime as estatísticas do tempo de quadro
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
+  bool autoplay = false;   // --scene penalti: o jogo escolhe sozinho pelo jogador (vídeos e testes sem tela)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
   bool textureStreaming = true;  // mips finos das texturas sob demanda (--no-texture-streaming: tudo no início)
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
@@ -80,6 +82,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--quit-after") o.quitAfter = std::max(0.0f, float(std::atof(next())));
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
+    else if (a == "--autoplay") o.autoplay = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
     else if (a == "--no-mesh-lights") o.meshLights = false;
     else if (a == "--no-lod") o.meshLods = false;
@@ -233,6 +236,7 @@ Options parseArgs(int argc, char** argv) {
           "  --atmosphere-test N       valida o céu contra path tracing (N caminhos por thread)\n"
           "  --width W --height H\n"
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n"
+          "  --scene penalti [--autoplay]  o jogo de pênaltis (clique = toque); --autoplay escolhe sozinho (vídeo)\n"
           "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n"
           "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n");
       std::exit(0);
@@ -376,6 +380,9 @@ int runHeadless(const Options& opt) {
   const VkFormat outFormat = VK_FORMAT_R8G8B8A8_SRGB;
   renderer::Renderer r;
   r.init(ctx, scene, extent, outFormat, opt.render);
+  game::PenaltiGame penalti;
+  const bool playing = opt.scene.name == "penalti";
+  if (playing) penalti.init(scene, r, opt.autoplay);
   LOG_INFO("Resolução interna %ux%u -> saída %ux%u", r.renderExtent().width, r.renderExtent().height, extent.width,
            extent.height);
 
@@ -422,7 +429,9 @@ int runHeadless(const Options& opt) {
     if (!cameraKeys.empty()) applyCameraPath(cameraKeys, float(shot) * dt, camera);
     if (opt.move != 0.0f && (opt.moveStop == 0 || f < opt.moveStop)) camera.position += moveDir * (opt.move * dt);
     const bool frozen = warming || opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
-    scene.update(frozen ? 0.0f : dt);
+    float sceneDt = dt;
+    if (playing && !warming) sceneDt = penalti.update(dt, game::Pointer{}, scene, camera, r, glm::vec2(float(extent.width), float(extent.height)));
+    scene.update(frozen ? 0.0f : sceneDt);
     scene.stream(ctx, camera.position);  // streaming do mundo (células perto da câmera)
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
@@ -520,6 +529,10 @@ int runWindowed(const Options& opt) {
   swapchain.create(ctx, surface, {uint32_t(fbw), uint32_t(fbh)}, opt.vsync);
   renderer::Renderer r;
   r.init(ctx, scene, swapchain.extent, swapchain.format, opt.render);
+  game::PenaltiGame penalti;
+  const bool playing = opt.scene.name == "penalti";
+  if (playing) penalti.init(scene, r, opt.autoplay);
+  bool mouseWasDown = false;
 
   std::array<FrameSync, renderer::Renderer::kFramesInFlight> frames;
   for (auto& f : frames) {
@@ -590,7 +603,7 @@ int runWindowed(const Options& opt) {
     double mx, my;
     glfwGetCursorPos(window, &mx, &my);
     bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
-    if (rmb && looking && (mx != lastX || my != lastY)) {
+    if (rmb && looking && (mx != lastX || my != lastY) && !playing) {
       camera.yaw += float(mx - lastX) * 0.0025f;
       camera.pitch = glm::clamp(camera.pitch - float(my - lastY) * 0.0025f, -1.55f, 1.55f);
       moved = true;
@@ -607,7 +620,7 @@ int runWindowed(const Options& opt) {
     if (key(GLFW_KEY_A)) move -= camera.right();
     if (key(GLFW_KEY_E)) move.y += 1.0f;
     if (key(GLFW_KEY_Q)) move.y -= 1.0f;
-    if (glm::length(move) > 0.0f) { camera.position += glm::normalize(move) * speed; moved = true; }
+    if (glm::length(move) > 0.0f && !playing) { camera.position += glm::normalize(move) * speed; moved = true; }
     float sunStep = 0.6f * dt;
     if (key(GLFW_KEY_UP)) { sunElev += sunStep; moved = true; }
     if (key(GLFW_KEY_DOWN)) { sunElev -= sunStep; moved = true; }
@@ -627,7 +640,20 @@ int runWindowed(const Options& opt) {
     toggle(GLFW_KEY_M, mDown, r.settings.motionBlur);
     (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
 
-    scene.update(opt.pause ? 0.0f : glm::clamp(dt, 0.0f, 0.1f));
+    float sceneDt = glm::clamp(dt, 0.0f, 0.1f);
+    if (playing) {  // o clique do mouse faz o papel do toque
+      int ww = 1, wh = 1;
+      glfwGetWindowSize(window, &ww, &wh);
+      const bool down = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+      game::Pointer p;
+      p.pos = glm::vec2(float(mx) * float(swapchain.extent.width) / float(std::max(ww, 1)), float(my) * float(swapchain.extent.height) / float(std::max(wh, 1)));
+      p.down = down;
+      p.pressed = down && !mouseWasDown;
+      p.released = !down && mouseWasDown;
+      mouseWasDown = down;
+      sceneDt = penalti.update(sceneDt, p, scene, camera, r, glm::vec2(float(swapchain.extent.width), float(swapchain.extent.height)));
+    }
+    scene.update(opt.pause ? 0.0f : sceneDt);
     scene.stream(ctx, camera.position);
 
     // ---- Frame ----

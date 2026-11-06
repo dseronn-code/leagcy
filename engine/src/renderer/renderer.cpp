@@ -664,6 +664,26 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   tm.colorFormats = {outputFormat};
   tonemapPipeline_ = rhi::createGraphicsPipeline(ctx, tm);
 
+  // Camada 2D (HUD do jogo): vértices em buffer visível ao host, um por frame em voo; atlas de fontes branco até o
+  // jogo enviar o dele.
+  {
+    uiLayout_.init(ctx, g, {CIS}, 16);
+    rhi::GraphicsPipelineDesc ud;
+    ud.vertexShader = "ui.vert";
+    ud.fragmentShader = "ui.frag";
+    ud.layout = uiLayout_.pipelineLayout;
+    ud.vertexBindings = {{0, uint32_t(sizeof(UiVertex)), VK_VERTEX_INPUT_RATE_VERTEX}};
+    ud.vertexAttributes = {{0, 0, VK_FORMAT_R32G32_SFLOAT, 0},
+                           {1, 0, VK_FORMAT_R32G32_SFLOAT, uint32_t(offsetof(UiVertex, uv))},
+                           {2, 0, VK_FORMAT_R32G32B32A32_SFLOAT, uint32_t(offsetof(UiVertex, color))}};
+    ud.colorFormats = {outputFormat};
+    ud.blendPremultiplied = true;
+    uiPipeline_ = rhi::createGraphicsPipeline(ctx, ud);
+    for (auto& b : uiBuffers_) b = rhi::createBuffer(ctx, kMaxUiVertices * sizeof(UiVertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
+    const uint8_t white[4] = {255, 255, 255, 255};
+    uiAtlas_ = rhi::createTexture(ctx, white, 1, 1, false);
+  }
+
   // LUTs constantes, calculadas uma vez: DFG (integral do BRDF), transmitância e múltiplo
   // espalhamento da atmosfera (esta depende da de transmitância).
   rhi::ComputePass dfgPass, transmittancePass, multiScatterPass, cloudNoisePass;
@@ -1545,6 +1565,17 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   tonemapLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs,
                       {tex(*color), Binding::sampled(t_.bloomMips[0], linear_), Binding::storageBuffer(exposureState_)}, &tp);
   vkCmdDraw(cmd, 3, 1, 0, 0);
+  if (!ui.empty() && uiBuffers_[slot].mapped) {
+    const size_t n = std::min(ui.size(), kMaxUiVertices) / 3 * 3;
+    std::memcpy(uiBuffers_[slot].mapped, ui.data(), n * sizeof(UiVertex));
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline_);
+    const VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &uiBuffers_[slot].handle, &offset);
+    struct { float w, h; uint32_t srgb, pad; } up{float(O.width), float(O.height), isSrgb(outputFormat_) ? 1u : 0u, 0u};
+    uiLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs, {Binding::sampled(uiAtlas_.view, linear_)}, &up);
+    vkCmdDraw(cmd, uint32_t(n), 1, 0, 0);
+  }
+  ui.clear();
   vkCmdEndRendering(cmd);
   profiler_.mark(cmd, "tonemap");
 
@@ -1558,6 +1589,13 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   prevJitter_ = jitterUv;
   historyValid_ = true;
   ++frameIndex_;
+}
+
+void Renderer::setUiAtlas(const std::vector<uint8_t>& rgba, uint32_t width, uint32_t height) {
+  if (rgba.size() < size_t(width) * height * 4) return;
+  vkDeviceWaitIdle(ctx_->device);
+  rhi::destroyImage(*ctx_, uiAtlas_);
+  uiAtlas_ = rhi::createTexture(*ctx_, rgba.data(), width, height, false);
 }
 
 void Renderer::cpuMark(const char* name) {
@@ -1694,7 +1732,7 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
         uint32_t pinned;
         glm::vec4 colliders[4];
       } cp{m.clothPos.address, m.clothPrev.address, m.vertices.address, m.clothWidth, m.clothHeight, m.clothSpacing, sceneDt,
-           s.time, (m.clothPinned ? 1u : 0u) | (std::getenv("LEGACY_NO_CLOTH_SELF") ? 2u : 0u), {m.clothColliders[0], m.clothColliders[1], m.clothColliders[2], m.clothColliders[3]}};
+           s.time, (m.clothPinned ? 1u : 0u) | (m.clothPinBorder ? 6u : 0u) | (std::getenv("LEGACY_NO_CLOTH_SELF") ? 2u : 0u), {m.clothColliders[0], m.clothColliders[1], m.clothColliders[2], m.clothColliders[3]}};
       clothPass_.dispatchGroups(cmd, globalSets_[slot], {}, 1, 1, &cp);
     }
     // Cabelo: física por fio no mundo (o objeto que usa a malha dá a posição da cabeça).
@@ -1899,6 +1937,10 @@ void Renderer::destroy() {
   rhi::destroyBuffer(ctx, emitterBuffer_);
   particleLayout_.destroy(ctx);
   vkDestroyPipeline(ctx.device, tonemapPipeline_, nullptr);
+  vkDestroyPipeline(ctx.device, uiPipeline_, nullptr);
+  uiLayout_.destroy(ctx);
+  rhi::destroyImage(ctx, uiAtlas_);
+  for (auto& b : uiBuffers_) rhi::destroyBuffer(ctx, b);
   gbufferLayout_.destroy(ctx);
   tonemapLayout_.destroy(ctx);
   vkDestroyDescriptorPool(ctx.device, pool_, nullptr);

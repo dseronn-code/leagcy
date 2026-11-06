@@ -195,7 +195,8 @@ target_compile_definitions(legacy PRIVATE
   GLM_FORCE_DEPTH_ZERO_TO_ONE
   GLM_FORCE_RADIANS
   SHADER_DIR="${SHADER_OUT_DIR}"
-  ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+  ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+  GAME_DIR="${CMAKE_CURRENT_SOURCE_DIR}/game")
 if(MSVC)
   # /utf-8: fontes e mensagens em UTF-8 (português); /MP: compilação paralela.
   target_compile_options(legacy PRIVATE /W4 /permissive- /utf-8 /MP)

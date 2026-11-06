@@ -59,6 +59,12 @@ int Model::findAnimation(const std::string& name) const {
   return -1;
 }
 
+int Model::findNode(const std::string& name) const {
+  for (size_t i = 0; i < nodes.size(); ++i)
+    if (nodes[i].name == name) return int(i);
+  return -1;
+}
+
 void Scene::animateModel(Model& m, float dt) {
   m.time += dt * m.speed;
   std::vector<ModelNode> pose = m.nodes;
@@ -84,6 +90,8 @@ void Scene::animateModel(Model& m, float dt) {
       }
     }
   }
+
+  if (m.poseHook) m.poseHook(m, pose);
 
   // Matrizes globais (pai antes do filho, com memoização).
   std::vector<glm::mat4> global(pose.size());
@@ -723,10 +731,10 @@ bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
   return changed;
 }
 
-uint32_t Scene::bakeCrowdClip(int modelIndex, uint32_t frames) {
+uint32_t Scene::bakeCrowdClip(int modelIndex, uint32_t frames, uint32_t skinned) {
   Model& m = models[size_t(modelIndex)];
   if (m.skinnedObjects.empty()) FATAL("bakeCrowdClip: o modelo não tem malha com esqueleto");
-  const uint32_t object = m.skinnedObjects[0];
+  const uint32_t object = m.skinnedObjects[std::min<size_t>(skinned, m.skinnedObjects.size() - 1)];
   const MeshData src = cpuMeshes_[objects[object].mesh];
   const Animation* a = (m.animation >= 0 && size_t(m.animation) < m.animations.size()) ? &m.animations[size_t(m.animation)] : nullptr;
   CrowdClip clip;
@@ -1116,6 +1124,7 @@ void Scene::upload(rhi::Context& ctx) {
       gm.clothHeight = data.clothHeight;
       gm.clothSpacing = data.clothSpacing;
       gm.clothPinned = data.clothPinned;
+      gm.clothPinBorder = data.clothPinBorder;
       for (int k = 0; k < 4; ++k) gm.clothColliders[k] = data.clothColliders[k];
       std::vector<glm::vec4> p(data.vertices.size());
       for (size_t i = 0; i < p.size(); ++i) p[i] = glm::vec4(data.vertices[i].position, 0.0f);

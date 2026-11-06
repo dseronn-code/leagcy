@@ -1380,6 +1380,10 @@ bool buildClothTest(Scene& s, Camera& camera) {
 
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
+}  // namespace scene
+namespace game { bool buildPenaltiScene(scene::Scene&, scene::Camera&, const scene::DemoOptions&); }
+namespace scene {
+
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (!buildDemoSceneDefaults(scene, camera, opt)) return false;
   if (opt.clouds >= 0.0f) scene.cloudCoverage = std::min(opt.clouds, 1.0f);
@@ -1403,6 +1407,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   };
   if (endsWith(".gltf") || endsWith(".glb")) return buildFromFile(scene, camera, opt);
   if (opt.name == "outdoor") return buildOutdoor(scene, camera, opt);
+  if (opt.name == "penalti") return game::buildPenaltiScene(scene, camera, opt);
   if (opt.name == "furnace") return buildFurnace(scene, camera);
   if (opt.name == "shadows") return buildShadowTest(scene, camera, glm::vec3(0.0f));
   if (opt.name == "shadows-far") return buildShadowTest(scene, camera, glm::vec3(4000.0f, 0.0f, -3000.0f));

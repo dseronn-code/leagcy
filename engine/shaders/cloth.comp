@@ -16,11 +16,15 @@ layout(push_constant) uniform Push {
   uint64_t pos, prev, vertices;
   uint width, height;
   float spacing, dt, time;
-  uint pinned;          // 1 = coluna 0 presa (bit 0); bit 1 = sem colisão consigo mesmo (medição)
+  uint pinned;          // 1 = coluna 0 presa (bit 0); bit 1 = sem colisão consigo mesmo (medição); bit 2 = borda presa (rede)
   vec4 colliders[4];    // esferas (espaço do pano): xyz centro, w raio
 } pc;
 
-bool fixedPoint(uint i) { return (pc.pinned & 1u) != 0u && i % pc.width == 0u; }
+bool fixedPoint(uint i) {
+  uint x = i % pc.width, y = i / pc.width;
+  if ((pc.pinned & 4u) != 0u && (x == 0u || x == pc.width - 1u || y == 0u || y == pc.height - 1u)) return true;
+  return (pc.pinned & 1u) != 0u && x == 0u;
+}
 // Empurra o ponto para fora das esferas (o chão é uma esfera enorme); `hit` = encostou em algo (atrito).
 vec3 collide(vec3 p, out bool hit) {
   hit = false;

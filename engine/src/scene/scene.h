@@ -261,6 +261,7 @@ struct Animation {
   float duration = 0.0f;
 };
 struct ModelNode {
+  std::string name;  // do glTF (ossos do esqueleto: o jogo encontra "mixamorig:RightArm" pelo nome)
   int parent = -1;
   glm::vec3 translation{0.0f};
   glm::quat rotation{1.0f, 0.0f, 0.0f, 0.0f};
@@ -286,6 +287,10 @@ struct Model {
   std::vector<std::vector<glm::mat4>> jointMatrices;       // saída por skin: global(junta) * inverseBind
 
   int findAnimation(const std::string& name) const;
+  int findNode(const std::string& name) const;  // -1 = não existe
+  // Ajuste da pose pelo jogo, depois do clipe e antes das matrizes globais (mira de braços e pernas, mergulho do
+  // goleiro, chute). Recebe a pose local de todos os nós; pode alterar rotações e translações.
+  std::function<void(const Model&, std::vector<ModelNode>& pose)> poseHook;
 };
 
 struct GpuMesh {
@@ -304,6 +309,7 @@ struct GpuMesh {
   uint32_t clothWidth = 0, clothHeight = 0;
   float clothSpacing = 0.0f;
   bool clothPinned = true;
+  bool clothPinBorder = false;
   glm::vec4 clothColliders[4] = {};
   rhi::Buffer clothPos, clothPrev;
   // Cabelo simulado: centro de cada ponto em repouso (objeto, w = meia largura) e posições atual/anterior (mundo).
@@ -426,7 +432,8 @@ class Scene {
   }
   // Assa `frames` poses do clipe ativo da malha com esqueleto do modelo (pele feita na CPU) e devolve o índice do
   // clipe. Chame antes do upload.
-  uint32_t bakeCrowdClip(int model, uint32_t frames);
+  // `skinned`: qual das malhas com esqueleto do modelo (personagens com corpo e juntas em malhas separadas).
+  uint32_t bakeCrowdClip(int model, uint32_t frames, uint32_t skinned = 0);
   // Põe uma pessoa da multidão: objeto com a pose 0 do clipe; o instante da animação vem de `phase` (s).
   uint32_t addCrowdAgent(uint32_t clip, const glm::mat4& transform, float phase);
   std::vector<Decal> decals;

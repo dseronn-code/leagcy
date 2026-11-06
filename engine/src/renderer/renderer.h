@@ -156,7 +156,24 @@ class Renderer {
 
   Settings settings;
 
+  // Camada 2D do jogo: triângulos em pixels da saída (0,0 = canto superior esquerdo), cor sRGB com alfa (não
+  // pré-multiplicada). uv >= 0: cobertura lida do atlas de fontes (canal R); uv < 0: cor sólida. O jogo preenche
+  // antes de record(); é desenhada por cima de tudo neste frame e esvaziada.
+  struct UiVertex {
+    glm::vec2 pos;
+    glm::vec2 uv;
+    glm::vec4 color;
+  };
+  std::vector<UiVertex> ui;
+  // Atlas de fontes da camada 2D (RGBA8 linear; a cobertura vai no R). Chamar fora da gravação de comandos.
+  void setUiAtlas(const std::vector<uint8_t>& rgba, uint32_t width, uint32_t height);
+
  private:
+  static constexpr size_t kMaxUiVertices = 120000;
+  rhi::Buffer uiBuffers_[kFramesInFlight];
+  VkPipeline uiPipeline_ = VK_NULL_HANDLE;
+  rhi::PassLayout uiLayout_;
+  rhi::Image uiAtlas_;
   struct Targets {
     std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
     rhi::Image diffuse, specular, motion, emissive;

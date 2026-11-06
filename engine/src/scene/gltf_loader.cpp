@@ -283,6 +283,7 @@ struct Loader {
       const cgltf_node& n = data->nodes[i];
       ModelNode& mn = m.nodes[i];
       mn.parent = n.parent ? int(nodeIndex(n.parent)) : -1;
+      if (n.name) mn.name = n.name;
       if (n.has_matrix) {
         glm::mat4 mat = glm::make_mat4(n.matrix);
         glm::vec3 skew;
