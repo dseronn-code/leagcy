@@ -1,0 +1,445 @@
+// Avaliação de material. Quem inclui define MATERIAL_SAMPLE(índice, uv):
+//   fragment: texture() (mip automático) | compute/ray tracing: textureLod().
+// Saída comum a todos os modelos: cor difusa + f0/f90 do especular + rugosidade (o que o BRDF usa).
+#ifndef MATERIAL_GLSL
+#define MATERIAL_GLSL
+
+#include "common.glsl"
+#include "scene.glsl"
+#include "frame.glsl"
+
+struct Surface {
+  vec3 diffuseColor;
+  vec3 f0;
+  float f90;
+  float alpha;
+  float roughness;       // perceptual
+  vec3 emissive;
+  vec3 normal;
+  float normalVariance;  // variância do normal map no mip lido (Toksvig) — alarga a rugosidade
+  float occlusion;       // oclusão do material (glTF occlusionTexture), 1 = nenhuma
+  float transmission;    // KHR_materials_transmission: fração não refletida que atravessa (parede fina)
+  vec3 transmissionTint; // cor base: tinge o que atravessa
+  float clearcoat;       // KHR_materials_clearcoat: intensidade do verniz
+  float clearcoatRoughness;
+};
+
+// Decals procedurais (scene::Decal): caixa projetada de cima para baixo sobre superfícies viradas para cima.
+struct Decal {
+  mat4 worldToDecal;
+  vec4 color;
+  uint type;
+  float seed;
+  int texture;
+  float roughness;
+};
+layout(set = 0, binding = 19, std430) readonly buffer Decals { Decal decals[]; };
+const uint DECAL_CROSSWALK = 0u, DECAL_LANE = 1u, DECAL_DIRT = 2u, DECAL_OIL = 3u, DECAL_CRACKS = 4u, DECAL_TEXTURE = 5u;
+
+void applyDecals(inout Surface s, vec3 P, vec3 N) {
+  for (int i = 0; i < decals.length(); ++i) {
+    Decal d = decals[i];
+    if (d.type == 0xFFFFFFFFu) break;
+    vec3 q = (d.worldToDecal * vec4(P, 1.0)).xyz;
+    if (any(greaterThan(abs(q), vec3(1.0)))) continue;
+    if (d.type == DECAL_TEXTURE) {
+      // Projeção pelo eixo z da caixa: só nas superfícies viradas para ele (não vaza para o lado de trás da parede).
+      vec3 axis = normalize(inverse(mat3(d.worldToDecal))[2]);
+      if (dot(N, axis) < 0.3 || d.texture < 0) continue;
+      vec4 img = MATERIAL_SAMPLE(d.texture, q.xy * vec2(0.5, -0.5) + 0.5);
+      float a = img.a * d.color.a * smoothstep(1.0, 0.7, abs(q.z));
+      s.diffuseColor = mix(s.diffuseColor, img.rgb * d.color.rgb, a);
+      s.f0 = mix(s.f0, vec3(0.04), a);
+      s.roughness = mix(s.roughness, d.roughness, a);
+      continue;
+    }
+    if (N.y < 0.5) continue;  // os procedurais são de chão
+    // Medidas reais da caixa (m): o padrão tem tamanho fixo no mundo.
+    vec2 halfSize = vec2(1.0 / length(d.worldToDecal[0].xyz), 1.0 / length(d.worldToDecal[2].xyz));
+    vec2 m = q.xz * halfSize;  // metros a partir do centro
+    float edge = smoothstep(1.0, 0.95, max(abs(q.x), abs(q.z))) * smoothstep(1.0, 0.6, abs(q.y));
+    float wear = smoothstep(0.35, 0.6, fbm(P.xz * 1.7 + d.seed * 31.0, 4));  // tinta gasta
+    if (d.type == DECAL_CROSSWALK || d.type == DECAL_LANE) {
+      float paint = d.type == DECAL_CROSSWALK ? step(0.45, fract(m.x / 0.9))           // listras de 45 cm
+                                              : step(0.55, fract(m.y / 6.0 + d.seed));   // tracejado 3 m / 3 m
+      paint *= edge * (1.0 - 0.6 * wear) * d.color.a;
+      s.diffuseColor = mix(s.diffuseColor, d.color.rgb * 0.8, paint);
+      s.f0 = mix(s.f0, vec3(0.04), paint);
+      s.roughness = mix(s.roughness, 0.55, paint);
+    } else if (d.type == DECAL_DIRT) {
+      float dirt = smoothstep(0.4, 0.75, fbm(P.xz * 0.9 + d.seed * 17.0, 5)) * edge * d.color.a;
+      s.diffuseColor *= mix(1.0, 0.5, dirt);
+      s.roughness = mix(s.roughness, min(s.roughness + 0.25, 1.0), dirt);
+    } else if (d.type == DECAL_OIL) {
+      float r = length(m) / max(min(halfSize.x, halfSize.y), 1e-3);
+      float oil = smoothstep(1.0, 0.6, r + 0.3 * (fbm(P.xz * 3.0 + d.seed * 11.0, 3) - 0.5)) * edge * d.color.a;
+      s.diffuseColor *= mix(1.0, 0.25, oil);
+      s.roughness = mix(s.roughness, 0.18, oil);  // filme de óleo: liso e escuro
+    } else if (d.type == DECAL_CRACKS) {
+      float n = fbm(P.xz * 2.3 + d.seed * 7.0, 5);
+      float crack = smoothstep(0.035, 0.0, abs(n - 0.5)) * edge * d.color.a;
+      s.diffuseColor *= mix(1.0, 0.3, crack);
+    }
+  }
+}
+
+// Chuva (Lagarde 2012, "Water drop" 2–4, usado em Remember Me): a água entra nos poros e escurece o difuso
+// (materiais porosos e ásperos escurecem mais), forma uma película que deixa a superfície lisa, e nas superfícies
+// planas viradas para cima junta em poças — água por cima (f0 2%, quase espelho, normal plana) com os anéis dos
+// pingos. As poças ficam onde um ruído de baixa frequência é alto (bordas suaves).
+vec3 rainRipples(vec2 p, float t) {
+  vec2 cell = floor(p), f = fract(p);
+  vec3 n = vec3(0.0);
+  for (int j = -1; j <= 1; ++j)
+    for (int i = -1; i <= 1; ++i) {
+      vec2 c = cell + vec2(i, j);
+      uvec3 h = pcg3d(uvec3(ivec2(c) + ivec2(4096), 0x2c1b3c6du));
+      vec3 r = vec3(h) * (1.0 / 4294967296.0);
+      float phase = fract(t * (0.8 + 0.4 * r.z) + r.z);  // cada pingo num instante
+      vec2 d = vec2(i, j) + r.xy - f;
+      float dist = length(d);
+      float radius = phase * 0.9;
+      float ring = sin(clamp((dist - radius) * 18.0, -PI, PI)) * (1.0 - phase) * (1.0 - phase);
+      ring *= smoothstep(0.12, 0.0, abs(dist - radius));
+      n.xz += ring * (dist > 1e-4 ? d / dist : vec2(0.0));
+    }
+  return n * 0.6;
+}
+
+void applyWetness(inout Surface s, vec3 P, vec3 N) {
+  float wet = frame.weather.x * rainExposure(P);
+  if (wet <= 0.0) return;
+  float porosity = clamp((1.0 - dot(s.f0, vec3(0.333)) * 4.0) * (0.3 + 0.7 * s.roughness), 0.0, 1.0);
+  s.diffuseColor *= mix(1.0, 0.35, wet * porosity);  // água nos poros: menos luz espalhada de volta
+  s.roughness = mix(s.roughness, min(s.roughness, 0.25), wet * 0.8);
+  // Poças: só em superfícies quase horizontais viradas para cima.
+  float up = smoothstep(0.92, 0.98, N.y);
+  if (up <= 0.0 || frame.weather.y <= 0.0) return;
+  up *= rainExposure(P);
+  float n = fbm(P.xz * 0.35, 3) * 0.75 + fbm(P.xz * 2.1, 2) * 0.25;
+  float puddle = up * smoothstep(1.0 - frame.weather.y * 0.6, 1.08 - frame.weather.y * 0.6, n + 0.15);
+  if (puddle <= 0.0) return;
+  s.diffuseColor *= mix(1.0, 0.25, puddle);  // a água por cima absorve e espelha
+  s.f0 = mix(s.f0, vec3(0.02), puddle);
+  s.f90 = mix(s.f90, 1.0, puddle);
+  s.roughness = mix(s.roughness, 0.02, puddle);
+  vec3 flatN = vec3(0.0, 1.0, 0.0);
+  if (rainIntensity() > 0.0) flatN = normalize(flatN + rainRipples(P.xz * 3.0, frame.night.w) * rainIntensity());
+  s.normal = normalize(mix(s.normal, flatN, puddle));
+  s.normalVariance *= 1.0 - puddle;
+}
+
+// N: normal geométrica interpolada; T: tangente (w = sinal da bitangente); T = 0 desliga o normal map.
+// Mar (renderer/ocean.h): normal e espuma da simulação FFT na posição do mundo, mais uma segunda amostra em outra
+// escala (ondas curtas). Água: f0 2%, quase espelho; o "difuso" é a luz que sobe de dentro d'água (azul-esverdeado
+// escuro); a espuma é branca e áspera.
+Surface evalWater(vec3 P) {
+  Surface s;
+  vec2 uv0 = P.xz / OCEAN_PATCH;
+  vec4 a = textureLod(oceanSlope, uv0, 0.0);
+  vec2 b = textureLod(oceanSlope, uv0 * 5.37 + vec2(0.31, 0.71), 0.0).xy * 0.35;
+  float foam = clamp(a.z, 0.0, 1.0);
+  vec2 rs = rippleSlope(P);  // objetos empurrando a água
+  s.normal = normalize(vec3(-(a.x + b.x + rs.x), 1.0, -(a.y + b.y + rs.y)));
+  s.diffuseColor = mix(vec3(0.004, 0.018, 0.022), vec3(0.7), foam);
+  // Luz que atravessa a crista fina das ondas (turquesa), forte olhando contra o sol: emissão aproximada pela
+  // iluminância do sol × altura da onda × espalhamento para a frente (Henyey-Greenstein).
+  float height = textureLod(oceanDisplacement, uv0, 0.0).y;
+  float crest = clamp(height * 0.6 + 0.2, 0.0, 1.0) * (1.0 - foam);
+  vec3 V = normalize(frame.cameraPos.xyz - P);
+  float forward = henyeyGreenstein(dot(-V, frame.sunDir.xyz), 0.5) * 4.0 * PI;  // ~1 isotrópico, até ~9 contra o sol
+  vec3 sunE = sunIrradianceAt(P) / max(preExposure(), 1e-20);
+  vec3 crestLight = vec3(0.1, 0.55, 0.5) * 0.5 * crest * forward * sunE / PI;  // ~1000 nits contra o sol
+  s.f0 = vec3(0.02);
+  s.f90 = 1.0;
+  s.alpha = 1.0;
+  s.roughness = mix(0.02, 0.55, foam);
+  s.emissive = crestLight;
+  s.normalVariance = 0.0;
+  s.occlusion = 1.0;
+  s.transmission = 0.0;
+  s.transmissionTint = vec3(1.0);
+  s.clearcoat = 0.0;
+  s.clearcoatRoughness = 0.0;
+  return s;
+}
+
+// Ruído de valor 2D com derivadas analíticas (Quílez): xy = derivadas, z = valor em [0, 1].
+vec3 valueNoised(vec2 p) {
+  vec2 i = floor(p), f = fract(p), u = f * f * (3.0 - 2.0 * f), du = 6.0 * f * (1.0 - f);
+  uvec2 c = uvec2(ivec2(i) + 32768);
+  float a = float(pcg3d(uvec3(c, 7u)).x) / 4294967296.0, b = float(pcg3d(uvec3(c + uvec2(1, 0), 7u)).x) / 4294967296.0;
+  float cc = float(pcg3d(uvec3(c + uvec2(0, 1), 7u)).x) / 4294967296.0, d = float(pcg3d(uvec3(c + uvec2(1, 1), 7u)).x) / 4294967296.0;
+  float k1 = b - a, k2 = cc - a, k4 = a - b - cc + d;
+  return vec3(du * vec2(k1 + k4 * u.y, k2 + k4 * u.x), a + k1 * u.x + k2 * u.y + k4 * u.x * u.y);
+}
+
+// Inclinação (∂h/∂x, ∂h/∂z) e espuma de ondinhas de rio em p (m): 3 oitavas de ruído, alturas de ~2 cm.
+vec3 riverDetail(vec2 p) {
+  vec2 slope = vec2(0.0);
+  float amp = 0.035, freq = 1.3, foam = 0.0;
+  for (int o = 0; o < 3; ++o) {
+    vec3 n = valueNoised(p * freq + float(o) * 17.3);
+    slope += n.xy * amp * freq;
+    if (o == 1) foam = n.z;  // espuma na oitava do meio: traços de ~30 cm, não manchas
+    amp *= 0.5;
+    freq *= 2.3;
+  }
+  return vec3(slope, foam);
+}
+
+// Rio (kMaterialRiver): água numa malha comum, com a correnteza na direção da tangente. Técnica de flow map
+// (Vlachos, "Water Flow in Portal 2", 2010): o detalhe é arrastado pela correnteza em duas fases defasadas de meio
+// ciclo, misturadas por um triângulo de pesos — cada fase volta ao começo quando a outra está no peso máximo, então o
+// recomeço nunca aparece. Cor: a de m.baseColor é a do que está dentro d'água (rio barrento, verde, limpo).
+Surface evalRiver(Material m, vec3 P, vec3 N, vec4 T) {
+  vec2 flow = length(T.xz) > 1e-4 ? normalize(T.xz) : vec2(1.0, 0.0);  // sem tangente (raios): uma direção qualquer
+  const float CYCLE = 1.6;  // s por fase
+  float t = frame.night.w / CYCLE, p0 = fract(t), p1 = fract(t + 0.5), w1 = abs(1.0 - 2.0 * p0);
+  vec2 drift = flow * m.flowSpeed * CYCLE;
+  vec3 d0 = riverDetail(P.xz - drift * p0), d1 = riverDetail(P.xz - drift * p1 + vec2(7.1, 3.7));
+  vec3 d = mix(d0, d1, w1);
+  Surface s;
+  vec3 up = normalize(N);
+  vec2 rs = rippleSlope(P);  // objetos empurrando a água
+  s.normal = normalize(up - vec3(d.x, 0.0, d.y) * min(m.flowSpeed, 3.0) / 3.0 * 2.0 - vec3(rs.x, 0.0, rs.y));
+  // Espuma nas cristas, mais com correnteza forte.
+  float foam = smoothstep(0.86, 0.97, d.z) * clamp(m.flowSpeed / 3.0, 0.0, 1.0) * 0.3;
+  s.diffuseColor = mix(m.baseColor.rgb, vec3(0.7), foam);
+  s.f0 = vec3(0.02);
+  s.f90 = 1.0;
+  s.alpha = 1.0;
+  s.roughness = mix(0.03, 0.5, foam);
+  s.emissive = vec3(0.0);
+  s.normalVariance = 0.0;
+  s.occlusion = 1.0;
+  s.transmission = 0.0;
+  s.transmissionTint = vec3(1.0);
+  s.clearcoat = 0.0;
+  s.clearcoatRoughness = 0.0;
+  return s;
+}
+
+// Camadas do terreno (scene::TerrainLayers, binding 25): grama, terra, rocha, cascalho.
+layout(set = 0, binding = 25, std430) readonly buffer TerrainLayersBuf {
+  ivec4 albedo, normal;
+  vec4 metersPerTile, roughness;
+} terrainLayers;
+
+// Amostra uma camada: planar (de cima) no chão, triplanar nos barrancos (a textura não estica). Devolve a cor e
+// altura (a) e, em nOut, a normal da camada no mundo (normal map por cima da normal da geometria).
+#ifndef TERRAIN_SAMPLE  // quem não define (outros shaders): amostra comum
+#define TERRAIN_SAMPLE(i, uv) MATERIAL_SAMPLE(i, uv)
+#define TERRAIN_REQUEST(i, uv)
+#endif
+vec4 terrainLayer(int layer, vec3 P, vec3 N, float triplanar, out vec3 nOut) {
+  float tile = terrainLayers.metersPerTile[layer];
+  TERRAIN_REQUEST(terrainLayers.albedo[layer], P.xz / tile);
+  TERRAIN_REQUEST(terrainLayers.normal[layer], P.xz / tile);
+#ifndef MATERIAL_DERIVATIVES
+  // Raios (reflexo, GI): só a cor, planar — o mesmo tom rebatido com uma fração do código (o shader de luz chama o
+  // material em vários lugares e o compilador repete tudo em cada um: a versão completa inflava a compilação).
+  nOut = N;
+  return TERRAIN_SAMPLE(terrainLayers.albedo[layer], P.xz / tile);
+#endif
+  int ca = terrainLayers.albedo[layer], cn = terrainLayers.normal[layer];
+  vec3 w = pow(abs(N), vec3(4.0));
+  w = mix(vec3(0.0, 1.0, 0.0), w / (w.x + w.y + w.z), triplanar);
+  vec4 col = vec4(0.0);
+  vec3 nsum = vec3(0.0);
+  for (int axis = 0; axis < 3; ++axis) {
+    if (w[axis] < 0.01) continue;
+    vec2 uv = (axis == 0 ? P.zy : axis == 1 ? P.xz : P.xy) / tile;
+    col += TERRAIN_SAMPLE(ca, uv) * w[axis];
+    vec3 tn = TERRAIN_SAMPLE(cn, uv).xyz * 2.0 - 1.0;
+    if (tn.z < -0.99) tn.z = sqrt(max(1.0 - dot(tn.xy, tn.xy), 0.0));  // BC5: z reconstruído
+    // "Whiteout" (Barré-Brisebois & Hill): soma a inclinação do mapa à normal da geometria no plano da projeção.
+    vec3 g = axis == 0 ? N.zyx : axis == 1 ? N.xzy : N;
+    vec3 b = normalize(vec3(tn.xy + g.xy, abs(tn.z) * abs(g.z) * sign(g.z + 1e-6)));
+    nsum += (axis == 0 ? b.zyx : axis == 1 ? b.xzy : b) * w[axis];
+  }
+  nOut = normalize(nsum + N * 1e-4);
+  return col;
+}
+
+// vertexColor: cor por vértice interpolada (glTF COLOR_0; branco se a malha não tem).
+Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexColor) {
+#ifdef MATERIAL_RAY_FEEDBACK
+  // Streaming de texturas: o raio pede, uma vez por material atingido, a resolução de todas as texturas dele.
+  if (sceneHas(MATERIAL_TERRAIN) && (m.flags & MATERIAL_TERRAIN) != 0u) {
+    for (int k = 0; k < 4; ++k) rayTextureRequest(terrainLayers.albedo[k]);
+  } else {
+    rayTextureRequest(m.baseColorTex);  // (o normal map não: nos raios ele não é lido — tangente zero)
+    rayTextureRequest(m.metalRoughTex);
+    rayTextureRequest(m.emissiveTex);
+    rayTextureRequest(m.occlusionTex);
+  }
+#endif
+  if (sceneHas(MATERIAL_WATER) && (m.flags & MATERIAL_WATER) != 0u) return evalWater(P);
+  if (sceneHas(MATERIAL_RIVER) && (m.flags & MATERIAL_RIVER) != 0u) return evalRiver(m, P, N, T);
+  if (m.uvRotation != 0.0 || m.uvScale != vec2(1.0) || m.uvOffset != vec2(0.0)) {  // KHR_texture_transform
+    float c = cos(m.uvRotation), sn = sin(m.uvRotation);
+    uv = mat2(c, sn, -sn, c) * (uv * m.uvScale) + m.uvOffset;  // mesma matriz do README da Khronos (colunas)
+  }
+  Surface s;
+  vec4 base = m.baseColor * vertexColor;
+  if (m.baseColorTex >= 0) base *= MATERIAL_SAMPLE(m.baseColorTex, uv);
+  s.alpha = base.a;
+  s.emissive = m.emissive;
+  if (m.emissiveTex >= 0) s.emissive *= MATERIAL_SAMPLE(m.emissiveTex, uv).rgb;
+
+  if ((m.flags & MATERIAL_SPECULAR_GLOSSINESS) != 0u) {
+    // Fluxo especular/glossiness: cor difusa e especular são dadas diretamente.
+    vec4 sg = m.metalRoughTex >= 0 ? MATERIAL_SAMPLE(m.metalRoughTex, uv) : vec4(1.0);
+    s.diffuseColor = base.rgb;
+    s.f0 = m.specularColor * sg.rgb;
+    s.f90 = 1.0;
+    s.roughness = 1.0 - (1.0 - m.roughness) * sg.a;
+  } else {
+    // Metálico/rugosidade (glTF) + KHR_materials_specular + KHR_materials_ior.
+    float metallic = m.metallic, roughness = m.roughness;
+    if (m.metalRoughTex >= 0) {
+      vec4 mr = MATERIAL_SAMPLE(m.metalRoughTex, uv);
+      roughness *= mr.g;
+      metallic *= mr.b;
+    }
+    float specWeight = m.specular * (m.specularTex >= 0 ? MATERIAL_SAMPLE(m.specularTex, uv).a : 1.0);
+    vec3 specColor = m.specularColor * (m.specularColorTex >= 0 ? MATERIAL_SAMPLE(m.specularColorTex, uv).rgb : vec3(1.0));
+    float r = (m.ior - 1.0) / (m.ior + 1.0);
+    vec3 dielectricF0 = min(r * r * specColor, vec3(1.0)) * specWeight;
+    s.diffuseColor = base.rgb * (1.0 - metallic);
+    s.f0 = mix(dielectricF0, base.rgb, metallic);
+    s.f90 = mix(specWeight, 1.0, metallic);
+    s.roughness = roughness;
+  }
+
+  s.normal = N;
+  s.normalVariance = 0.0;
+  s.occlusion = m.occlusionTex >= 0 ? MATERIAL_SAMPLE(m.occlusionTex, uv).r : 1.0;
+  s.transmission = m.transmission;
+  if (sceneHas(MATERIAL_TRANSMISSIVE) && m.transmissionTex >= 0) s.transmission *= MATERIAL_SAMPLE(m.transmissionTex, uv).r;
+  s.transmissionTint = base.rgb;
+  s.clearcoat = m.clearcoat;
+  s.clearcoatRoughness = m.clearcoatRoughness;
+  if (sceneHas(MATERIAL_CLEARCOAT) && m.clearcoatTex >= 0) s.clearcoat *= MATERIAL_SAMPLE(m.clearcoatTex, uv).r;
+  if (sceneHas(MATERIAL_CLEARCOAT) && m.clearcoatRoughnessTex >= 0) s.clearcoatRoughness *= MATERIAL_SAMPLE(m.clearcoatRoughnessTex, uv).g;
+  s.clearcoatRoughness = clamp(s.clearcoatRoughness, 0.0, 1.0);
+  vec3 t = T.xyz - N * dot(N, T.xyz);
+  if (m.normalTex >= 0 && dot(t, t) > 1e-8) {
+    t = normalize(t);
+    vec3 b = cross(N, t) * (T.w < 0.0 ? -1.0 : 1.0);
+    vec3 n = MATERIAL_SAMPLE(m.normalTex, uv).xyz * 2.0 - 1.0;
+    // Normal map em BC5 (padrão; texture_compress.h): só x e y — o canal azul vem 0 (n.z = -1, impossível num normal
+    // map de espaço tangente) e o z é reconstruído da normal unitária. Em RGBA8 (--no-texture-compression) o z vem do
+    // arquivo e o Toksvig abaixo também mede a variância guardada no encurtamento dos mips.
+    if (n.z < -0.99) n.z = sqrt(max(1.0 - dot(n.xy, n.xy), 0.0));
+    // Toksvig: nos mips a média de normais divergentes encurta o vetor; o encurtamento mede a
+    // variância das normais dentro do pixel e vira rugosidade extra (sem cintilação a distância).
+    float len = length(n);
+    s.normalVariance = len > 1e-4 ? clamp((1.0 - len) / len, 0.0, 1.0) : 0.0;
+    n.xy *= m.normalScale;
+    vec3 mapped = t * n.x + b * n.y + N * max(n.z, 1e-3);
+    if (dot(mapped, mapped) > 1e-8) s.normal = normalize(mapped);
+  }
+
+  if (m.flakes > 0.0) {
+    // Flocos metálicos: cada célula da grade de UV sorteia se tem floco e a inclinação dele (até ~20°). Visíveis um a
+    // um quando a célula cobre ~1 pixel ou mais; menores que o pixel, a média deles é um lobo mais largo (variância
+    // da normal, que o AA especular soma na rugosidade) — sem cintilar à distância.
+    vec2 cellUv = uv * m.flakeScale;
+    uvec3 h = pcg3d(uvec3(uvec2(ivec2(floor(cellUv)) + ivec2(1 << 20)), 0x9e3779b9u));
+    vec3 r = vec3(h) * (1.0 / 4294967296.0);
+    float tilt = 0.35 * sqrt(r.x), phi = TWO_PI * r.y;
+    vec3 ft, fb;
+    orthonormalBasis(s.normal, ft, fb);
+    vec3 flakeN = normalize(s.normal + tilt * (cos(phi) * ft + sin(phi) * fb));
+#ifdef MATERIAL_DERIVATIVES
+    float footprint = max(length(dFdx(cellUv)), length(dFdy(cellUv)));
+    float resolved = clamp(1.5 - footprint, 0.0, 1.0);
+#else
+    float resolved = 0.0;
+#endif
+    float isFlake = r.z < m.flakes ? 1.0 : 0.0;
+    s.normal = normalize(mix(s.normal, flakeN, isFlake * resolved));
+    s.normalVariance += m.flakes * 0.03 * (1.0 - resolved);  // ≈ variância da inclinação dos flocos
+  }
+
+  if (sceneHas(MATERIAL_EYE) && (m.flags & MATERIAL_EYE) != 0u) {
+    // Direção no olho a partir das UVs latitude/longitude da esfera; ângulo até a frente (+z).
+    float th = uv.y * PI, ph = uv.x * TWO_PI;
+    vec3 n = vec3(sin(th) * cos(ph), cos(th), sin(th) * sin(ph));
+    float ang = acos(clamp(n.z, -1.0, 1.0));
+    const float IRIS = 0.55, PUPIL = 0.2;  // rad (íris de ~12 mm num olho de ~24 mm)
+    float around = atan(n.y, n.x);
+    // Esclera: branco levemente quente com veias finas perto da íris e sombreado nas bordas.
+    vec3 sclera = vec3(0.86, 0.82, 0.78);
+    float veins = smoothstep(0.62, 0.7, fbm(vec2(around * 6.0, ang * 14.0), 4)) * smoothstep(1.6, 0.8, ang);
+    sclera = mix(sclera, vec3(0.75, 0.35, 0.3), veins * 0.5);
+    // Íris: fibras radiais (ruído no ângulo), escurece para a borda (anel límbico) e clareia perto da pupila.
+    float r = ang / IRIS;
+    float fibers = fbm(vec2(around * 10.0, r * 3.0), 5);
+    vec3 iris = base.rgb * (0.55 + 0.9 * fibers) * mix(1.15, 0.65, smoothstep(0.35, 1.0, r));
+    iris = mix(iris, base.rgb * 1.6 + 0.08, smoothstep(0.45, 0.25, r) * 0.35);  // colarinho claro
+    float limbal = smoothstep(0.82, 1.0, r);
+    iris *= 1.0 - 0.75 * limbal;
+    vec3 c = ang < PUPIL ? vec3(0.008) : ang < IRIS ? iris : sclera;
+    c = mix(c, iris * 0.25, smoothstep(IRIS * 1.08, IRIS, ang) * step(IRIS, ang));  // borda suave íris/esclera
+    s.diffuseColor = c;
+    s.f0 = vec3(0.02);
+    s.f90 = 1.0;
+    s.roughness = ang < IRIS ? 0.5 : 0.35;
+    s.clearcoat = 1.0;           // córnea/filme lacrimal: reflexo nítido por cima
+    s.clearcoatRoughness = 0.02;
+  }
+
+  if (sceneHas(MATERIAL_TERRAIN) && (m.flags & MATERIAL_TERRAIN) != 0u && terrainLayers.albedo.x >= 0) {
+    // Terreno por camadas: as mesmas regras do procedural (inclinação e ruído grande) dão o peso de cada camada; a
+    // mistura final é por altura (a pedra aparece entre a grama, não num degradê) e a normal vem da camada.
+    float slope = 1.0 - N.y;
+    float large = fbm(P.xz * 0.06, 5), detail = fbm(P.xz * 0.7, 3);
+    float dirtMask = smoothstep(0.55, 0.72, large + 0.15 * detail);
+    float rockMask = smoothstep(0.18, 0.38, slope + (detail - 0.5) * 0.25);
+    float gravelMask = smoothstep(0.62, 0.7, large + 0.1 * detail) * (1.0 - smoothstep(0.7, 0.8, large));
+    vec4 wl = vec4((1.0 - dirtMask) * (1.0 - rockMask), dirtMask * (1.0 - rockMask) * (1.0 - gravelMask), rockMask,
+                   gravelMask * (1.0 - rockMask));
+    float tri = smoothstep(0.15, 0.35, slope);
+    vec4 c[4];
+    vec3 n[4];
+    for (int k = 0; k < 4; ++k)
+      if (wl[k] > 0.001) c[k] = terrainLayer(k, P, N, k == 2 ? tri : tri * 0.5, n[k]);
+      else { c[k] = vec4(0.0); n[k] = N; }
+    // Mistura por altura (Mittring): só as camadas perto do topo da soma "peso + altura" contam.
+    vec4 hw = wl + vec4(c[0].a, c[1].a, c[2].a, c[3].a) * 0.5 * step(vec4(0.001), wl);
+    float top = max(max(hw.x, hw.y), max(hw.z, hw.w)) - 0.15;
+    vec4 bw = max(hw - top, 0.0) * step(vec4(0.001), wl);
+    bw /= max(dot(bw, vec4(1.0)), 1e-5);
+    s.diffuseColor = c[0].rgb * bw.x + c[1].rgb * bw.y + c[2].rgb * bw.z + c[3].rgb * bw.w;
+    s.normal = normalize(n[0] * bw.x + n[1] * bw.y + n[2] * bw.z + n[3] * bw.w);
+    s.f0 = vec3(0.04);
+    s.f90 = 1.0;
+    s.roughness = dot(terrainLayers.roughness, bw);
+    s.alpha = 1.0;
+    s.occlusion = 1.0;
+  } else if (sceneHas(MATERIAL_TERRAIN) && (m.flags & MATERIAL_TERRAIN) != 0u) {
+    // Terreno procedural: grama, terra e rocha por inclinação e ruído.
+    float slope = 1.0 - N.y;
+    float large = fbm(P.xz * 0.06, 5);
+    float detail = fbm(P.xz * 1.7, 4);
+    vec3 grass = mix(vec3(0.07, 0.11, 0.03), vec3(0.17, 0.19, 0.06), large) * (0.75 + 0.5 * detail);
+    vec3 dirt = vec3(0.21, 0.15, 0.10) * (0.7 + 0.6 * detail);
+    vec3 rock = vec3(0.28, 0.27, 0.25) * (0.6 + 0.8 * detail);
+    float dirtMask = smoothstep(0.55, 0.72, large + 0.15 * detail);
+    float rockMask = smoothstep(0.18, 0.38, slope + (detail - 0.5) * 0.25);
+    s.diffuseColor = mix(mix(grass, dirt, dirtMask), rock, rockMask);
+    s.f0 = vec3(0.04);
+    s.f90 = 1.0;
+    s.roughness = mix(mix(0.9, 0.95, dirtMask), 0.7, rockMask);
+  }
+  s.roughness = clamp(s.roughness, 0.0, 1.0);
+  applyDecals(s, P, N);
+  if (frame.weather.x > 0.0 && s.transmission <= 0.0) applyWetness(s, P, N);
+  s.diffuseColor *= 1.0 - s.transmission;  // o que atravessa não espalha (glTF: mix(difuso, transmissão))
+  return s;
+}
+
+#endif

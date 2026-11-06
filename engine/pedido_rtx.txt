@@ -1,0 +1,9 @@
+# Rodada 19 (3/11): por que o Bistro sai ~10% mais escuro que a referência em todos os presets? Variações do Ultra
+# contra a mesma referência; e a Sponza na janela com uma trajetória que fica dentro do prédio.
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --frames 256
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-radiance-cache"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-mesh-lights"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-lens-flare"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro-ev13
+build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt

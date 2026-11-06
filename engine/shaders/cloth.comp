@@ -1,0 +1,146 @@
+#version 460
+// Tecido na GPU (Verlet com restrições de distância: Jakobsen 2001, Müller et al. 2007 "Position Based Dynamics"):
+// um grupo de trabalho por pano, tudo em memória compartilhada. Por subpasso: integração de Verlet (gravidade, vento
+// com rajadas, arrasto do ar), depois várias rodadas de Jacobi que restauram o comprimento das molas estruturais e de
+// cisalhamento; a coluna 0 fica presa. No fim, normais pela grade e o buffer de vértices reescrito (o G-buffer, as
+// sombras e os reflexos — refit da BLAS — veem o pano mexendo).
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+
+layout(local_size_x = 256) in;
+layout(buffer_reference, scalar) buffer Points { vec4 p[]; };
+layout(buffer_reference, scalar) buffer Vertices { float v[]; };  // 12 floats por vértice (scene::Vertex)
+layout(push_constant) uniform Push {
+  uint64_t pos, prev, vertices;
+  uint width, height;
+  float spacing, dt, time;
+  uint pinned;          // 1 = coluna 0 presa (bit 0); bit 1 = sem colisão consigo mesmo (medição)
+  vec4 colliders[4];    // esferas (espaço do pano): xyz centro, w raio
+} pc;
+
+bool fixedPoint(uint i) { return (pc.pinned & 1u) != 0u && i % pc.width == 0u; }
+// Empurra o ponto para fora das esferas (o chão é uma esfera enorme); `hit` = encostou em algo (atrito).
+vec3 collide(vec3 p, out bool hit) {
+  hit = false;
+  for (int k = 0; k < 4; ++k) {
+    vec4 s = pc.colliders[k];
+    if (s.w <= 0.0) continue;
+    vec3 d = p - s.xyz;
+    float r = s.w + 0.01, l = length(d);  // folga fixa de 1 cm (a esfera-chão tem 1 km de raio)
+    if (l < r) {
+      p = s.xyz + (l > 1e-6 ? d / l : vec3(0.0, 1.0, 0.0)) * r;
+      hit = true;
+    }
+  }
+  return p;
+}
+
+const uint MAX_POINTS = 1024u;
+shared vec3 P[MAX_POINTS], Q[MAX_POINTS];
+
+void main() {
+  uint n = pc.width * pc.height, t = gl_LocalInvocationID.x;
+  Points pos = Points(pc.pos), prev = Points(pc.prev);
+  for (uint i = t; i < n; i += 256u) {
+    P[i] = pos.p[i].xyz;
+    Q[i] = prev.p[i].xyz;
+  }
+  barrier();
+  if (pc.dt > 0.0) {
+    const int SUBSTEPS = 4, ITERATIONS = 8;
+    float h = min(pc.dt, 1.0 / 30.0) / float(SUBSTEPS);
+    for (int sub = 0; sub < SUBSTEPS; ++sub) {
+      float time = pc.time + float(sub) * h;
+      for (uint i = t; i < n; i += 256u) {
+        if (fixedPoint(i)) continue;  // coluna presa
+        vec3 p = P[i], vel = (p - Q[i]) * 0.995;  // arrasto do ar
+        // Vento: base na direção +z com rajadas e uma onda que corre pelo pano (o "tremular" da bandeira).
+        float gust = 0.6 + 0.4 * sin(time * 0.9) + 0.25 * sin(time * 2.3 + 1.7);
+        vec3 wind = vec3(0.6, 0.0, 6.0) * gust + vec3(0.0, 0.0, 2.0) * sin(time * 7.0 - p.x * 2.5);
+        vec3 acc = vec3(0.0, -9.81, 0.0) + ((pc.pinned & 1u) != 0u ? wind * 1.4 : vec3(0.0));  // pano solto: sem vento
+        Q[i] = p;
+        P[i] = p + vel + acc * h * h;
+      }
+      barrier();
+      for (int it = 0; it < ITERATIONS; ++it) {
+        vec3 corr[4];  // até 4 vértices por invocação
+        uint k = 0u;
+        for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          corr[k] = vec3(0.0);
+          if (fixedPoint(i)) continue;
+          ivec2 g = ivec2(i % pc.width, i / pc.width);
+          vec3 sum = vec3(0.0);
+          float cnt = 0.0;
+          const ivec2 offs[8] = ivec2[](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1), ivec2(1, 1), ivec2(-1, -1),
+                                         ivec2(1, -1), ivec2(-1, 1));
+          for (int o = 0; o < 8; ++o) {
+            ivec2 q = g + offs[o];
+            if (q.x < 0 || q.y < 0 || q.x >= int(pc.width) || q.y >= int(pc.height)) continue;
+            vec3 d = P[uint(q.y) * pc.width + uint(q.x)] - P[i];
+            float len = length(d), rest = pc.spacing * (o < 4 ? 1.0 : 1.41421356);
+            if (len > 1e-6) sum += d * (1.0 - rest / len) * 0.5;  // metade da correção para cada ponta
+            cnt += 1.0;
+          }
+          corr[k] = cnt > 0.0 ? sum / cnt * 1.6 : vec3(0.0);  // sobre-relaxação (Jacobi converge devagar)
+        }
+        barrier();
+        k = 0u;
+        for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          bool hit;
+          P[i] = collide(P[i] + corr[k], hit);
+          if (hit) Q[i] = mix(Q[i], P[i], 0.3);  // atrito: o contato tira parte da velocidade
+        }
+        barrier();
+      }
+      // Colisão do pano consigo mesmo: pontos que não são vizinhos na grade (mais de 2 de distância) ficam a pelo
+      // menos 0,8 do espaçamento (a espessura do pano); cada par afasta metade da sobreposição para cada lado
+      // (Jacobi). Todos os pares (até 1.024 pontos, na memória compartilhada).
+      if ((pc.pinned & 2u) == 0u) {
+        const float thick = 0.8 * pc.spacing;
+        vec3 push[4];
+        uint k = 0u;
+        for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          push[k] = vec3(0.0);
+          if (fixedPoint(i)) continue;
+          ivec2 gi = ivec2(i % pc.width, i / pc.width);
+          vec3 pi = P[i];
+          for (uint j = 0u; j < n; ++j) {
+            ivec2 gj = ivec2(j % pc.width, j / pc.width);
+            if (max(abs(gi.x - gj.x), abs(gi.y - gj.y)) <= 2) continue;
+            vec3 d = pi - P[j];
+            float l2 = dot(d, d);
+            if (l2 < thick * thick && l2 > 1e-12) {
+              float l = sqrt(l2);
+              push[k] += d / l * (thick - l) * 0.5;
+            }
+          }
+        }
+        barrier();
+        k = 0u;
+        for (uint i = t; i < n && k < 4u; i += 256u, ++k) {
+          if (fixedPoint(i)) continue;  // ponto preso fica onde está
+          bool hit;
+          P[i] = collide(P[i] + push[k], hit);
+        }
+        barrier();
+      }
+    }
+  }
+  Vertices vb = Vertices(pc.vertices);
+  for (uint i = t; i < n; i += 256u) {
+    pos.p[i] = vec4(P[i], 0.0);
+    prev.p[i] = vec4(Q[i], 0.0);
+    ivec2 g = ivec2(i % pc.width, i / pc.width);
+    uint l = uint(g.y) * pc.width + uint(max(g.x - 1, 0)), r = uint(g.y) * pc.width + uint(min(g.x + 1, int(pc.width) - 1));
+    uint u = uint(max(g.y - 1, 0)) * pc.width + uint(g.x), d = uint(min(g.y + 1, int(pc.height) - 1)) * pc.width + uint(g.x);
+    vec3 tx = P[r] - P[l], ty = P[u] - P[d];
+    vec3 nrm = normalize(cross(tx, ty) + vec3(0.0, 0.0, 1e-6));
+    uint b = i * 12u;
+    vb.v[b] = P[i].x; vb.v[b + 1u] = P[i].y; vb.v[b + 2u] = P[i].z;
+    vb.v[b + 3u] = nrm.x; vb.v[b + 4u] = nrm.y; vb.v[b + 5u] = nrm.z;
+    vec3 tn = normalize(tx + vec3(1e-6, 0.0, 0.0));
+    vb.v[b + 8u] = tn.x; vb.v[b + 9u] = tn.y; vb.v[b + 10u] = tn.z; vb.v[b + 11u] = 1.0;
+  }
+}

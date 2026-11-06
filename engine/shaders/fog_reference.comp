@@ -1,0 +1,75 @@
+#version 460
+// Referência da névoa (--fog-reference): por pixel, a integral de espalhamento simples ao longo do raio da câmera até
+// o ponto visto (ou 4 km no céu), sem grade e sem aproximação: transmitância exata da névoa de altura, sol com raio de
+// sombra em cada amostra e céu com direção sorteada pela MESMA fase de Henyey-Greenstein (e raio de visibilidade).
+// Amostras estratificadas em t (mapa log, que concentra perto da câmera) e acumuladas com a cena parada.
+// Saída: rgb = luz espalhada, a = transmitância. composite (variante FOG_REFERENCE) usa isso no lugar dos froxels.
+#extension GL_GOOGLE_include_directive : require
+#define RAY_TRACING 1
+#include "fog.glsl"
+#include "raytracing.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0) uniform sampler2D gDepth;
+layout(set = 1, binding = 1, rgba32f) uniform writeonly image2D fogOut;
+layout(set = 1, binding = 2) uniform sampler2D fogPrev;
+layout(push_constant) uniform Push { uint frames; } pc;
+
+uint rngState;
+float rnd() {
+  rngState = rngState * 747796405u + 2891336453u;
+  uint w = ((rngState >> ((rngState >> 28u) + 4u)) ^ rngState) * 277803737u;
+  return float((w >> 22u) ^ w) * (1.0 / 4294967296.0);
+}
+
+// Transmitância exata da névoa de altura no trecho [0, t] do raio o + v t.
+float fogTransmittance(vec3 o, vec3 v, float t) {
+  float k = frame.params.w * v.y * t;
+  float lineIntegral = abs(k) > 1e-4 ? (1.0 - exp(-k)) / k : 1.0;
+  return exp(-frame.params.z * exp(-frame.params.w * o.y) * lineIntegral * t);
+}
+
+const int STEPS = 16;
+const float C = 1.0;  // m: t = C ((1 + D/C)^u − 1)
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, ivec2(frame.renderSize.xy)))) return;
+  rngState = uint(id.x) * 1973u + uint(id.y) * 9277u + pc.frames * 26699u + 1u;
+  vec2 uv = (vec2(id) + 0.5) * frame.renderSize.zw;
+  float depth = texelFetch(gDepth, id, 0).r;
+  vec3 o = frame.cameraPos.xyz, v;
+  float D;
+  if (depth <= 0.0) {
+    v = viewDirFromUv(uv);
+    D = 4000.0;
+  } else {
+    vec3 rel = cameraRelativePosFromDepth(uv, depth);
+    D = length(rel);
+    v = rel / D;
+  }
+  vec3 L = vec3(0.0);
+  float T = 1.0;
+  if (frame.params.z > 0.0 && !underwater(o)) {
+    T = fogTransmittance(o, v, D);
+    float logK = log(1.0 + D / C);
+    for (int i = 0; i < STEPS; ++i) {
+      float u = (float(i) + rnd()) / float(STEPS);
+      float t = C * (exp(u * logK) - 1.0), jac = (t + C) * logK / float(STEPS);
+      vec3 p = o + v * t;
+      float sigma = fogDensityAt(p);
+      vec3 sunE = sunIrradianceAt(p);
+      vec3 Lin = vec3(0.0);
+      if (dot(sunE, sunE) > 0.0) Lin += sunE * traceVisibility(p, frame.sunDir.xyz, 1e4) * henyeyGreenstein(dot(v, frame.sunDir.xyz), FOG_PHASE_G);
+      vec3 w = sampleFogPhase(v, FOG_PHASE_G, vec2(rnd(), rnd()));  // céu: estimador ∫ céu × vis × fase com a fase como pdf
+      Lin += sampleSky(w) * traceVisibility(p, w, 1e4);
+      L += fogTransmittance(o, v, t) * sigma * Lin * jac;
+    }
+  }
+  vec4 cur = vec4(L, T);
+  if (pc.frames > 0u) {  // média dos frames, a luz anterior trazida para a pré-exposição deste
+    vec4 prev = texelFetch(fogPrev, id, 0);
+    cur = mix(vec4(prev.rgb * historyExposureScale(), prev.a), cur, 1.0 / float(pc.frames + 1u));
+  }
+  imageStore(fogOut, id, cur);
+}

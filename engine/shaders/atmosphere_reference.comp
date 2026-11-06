@@ -1,0 +1,140 @@
+#version 460
+// Referência da atmosfera por path tracing volumétrico (todas as ordens de espalhamento), para validar
+// a pipeline de LUTs. Um grupo por (caso, canal de cor); delta tracking com majorante, próximo-evento
+// em direção ao sol (transmitância por raymarch, independente das LUTs) e chão Lambert.
+#extension GL_GOOGLE_include_directive : require
+#include "frame.glsl"
+
+layout(local_size_x = 64) in;
+struct TestCase { vec4 sunDir; vec4 viewDir; };
+layout(set = 1, binding = 0, std430) readonly buffer Cases { TestCase cases[]; };
+// Por caso: [0] motor (com múltiplo espalhamento), [1] motor só espalhamento simples, [2] referência, [3] erro padrão.
+layout(set = 1, binding = 1, std430) buffer Results { vec4 results[]; };
+layout(push_constant) uniform Push { uint pathsPerThread; uint caseCount; } pc;
+
+shared float sumL[64], sumL2[64];
+
+float channel(vec3 v, uint c) { return c == 0u ? v.x : (c == 1u ? v.y : v.z); }
+
+vec3 sampleUniformSphere(vec2 u) {
+  float z = 1.0 - 2.0 * u.x, r = sqrt(max(1.0 - z * z, 0.0)), phi = TWO_PI * u.y;
+  return vec3(r * cos(phi), z, r * sin(phi));
+}
+vec3 sampleHG(vec3 w, float g, vec2 u) {  // direção espalhada a partir de w (cos com w = mu)
+  float s = (1.0 - g * g) / (1.0 - g + 2.0 * g * u.x);
+  float mu = (1.0 + g * g - s * s) / (2.0 * g);
+  float sinT = sqrt(max(1.0 - mu * mu, 0.0)), phi = TWO_PI * u.y;
+  vec3 t, b;
+  orthonormalBasis(w, t, b);
+  return normalize(t * (sinT * cos(phi)) + b * (sinT * sin(phi)) + w * mu);
+}
+
+// Radiância (por unidade de iluminância solar) que chega ao observador em ro vindo de -rd, canal c.
+float tracePath(vec3 ro, vec3 rd, vec3 sunDir, uint c, inout uint rng) {
+  // Majorante: extinção máxima do canal (Rayleigh + Mie no chão + pico do ozônio).
+  float majorant = channel(RAYLEIGH_SCATTER, c) + MIE_EXTINCT + channel(OZONE_ABSORB, c);
+  float L = 0.0, weight = 1.0;
+  vec3 p = ro, dir = rd;
+  for (int bounce = 0; bounce < 64; ++bounce) {
+    float tTop = raySphere(p, dir, R_TOP);
+    float tGround = raySphere(p, dir, R_GROUND);
+    float tMax = tGround > 0.0 ? tGround : tTop;
+    if (tMax <= 0.0) break;
+    // Delta tracking: colisões tentativas até uma real ou sair do intervalo.
+    float t = 0.0;
+    bool collided = false;
+    vec3 sR, ext; float sM;
+    while (true) {
+      t -= log(1.0 - rand(rng)) / majorant;
+      if (t >= tMax) break;
+      sampleMedium(length(p + dir * t) - R_GROUND, sR, sM, ext);
+      if (rand(rng) * majorant < channel(ext, c)) { collided = true; break; }
+    }
+    if (!collided) {
+      if (tGround <= 0.0) break;  // escapou para o espaço (o disco solar não entra)
+      // Chão: Lambert com próximo-evento ao sol e novo rebote cosseno.
+      p = p + dir * tGround;
+      vec3 n = normalize(p);
+      p += n * 1e-4;
+      float NoL = dot(n, sunDir);
+      if (NoL > 0.0) L += weight * channel(GROUND_ALBEDO, c) / PI * NoL * channel(transmittanceRaymarch(length(p), dot(n, sunDir), 64), c);
+      weight *= channel(GROUND_ALBEDO, c);
+      dir = cosineSampleHemisphere(n, rand2(rng));
+    } else {
+      p = p + dir * t;
+      float sigS = channel(sR, c) + sM;
+      weight *= sigS / channel(ext, c);  // albedo de espalhamento (o ozônio absorve)
+      float fR = channel(sR, c) / sigS;
+      // Próximo-evento ao sol (sombra da Terra incluída).
+      float r = length(p);
+      float muSun = dot(p / r, sunDir);
+      bool shadowed = raySphere(p, sunDir, R_GROUND) > 0.0;
+      if (!shadowed) {
+        float cosT = dot(dir, sunDir);
+        float phase = fR * rayleighPhase(cosT) + (1.0 - fR) * miePhase(cosT);
+        L += weight * phase * channel(transmittanceRaymarch(r, muSun, 64), c);
+      }
+      // Nova direção: mistura uniforme (Rayleigh) / Henyey-Greenstein (Mie), peso = fase / pdf da mistura.
+      vec3 newDir = rand(rng) < fR ? sampleUniformSphere(rand2(rng)) : sampleHG(dir, MIE_G, rand2(rng));
+      float cosN = dot(dir, newDir);
+      float phase = fR * rayleighPhase(cosN) + (1.0 - fR) * miePhase(cosN);
+      float pdf = fR * ISOTROPIC_PHASE + (1.0 - fR) * henyeyGreenstein(cosN, MIE_G);
+      weight *= phase / max(pdf, 1e-8);
+      dir = newDir;
+    }
+    if (bounce > 6) {  // roleta russa
+      float q = clamp(weight, 0.05, 0.95);
+      if (rand(rng) > q) break;
+      weight /= q;
+    }
+  }
+  return L;
+}
+
+void main() {
+  uint caseIdx = gl_WorkGroupID.x / 3u, c = gl_WorkGroupID.x % 3u;
+  if (caseIdx >= pc.caseCount) return;
+  vec3 sunDir = normalize(cases[caseIdx].sunDir.xyz);
+  vec3 rd = normalize(cases[caseIdx].viewDir.xyz);
+  vec3 ro = vec3(0.0, R_GROUND + 0.2, 0.0);  // observador a 200 m
+  uint rng = seedFor(uvec2(gl_LocalInvocationIndex, gl_WorkGroupID.x), 0u, 99u);
+  float s = 0.0, s2 = 0.0;
+  for (uint i = 0u; i < pc.pathsPerThread; ++i) {
+    float v = tracePath(ro, rd, sunDir, c, rng);
+    if (isnan(v) || isinf(v)) v = 0.0;  // caminho degenerado (peso numérico inválido): descartado
+    s += v;
+    s2 += v * v;
+  }
+  sumL[gl_LocalInvocationIndex] = s;
+  sumL2[gl_LocalInvocationIndex] = s2;
+  barrier();
+  if (gl_LocalInvocationIndex == 0u) {
+    float total = 0.0, total2 = 0.0;
+    for (uint i = 0u; i < 64u; ++i) { total += sumL[i]; total2 += sumL2[i]; }
+    float n = float(pc.pathsPerThread * 64u);
+    float mean = total / n;
+    float stderr = sqrt(max(total2 / n - mean * mean, 0.0) / n);
+    // Motor: mesma integração usada na sky-view LUT, com e sem a LUT de múltiplo espalhamento.
+    vec3 engine = integrateSky(ro, rd, sunDir, 1.0);
+    float tTop = raySphere(ro, rd, R_TOP), tGround = raySphere(ro, rd, R_GROUND);
+    float tMax = tGround > 0.0 ? tGround : tTop;
+    float mu = dot(rd, sunDir);
+    float ss = 0.0, T = 1.0, tPrev = 0.0;
+    for (int i = 0; i < 400; ++i) {  // espalhamento simples de referência (sem LUT de MS)
+      float t = tMax * float(i + 1) / 400.0;
+      float dt = t - tPrev;
+      vec3 q = ro + rd * (tPrev + 0.5 * dt);
+      tPrev = t;
+      vec3 sR, ext; float sM;
+      sampleMedium(length(q) - R_GROUND, sR, sM, ext);
+      float sunT = raySphere(q, sunDir, R_GROUND) > 0.0 ? 0.0 : channel(transmittanceRaymarch(length(q), dot(normalize(q), sunDir), 64), c);
+      ss += T * (channel(sR, c) * rayleighPhase(mu) + sM * miePhase(mu)) * sunT * dt;
+      T *= exp(-channel(ext, c) * dt);
+    }
+    uint o = caseIdx * 4u;
+    results[o + 0u][c] = channel(engine, c);
+    results[o + 1u][c] = ss;
+    results[o + 2u][c] = mean;
+    results[o + 3u][c] = stderr;
+  }
+}

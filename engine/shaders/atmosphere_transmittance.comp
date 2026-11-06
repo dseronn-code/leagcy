@@ -1,0 +1,16 @@
+#version 460
+// LUT de transmitância (256x64): calculada uma vez na inicialização (a atmosfera é constante).
+#extension GL_GOOGLE_include_directive : require
+#include "atmosphere.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D lutOut;
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 size = imageSize(lutOut);
+  if (any(greaterThanEqual(id, size))) return;
+  float r, mu;
+  rMuFromTransmittanceUv((vec2(id) + 0.5) / vec2(size), r, mu);
+  imageStore(lutOut, id, vec4(transmittanceRaymarch(r, mu, 64), 1.0));
+}

@@ -1,0 +1,9 @@
+build/
+build2/
+build3/
+assets/
+*.png
+!docs/screenshots/*.png
+__pycache__/
+resultados_pc/
+texcache/

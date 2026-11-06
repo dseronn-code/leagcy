@@ -1,0 +1,27 @@
+#version 460
+// Integração da névoa ao longo das fatias (da câmera para longe), com a integral analítica por fatia (Hillaire 2015).
+// Saída por fatia: rgb = luz espalhada acumulada até o fim da fatia, a = transmitância acumulada.
+#extension GL_GOOGLE_include_directive : require
+#include "fog.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 0) uniform sampler3D inject;
+layout(set = 1, binding = 1, rgba16f) uniform writeonly image3D integratedOut;
+
+void main() {
+  ivec3 size = imageSize(integratedOut);
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (any(greaterThanEqual(id, size.xy))) return;
+  vec3 L = vec3(0.0);
+  float T = 1.0, prevDist = 0.0;
+  for (int z = 0; z < size.z; ++z) {
+    float dist = fogSliceDistance(float(z + 1) / float(size.z));
+    vec4 s = texelFetch(inject, ivec3(id, z), 0);
+    float dt = dist - prevDist, sigmaT = max(s.a, 1e-7);
+    float Tstep = exp(-sigmaT * dt);
+    L += T * (s.rgb - s.rgb * Tstep) / sigmaT;
+    T *= Tstep;
+    prevDist = dist;
+    imageStore(integratedOut, ivec3(id, z), vec4(clampHalf(L), T));
+  }
+}

@@ -1,0 +1,60 @@
+#version 460
+// Espalhamento subsuperficial em espaço de tela (Jimenez et al., "Separable Subsurface Scattering", 2015 — o método
+// de jogos AAA para pele): a irradiância difusa (já sem ruído, antes de multiplicar pelo albedo) dos pixels com
+// MATERIAL_SUBSURFACE é borrada por um perfil gaussiano por canal com largura em metros do mundo (o vermelho anda
+// mais dentro da pele). Duas passadas separáveis (horizontal, vertical). As amostras seguem a superfície: só pixels
+// do mesmo material e a pouca distância em profundidade contam (sem vazar para o fundo).
+#extension GL_GOOGLE_include_directive : require
+#include "gbuffer.glsl"
+#include "scene.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 4) uniform usampler2D gVisibility;
+layout(set = 1, binding = 5) uniform sampler2D diffuseIn;
+layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D diffuseOut;
+layout(push_constant) uniform Push { ivec2 axis; } pc;
+
+const int TAPS = 9;  // de cada lado
+
+uint materialAt(ivec2 p) {
+  uint obj = texelFetch(gVisibility, p, 0).x;
+  return obj == 0u ? 0xFFFFFFFFu : instances[obj - 1u].material;
+}
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (!insideRender(id)) return;
+  vec4 center = texelFetch(diffuseIn, id, 0);
+  uint mat = materialAt(id);
+  float depth = texelFetch(gDepth, id, 0).r;
+  if (mat == 0xFFFFFFFFu || depth <= 0.0 || (materials[mat].flags & MATERIAL_SUBSURFACE) == 0u) {
+    imageStore(diffuseOut, id, center);
+    return;
+  }
+  vec3 radius = materials[mat].subsurfaceRadius;
+  float z = linearDepth(depth);
+  // Pixels por metro nesta profundidade: altura da imagem / (2 tan(fov/2) z).
+  float pixelsPerMeter = frame.renderSize.y * abs(frame.proj[1][1]) / (2.0 * z);
+  float maxR = max(radius.r, max(radius.g, radius.b));
+  float stepPx = max(maxR * 3.0 * pixelsPerMeter / float(TAPS), 0.0);  // cobre 3 desvios do canal mais largo
+  if (stepPx < 0.35) {  // menor que um pixel: nada a borrar
+    imageStore(diffuseOut, id, center);
+    return;
+  }
+  vec3 sum = center.rgb, wsum = vec3(1.0);
+  for (int i = -TAPS; i <= TAPS; ++i) {
+    if (i == 0) continue;
+    ivec2 q = clamp(id + ivec2(round(vec2(pc.axis) * float(i) * stepPx)), ivec2(0), ivec2(frame.renderSize.xy) - 1);
+    if (materialAt(q) != mat) continue;
+    float zq = linearDepth(texelFetch(gDepth, q, 0).r);
+    float distM = abs(float(i)) * stepPx / pixelsPerMeter;
+    // Quanto a profundidade muda além da curvatura esperada: corta onde a superfície "salta" (orelha na frente da
+    // bochecha).
+    float dz = abs(zq - z);
+    if (dz > maxR * 4.0) continue;
+    vec3 w = exp(-0.5 * (distM * distM + dz * dz) / max(radius * radius, vec3(1e-10)));
+    sum += texelFetch(diffuseIn, q, 0).rgb * w;
+    wsum += w;
+  }
+  imageStore(diffuseOut, id, vec4(sum / wsum, center.a));
+}

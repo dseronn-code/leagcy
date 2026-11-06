@@ -1,0 +1,151 @@
+#version 460
+// Denoiser, passo 1 (SVGF — Schied et al. 2017): acumulação temporal com reprojeção.
+// Cada pixel reaproveita o histórico filtrado do mesmo ponto no frame anterior
+// (validado por profundidade e normal) e estima a variância a partir dos momentos.
+#extension GL_GOOGLE_include_directive : require
+#include "gbuffer.glsl"
+#include "brdf.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 1, binding = 4) uniform sampler2D gDepthPrev;
+layout(set = 1, binding = 5) uniform sampler2D gNormalPrev;
+layout(set = 1, binding = 6) uniform sampler2D gMotion;
+layout(set = 1, binding = 7) uniform sampler2D diffuseIn;
+layout(set = 1, binding = 8) uniform sampler2D specularIn;
+layout(set = 1, binding = 9) uniform sampler2D diffuseHistory;
+layout(set = 1, binding = 10) uniform sampler2D specularHistory;
+layout(set = 1, binding = 11) uniform sampler2D momentsHistory;  // x,y = momentos difuso; z,w = especular
+layout(set = 1, binding = 12) uniform sampler2D lengthHistory;   // x = frames acumulados
+layout(set = 1, binding = 13, rgba16f) uniform writeonly image2D diffuseOut;   // rgb + variância
+layout(set = 1, binding = 14, rgba16f) uniform writeonly image2D specularOut;
+layout(set = 1, binding = 15, rgba32f) uniform writeonly image2D momentsOut;  // float32: luminância² estoura float16
+layout(set = 1, binding = 16, rgba16f) uniform writeonly image2D lengthOut;
+
+const float MAX_HISTORY = 48.0;
+const float HIT_DIST_MISS = 60000.0;  // lighting.glsl: raio especular que foi para o céu
+
+// Histórico bilinear em `p` (pixels do frame anterior): só os texels que são a mesma superfície (profundidade e
+// normal). Devolve o peso total (0 = sem histórico).
+float fetchHistory(vec2 p, float z, vec3 N, out vec3 hd, out vec3 hs, out vec4 hm, out float hl) {
+  hd = hs = vec3(0.0);
+  hm = vec4(0.0);
+  hl = 0.0;
+  float wsum = 0.0;
+  ivec2 base = ivec2(floor(p));
+  vec2 f = fract(p);
+  for (int i = 0; i < 4; ++i) {
+    ivec2 o = ivec2(i & 1, i >> 1);
+    ivec2 q = base + o;
+    if (!insideRender(q)) continue;
+    float zq = linearDepth(texelFetch(gDepthPrev, q, 0).r);
+    vec3 nq = texelFetch(gNormalPrev, q, 0).xyz;
+    if (abs(zq - z) > 0.05 * z || dot(nq, N) < 0.85) continue;
+    float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+    hd += texelFetch(diffuseHistory, q, 0).rgb * w;
+    hs += texelFetch(specularHistory, q, 0).rgb * w;
+    hm += texelFetch(momentsHistory, q, 0) * w;
+    hl += texelFetch(lengthHistory, q, 0).x * w;
+    wsum += w;
+  }
+  if (wsum > 0.01) {
+    hd /= wsum; hs /= wsum; hm /= wsum; hl /= wsum;
+  }
+  return wsum;
+}
+
+// Distância do reflexo suavizada (3x3, só acertos): a de um pixel vem de 1-2 raios e faria o histórico tremer.
+float smoothHitDistance(ivec2 id) {
+  float sum = 0.0, n = 0.0;
+  for (int y = -1; y <= 1; ++y)
+    for (int x = -1; x <= 1; ++x) {
+      ivec2 q = id + ivec2(x, y);
+      if (!insideRender(q)) continue;
+      float t = texelFetch(specularIn, q, 0).a;
+      if (t > 0.0) { sum += min(t, HIT_DIST_MISS); n += 1.0; }
+    }
+  return n > 0.0 ? sum / n : 0.0;
+}
+
+void main() {
+  ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+  if (!insideRender(id)) return;
+  float depth = texelFetch(gDepth, id, 0).r;
+  vec3 cd = texelFetch(diffuseIn, id, 0).rgb;
+  vec3 cs = texelFetch(specularIn, id, 0).rgb;
+  if (depth <= 0.0) {
+    imageStore(diffuseOut, id, vec4(0.0));
+    imageStore(specularOut, id, vec4(0.0));
+    imageStore(momentsOut, id, vec4(0.0));
+    imageStore(lengthOut, id, vec4(0.0));
+    return;
+  }
+  vec4 nr = texelFetch(gNormal, id, 0);
+  vec3 N = nr.xyz;
+  float z = linearDepth(depth);
+
+  // Reprojeção bilinear: cada um dos 4 texels só conta se for a mesma superfície.
+  vec3 hd = vec3(0.0), hs = vec3(0.0);
+  vec4 hm = vec4(0.0);
+  float hl = 0.0, wsum = 0.0;
+  if (historyValid()) {
+    vec2 uv = (vec2(id) + 0.5) * frame.renderSize.zw;
+    vec2 p = (uv - texelFetch(gMotion, id, 0).xy) * frame.renderSize.xy - 0.5;
+    wsum = fetchHistory(p, z, N, hd, hs, hm, hl);
+
+    // Movimento VIRTUAL do reflexo (como no NRD): num espelho a imagem refletida está atrás da superfície, à
+    // distância (câmera→ponto + distância do reflexo) na direção de visão, e se move como esse ponto virtual — não
+    // como o espelho. Superfícies lisas usam o ponto virtual; rugosas, o da superfície (o reflexo é borrado e segue
+    // a superfície). O histórico continua validado pela superfície no ponto reprojetado.
+    float virtualWeight = virtualMotionEnabled() ? 1.0 - smoothstep(0.15, 0.5, nr.w) : 0.0;
+    float hitT = virtualWeight > 0.0 ? smoothHitDistance(id) : 0.0;
+    if (hitT > 0.0) {
+      vec3 P = worldPosFromDepth(uv, depth);
+      vec3 view = P - frame.cameraPos.xyz;
+      float dist = length(view);
+      vec3 Pv = frame.cameraPos.xyz + view * ((dist + min(hitT, 1.0e4)) / dist);
+      // Como os vetores de movimento: diferença entre as projeções atual e anterior SEM jitter (câmera parada = 0).
+      vec4 cPrev = frame.prevViewProjNoJitter * vec4(Pv, 1.0), cCur = frame.viewProjNoJitter * vec4(Pv, 1.0);
+      if (cPrev.w > 0.0 && cCur.w > 0.0) {
+        vec2 motionV = (cCur.xy / cCur.w - cPrev.xy / cPrev.w) * 0.5;
+        vec2 pv = mix(p, (uv - motionV) * frame.renderSize.xy - 0.5, virtualWeight);
+        vec3 vd, vs;
+        vec4 vm;
+        float vl;
+        if (fetchHistory(pv, z, N, vd, vs, vm, vl) > 0.01) {
+          hs = vs;
+          hm.zw = vm.zw;
+        }
+      }
+    }
+  }
+  bool valid = wsum > 0.01;
+  if (valid) {
+    // Histórico foi gravado com a pré-exposição do frame anterior: traz para a escala atual.
+    float k = historyExposureScale();
+    hd *= k;
+    hs *= k;
+    hm *= vec4(k, k * k, k, k * k);
+  }
+  float len = valid ? min(hl + 1.0, MAX_HISTORY) : 1.0;
+
+  float ld = luminance(cd), ls = luminance(cs);
+  vec4 m = vec4(ld, ld * ld, ls, ls * ls);
+  float alpha = valid ? max(1.0 / len, 0.04) : 1.0;
+  float alphaSpec = valid ? max(1.0 / len, 0.12) : 1.0;  // reflexões mudam com o ponto de vista: menos histórico
+  float alphaM = valid ? max(1.0 / len, 0.2) : 1.0;
+  m = mix(hm, m, alphaM);
+  vec3 od = mix(hd, cd, alpha);
+  vec3 os = mix(hs, cs, alphaSpec);
+
+  // Variância temporal; com pouco histórico, assume alta para o filtro espacial agir forte.
+  float vd = max(m.y - m.x * m.x, 0.0), vs = max(m.w - m.z * m.z, 0.0);
+  if (len < 4.0) {
+    float boost = 4.0 / len;
+    vd = max(vd, ld * ld) * boost;
+    vs = max(vs, ls * ls) * boost;
+  }
+  imageStore(diffuseOut, id, vec4(clampHalf(od), min(vd, HALF_SAFE_MAX)));
+  imageStore(specularOut, id, vec4(clampHalf(os), min(vs, HALF_SAFE_MAX)));
+  imageStore(momentsOut, id, m);
+  imageStore(lengthOut, id, vec4(len, 0.0, 0.0, 0.0));
+}
