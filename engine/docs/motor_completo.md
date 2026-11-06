@@ -227,13 +227,17 @@ pular, correr, direção da câmera; o anfitrião limita o tamanho do vetor) e m
 liso mesmo com pacotes perdidos. Quem entra ocupa uma vaga livre e nasce no ponto dela; quem sai libera a vaga.
 A câmera do cliente segue o boneco dele.
 
-Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina): o cliente segura W por 1,5 s e o boneco
-dele anda 6,30 m no anfitrião; no fim, o boneco e a bola aparecem no cliente na mesma posição que no anfitrião
-(diferença 0,00 cm) e a bola parada no chão.
+No cliente, personagens com `"visual"` animam pela velocidade estimada das poses recebidas (parado/andar/correr e
+IK dos pés, como no anfitrião).
+
+Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina, o jogador é a raposa animada): o cliente
+segura W por 1,5 s e o boneco dele anda 2,30 m no anfitrião (1,5 m/s); no fim, o boneco e a bola aparecem no cliente
+na mesma posição que no anfitrião (diferença 0,00 cm), a bola parada no chão; e no cliente a pata da raposa oscila
+3,8 cm em relação à bacia enquanto ela anda (a animação roda lá).
 
 Ainda não tem: previsão no cliente (no LAN o atraso é de poucos ms; pela internet o próprio boneco responde com o
-atraso da conexão), animação replicada dos personagens com `"visual"` (aparecem na pose parada) e rodas dos carros
-no cliente (o chassi vem certo). Os scripts rodam nos dois lados (no cliente servem para a interface).
+atraso da conexão) e rodas dos carros no cliente (o chassi vem certo). Os scripts rodam nos dois lados (no cliente
+servem para a interface).
 
 ## Malhas comprimidas e texturas KTX2 (glTF do gltfpack)
 

@@ -117,6 +117,9 @@ struct Character {
   uint32_t id = ~0u;        // na Physics
   // IA ("controle": "ia"): anda pela malha de navegação até um ponto ou seguindo outra entidade.
   int remoteSlot = -1;  // multijogador: vaga de jogador remoto (entrada vem da rede)
+  glm::vec3 netVelocity{0.0f};  // cliente de rede: velocidade estimada pelas poses recebidas (anima o "visual")
+  glm::vec3 netLastPos{0.0f};
+  bool netHasLast = false;
   bool ai = false;
   bool aiHasTarget = false;
   glm::vec3 aiTarget{0.0f};

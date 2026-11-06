@@ -669,7 +669,18 @@ void World::update(scene::Scene& scene, float dt) {
   time += dt;
   if (scripting) scripting->update(scene, dt);
   if (paused) return;  // um script pausou agora: a pausa já vale neste quadro (nada se move)
-  if (netClient) return;  // cliente de rede: as poses vêm do anfitrião (game/network)
+  if (netClient) {  // cliente de rede: as poses vêm do anfitrião (game/network); aqui só a animação dos "visual"
+    for (auto ent : registry.view<Transform, Character>()) {
+      Character& c = registry.get<Character>(ent);
+      if (!c.visual.enabled || c.visual.model < 0) continue;
+      const glm::vec3 pos = registry.get<Transform>(ent).position;
+      if (c.netHasLast) c.netVelocity = glm::mix(c.netVelocity, (pos - c.netLastPos) / dt, 1.0f - std::exp(-dt * 15.0f));
+      c.netLastPos = pos;
+      c.netHasLast = true;
+      animateCharacter(scene, c, pos - glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f), dt);
+    }
+    return;
+  }
   // Personagens: velocidade desejada pela entrada do jogador ou pelo roteiro.
   for (auto ent : registry.view<Character>()) {
     Character& c = registry.get<Character>(ent);
@@ -806,9 +817,11 @@ void World::update(scene::Scene& scene, float dt) {
 void World::animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt) {
   CharacterVisual& v = c.visual;
   scene::Model& m = scene.models[size_t(v.model)];
-  const glm::vec3 vel = physics->characterVelocity(c.id);
+  // No cliente de rede a física não roda: a velocidade vem das poses recebidas e o personagem conta como no chão
+  // enquanto não sobe nem desce rápido.
+  const glm::vec3 vel = netClient ? c.netVelocity : physics->characterVelocity(c.id);
   const float hs = glm::length(glm::vec2(vel.x, vel.z));
-  const bool onGround = physics->characterOnGround(c.id);
+  const bool onGround = netClient ? std::abs(vel.y) < 1.0f : physics->characterOnGround(c.id);
   // Velocidade e direção suavizadas (sem trancos de um quadro para o outro).
   const float k = 1.0f - std::exp(-dt * 10.0f);
   v.speed += ((onGround ? hs : v.speed) - v.speed) * k;
