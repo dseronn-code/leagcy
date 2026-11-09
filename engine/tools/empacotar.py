@@ -8,6 +8,7 @@ O que vai para a pasta:
   - o executável e as bibliotecas ao lado dele (DLSS e outras .dll/.so do build);
   - os shaders compilados (o executável procura "shaders/" na própria pasta antes da pasta do build);
   - a fonte do HUD e os textos de licença (DLSS, Roboto e a tabela de licenças);
+  - as traduções (idiomas/*.json);
   - as cenas e tudo o que elas usam: modelos glTF (com .bin e texturas), scripts Lua, sons e os arquivos citados
     dentro dos scripts (strings com extensão conhecida que existem no disco);
   - jogar.bat (Windows) e jogar.sh (Linux): abrem a primeira cena em tela cheia.
@@ -170,6 +171,8 @@ def main():
     for extra in ('fontes/Roboto-Medium.ttf', 'fontes/LICENSE-Roboto.txt', 'docs/licencas.md'):
         if os.path.isfile(os.path.join(MOTOR, extra)):
             pac.adicionar(extra)
+    for idioma in sorted(glob.glob(os.path.join(MOTOR, 'idiomas', '*.json'))):  # traduções dos textos (t())
+        pac.adicionar(os.path.relpath(idioma, MOTOR).replace(os.sep, '/'))
 
     if os.path.isdir(saida):
         shutil.rmtree(saida)

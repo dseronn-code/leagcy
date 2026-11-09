@@ -2,6 +2,7 @@
 #include <array>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <entt/entt.hpp>
@@ -257,6 +258,14 @@ class World {
   // continuam rodando (o menu). Diferente de `simulate` (o editor parado, sem scripts).
   bool paused = false;
   bool quitRequested = false;        // sair() no script
+  // Idiomas (t("texto") no script): idiomas/<código>.json com {"_nome": "English", "Continuar": "Continue"}; a chave
+  // é o texto original em português, então sem tradução (ou sem a pasta) aparece o português. Ordem de escolha:
+  // --idioma, a escolha guardada do jogador (saves/idioma.txt), "idioma" da cena, "pt".
+  std::string language = "pt";
+  std::string translate(const std::string& key) const;
+  bool setLanguage(const std::string& code, bool remember);
+  std::vector<std::pair<std::string, std::string>> languages() const;  // (código, nome), em ordem de código
+  std::string scenePath;
   bool playerControl = true;         // controle_jogador(falso): o jogador para de responder (cutscene)
   float realTime = 0.0f;             // s desde o início, mesmo pausado (tempo_real())
   std::string qualityRequest;        // qualidade("medio"): o main recria o renderizador com o preset
@@ -315,6 +324,9 @@ class World {
   float time = 0.0f;  // segundos de jogo simulados
 
  private:
+  std::unordered_map<std::string, std::unordered_map<std::string, std::string>> texts_;  // idioma -> chave -> texto
+  std::unordered_map<std::string, std::string> languageNames_;
+  void loadLanguages();
   struct FileData;
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
@@ -334,6 +346,8 @@ class World {
 bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera& camera);
 // Áudio sem placa de som (modo sem janela): a mixagem fica na memória para --audio-wav. Antes de carregar a cena.
 void setAudioOffline(bool offline);
+// --idioma: vale acima da escolha guardada e da cena. Antes de carregar a cena.
+void setLanguageOverride(const std::string& code);
 World* currentWorld();
 
 }  // namespace game

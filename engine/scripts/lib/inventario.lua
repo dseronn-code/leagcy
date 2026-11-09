@@ -53,9 +53,9 @@ end
 function inventario.desenhar(x, y)
   local lista = inventario.itens()
   hud.retangulo(x, y, 0.22, 0.05 + 0.04 * #lista, {0, 0, 0, 0.45})
-  hud.texto("Inventário", x + 0.01, y + 0.008, {tamanho = 0.03, cor = {1, 0.85, 0.35}})
+  hud.texto(t("Inventário"), x + 0.01, y + 0.008, {tamanho = 0.03, cor = {1, 0.85, 0.35}})
   for i, it in ipairs(lista) do
-    hud.texto(it[1], x + 0.012, y + 0.008 + 0.04 * i, {tamanho = 0.027})
+    hud.texto(t(it[1]), x + 0.012, y + 0.008 + 0.04 * i, {tamanho = 0.027})
     hud.texto(tostring(it[2]), x + 0.21, y + 0.008 + 0.04 * i, {tamanho = 0.027, alinhar = "direita"})
   end
 end
@@ -115,10 +115,10 @@ function missoes.desenhar(x, y)
   for _, id in ipairs(ordem) do
     local m = lista_missoes[id]
     if m.estado == "ativa" then
-      hud.texto(m.titulo, x, y + 0.04 * linhas, {tamanho = 0.03, cor = {1, 0.85, 0.35}})
+      hud.texto(t(m.titulo), x, y + 0.04 * linhas, {tamanho = 0.03, cor = {1, 0.85, 0.35}})
       linhas = linhas + 1
       for _, o in ipairs(m.objetivos) do
-        hud.texto((o[2] and "[x] " or "[ ] ") .. o[1], x + 0.015, y + 0.04 * linhas,
+        hud.texto((o[2] and "[x] " or "[ ] ") .. t(o[1]), x + 0.015, y + 0.04 * linhas,
                   {tamanho = 0.026, cor = o[2] and {0.5, 1, 0.5, 0.8} or {1, 1, 1}})
         linhas = linhas + 1
       end

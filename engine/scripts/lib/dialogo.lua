@@ -47,12 +47,12 @@ function dialogo.atualizar(dt)
   if not estado then return end
   local no = estado.arvore[estado.no]
   if not no then terminar() return end
-  local texto = no.fala or ""
+  local texto = t(no.fala or "")  -- falas, nomes e opções passam pelos idiomas/
   estado.letras = math.min(#texto, estado.letras + (dt or 0) * VELOCIDADE)
   local completo = estado.letras >= #texto
   -- Caixa de diálogo na parte de baixo da tela.
   hud.retangulo(0.08, 0.66, 0.84, 0.3, {0.03, 0.04, 0.07, 0.86})
-  if no.quem then hud.texto(no.quem, 0.11, 0.68, {tamanho = 0.038, cor = {1, 0.85, 0.35}}) end
+  if no.quem then hud.texto(t(no.quem), 0.11, 0.68, {tamanho = 0.038, cor = {1, 0.85, 0.35}}) end
   -- Corta no limite de um caractere UTF-8 (acentos não quebram).
   local n = math.floor(estado.letras)
   while n > 0 and n < #texto and texto:byte(n + 1) >= 0x80 and texto:byte(n + 1) < 0xC0 do n = n - 1 end
@@ -64,14 +64,14 @@ function dialogo.atualizar(dt)
   end
   if no.opcoes and #no.opcoes > 0 then
     for i, op in ipairs(no.opcoes) do
-      if hud.botao(op[1], 0.12, 0.79 + (i - 1) * 0.055, 0.76, 0.048, {tamanho = 0.028}) then
+      if hud.botao(t(op[1]), 0.12, 0.79 + (i - 1) * 0.055, 0.76, 0.048, {tamanho = 0.028}) then
         if op[3] then op[3]() end
         ir(op[2])
         return
       end
     end
   else
-    hud.texto("Enter >", 0.89, 0.91, {tamanho = 0.026, alinhar = "direita", cor = {1, 1, 1, 0.6}})
+    hud.texto(t("Enter >"), 0.89, 0.91, {tamanho = 0.026, alinhar = "direita", cor = {1, 1, 1, 0.6}})
     if avancar then
       if no.acao then no.acao() end
       ir(no.proximo)

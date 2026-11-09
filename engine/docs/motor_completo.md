@@ -286,6 +286,32 @@ mundo atual e devolve os dados.
 Na janela (Xvfb): o menu aparece por cima do jogo, Opções abre pelo clique e a troca para Média refaz o renderizador
 sem fechar o jogo.
 
+## Idiomas
+
+Os textos do jogo passam por `t("texto")`: a chave é o próprio texto em português, então sem tradução (ou sem a
+pasta) aparece o português e nunca uma chave crua. As traduções ficam em `idiomas/<código>.json`:
+
+```json
+{"_nome": "English", "Continuar": "Continue", "Qualidade: {q}": "Quality: {q}"}
+```
+
+- `t("Qualidade: {q}", {q = "Alta"})` troca `{q}`; `idioma()` diz o atual e `idioma("en")` troca (e guarda a escolha
+  do jogador em `saves/idioma.txt`); `idiomas()` lista `{código, nome}` para montar um seletor.
+- Ordem de escolha: `--idioma en` na linha de comando, a escolha guardada, `"idioma"` da cena, português.
+- Já traduzidos: o menu de pausa (com a escolha de idioma em Opções quando há mais de um), `lib/dialogo.lua`
+  (falas, nomes e opções passam por `t` sozinhos), `lib/sequencia.lua` (legendas), `lib/inventario.lua` (itens,
+  missões e objetivos) e o guarda do parque. Vêm inglês e espanhol; um idioma novo é só um arquivo a mais.
+- A fonte do HUD cobre o Latin-1 (á, ç, ñ, ¿, ¡...). O empacotador leva `idiomas/` junto.
+
+Testes (`tools/idiomas.py`):
+
+| Teste | Resultado |
+|---|---|
+| traduz | en "Continue", "Quality: High"; es "Calidad: Alta", "¡Misión cumplida! +20 monedas"; sem tradução sai como está |
+| lista | `idiomas()`: en=English, es=Español, pt=Português |
+| escolha | cena "en" → en; depois de `idioma("es")` a escolha guardada vence a cena; `--idioma pt` vence tudo |
+| menu | menu de pausa com janela: o 1º botão em inglês ("Continue") mais estreito que em português ("Continuar") |
+
 ## Partículas de jogo
 
 Na entidade: `"particulas": {"tipo": "fogo", "raio": 0.3, "escala": 1, "quantidade": 900, "desvio": [0, 0.3, 0],

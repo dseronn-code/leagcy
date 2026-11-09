@@ -384,7 +384,7 @@ struct Scripting::Impl {
       box(x, y, w, h, focused ? optColor(o, "cor_foco", kFocus) : optColor(o, "cor", kBg));
       const float size = optNum(o, "tamanho", 0.5f * h);
       label(text, x + 0.03f * w, y, h, size, optColor(o, "cor_texto", kText), 0);
-      label(value ? "Sim" : "Não", x + 0.97f * w, y, h, size, value ? glm::vec4(0.45f, 1.0f, 0.5f, 1.0f) : glm::vec4(1.0f, 0.55f, 0.5f, 1.0f), 2);
+      label(world.translate(value ? "Sim" : "Não"), x + 0.97f * w, y, h, size, value ? glm::vec4(0.45f, 1.0f, 0.5f, 1.0f) : glm::vec4(1.0f, 0.55f, 0.5f, 1.0f), 2);
       return value;
     });
     hud.set_function("deslizar", [=, this](const std::string& text, float x, float y, float w, float h, float value, float lo,
@@ -444,6 +444,32 @@ struct Scripting::Impl {
       world.cameraOverride.fovDeg = fov.value_or(0.0f);
     });
     lua.set_function("camera_jogo", [this]() { world.cameraOverride.active = false; });
+    // Idiomas: t("chave", {nome = "Ana"}) troca {nome} no texto traduzido.
+    lua.set_function("t", [this](const std::string& key, sol::optional<sol::table> vars, sol::this_state st) {
+      std::string text = world.translate(key);
+      if (vars) {
+        sol::state_view L(st);
+        for (auto& kv : *vars) {
+          if (!kv.first.is<std::string>()) continue;
+          const std::string tag = "{" + kv.first.as<std::string>() + "}";
+          const std::string val = L["tostring"](kv.second).get<std::string>();
+          for (size_t at = text.find(tag); at != std::string::npos; at = text.find(tag, at + val.size()))
+            text.replace(at, tag.size(), val);
+        }
+      }
+      return text;
+    });
+    lua.set_function("idioma", [this](sol::optional<std::string> code) {
+      if (code) world.setLanguage(*code, true);
+      return world.language;
+    });
+    lua.set_function("idiomas", [this](sol::this_state st) {
+      sol::state_view L(st);
+      sol::table out = L.create_table();
+      int i = 1;
+      for (const auto& [code, name] : world.languages()) out[i++] = L.create_table_with(1, code, 2, name);
+      return out;
+    });
     lua.set_function("controle_jogador", [this](sol::optional<bool> on) {
       if (on) world.playerControl = *on;
       return world.playerControl;

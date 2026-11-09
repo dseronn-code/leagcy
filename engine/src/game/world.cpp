@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include "core/log.h"
+#include "core/paths.h"
 #include "scene/camera.h"
 #include "scene/mesh.h"
 #include "scene/scene.h"
@@ -81,6 +82,7 @@ const char* shapeName(ShapeType t) { return t == ShapeType::Box ? "caixa" : t ==
 
 World* gCurrent = nullptr;
 bool gAudioOffline = false;
+std::string gLanguageOverride;  // --idioma
 
 // Velocidade inicial lida do arquivo (aplicada ao criar o corpo).
 struct InitialVelocity {
@@ -150,6 +152,16 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
   } catch (const json::exception& e) {
     LOG_ERROR("Cena %s: JSON inválido (%s)", path.c_str(), e.what());
     return false;
+  }
+  scenePath = path;
+  loadLanguages();
+  {
+    std::string saved;
+    std::ifstream("saves/idioma.txt") >> saved;
+    language = "pt";
+    const std::string fromScene = doc.value("idioma", std::string());
+    for (const std::string& want : {fromScene, saved, gLanguageOverride})
+      if (!want.empty() && texts_.count(want)) language = want;
   }
   try {
     // Sol e céu.
@@ -1265,6 +1277,67 @@ bool World::playerVehicle(glm::vec3& position, glm::vec3& forward) const {
   return false;
 }
 void setAudioOffline(bool offline) { gAudioOffline = offline; }
+void setLanguageOverride(const std::string& code) { gLanguageOverride = code; }
+
+void World::loadLanguages() {
+  texts_.clear();
+  languageNames_.clear();
+  std::vector<std::filesystem::path> dirs = {"idiomas"};
+  const std::filesystem::path sceneDir = std::filesystem::path(scenePath).parent_path();
+  dirs.push_back(sceneDir / "idiomas");
+  dirs.push_back(sceneDir.parent_path() / "idiomas");
+  if (const std::filesystem::path exe = core::executableDir(); !exe.empty()) {  // pacote; build ao lado do motor
+    dirs.push_back(exe / "idiomas");
+    dirs.push_back(exe.parent_path() / "idiomas");
+    dirs.push_back(exe.parent_path().parent_path() / "idiomas");  // build/Release no Windows
+  }
+  for (const auto& dir : dirs) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(dir, ec)) continue;
+    for (const auto& it : std::filesystem::directory_iterator(dir, ec)) {
+      if (it.path().extension() != ".json") continue;
+      const std::string code = it.path().stem().string();
+      if (texts_.count(code)) continue;  // a primeira pasta vence
+      std::ifstream f(it.path());
+      try {
+        const json doc = json::parse(f, nullptr, true, true);
+        auto& table = texts_[code];
+        for (auto kv = doc.begin(); kv != doc.end(); ++kv)
+          if (kv.value().is_string()) table[kv.key()] = kv.value().get<std::string>();
+        languageNames_[code] = table.count("_nome") ? table["_nome"] : code;
+      } catch (const json::exception& e) {
+        LOG_ERROR("Idioma %s: JSON inválido (%s)", it.path().string().c_str(), e.what());
+      }
+    }
+  }
+}
+
+std::string World::translate(const std::string& key) const {
+  for (const std::string& code : {language, std::string("pt")}) {
+    auto t = texts_.find(code);
+    if (t == texts_.end()) continue;
+    auto k = t->second.find(key);
+    if (k != t->second.end()) return k->second;
+  }
+  return key;
+}
+
+bool World::setLanguage(const std::string& code, bool remember) {
+  if (!texts_.count(code)) return false;
+  language = code;
+  if (remember) {
+    std::error_code ec;
+    std::filesystem::create_directories("saves", ec);
+    std::ofstream("saves/idioma.txt") << code;
+  }
+  return true;
+}
+
+std::vector<std::pair<std::string, std::string>> World::languages() const {
+  std::vector<std::pair<std::string, std::string>> out(languageNames_.begin(), languageNames_.end());
+  std::sort(out.begin(), out.end());
+  return out;
+}
 
 entt::entity World::entityOfBody(uint32_t body) const {
   if (body == ~0u) return entt::null;

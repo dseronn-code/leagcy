@@ -30,7 +30,7 @@ function atualizar(e, dt)
   if dialogo.ativo() then
     dialogo.atualizar(dt)
   elseif perto then
-    hud.texto("E: falar com o guarda", 0.5, 0.82, {tamanho = 0.035, alinhar = "centro"})
+    hud.texto(t("E: falar com o guarda"), 0.5, 0.82, {tamanho = 0.035, alinhar = "centro"})
     if tecla_apertada("e") or controle_apertado("x") then dialogo.iniciar(conversa, "inicio") end
   end
   -- Objetivos da missão pelo lugar do jogador: alto na escada e perto do elevador.
@@ -45,6 +45,6 @@ function atualizar(e, dt)
   missoes.desenhar(0.03, 0.05)
   if #inventario.itens() > 0 then inventario.desenhar(0.76, 0.05) end
   if som_ok and tempo_real() - som_ok < 3 then
-    hud.texto("Missão concluída! +20 moedas", 0.5, 0.3, {tamanho = 0.05, alinhar = "centro", cor = {0.5, 1, 0.5}})
+    hud.texto(t("Missão concluída! +{n} moedas", {n = 20}), 0.5, 0.3, {tamanho = 0.05, alinhar = "centro", cor = {0.5, 1, 0.5}})
   end
 end

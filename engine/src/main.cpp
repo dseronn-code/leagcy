@@ -224,6 +224,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--test-restore") o.testRestore = true;
     else if (a == "--audio-wav") o.audioWav = next();
     else if (a == "--simular") o.simulate = next();
+    else if (a == "--idioma") game::setLanguageOverride(next());
     else if (a == "--host") {
       o.hostPort = 7777;
       if (i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0]))) o.hostPort = std::atoi(argv[++i]);
@@ -391,6 +392,7 @@ Options parseArgs(int argc, char** argv) {
           "  --scene cena.json [--save-world saida.json]   cena em arquivo com física (ex.: cenas/fisica.json)\n"
           "  --audio-wav saida.wav    sem janela: grava o áudio 3D da cena .json (ouvinte = câmera)\n"
           "  --simular \"t:evento;...\"  entradas simuladas para testes (tecla, segurar, clique, mouse, eixo)\n"
+          "  --idioma en         idioma dos textos do jogo (idiomas/<codigo>.json)\n"
           "  --host [porta]           multijogador: anfitrião (padrão 7777; cena com \"multijogador\")\n"
           "  --conectar ip[:porta]    multijogador: entra no jogo de outro computador\n"
           "  --editor                 editor visual na janela (entidades, propriedades, alças, jogar/pausar, salvar)\n"

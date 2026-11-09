@@ -8,7 +8,7 @@
 --       {t = 8, pos = {6, 1.5, 0}, alvo = {"raposa"}, fov = 35},  -- alvo pode ser uma entidade (segue ela)
 --     },
 --     eventos = {
---       {t = 0.5, fala = "Guarda: quem vem lá?", duracao = 2.5},   -- legenda na tarja de baixo
+--       {t = 0.5, fala = "Guarda: quem vem lá?", duracao = 2.5},   -- legenda na tarja de baixo (traduzida por t)
 --       {t = 1, animar = {"guarda", "Survey", 0.3}},             -- entidade, clipe, transição, laço
 --       {t = 2, som = {"sons/sino.wav", 0, 2, 0}},              -- arquivo, posição, volume
 --       {t = 3, ir_para = {"raposa", 2, 0, 1}},                  -- anda até lá pela navegação
@@ -195,11 +195,11 @@ function Seq:atualizar(dt)
   end
   for _, e in ipairs(self.eventos) do
     if e.fala and self.t >= e.t and self.t < e.t + (e.duracao or 3) then
-      hud.texto(e.fala, 0.5, 0.905, {tamanho = 0.036, alinhar = "centro"})
+      hud.texto(t(e.fala), 0.5, 0.905, {tamanho = 0.036, alinhar = "centro"})
     end
   end
   if self.pode_pular then
-    hud.texto("Enter: pular", 0.97, 0.955, {tamanho = 0.024, alinhar = "direita", cor = {1, 1, 1, 0.55}})
+    hud.texto(t("Enter: pular"), 0.97, 0.955, {tamanho = 0.024, alinhar = "direita", cor = {1, 1, 1, 0.55}})
     if tecla_apertada("enter") or controle_apertado("a") then self:pular() end
   end
 end

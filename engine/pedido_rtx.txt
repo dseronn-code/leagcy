@@ -11,6 +11,7 @@ python tools\rede.py --bin build\Release\legacy.exe
 python tools\ia.py --bin build\Release\legacy.exe
 python tools\ragdoll.py --bin build\Release\legacy.exe
 python tools\sequencia.py --bin build\Release\legacy.exe
+python tools\idiomas.py --bin build\Release\legacy.exe
 python tools\empacotar.py --cena cenas\parque.json --cena cenas\carro.json --saida %TEMP%\legacy_pacote --janela --testar
 build\Release\legacy.exe --scene cenas\parque.json --width 1920 --height 1080 --quit-after 12 --screenshot resultados_pc\parque.png
 build\Release\legacy.exe --scene cenas\parque.json --editor --select raposa --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\editor.png
