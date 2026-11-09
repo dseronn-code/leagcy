@@ -139,7 +139,7 @@ que corria).
 - **Levantar sem salto**: a pose caída se mistura com a animação em 0,5 s (cada osso no mesmo ritmo, posição e
   rotação), e o personagem fica de pé virado para onde o tronco estava deitado.
 - **Em rede**: o anfitrião simula e manda a matriz de cada parte junto com o estado; o cliente interpola entre dois
-  estados (como as rodas dos carros) e faz a mesma transição ao levantar.
+  estados (como as rodas dos carros) e faz a mesma transição ao levantar (teste `ragdoll` em `tools/rede.py`).
 
 ![ragdoll](img/ragdoll.png)
 
@@ -358,7 +358,8 @@ Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina, o jog
 |---|---|
 | rede | o cliente segura W 1,5 s: o boneco anda 2,25 m no anfitrião; no fim, boneco a 0,01 cm e bola a 0,00 cm nos dois lados; no cliente a pata oscila 5,3 cm em relação à bacia (animação) |
 | previsao | com 150 ms de atraso simulado em cada sentido (`LEGACY_REDE_ATRASO_MS`): o boneco reage em 67 ms (2 quadros) com previsão, 367 ms sem; no fim os dois lados concordam (0,0 cm) |
-| rodas | carro dirigido por roteiro no anfitrião: a imagem final do cliente igual à do anfitrião (diferença média 0,18/255), chassi e rodas |
+| rodas | carro dirigido por roteiro no anfitrião: a imagem final do cliente igual à do anfitrião (diferença média 0,21/255), chassi e rodas |
+| ragdoll | raposa em ragdoll no anfitrião: no cliente cai junto (bacia a 2 cm do chão), deitada no mesmo lugar (0,00 cm) e de pé no fim (0,41 m) |
 
 Os scripts rodam nos dois lados (no cliente servem para a interface).
 
