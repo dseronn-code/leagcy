@@ -41,6 +41,17 @@ struct VehicleDesc {
   float suspensionMin = 0.25f, suspensionMax = 0.45f; // m
 };
 
+// Uma parte de um ragdoll: cápsula do ponto `a` ao ponto `b` (mundo, as tampas terminam neles), presa à parte `parent`
+// (-1 = solta, a raiz) por uma junta esférica com limites (cone e torção) no ponto `a`.
+struct RagdollPart {
+  int parent = -1;
+  glm::vec3 a{0.0f}, b{0.0f, 0.1f, 0.0f};
+  float radius = 0.05f;
+  float mass = 1.0f;          // kg
+  float coneDeg = 50.0f;      // quanto o osso dobra em relação ao pai
+  float twistDeg = 25.0f;     // quanto gira em torno do próprio eixo
+};
+
 // Física de corpos rígidos sobre o Jolt Physics: passos fixos de 1/60 s com 2 subpassos de colisão (resultado igual em
 // qualquer taxa de quadros e determinístico entre execuções), em várias threads. Os cabeçalhos do Jolt ficam só em
 // physics.cpp.
@@ -96,6 +107,12 @@ class Physics {
   void stepCharacterOnly(uint32_t character, float dt);
   void nudgeCharacter(uint32_t character, glm::vec3 delta);
   void setCharacterFeet(uint32_t character, glm::vec3 feet);  // editor: teletransporta e zera a velocidade
+
+  // Ragdoll: um corpo por parte, juntas com limites, sem colisão entre partes que já se tocam na pose inicial (pai e
+  // filho, quadril e coxas); todas começam com `velocity`. Devolve os corpos (pose(), addImpulse()), na ordem das
+  // partes. removeRagdoll tira as juntas e os corpos.
+  std::vector<uint32_t> addRagdoll(const std::vector<RagdollPart>& parts, glm::vec3 velocity);
+  void removeRagdoll(const std::vector<uint32_t>& bodies);
 
   // Veículos. drive: acelerador -1..1 (negativo = ré, com câmbio automático), direção -1..1 (+ = direita), freio e
   // freio de mão 0..1.

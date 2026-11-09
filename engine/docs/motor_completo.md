@@ -123,6 +123,34 @@ A raposa (modelo gratuito) tem limites do próprio clipe: na corrida a pata tras
 esquerda a 2,9 m/s, então nenhuma velocidade deixa as duas paradas; e o IK posiciona o tornozelo, sem girar o pé
 para acompanhar a rampa (daí 1,4 cm nas patas de trás).
 
+## Ragdoll (Jolt)
+
+`e:ragdoll(ix, iy, iz)` num personagem com `"visual"`: o corpo vira peças da física ligadas por juntas e o modelo
+passa a seguir as peças; `e:levantar()` põe o personagem de pé onde a bacia caiu, com a animação de volta;
+`e:caido()` diz se está em ragdoll. O impulso (N·s) soma à velocidade que o personagem já tinha (cai para o lado em
+que corria).
+
+- **Montagem automática pelo esqueleto do glTF**, sem configurar osso por osso: a partir da bacia (a primeira junta
+  que se divide em pernas e coluna; ossos de controle acima dela ficam fora), cada osso vira uma cápsula até os
+  filhos (ou, nas pontas — cabeça, mãos, pés —, 60% do osso pai na mesma direção); ossos curtos demais seguem o pai.
+  Juntas swing-twist do Jolt com limites (cone de 50°, torção de 25°) e um atrito leve; partes que se tocam na pose
+  inicial não colidem entre si. A massa do personagem (`"massa"`) é dividida pelo volume das peças.
+- Contínuo (sem atravessar o chão em queda rápida) e no passo fixo da física: o mesmo resultado a qualquer FPS.
+- Só no anfitrião em rede (o cliente não vê o ragdoll ainda).
+
+![ragdoll](img/ragdoll.png)
+
+Testes (`tools/ragdoll.py`, a raposa de 20 kg):
+
+| Teste | Critério | Resultado |
+|---|---|---|
+| cai | bacia perto do chão, nenhum osso dentro do piso | bacia 0,41 → 0,07 m; osso mais baixo a 0,8 cm acima |
+| juntas | distância entre ossos ligados muda < 5% | 4,0% (bacia–coxa: 3,6 mm) |
+| empurrao | 3 m/s para +X: vai para +X | 1,02 m em X, 0,04 m em Z |
+| repouso | caída, nada se mexe > 1 cm em 0,5 s | 0,00 cm |
+| levantar | e:levantar e andar: de pé na altura normal | bacia a 0,41 m (antes: 0,41); andou 3,5 m |
+| degrau | cai sobre a quina de um degrau de 30 cm | nenhum osso dentro (0,0 cm) |
+
 ## Navegação e NPCs (Recast/Detour)
 
 Personagem com `"controle": "ia"` anda sozinho pela malha de navegação: `"ia": {"alvo": [x, y, z]}` vai até um

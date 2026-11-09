@@ -179,6 +179,14 @@ struct Scripting::Impl {
         "animar", [](const Entidade& h, const std::string& clip, sol::optional<float> fade, sol::optional<bool> loop) {
           return h.valid() && h.world->playAction(h.e, clip, fade.value_or(0.2f), loop.value_or(false));
         },
+        "ragdoll", [](const Entidade& h, sol::optional<float> ix, sol::optional<float> iy, sol::optional<float> iz) {
+          return h.valid() && h.world->startRagdoll(h.e, glm::vec3(ix.value_or(0.0f), iy.value_or(0.0f), iz.value_or(0.0f)));
+        },
+        "levantar", [](const Entidade& h) { return h.valid() && h.world->stopRagdoll(h.e); },
+        "caido", [](const Entidade& h) {
+          const Character* c = h.valid() ? h.world->registry.try_get<Character>(h.e) : nullptr;
+          return c && c->ragdoll.active;
+        },
         "parar_animacao", [](const Entidade& h, sol::optional<float> fade) {
           if (h.valid()) h.world->stopAction(h.e, fade.value_or(0.2f));
         },

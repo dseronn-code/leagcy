@@ -144,6 +144,14 @@ struct Character {
   glm::vec3 aiGoal{0.0f};
   bool aiHasGoal = false;
   std::string aiState = "parado";  // parado, patrulhando, perseguindo, procurando, fugindo, indo, seguindo
+  // Ragdoll (e:ragdoll): o personagem vira corpos ligados por juntas e o "visual" segue a física; e:levantar volta.
+  struct Ragdoll {
+    bool active = false;
+    std::vector<uint32_t> bodies, nodes;  // corpo da física e nó do modelo de cada parte
+    std::vector<glm::mat4> offset;        // do corpo até o nó (fixo, da pose em que caiu)
+    glm::mat4 rootBasis{1.0f};            // rotação e escala do modelo (sem a posição)
+    glm::vec3 rootToPelvis{0.0f};         // da origem do modelo até a bacia, no mundo, na pose em que caiu
+  } ragdoll;
 };
 
 // Um passo do roteiro de um veículo (testes, carros de IA simples): a partir de `time` s, pedais e direção.
@@ -237,6 +245,10 @@ class World {
   void stopAction(entt::entity e, float fade);
   // Posição no mundo de um osso (nó do glTF) do modelo de um personagem com "visual"; falso se não existe.
   bool bonePosition(entt::entity e, const std::string& bone, glm::vec3& out) const;
+  // Ragdoll num personagem com "visual": corpos por osso a partir da bacia, com a velocidade atual mais
+  // impulse / massa. Falso se não houver esqueleto. stopRagdoll põe o personagem de pé onde a bacia caiu.
+  bool startRagdoll(entt::entity e, glm::vec3 impulse);
+  bool stopRagdoll(entt::entity e);
   scene::Scene* scene = nullptr;  // a cena deste mundo (consultas dos scripts: ossos, animação)
   std::vector<HudItem> hud;  // interface de jogo deste quadro (refeita pelos scripts enquanto o jogo roda)
   GameInput gameInput;       // teclado, mouse e controle neste quadro (preenchido pelo main)

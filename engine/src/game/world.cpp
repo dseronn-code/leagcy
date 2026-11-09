@@ -710,6 +710,10 @@ void World::update(scene::Scene& scene, float dt) {
   for (auto ent : registry.view<Character>()) {
     Character& c = registry.get<Character>(ent);
     if (c.id == ~0u) continue;
+    if (c.ragdoll.active) {  // a cápsula fica guardada fora do mapa enquanto o corpo é da física
+      physics->setCharacterFeet(c.id, glm::vec3(0.0f, -3000.0f - 10.0f * float(entt::to_integral(ent) & 1023u), 0.0f));
+      continue;
+    }
     glm::vec3 dir(0.0f);
     bool jump = false, run = false;
     if (c.remoteSlot >= 0) {  // vaga de jogador remoto
@@ -880,6 +884,22 @@ void World::update(scene::Scene& scene, float dt) {
     auto& t = registry.get<Transform>(ent);
     Character& c = registry.get<Character>(ent);
     if (c.id == ~0u) continue;
+    if (c.ragdoll.active && c.visual.model >= 0) {
+      scene::Model& m = scene.models[size_t(c.visual.model)];
+      for (size_t k = 0; k < c.ragdoll.bodies.size(); ++k) {
+        glm::vec3 p;
+        glm::quat q;
+        physics->pose(c.ragdoll.bodies[k], p, q);
+        m.drivenWorld[k] = glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(q) * c.ragdoll.offset[k];
+      }
+      // A origem do modelo acompanha a bacia (a caixa de recorte do desenho fica no lugar certo).
+      const glm::vec3 pelvis(m.drivenWorld[0][3]);
+      m.root = glm::translate(glm::mat4(1.0f), pelvis - c.ragdoll.rootToPelvis) * c.ragdoll.rootBasis;
+      t.position = pelvis;
+      if (const Renderable* r = registry.try_get<Renderable>(ent))
+        scene.setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(ent)));
+      continue;
+    }
     const glm::vec3 feet = physics->characterFeet(c.id);
     t.position = feet + glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
     if (const Renderable* r = registry.try_get<Renderable>(ent))
@@ -1385,6 +1405,130 @@ void World::stopAction(entt::entity e, float fade) {
     c->visual.actionOn = false;
     c->visual.actionFade = std::max(fade, 0.0f);
   }
+}
+
+bool World::startRagdoll(entt::entity e, glm::vec3 impulse) {
+  Character* c = registry.try_get<Character>(e);
+  if (!c || c->id == ~0u || !c->visual.enabled || c->visual.model < 0 || c->ragdoll.active || !scene || netClient)
+    return false;
+  scene::Model& m = scene->models[size_t(c->visual.model)];
+  const size_t n = m.nodes.size();
+  if (m.nodeWorld.size() != n || m.skins.empty()) return false;
+  std::vector<uint8_t> joint(n, 0);
+  for (const scene::Skin& sk : m.skins)
+    for (uint32_t j : sk.joints)
+      if (j < n) joint[j] = 1;
+  std::vector<std::vector<uint32_t>> kids(n);
+  for (size_t i = 0; i < n; ++i)
+    if (joint[i] && m.nodes[i].parent >= 0 && joint[size_t(m.nodes[i].parent)]) kids[size_t(m.nodes[i].parent)].push_back(uint32_t(i));
+  auto at = [&](size_t i) { return glm::vec3(m.nodeWorld[i][3]); };
+  // Bacia: descendo da raiz do esqueleto, a primeira junta que se divide (pernas e coluna). Acima dela ficam ossos de
+  // controle (raiz no chão), que não são corpo de verdade.
+  int pelvis = -1;
+  for (size_t i = 0; i < n && pelvis < 0; ++i) {
+    if (!joint[i] || (m.nodes[i].parent >= 0 && joint[size_t(m.nodes[i].parent)])) continue;
+    size_t j = i;
+    while (kids[j].size() == 1) j = kids[j][0];
+    if (kids[j].size() >= 2) pelvis = int(j);
+  }
+  if (pelvis < 0) return false;
+  const float h = c->desc.height, minLen = 0.04f * h;
+  std::vector<RagdollPart> parts;
+  std::vector<uint32_t> nodes;
+  std::vector<int> partOf(n, -1);
+  std::vector<uint32_t> stack{uint32_t(pelvis)};  // pais antes dos filhos
+  while (!stack.empty()) {
+    const uint32_t i = stack.back();
+    stack.pop_back();
+    for (auto it = kids[i].rbegin(); it != kids[i].rend(); ++it) stack.push_back(*it);
+    const glm::vec3 a = at(i);
+    glm::vec3 b = a;
+    float radius = 0.0f;
+    if (!kids[i].empty()) {
+      glm::vec3 cen(0.0f);
+      float far = 0.0f;
+      for (uint32_t k : kids[i]) {
+        cen += at(k);
+        far = std::max(far, glm::length(at(k) - a));
+      }
+      cen /= float(kids[i].size());
+      if (far < minLen) continue;
+      if (glm::length(cen - a) > 0.3f * far) {
+        b = cen;
+        radius = glm::clamp(0.22f * glm::length(b - a), 0.015f * h, 0.1f * h);
+      } else {  // filhos para lados opostos (bacia humana): uma esfera
+        radius = glm::clamp(0.35f * far, 0.015f * h, 0.12f * h);
+      }
+    } else {  // ponta (cabeça, mão, pé): continua na direção do osso, 60% do comprimento do pai
+      if (m.nodes[i].parent < 0) continue;
+      const glm::vec3 d = a - at(size_t(m.nodes[i].parent));
+      if (glm::length(d) < minLen) continue;
+      b = a + 0.6f * d;
+      radius = glm::clamp(0.22f * glm::length(b - a), 0.015f * h, 0.1f * h);
+    }
+    int parent = -1;
+    for (int p = m.nodes[i].parent; p >= 0 && parent < 0; p = m.nodes[size_t(p)].parent) parent = partOf[size_t(p)];
+    if (parent < 0 && !parts.empty()) continue;  // fora da árvore da bacia
+    RagdollPart part;
+    part.parent = parent;
+    part.a = a;
+    part.b = b;
+    part.radius = radius;
+    partOf[i] = int(parts.size());
+    parts.push_back(part);
+    nodes.push_back(i);
+  }
+  if (parts.empty()) return false;
+  // Massa pelo volume de cada parte, somando a do personagem.
+  float volume = 0.0f;
+  std::vector<float> vol(parts.size());
+  for (size_t k = 0; k < parts.size(); ++k) {
+    const float r = parts[k].radius, len = glm::length(parts[k].b - parts[k].a);
+    vol[k] = glm::pi<float>() * r * r * std::max(len - 2.0f * r, 0.0f) + 4.0f / 3.0f * glm::pi<float>() * r * r * r;
+    volume += vol[k];
+  }
+  for (size_t k = 0; k < parts.size(); ++k) parts[k].mass = c->desc.mass * vol[k] / std::max(volume, 1e-9f);
+  const glm::vec3 velocity = physics->characterVelocity(c->id) + impulse / std::max(c->desc.mass, 1e-3f);
+  std::vector<uint32_t> bodies = physics->addRagdoll(parts, velocity);
+  if (bodies.empty()) return false;
+  Character::Ragdoll& r = c->ragdoll;
+  r.active = true;
+  r.bodies = bodies;
+  r.nodes = nodes;
+  r.offset.resize(bodies.size());
+  m.driven.assign(n, -1);
+  m.drivenWorld.resize(bodies.size());
+  for (size_t k = 0; k < bodies.size(); ++k) {
+    glm::vec3 p;
+    glm::quat q;
+    physics->pose(bodies[k], p, q);
+    r.offset[k] = glm::inverse(glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(q)) * m.nodeWorld[nodes[k]];
+    m.driven[nodes[k]] = int(k);
+    m.drivenWorld[k] = m.nodeWorld[nodes[k]];
+  }
+  r.rootBasis = m.root;
+  r.rootBasis[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+  r.rootToPelvis = at(nodes[0]) - glm::vec3(m.root[3]);
+  physics->setCharacterFeet(c->id, glm::vec3(0.0f, -3000.0f - 10.0f * float(entt::to_integral(e) & 1023u), 0.0f));
+  return true;
+}
+
+bool World::stopRagdoll(entt::entity e) {
+  Character* c = registry.try_get<Character>(e);
+  if (!c || !c->ragdoll.active || !scene) return false;
+  scene::Model& m = scene->models[size_t(c->visual.model)];
+  glm::vec3 pelvis(m.drivenWorld[0][3]);
+  physics->removeRagdoll(c->ragdoll.bodies);
+  m.driven.clear();
+  m.drivenWorld.clear();
+  c->ragdoll = Character::Ragdoll{};
+  // De pé onde a bacia está: os pés no chão abaixo dela (ou na altura dela, sem chão).
+  float dist = 0.0f;
+  glm::vec3 feet = pelvis;
+  if (physics->castRay(pelvis + glm::vec3(0.0f, 0.5f * c->desc.height, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f), 2.0f * c->desc.height, &dist) != ~0u)
+    feet.y = pelvis.y + 0.5f * c->desc.height - dist + 0.02f;
+  physics->setCharacterFeet(c->id, feet);
+  return true;
 }
 
 bool World::bonePosition(entt::entity e, const std::string& bone, glm::vec3& out) const {

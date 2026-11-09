@@ -9,9 +9,11 @@
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyFilter.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyLockMulti.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/GroupFilterTable.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
@@ -21,11 +23,13 @@
 #include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -144,6 +148,13 @@ struct Physics::Impl {
   };
   std::vector<Vehicle> vehicles;
 
+  struct Ragdoll {
+    std::vector<uint32_t> bodies;
+    std::vector<JPH::Ref<JPH::Constraint>> joints;
+  };
+  std::vector<Ragdoll> ragdolls;
+  JPH::CollisionGroup::GroupID nextGroup = 1;
+
   // Um passo de cada personagem (antes do passo dos corpos rígidos, como no exemplo do Jolt).
   void stepCharacters(float dt) {
     for (Character& c : characters) stepCharacter(c, dt);
@@ -236,6 +247,9 @@ Physics::~Physics() {
     p_->system->RemoveConstraint(v.constraint);
   }
   p_->vehicles.clear();
+  for (auto& r : p_->ragdolls)
+    for (auto& j : r.joints) p_->system->RemoveConstraint(j);
+  p_->ragdolls.clear();
   p_->characters.clear();  // antes dos corpos: o personagem tem um corpo interno no sistema
   if (p_->system) {
     JPH::BodyIDVector ids;
@@ -294,6 +308,113 @@ uint32_t Physics::addStaticMesh(const std::vector<glm::vec3>& vertices, const st
   BodyDesc d;
   d.friction = friction;
   return p_->add(r.Get(), glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), d);
+}
+
+namespace {
+// Menor distância entre os segmentos pq e rs (amostrado: as partes do ragdoll são poucas e isso roda uma vez).
+float segmentDistance(glm::vec3 p, glm::vec3 q, glm::vec3 r, glm::vec3 s) {
+  float best = 1e30f;
+  for (int i = 0; i <= 16; ++i)
+    for (int j = 0; j <= 16; ++j)
+      best = std::min(best, glm::length(glm::mix(p, q, float(i) / 16.0f) - glm::mix(r, s, float(j) / 16.0f)));
+  return best;
+}
+// Rotação que leva +Y para `dir` (normalizado).
+glm::quat yTo(glm::vec3 dir) {
+  const glm::vec3 y(0.0f, 1.0f, 0.0f);
+  const float d = glm::dot(y, dir);
+  if (d > 0.9999f) return glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+  if (d < -0.9999f) return glm::angleAxis(glm::pi<float>(), glm::vec3(1.0f, 0.0f, 0.0f));
+  return glm::normalize(glm::quat(1.0f + d, glm::cross(y, dir)));
+}
+}  // namespace
+
+std::vector<uint32_t> Physics::addRagdoll(const std::vector<RagdollPart>& parts, glm::vec3 velocity) {
+  std::vector<uint32_t> out;
+  if (parts.empty()) return out;
+  const JPH::uint n = JPH::uint(parts.size());
+  JPH::Ref<JPH::GroupFilterTable> filter = new JPH::GroupFilterTable(n);
+  for (JPH::uint i = 0; i < n; ++i)
+    for (JPH::uint j = i + 1; j < n; ++j) {
+      const RagdollPart &a = parts[i], &b = parts[j];
+      const bool family = a.parent == int(j) || b.parent == int(i) || (a.parent >= 0 && a.parent == b.parent);
+      if (family || segmentDistance(a.a, a.b, b.a, b.b) < 1.1f * (a.radius + b.radius)) filter->DisableCollision(i, j);
+    }
+  const JPH::CollisionGroup::GroupID group = p_->nextGroup++;
+  Impl::Ragdoll rd;
+  for (JPH::uint i = 0; i < n; ++i) {
+    const RagdollPart& part = parts[i];
+    const glm::vec3 axis = part.b - part.a;
+    const float len = glm::length(axis);
+    const float r = std::max(part.radius, 1e-3f);
+    const float half = 0.5f * len - r;
+    JPH::Ref<JPH::Shape> shape;
+    if (half > 1e-3f) shape = new JPH::CapsuleShape(half, r);
+    else shape = new JPH::SphereShape(std::max(r, 0.5f * len));
+    const glm::vec3 center = 0.5f * (part.a + part.b);
+    const glm::quat rot = len > 1e-5f ? yTo(axis / len) : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    JPH::BodyCreationSettings s(shape, JPH::RVec3(center.x, center.y, center.z), toJolt(rot), JPH::EMotionType::Dynamic,
+                                kLayerMoving);
+    s.mFriction = 0.8f;
+    s.mRestitution = 0.0f;
+    s.mLinearDamping = 0.05f;
+    s.mAngularDamping = 0.6f;
+    s.mMotionQuality = JPH::EMotionQuality::LinearCast;  // partes finas caindo rápido não atravessam o chão
+    s.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+    s.mMassPropertiesOverride.mMass = std::max(part.mass, 0.01f);
+    s.mCollisionGroup = JPH::CollisionGroup(filter, group, i);
+    s.mLinearVelocity = toJolt(velocity);
+    const JPH::BodyID id = p_->bodies().CreateAndAddBody(s, JPH::EActivation::Activate);
+    if (id.IsInvalid()) {
+      LOG_ERROR("Física: limite de corpos atingido (ragdoll)");
+      removeRagdoll(out);
+      return {};
+    }
+    out.push_back(id.GetIndexAndSequenceNumber());
+  }
+  for (JPH::uint i = 0; i < n; ++i) {
+    const RagdollPart& part = parts[i];
+    if (part.parent < 0 || part.parent >= int(n)) continue;
+    glm::vec3 twist = part.b - part.a;
+    twist = glm::length(twist) > 1e-6f ? glm::normalize(twist) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 plane = glm::cross(twist, std::abs(twist.y) < 0.9f ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f));
+    plane = glm::normalize(plane);
+    JPH::SwingTwistConstraintSettings cs;
+    cs.mSpace = JPH::EConstraintSpace::WorldSpace;
+    cs.mPosition1 = cs.mPosition2 = JPH::RVec3(part.a.x, part.a.y, part.a.z);
+    cs.mTwistAxis1 = cs.mTwistAxis2 = toJolt(twist);
+    cs.mPlaneAxis1 = cs.mPlaneAxis2 = toJolt(plane);
+    cs.mNormalHalfConeAngle = cs.mPlaneHalfConeAngle = glm::radians(part.coneDeg);
+    cs.mTwistMinAngle = -glm::radians(part.twistDeg);
+    cs.mTwistMaxAngle = glm::radians(part.twistDeg);
+    // Atrito na junta: um pouco de resistência (músculo relaxado), sem deixar o corpo duro.
+    cs.mMaxFrictionTorque = 0.05f * part.mass * 9.81f * glm::length(part.b - part.a);
+    const std::array<JPH::BodyID, 2> pair{bodyId(out[size_t(part.parent)]), bodyId(out[i])};
+    JPH::BodyLockMultiWrite lock(p_->system->GetBodyLockInterface(), pair.data(), 2);
+    JPH::Body* b1 = lock.GetBody(0);
+    JPH::Body* b2 = lock.GetBody(1);
+    if (!b1 || !b2) continue;
+    JPH::Ref<JPH::Constraint> c = cs.Create(*b1, *b2);
+    rd.joints.push_back(c);
+  }
+  for (auto& c : rd.joints) p_->system->AddConstraint(c);
+  rd.bodies = out;
+  p_->ragdolls.push_back(std::move(rd));
+  return out;
+}
+
+void Physics::removeRagdoll(const std::vector<uint32_t>& bodies) {
+  if (bodies.empty()) return;
+  for (size_t k = 0; k < p_->ragdolls.size(); ++k) {
+    if (p_->ragdolls[k].bodies.empty() || p_->ragdolls[k].bodies[0] != bodies[0]) continue;
+    for (auto& j : p_->ragdolls[k].joints) p_->system->RemoveConstraint(j);
+    p_->ragdolls.erase(p_->ragdolls.begin() + std::ptrdiff_t(k));
+    break;
+  }
+  std::vector<JPH::BodyID> ids;
+  for (uint32_t b : bodies) ids.push_back(bodyId(b));
+  p_->bodies().RemoveBodies(ids.data(), int(ids.size()));
+  p_->bodies().DestroyBodies(ids.data(), int(ids.size()));
 }
 
 void Physics::optimizeBroadphase() { p_->system->OptimizeBroadPhase(); }

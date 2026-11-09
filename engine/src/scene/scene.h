@@ -303,6 +303,10 @@ struct Model {
   float maxPelvisDrop = 0.4f;  // m
 
   std::vector<glm::mat4> nodeWorld;  // saída: matriz de cada nó no mundo (root incluído), depois do IK
+  // Ragdoll: nós com a matriz no mundo dada de fora (a física); os filhos sem corpo seguem o pai com a pose da
+  // animação. driven[nó] = índice em drivenWorld (-1 = animado). Vazio = desligado (e o IK dos pés volta).
+  std::vector<int> driven;
+  std::vector<glm::mat4> drivenWorld;
 
   std::vector<ModelNode> nodes;
   std::vector<Animation> animations;

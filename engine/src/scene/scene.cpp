@@ -162,10 +162,17 @@ void Scene::animateModel(Model& m, float dt) {
   // Matrizes globais (pai antes do filho, com memoização).
   std::vector<glm::mat4> global(pose.size());
   std::vector<uint8_t> done(pose.size(), 0);
+  const std::vector<int>& driven = m.driven;
+  const bool ragdoll = driven.size() == pose.size() && !m.drivenWorld.empty();
+  const glm::mat4 invRoot = ragdoll ? glm::inverse(m.root) : glm::mat4(1.0f);
   std::function<const glm::mat4&(size_t)> resolve = [&](size_t i) -> const glm::mat4& {
     if (!done[i]) {
-      glm::mat4 local = nodeMatrix(pose[i]);
-      global[i] = pose[i].parent >= 0 ? resolve(size_t(pose[i].parent)) * local : local;
+      if (ragdoll && driven[i] >= 0) {
+        global[i] = invRoot * m.drivenWorld[size_t(driven[i])];
+      } else {
+        glm::mat4 local = nodeMatrix(pose[i]);
+        global[i] = pose[i].parent >= 0 ? resolve(size_t(pose[i].parent)) * local : local;
+      }
       done[i] = 1;
     }
     return global[i];
@@ -173,7 +180,7 @@ void Scene::animateModel(Model& m, float dt) {
   glm::mat4 root = m.root;
 
   // IK dos pés.
-  if (!m.legs.empty() && m.ground && m.ikWeight > 0.0f) {
+  if (!ragdoll && !m.legs.empty() && m.ground && m.ikWeight > 0.0f) {
     const glm::vec3 up(0.0f, 1.0f, 0.0f);
     std::vector<float> offsets(m.legs.size(), 0.0f);
     std::vector<uint8_t> found(m.legs.size(), 0);
