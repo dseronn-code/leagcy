@@ -670,6 +670,25 @@ void World::update(scene::Scene& scene, float dt) {
   if (scripting) scripting->update(scene, dt);
   if (paused) return;  // um script pausou agora: a pausa já vale neste quadro (nada se move)
   if (netClient) {  // cliente de rede: as poses vêm do anfitrião (game/network); aqui só a animação dos "visual"
+    // Previsão: o boneco deste jogador anda já com a entrada local (o anfitrião confirma e o network corrige).
+    if (predictLocal && localSlot >= 0) {
+      const entt::entity e = slotEntity(localSlot);
+      if (e != entt::null) {
+        Character& c = registry.get<Character>(e);
+        if (c.id != ~0u) {
+          const glm::vec3 fwd(std::cos(input_.cameraYaw), 0.0f, std::sin(input_.cameraYaw));
+          const glm::vec3 right(-fwd.z, 0.0f, fwd.x);
+          glm::vec3 dir = fwd * input_.move.y + right * input_.move.x;
+          if (glm::dot(dir, dir) > 1.0f) dir = glm::normalize(dir);
+          physics->moveCharacter(c.id, dir * (input_.run ? c.runSpeed : c.walkSpeed), input_.jump, c.jumpSpeed);
+          physics->stepCharacterOnly(c.id, dt);
+          Transform& t = registry.get<Transform>(e);
+          t.position = physics->characterFeet(c.id) + glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
+          if (const Renderable* r = registry.try_get<Renderable>(e); r && registry.all_of<Shape>(e))
+            scene.setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(e)));
+        }
+      }
+    }
     for (auto ent : registry.view<Transform, Character>()) {
       Character& c = registry.get<Character>(ent);
       if (!c.visual.enabled || c.visual.model < 0) continue;

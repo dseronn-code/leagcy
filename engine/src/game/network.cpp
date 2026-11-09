@@ -1,8 +1,11 @@
 #include "game/network.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <array>
 #include <map>
 #include <vector>
 
@@ -15,7 +18,9 @@
 #endif
 #endif
 #include <enet/enet.h>
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 
 #include "core/log.h"
 #include "game/world.h"
@@ -81,10 +86,19 @@ struct Pose {
   glm::vec3 p;
   glm::quat r;
 };
+struct WheelPose {
+  glm::vec3 p, s;
+  glm::quat r;
+};
 struct Snapshot {
   float hostTime;
   std::vector<Pose> poses;
+  std::map<uint16_t, std::array<WheelPose, 4>> wheels;  // rodas dos carros (índice da tabela)
 };
+
+double nowSeconds() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 }  // namespace
 
@@ -94,6 +108,7 @@ struct Network::Impl {
   bool isHost = false, isClient = false;
   // Anfitrião
   std::map<ENetPeer*, int> slotOf;
+  std::map<int, uint32_t> lastSeq;  // última entrada recebida de cada vaga (o cliente compara com a previsão)
   std::vector<entt::entity> table;  // ordem da tabela de nomes
   float sendTimer = 0.0f;
   // Cliente
@@ -101,6 +116,11 @@ struct Network::Impl {
   std::deque<Snapshot> snaps;
   float renderTime = -1.0f;
   bool welcomed = false;
+  uint32_t seq = 0;                                       // número da última entrada enviada
+  std::deque<std::pair<uint32_t, glm::vec3>> predicted;   // (entrada, pés previstos depois dela)
+  // Atraso simulado (LEGACY_REDE_ATRASO_MS, só para testes): pacotes recebidos e enviados esperam este tempo.
+  double delay = 0.0;
+  std::deque<std::pair<double, std::vector<uint8_t>>> inbox, outbox;
 
   ~Impl() {
     if (server) enet_peer_disconnect_now(server, 0);
@@ -137,17 +157,20 @@ struct Network::Impl {
           continue;
         }
         slotOf[ev.peer] = slot;
+        lastSeq[slot] = 0;
         world.activateSlot(slot, true);
         welcome(world, ev.peer, slot);
       } else if (ev.type == ENET_EVENT_TYPE_DISCONNECT) {
         if (auto it = slotOf.find(ev.peer); it != slotOf.end()) {
           world.activateSlot(it->second, false);
+          lastSeq.erase(it->second);
           slotOf.erase(it);
         }
       } else if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
         Reader r{ev.packet->data, ev.packet->dataLength};
         if (r.get<uint8_t>() == kInput) {
           auto it = slotOf.find(ev.peer);
+          const uint32_t seqIn = r.get<uint32_t>();
           PlayerInput in;
           in.move.x = r.get<float>();
           in.move.y = r.get<float>();
@@ -158,6 +181,7 @@ struct Network::Impl {
           if (r.ok && it != slotOf.end()) {
             if (glm::length(in.move) > 1.0f) in.move = glm::normalize(in.move);  // não confia no cliente
             world.remoteInputs[size_t(it->second)] = in;
+            lastSeq[it->second] = std::max(lastSeq[it->second], seqIn);
           }
         }
         enet_packet_destroy(ev.packet);
@@ -179,6 +203,32 @@ struct Network::Impl {
       w.put(t.rotation.x);
       w.put(t.rotation.y);
       w.put(t.rotation.z);
+    }
+    // Confirmação da entrada de cada vaga (o cliente corrige a previsão) e as rodas dos carros.
+    w.put(uint8_t(lastSeq.size()));
+    for (const auto& [slot, sq] : lastSeq) {
+      w.put(int8_t(slot));
+      w.put(sq);
+    }
+    uint16_t nVeh = 0;
+    for (entt::entity e : table) nVeh += world.registry.valid(e) && world.registry.all_of<Vehicle>(e) ? 1 : 0;
+    w.put(nVeh);
+    for (uint32_t i = 0; i < table.size(); ++i) {
+      if (!world.registry.valid(table[i]) || !world.registry.all_of<Vehicle>(table[i]) || !world.scene) continue;
+      const Vehicle& v = world.registry.get<Vehicle>(table[i]);
+      w.put(uint16_t(i));
+      for (uint32_t k = 0; k < 4; ++k) {
+        glm::vec3 pos(0.0f), scale(1.0f), skew;
+        glm::vec4 persp;
+        glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
+        if (v.wheelObjects[k] != ~0u) glm::decompose(world.scene->objects[v.wheelObjects[k]].transform, scale, rot, pos, skew, persp);
+        w.put(pos);
+        w.put(scale);
+        w.put(rot.w);
+        w.put(rot.x);
+        w.put(rot.y);
+        w.put(rot.z);
+      }
     }
     ENetPacket* pk = enet_packet_create(w.b.data(), w.b.size(), 0);  // não confiável: o próximo estado substitui
     enet_host_broadcast(host, 1, pk);
@@ -202,56 +252,130 @@ struct Network::Impl {
     world.setEntityPose(scene, e, pose.p, pose.r);
   }
 
+  entt::entity localEntity(const World& world) const { return world.slotEntity(world.localSlot); }
+
+  void handlePacket(World& world, const std::vector<uint8_t>& data) {
+    Reader r{data.data(), data.size()};
+    const uint8_t type = r.get<uint8_t>();
+    if (type == kWelcome) {
+      world.localSlot = r.get<int32_t>();
+      const uint32_t n = r.get<uint32_t>();
+      std::map<std::string, entt::entity> byName;
+      for (auto e : world.registry.view<Name>()) byName[world.registry.get<Name>(e).value] = e;
+      clientTable.assign(n, entt::null);
+      for (uint32_t i = 0; i < n && r.ok; ++i) {
+        auto it = byName.find(r.str());
+        if (it != byName.end()) clientTable[i] = it->second;
+      }
+      welcomed = r.ok;
+      LOG_INFO("Multijogador: conectado na vaga %d (%u entidades replicadas)", world.localSlot, n);
+    } else if (type == kState && welcomed) {
+      Snapshot s;
+      s.hostTime = r.get<float>();
+      const uint32_t n = r.get<uint32_t>();
+      s.poses.assign(clientTable.size(), Pose{glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)});
+      for (uint32_t k = 0; k < n && r.ok; ++k) {
+        const uint16_t i = r.get<uint16_t>();
+        Pose p;
+        p.p = r.get<glm::vec3>();
+        p.r.w = r.get<float>();
+        p.r.x = r.get<float>();
+        p.r.y = r.get<float>();
+        p.r.z = r.get<float>();
+        if (r.ok && i < s.poses.size()) s.poses[i] = p;
+      }
+      uint32_t ack = 0;
+      bool hasAck = false;
+      const uint8_t nAck = r.get<uint8_t>();
+      for (uint8_t k = 0; k < nAck && r.ok; ++k) {
+        const int8_t slot = r.get<int8_t>();
+        const uint32_t sq = r.get<uint32_t>();
+        if (slot == world.localSlot) { ack = sq; hasAck = true; }
+      }
+      const uint16_t nVeh = r.get<uint16_t>();
+      for (uint16_t k = 0; k < nVeh && r.ok; ++k) {
+        const uint16_t i = r.get<uint16_t>();
+        std::array<WheelPose, 4> wp;
+        for (WheelPose& p : wp) {
+          p.p = r.get<glm::vec3>();
+          p.s = r.get<glm::vec3>();
+          p.r.w = r.get<float>();
+          p.r.x = r.get<float>();
+          p.r.y = r.get<float>();
+          p.r.z = r.get<float>();
+        }
+        if (r.ok) s.wheels[i] = wp;
+      }
+      if (!r.ok) return;
+      if (hasAck) reconcile(world, s, ack);
+      if (snaps.empty() || s.hostTime > snaps.back().hostTime) snaps.push_back(std::move(s));
+      while (snaps.size() > 32) snaps.pop_front();
+    }
+  }
+
+  // Correção da previsão: o anfitrião diz até qual entrada já processou e onde o boneco estava; a diferença para o
+  // que este cliente previu naquela entrada é o erro. Aplicado aos poucos (sem tranco), ou de uma vez se for grande
+  // (teleporte, nascimento). As previsões mais novas andam junto com a correção.
+  void reconcile(World& world, const Snapshot& s, uint32_t ack) {
+    if (!world.predictLocal) return;
+    const entt::entity e = localEntity(world);
+    if (e == entt::null) return;
+    size_t ti = 0;
+    while (ti < clientTable.size() && clientTable[ti] != e) ++ti;
+    if (ti >= clientTable.size()) return;
+    const Character& c = world.registry.get<Character>(e);
+    const glm::vec3 serverFeet = s.poses[ti].p - glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
+    while (!predicted.empty() && predicted.front().first < ack) predicted.pop_front();
+    glm::vec3 err;
+    if (!predicted.empty() && predicted.front().first == ack) err = serverFeet - predicted.front().second;
+    else if (predicted.empty()) err = serverFeet - world.physics->characterFeet(c.id);
+    else return;
+    const float len = glm::length(err);
+    if (len < 1e-4f) return;
+    const glm::vec3 fix = len > 2.0f ? err : err * 0.35f;
+    world.physics->nudgeCharacter(c.id, fix);
+    for (auto& [sq, feet] : predicted) feet += fix;
+  }
+
   void clientUpdate(World& world, scene::Scene& scene, float dt, const PlayerInput& input) {
+    const double now = nowSeconds();
     ENetEvent ev;
     while (enet_host_service(host, &ev, 0) > 0) {
       if (ev.type == ENET_EVENT_TYPE_DISCONNECT) {
         LOG_WARN("Multijogador: o anfitrião desconectou");
         server = nullptr;
       } else if (ev.type == ENET_EVENT_TYPE_RECEIVE) {
-        Reader r{ev.packet->data, ev.packet->dataLength};
-        const uint8_t type = r.get<uint8_t>();
-        if (type == kWelcome) {
-          world.localSlot = r.get<int32_t>();
-          const uint32_t n = r.get<uint32_t>();
-          std::map<std::string, entt::entity> byName;
-          for (auto e : world.registry.view<Name>()) byName[world.registry.get<Name>(e).value] = e;
-          clientTable.assign(n, entt::null);
-          for (uint32_t i = 0; i < n && r.ok; ++i) {
-            auto it = byName.find(r.str());
-            if (it != byName.end()) clientTable[i] = it->second;
-          }
-          welcomed = r.ok;
-          LOG_INFO("Multijogador: conectado na vaga %d (%u entidades replicadas)", world.localSlot, n);
-        } else if (type == kState && welcomed) {
-          Snapshot s;
-          s.hostTime = r.get<float>();
-          const uint32_t n = r.get<uint32_t>();
-          s.poses.assign(clientTable.size(), Pose{glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f)});
-          for (uint32_t k = 0; k < n && r.ok; ++k) {
-            const uint16_t i = r.get<uint16_t>();
-            Pose p;
-            p.p = r.get<glm::vec3>();
-            p.r.w = r.get<float>();
-            p.r.x = r.get<float>();
-            p.r.y = r.get<float>();
-            p.r.z = r.get<float>();
-            if (r.ok && i < s.poses.size()) s.poses[i] = p;
-          }
-          if (r.ok && (snaps.empty() || s.hostTime > snaps.back().hostTime)) snaps.push_back(std::move(s));
-          while (snaps.size() > 32) snaps.pop_front();
-        }
+        inbox.emplace_back(now + delay, std::vector<uint8_t>(ev.packet->data, ev.packet->data + ev.packet->dataLength));
         enet_packet_destroy(ev.packet);
       }
     }
-    if (server && welcomed) {  // a entrada do jogador, todo quadro
+    while (!inbox.empty() && inbox.front().first <= now) {
+      handlePacket(world, inbox.front().second);
+      inbox.pop_front();
+    }
+    if (server && welcomed) {  // a entrada do jogador, todo quadro, numerada
+      if (seq > 0 && world.predictLocal) {  // pés previstos depois da entrada anterior (aplicada no quadro passado)
+        const entt::entity e = localEntity(world);
+        if (e != entt::null && world.registry.get<Character>(e).id != ~0u) {
+          predicted.emplace_back(seq, world.physics->characterFeet(world.registry.get<Character>(e).id));
+          while (predicted.size() > 600) predicted.pop_front();
+        }
+      }
+      ++seq;
       Writer w;
       w.put(uint8_t(kInput));
+      w.put(seq);
       w.put(input.move.x);
       w.put(input.move.y);
       w.put(input.cameraYaw);
       w.put(uint8_t((input.jump ? 1 : 0) | (input.run ? 2 : 0)));
+      outbox.emplace_back(now + delay, std::move(w.b));
+    }
+    while (server && !outbox.empty() && outbox.front().first <= now) {
+      Writer w;
+      w.b = std::move(outbox.front().second);
       send(server, w, 1, false);
+      outbox.pop_front();
     }
     if (snaps.empty()) return;
     // Interpolação: o relógio de exibição anda com o quadro e fica ~100 ms atrás do último estado recebido.
@@ -265,12 +389,25 @@ struct Network::Impl {
     const Snapshot& s0 = snaps[b == 0 ? 0 : b - 1];
     const float span = s1.hostTime - s0.hostTime;
     const float f = span > 1e-5f ? std::clamp((renderTime - s0.hostTime) / span, 0.0f, 1.0f) : 1.0f;
+    const entt::entity mine = world.predictLocal ? localEntity(world) : entt::null;
     for (size_t i = 0; i < clientTable.size(); ++i) {
-      if (clientTable[i] == entt::null || i >= s0.poses.size() || i >= s1.poses.size()) continue;
+      if (clientTable[i] == entt::null || clientTable[i] == mine || i >= s0.poses.size() || i >= s1.poses.size()) continue;
       Pose p;
       p.p = glm::mix(s0.poses[i].p, s1.poses[i].p, f);
       p.r = glm::slerp(s0.poses[i].r, s1.poses[i].r, f);
       applyPose(world, scene, clientTable[i], p);
+    }
+    for (const auto& [i, w1] : s1.wheels) {  // rodas: posição, giro e esterço vindos do anfitrião
+      if (i >= clientTable.size() || clientTable[i] == entt::null || !world.registry.all_of<Vehicle>(clientTable[i])) continue;
+      auto it0 = s0.wheels.find(i);
+      const std::array<WheelPose, 4>& w0 = it0 != s0.wheels.end() ? it0->second : w1;
+      const Vehicle& v = world.registry.get<Vehicle>(clientTable[i]);
+      for (uint32_t k = 0; k < 4; ++k) {
+        if (v.wheelObjects[k] == ~0u) continue;
+        const glm::vec3 p = glm::mix(w0[k].p, w1[k].p, f), sc = glm::mix(w0[k].s, w1[k].s, f);
+        const glm::quat q = glm::slerp(w0[k].r, w1[k].r, f);
+        scene.setTransform(v.wheelObjects[k], glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(q) * glm::scale(glm::mat4(1.0f), sc));
+      }
     }
     world.time = renderTime;
   }
@@ -322,6 +459,8 @@ bool Network::connect(World& world, const std::string& address, uint16_t port, f
   }
   p_->isClient = true;
   world.netClient = true;
+  if (const char* d = std::getenv("LEGACY_REDE_ATRASO_MS")) p_->delay = std::atof(d) / 1000.0;  // testes
+  if (std::getenv("LEGACY_REDE_SEM_PREVISAO")) world.predictLocal = false;
   LOG_INFO("Multijogador: conectado a %s:%u", address.c_str(), port);
   return true;
 }

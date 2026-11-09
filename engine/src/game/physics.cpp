@@ -134,6 +134,7 @@ struct Physics::Impl {
     float jumpBuffer = 0.0f;  // s em que um pulo pedido ainda vale (pedido um pouco antes de tocar o chão)
     float jumpSpeed = 5.0f;
     float stepHeight = 0.4f;
+    float soloAccumulator = 0.0f;  // passos só deste personagem (previsão no cliente de rede)
   };
   std::vector<Character> characters;
 
@@ -145,8 +146,11 @@ struct Physics::Impl {
 
   // Um passo de cada personagem (antes do passo dos corpos rígidos, como no exemplo do Jolt).
   void stepCharacters(float dt) {
+    for (Character& c : characters) stepCharacter(c, dt);
+  }
+  void stepCharacter(Character& c, float dt) {
     const JPH::Vec3 up = JPH::Vec3::sAxisY(), gravity = system->GetGravity();
-    for (Character& c : characters) {
+    {
       JPH::CharacterVirtual& ch = *c.body;
       ch.UpdateGroundVelocity();
       const JPH::Vec3 current = ch.GetLinearVelocity();
@@ -351,6 +355,22 @@ uint32_t Physics::addCharacter(const CharacterDesc& d, glm::vec3 feet) {
   c.stepHeight = d.stepHeight;
   p_->characters.push_back(c);
   return uint32_t(p_->characters.size() - 1);
+}
+
+void Physics::stepCharacterOnly(uint32_t i, float dt) {
+  if (i >= p_->characters.size()) return;
+  Impl::Character& c = p_->characters[i];
+  c.soloAccumulator += std::clamp(dt, 0.0f, 0.25f);
+  while (c.soloAccumulator >= kStep) {  // o mesmo passo fixo do anfitrião: a previsão anda igual
+    p_->stepCharacter(c, kStep);
+    c.soloAccumulator -= kStep;
+  }
+}
+
+void Physics::nudgeCharacter(uint32_t i, glm::vec3 delta) {
+  if (i >= p_->characters.size()) return;
+  JPH::CharacterVirtual& c = *p_->characters[i].body;
+  c.SetPosition(c.GetPosition() + JPH::RVec3(delta.x, delta.y, delta.z));  // a velocidade fica
 }
 
 void Physics::moveCharacter(uint32_t i, glm::vec3 horizontalVelocity, bool jump, float jumpSpeed) {

@@ -10,7 +10,10 @@ Um script nos dois lados registra as posições a cada quadro. Confere:
   - entrada pela rede: no anfitrião, o boneco do cliente andou para a frente (> 2 m) e parou;
   - estado replicado: no fim (tudo parado), o cliente mostra o boneco e a bola na mesma posição que o anfitrião
     (< 2 cm), e a bola caiu até o chão nos dois;
-  - animação replicada: no cliente (sem física), a pata da raposa se mexe em relação à bacia enquanto ela anda.
+  - animação replicada: no cliente (sem física), a pata da raposa se mexe em relação à bacia enquanto ela anda;
+  - previsão: com 150 ms de atraso simulado em cada sentido, o boneco do cliente reage na hora (com previsão) e não
+    só depois da volta pela rede (sem previsão); no fim, os dois lados concordam;
+  - rodas: um carro dirigido no anfitrião aparece igual no cliente (imagem final, chassi e rodas).
 """
 import argparse
 import json
@@ -29,13 +32,58 @@ function atualizar(e, dt)
   if h and b then
     local hx, hy, hz = h:posicao()
     local bx, by, bz = b:posicao()
-    log("POS", string.format("%.4f %.4f %.4f %.4f %.4f %.4f", hx, hy, hz, bx, by, bz))
+    log("POS", string.format("%.4f %.4f %.4f %.4f %.4f %.4f %.4f", hx, hy, hz, bx, by, bz, tempo_real()))
     local px, py, pz = h:osso("b_LeftFoot02_018")
     local qx, qy, qz = h:osso("b_Hip_01")
     if px then log("OSSO", string.format("%.4f %.4f %.4f", px - qx, py - qy, pz - qz)) end
   end
 end
 '''
+
+
+def sessao(binario, pasta, arq, porta, simular, env_cliente=None):
+    """Roda anfitrião e cliente; devolve (linhas do anfitrião, linhas do cliente)."""
+    base = [binario, '--headless', '--scene', arq, '--width', '32', '--height', '18']
+    anfitriao = subprocess.Popen(base + ['--host', str(porta), '--frames', '900', '--out', os.path.join(pasta, 'h.png')],
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+                                 errors='replace')
+    linhas_h = []
+    pronto = threading.Event()
+
+    def ler():
+        for l in anfitriao.stdout:
+            linhas_h.append(l)
+            if 'anfitrião na porta' in l:
+                pronto.set()
+    t = threading.Thread(target=ler)
+    t.start()
+    if not pronto.wait(300):
+        anfitriao.kill()
+        raise RuntimeError('o anfitrião não abriu a porta')
+    time.sleep(0.5)
+    env = dict(os.environ, **(env_cliente or {}))
+    cli = subprocess.run(base + ['--conectar', f'127.0.0.1:{porta}', '--frames', '900', '--simular', simular, '--out',
+                                 os.path.join(pasta, 'c.png')], capture_output=True, text=True, encoding='utf-8',
+                         errors='replace', env=env)
+    anfitriao.wait(timeout=900)
+    t.join()
+    return linhas_h, (cli.stdout + cli.stderr).splitlines()
+
+
+def posicoes(texto):
+    return [tuple(map(float, l.split('POS', 1)[1].split())) for l in texto if 'POS ' in l]
+
+
+def reacao(pc, aperto):
+    """Segundos (tempo do cliente) entre apertar W e o boneco andar 1 cm na tela do cliente."""
+    antes = [p for p in pc if p[6] <= aperto and p[1] > -100]
+    if not antes:
+        return float('nan')
+    x0 = antes[-1][:3]
+    for p in pc:
+        if p[6] > aperto and math.dist(p[:3], x0) > 0.01:
+            return p[6] - aperto
+    return float('nan')
 
 
 def main():
@@ -46,6 +94,7 @@ def main():
     ap.add_argument('--porta', type=int, default=7790)
     a = ap.parse_args()
     binario = os.path.abspath(a.bin)
+    oks = []
     with tempfile.TemporaryDirectory() as pasta:
         lua = os.path.join(pasta, 'pos.lua')
         with open(lua, 'w', encoding='utf-8') as f:
@@ -67,56 +116,75 @@ def main():
         arq = os.path.join(pasta, 'rede.json')
         with open(arq, 'w', encoding='utf-8') as f:
             json.dump(cena, f)
-        base = [binario, '--headless', '--scene', arq, '--width', '32', '--height', '18']
-        anfitriao = subprocess.Popen(base + ['--host', str(a.porta), '--frames', '900', '--out',
-                                            os.path.join(pasta, 'h.png')], stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
-        linhas_h = []
-        pronto = threading.Event()
 
-        def ler():
-            for l in anfitriao.stdout:
-                linhas_h.append(l)
-                if 'anfitrião na porta' in l:
-                    pronto.set()
-        t = threading.Thread(target=ler)
-        t.start()
-        if not pronto.wait(300):
-            anfitriao.kill()
-            print('rede       FALHOU: o anfitrião não abriu a porta')
-            sys.exit(1)
-        time.sleep(0.5)
-        cli = subprocess.run(base + ['--conectar', f'127.0.0.1:{a.porta}', '--frames', '900', '--simular',
-                                     '0.5:segurar:w:1.5', '--out', os.path.join(pasta, 'c.png')],
-                             capture_output=True, text=True, encoding='utf-8', errors='replace')
-        anfitriao.wait(timeout=900)
-        t.join()
-
-        def posicoes(texto):
-            return [tuple(map(float, l.split('POS', 1)[1].split())) for l in texto if 'POS ' in l]
-        ph = posicoes(linhas_h)
-        pc = posicoes((cli.stdout + cli.stderr).splitlines())
-        conectou = any('conectado na vaga 0' in l for l in (cli.stdout + cli.stderr).splitlines())
+        # 1) sem atraso: estado igual nos dois lados e animação no cliente
+        lh, lc = sessao(binario, pasta, arq, a.porta, '3:segurar:w:1.5')
+        ph, pc = posicoes(lh), posicoes(lc)
+        conectou = any('conectado na vaga 0' in l for l in lc)
         if not ph or not pc or not conectou:
             print(f'rede       FALHOU: conectou={conectou}, registros anfitrião {len(ph)}, cliente {len(pc)}')
-            print((cli.stdout + cli.stderr)[-1500:])
+            print('\n'.join(lc[-30:]))
             sys.exit(1)
         h, c = ph[-1], pc[-1]
-        # Animação replicada: no cliente, enquanto o boneco anda, a pata se mexe em relação à bacia (passos).
-        ossos = [tuple(map(float, l.split('OSSO', 1)[1].split())) for l in (cli.stdout + cli.stderr).splitlines()
-                 if 'OSSO ' in l]
+        ossos = [tuple(map(float, l.split('OSSO', 1)[1].split())) for l in lc if 'OSSO ' in l]
         import statistics
         passos = statistics.pstdev([o[2] for o in ossos]) if len(ossos) > 2 else 0.0
-        ativos = [p for p in ph if p[1] > -100]  # vaga ocupada (fora do estacionamento)
+        ativos = [p for p in ph if p[1] > -100]
         andou = math.dist(ativos[0][:3], h[:3]) if ativos else 0.0
-        dif_heroi = math.dist(h[:3], c[:3])
-        dif_bola = math.dist(h[3:], c[3:])
+        dif_heroi, dif_bola = math.dist(h[:3], c[:3]), math.dist(h[3:6], c[3:6])
         ok = andou > 1.0 and dif_heroi < 0.02 and dif_bola < 0.02 and abs(h[4] - 0.25) < 0.05 and passos > 0.02
-        print(f'rede       {"PASSOU" if ok else "FALHOU"}: o boneco do cliente andou {andou:.2f} m no anfitrião '
-              f'(de x = 3); no fim, cliente e anfitrião: boneco a {100 * dif_heroi:.2f} cm, bola a '
-              f'{100 * dif_bola:.2f} cm (bola no chão, y = {h[4]:.3f} m); animação no cliente: a pata oscila '
-              f'{100 * passos:.1f} cm (desvio) em relação à bacia')
-        sys.exit(0 if ok else 1)
+        oks.append(ok)
+        print(f'rede       {"PASSOU" if ok else "FALHOU"}: o boneco do cliente andou {andou:.2f} m no anfitrião; no fim, '
+              f'cliente e anfitrião: boneco a {100 * dif_heroi:.2f} cm, bola a {100 * dif_bola:.2f} cm (bola no chão, '
+              f'y = {h[4]:.3f} m); animação no cliente: a pata oscila {100 * passos:.1f} cm em relação à bacia')
+
+        # 2) atraso de 150 ms em cada sentido: com previsão o boneco reage na hora; sem, só depois da volta
+        res = {}
+        for nome, env in (('com previsão', {'LEGACY_REDE_ATRASO_MS': '150'}),
+                          ('sem previsão', {'LEGACY_REDE_ATRASO_MS': '150', 'LEGACY_REDE_SEM_PREVISAO': '1'})):
+            lh, lc = sessao(binario, pasta, arq, a.porta, '3:segurar:w:1.5', env)
+            ph, pc = posicoes(lh), posicoes(lc)
+            res[nome] = (reacao(pc, 3.0), math.dist(ph[-1][:3], pc[-1][:3]) if ph and pc else float('nan'))
+        rp, dp = res['com previsão']
+        rs, ds = res['sem previsão']
+        ok = rp < 0.1 and rs > 0.25 and dp < 0.05 and ds < 0.05
+        oks.append(ok)
+        print(f'previsao   {"PASSOU" if ok else "FALHOU"}: com 150 ms de atraso em cada sentido, o boneco reage em '
+              f'{1000 * rp:.0f} ms com previsão e {1000 * rs:.0f} ms sem; no fim, cliente e anfitrião a {100 * dp:.1f} cm '
+              f'(com) e {100 * ds:.1f} cm (sem)')
+
+        # 3) carro com roteiro no anfitrião: no cliente o chassi E as rodas (posição, giro, esterço) iguais
+        carro = {'camera': {'posicao': [6, 2.5, 8], 'alvo': [0, 0.5, 6]}, 'menu': False, 'multijogador': {'vagas': 1},
+                 'entidades': [
+                     {'nome': 'chao', 'forma': 'caixa', 'meia_extensao': [80, 0.5, 80], 'posicao': [0, -0.5, 0],
+                      'fisica': {'tipo': 'estatico', 'atrito': 1}},
+                     {'nome': 'heroi', 'posicao': [-6, 0, 0], 'personagem': {'controle': 'jogador'}},
+                     {'nome': 'carro', 'posicao': [0, 1.2, 0], 'veiculo': {'controle': 'roteiro', 'roteiro': [
+                         {'t': 0, 'acelerar': 0.6, 'virar': 0.5}, {'t': 1.5, 'acelerar': 0, 'virar': 0.5, 'freio': 1}]}}]}
+        arq2 = os.path.join(pasta, 'carro.json')
+        with open(arq2, 'w', encoding='utf-8') as f:
+            json.dump(carro, f)
+        base = [binario, '--headless', '--scene', arq2, '--width', '320', '--height', '180']
+        h = subprocess.Popen(base + ['--host', str(a.porta + 1), '--frames', '1500', '--out', os.path.join(pasta, 'ch.png')],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
+        for l in h.stdout:
+            if 'anfitrião na porta' in l:
+                break
+        threading.Thread(target=lambda: [None for _ in h.stdout]).start()
+        time.sleep(0.5)
+        subprocess.run(base + ['--conectar', f'127.0.0.1:{a.porta + 1}', '--frames', '300', '--out',
+                               os.path.join(pasta, 'cc.png')], capture_output=True)
+        h.wait(timeout=1800)
+        import numpy as np
+        from PIL import Image
+        im_h = np.asarray(Image.open(os.path.join(pasta, 'ch.png'))).astype(float)
+        im_c = np.asarray(Image.open(os.path.join(pasta, 'cc.png'))).astype(float)
+        dif = np.abs(im_h - im_c).mean()
+        ok = dif < 1.0
+        oks.append(ok)
+        print(f'rodas      {"PASSOU" if ok else "FALHOU"}: carro dirigido no anfitrião, imagem final do cliente igual à do '
+              f'anfitrião (diferença média {dif:.2f}/255, chassi e rodas)')
+    sys.exit(0 if all(oks) else 1)
 
 
 if __name__ == '__main__':

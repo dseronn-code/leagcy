@@ -247,6 +247,8 @@ class World {
   std::vector<glm::vec3> slotSpawn;
   bool netClient = false;
   int localSlot = -1;  // cliente: a vaga deste jogador (a câmera segue ela)
+  bool predictLocal = true;  // cliente: o próprio boneco anda na hora (previsão), o anfitrião corrige
+  const PlayerInput& playerInput() const { return input_; }
   void activateSlot(int slot, bool on);
   entt::entity slotEntity(int slot) const;
   bool saveGame(const std::string& name, const std::string& dataJson) const;

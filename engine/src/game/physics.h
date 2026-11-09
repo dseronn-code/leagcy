@@ -91,6 +91,10 @@ class Physics {
   glm::vec3 characterVelocity(uint32_t character) const;
   bool characterOnGround(uint32_t character) const;
   void setCharacterVelocity(uint32_t character, glm::vec3 v);
+  // Previsão no cliente de rede: passos (fixos, 1/60 s) só deste personagem, contra o cenário parado; e um empurrão
+  // na posição que mantém a velocidade (correção vinda do anfitrião).
+  void stepCharacterOnly(uint32_t character, float dt);
+  void nudgeCharacter(uint32_t character, glm::vec3 delta);
   void setCharacterFeet(uint32_t character, glm::vec3 feet);  // editor: teletransporta e zera a velocidade
 
   // Veículos. drive: acelerador -1..1 (negativo = ré, com câmbio automático), direção -1..1 (+ = direita), freio e

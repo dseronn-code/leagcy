@@ -227,30 +227,22 @@ pular, correr, direção da câmera; o anfitrião limita o tamanho do vetor) e m
 liso mesmo com pacotes perdidos. Quem entra ocupa uma vaga livre e nasce no ponto dela; quem sai libera a vaga.
 A câmera do cliente segue o boneco dele.
 
-No cliente, personagens com `"visual"` animam pela velocidade estimada das poses recebidas (parado/andar/correr e
-IK dos pés, como no anfitrião).
+**Previsão no cliente:** o boneco do próprio jogador anda na hora com a entrada local (a mesma física de
+personagem, passo fixo de 1/60 s, contra o cenário). Cada entrada vai numerada; o anfitrião devolve, junto com o
+estado, até qual entrada já processou, e o cliente compara com o que tinha previsto naquele ponto: diferença pequena é
+corrigida aos poucos (sem tranco), grande (nascimento, teleporte) de uma vez. Os outros objetos seguem interpolados
+100 ms atrás. Personagens com `"visual"` animam no cliente pela velocidade estimada das poses; as rodas dos carros
+(posição, giro e esterço) vêm do anfitrião.
 
-Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina, o jogador é a raposa animada): o cliente
-segura W por 1,5 s e o boneco dele anda 2,30 m no anfitrião (1,5 m/s); no fim, o boneco e a bola aparecem no cliente
-na mesma posição que no anfitrião (diferença 0,00 cm), a bola parada no chão; e no cliente a pata da raposa oscila
-3,8 cm em relação à bacia enquanto ela anda (a animação roda lá).
+Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina, o jogador é a raposa animada):
 
-Ainda não tem: previsão no cliente (no LAN o atraso é de poucos ms; pela internet o próprio boneco responde com o
-atraso da conexão) e rodas dos carros no cliente (o chassi vem certo). Os scripts rodam nos dois lados (no cliente
-servem para a interface).
+| Teste | Resultado |
+|---|---|
+| rede | o cliente segura W 1,5 s: o boneco anda 2,25 m no anfitrião; no fim, boneco a 0,01 cm e bola a 0,00 cm nos dois lados; no cliente a pata oscila 5,3 cm em relação à bacia (animação) |
+| previsao | com 150 ms de atraso simulado em cada sentido (`LEGACY_REDE_ATRASO_MS`): o boneco reage em 67 ms (2 quadros) com previsão, 367 ms sem; no fim os dois lados concordam (0,0 cm) |
+| rodas | carro dirigido por roteiro no anfitrião: a imagem final do cliente igual à do anfitrião (diferença média 0,18/255), chassi e rodas |
 
-## Malhas comprimidas e texturas KTX2 (glTF do gltfpack)
-
-O carregador lê `EXT_meshopt_compression` (malhas comprimidas, o formato que o gltfpack gera; descompressão pela
-meshoptimizer, MIT) e `KHR_mesh_quantization` (normais, UV e posições em inteiros normalizados). Teste: o
-DamagedHelmet convertido por `tools/gltf_meshopt.cpp` (comprime a geometria com o codificador da meshoptimizer e
-ZERA os dados originais no .bin, então só aparece algo se o motor descomprimir) sai igual ao original — diferença
-máxima de 1/255 por pixel, só comprimido e também quantizado; a geometria cai para 64% (60% quantizada).
-
-**Texturas KTX2** (`KHR_texture_basisu`, ETC1S ou UASTC com zstd, o formato do gltfpack e do Sketchfab):
-decodificadas pelo transcodificador Basis Universal (Apache 2.0) e depois seguem o caminho normal (mipmaps e BC7).
-Teste: o StainedGlassLamp da Khronos na versão KTX2 contra a versão PNG — diferença média de 0,03/255 por pixel
-(19 texturas; a versão KTX2 do arquivo tem 1/3 dos texels e cabe em 24 MB de vídeo contra 78 MB).
+Os scripts rodam nos dois lados (no cliente servem para a interface).
 
 ## Exportar o jogo (`tools/empacotar.py`)
 
