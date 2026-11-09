@@ -174,7 +174,7 @@ def main():
                 break
         threading.Thread(target=lambda: [None for _ in h.stdout]).start()
         time.sleep(0.5)
-        subprocess.run(base + ['--conectar', f'127.0.0.1:{a.porta + 1}', '--frames', '300', '--out',
+        subprocess.run(base + ['--conectar', f'127.0.0.1:{a.porta + 1}', '--frames', '900', '--out',
                                os.path.join(pasta, 'cc.png')], capture_output=True)
         h.wait(timeout=1800)
         import numpy as np
