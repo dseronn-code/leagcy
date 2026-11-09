@@ -102,8 +102,24 @@ std::unique_ptr<game::Network> startNetwork(int hostPort, const std::string& con
 }
 
 // Câmera de cinema pedida por script (camera() / camera_jogo()).
+// A câmera de antes da cena volta quando o script devolve o controle (camera_jogo): posição, direção e FOV.
 void applyScriptCamera(const game::World& w, scene::Camera& camera) {
-  if (!w.cameraOverride.active) return;
+  static bool wasActive = false;
+  static scene::Camera saved;
+  if (!w.cameraOverride.active) {
+    if (wasActive) {
+      camera.position = saved.position;
+      camera.yaw = saved.yaw;
+      camera.pitch = saved.pitch;
+      camera.fovY = saved.fovY;
+      wasActive = false;
+    }
+    return;
+  }
+  if (!wasActive) {
+    saved = camera;
+    wasActive = true;
+  }
   camera.position = w.cameraOverride.position;
   camera.lookAt(w.cameraOverride.target);
   if (w.cameraOverride.fovDeg > 0.0f) camera.fovY = glm::radians(w.cameraOverride.fovDeg);

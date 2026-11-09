@@ -728,6 +728,8 @@ void World::update(scene::Scene& scene, float dt) {
       if (glm::dot(dir, dir) > 1.0f) dir = glm::normalize(dir);
       jump = in.jump;
       run = in.run;
+    } else if (c.player && !playerControl) {
+      // Cutscene: parado (a física continua: cai, é empurrado).
     } else if (c.player) {
       // Frente = para onde a câmera olha, no plano do chão.
       const glm::vec3 fwd(std::cos(input_.cameraYaw), 0.0f, std::sin(input_.cameraYaw));

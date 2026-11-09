@@ -257,6 +257,7 @@ class World {
   // continuam rodando (o menu). Diferente de `simulate` (o editor parado, sem scripts).
   bool paused = false;
   bool quitRequested = false;        // sair() no script
+  bool playerControl = true;         // controle_jogador(falso): o jogador para de responder (cutscene)
   float realTime = 0.0f;             // s desde o início, mesmo pausado (tempo_real())
   std::string qualityRequest;        // qualidade("medio"): o main recria o renderizador com o preset
   // Câmera de cinema pelo script (camera(x, y, z, ax, ay, az) / camera_jogo()): com `active`, o main põe a câmera em

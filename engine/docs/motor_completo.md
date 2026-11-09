@@ -194,11 +194,28 @@ e `camera_jogo()` devolve. Teste: o script vira a câmera da caixa azul para a v
 - **`lib/inventario.lua`**: inventário (`adicionar`, `remover` sem ficar negativo, `quantidade`, `tem`, `itens`,
   `desenhar`) e missões (`iniciar` com objetivos, `cumprir`, `estado`, `ao_concluir`, `desenhar`), com `dados()` e
   `carregar()` para ir no `salvar_jogo`.
+- **`lib/sequencia.lua`** (cutscenes): linha do tempo com trilha de câmera (chaves com tempo, posição, alvo — um
+  ponto ou uma entidade, que a câmera acompanha — e FOV; curva suave que passa por todas, arrancando e parando
+  devagar), legendas, `animar`, `som`, `ir_para`, `ragdoll` e `chamar` (qualquer função), tarjas de cinema, Enter
+  ou A pulam (os `chamar` que faltam rodam e `ir_para` vira teletransporte, para o jogo ficar no estado certo) e o
+  jogador fica parado durante a cena (`controle_jogador(falso)`, que também serve sozinho). No fim, a câmera de
+  antes volta (posição, direção e FOV) e `ao_terminar` é chamada.
 
 Exemplo: o guarda de `cenas/parque.json` (`scripts/guarda.lua`) patrulha, conversa quando o jogador chega perto e
 aperta E, dá uma missão com dois objetivos e moedas. Testes em `tools/jogo.py`: `dialogo` (Enter avança, ↓ + Enter
 escolhe a 2ª opção e roda a ação dela, o jogo pausa e volta) e `inventario` (contas, missão concluída e tudo igual
 depois de salvar e carregar).
+
+Testes do sequenciador (`tools/sequencia.py`, cena de 4 s com três chaves de câmera e eventos):
+
+| Teste | Critério | Resultado |
+|---|---|---|
+| camera | imagem: centro vermelho no começo, azul no fim, câmera do jogo depois | vermelho / azul / câmera do jogo |
+| curva | passa pelas chaves; velocidade sem trancos | nas 3 chaves; muda no máximo 0,27 m/s entre quadros (máx. 3,2 m/s) |
+| eventos | cada um no quadro do seu tempo, em ordem | a, b, c, fim — 0 ms de atraso |
+| travar | W segurado não anda na cena, anda depois | 0,0 cm na cena; 6,75 m depois |
+| pular | Enter em 1 s: acaba, roda os `chamar` restantes, o jogador anda | acabou em 1,03 s; a, b, c chamados; andou 6,3 m |
+| tarjas | com janela: tarjas pretas e legenda | preto (0) em cima e embaixo; 315 pixels de legenda |
 
 ## Interface de jogo (HUD)
 

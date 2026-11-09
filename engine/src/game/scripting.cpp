@@ -444,6 +444,10 @@ struct Scripting::Impl {
       world.cameraOverride.fovDeg = fov.value_or(0.0f);
     });
     lua.set_function("camera_jogo", [this]() { world.cameraOverride.active = false; });
+    lua.set_function("controle_jogador", [this](sol::optional<bool> on) {
+      if (on) world.playerControl = *on;
+      return world.playerControl;
+    });
     lua.set_function("tempo_real", [this]() { return world.realTime; });
     lua.set_function("volume", [this](sol::optional<float> v) {
       if (!world.audio) return v.value_or(1.0f);
