@@ -11,6 +11,8 @@ quadro e o teste confere:
   - repouso:   no fim, deitada, nada se mexe mais de 1 cm em meio segundo (não fica tremendo).
   - levantar:  e:levantar() em t = 5 s e o roteiro manda andar: a raposa volta a andar de pé, na altura normal.
   - degrau:    cai sobre a quina de um degrau de 30 cm: nenhum osso dentro do degrau nem do chão.
+  - transicao: ao levantar, a pose caída se mistura com a animação em 0,5 s: nenhum osso salta mais de 5 cm de um
+               quadro para o outro, e a raposa fica de pé virada para onde o tronco estava deitado.
 """
 import argparse
 import json
@@ -169,8 +171,27 @@ def teste_degrau(b, pasta):
     return pior < 0.02, f'maior entrada de um osso no degrau ou no chão: {pior * 100:.1f} cm'
 
 
+def teste_transicao(b, pasta):
+    acao = (CAIR % f'{2 * MASSA}, 0, {1 * MASSA}') + '\n  if tempo() >= 4.0 and not levantou then levantou = true; e:levantar() end'
+    q = rodar(b, pasta, 'transicao', [chao(), raposa([0, 0.4, 0], [])], 5.5, acao)
+    deitado = [o for t, c, o in q if c][-1]
+    depois = [o for t, c, o in q if not c and t > 3.9]
+    pior, qual = 0.0, ''
+    seq = [deitado] + depois
+    for i in range(1, len(seq)):
+        for n in seq[i]:
+            d = math.dist(seq[i][n], seq[i - 1][n])
+            if d > pior:
+                pior, qual = d, n
+    def rumo(o):
+        return math.degrees(math.atan2(o['b_Neck_04'][0] - o['b_Hip_01'][0], o['b_Neck_04'][2] - o['b_Hip_01'][2]))
+    giro = abs((rumo(depois[-1]) - rumo(deitado) + 180) % 360 - 180)
+    ok = pior < 0.05 and giro < 30
+    return ok, f'maior salto de um osso por quadro ao levantar: {pior * 100:.1f} cm ({qual}); de pé virada a {giro:.0f}° de como estava deitada'
+
+
 TESTES = {'cai': teste_cai, 'juntas': teste_juntas, 'empurrao': teste_empurrao, 'repouso': teste_repouso,
-          'levantar': teste_levantar, 'degrau': teste_degrau}
+          'levantar': teste_levantar, 'degrau': teste_degrau, 'transicao': teste_transicao}
 
 
 def main():

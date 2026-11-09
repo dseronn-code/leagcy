@@ -165,10 +165,33 @@ void Scene::animateModel(Model& m, float dt) {
   const std::vector<int>& driven = m.driven;
   const bool ragdoll = driven.size() == pose.size() && !m.drivenWorld.empty();
   const glm::mat4 invRoot = ragdoll ? glm::inverse(m.root) : glm::mat4(1.0f);
+  // Pose só da animação (sem o ragdoll), para a mistura ao levantar.
+  std::vector<glm::mat4> animGlobal(ragdoll && m.drivenWeight < 1.0f ? pose.size() : 0);
+  std::vector<uint8_t> animDone(animGlobal.size(), 0);
+  std::function<const glm::mat4&(size_t)> resolveAnim = [&](size_t i) -> const glm::mat4& {
+    if (!animDone[i]) {
+      const glm::mat4 local = nodeMatrix(pose[i]);
+      animGlobal[i] = pose[i].parent >= 0 ? resolveAnim(size_t(pose[i].parent)) * local : local;
+      animDone[i] = 1;
+    }
+    return animGlobal[i];
+  };
   std::function<const glm::mat4&(size_t)> resolve = [&](size_t i) -> const glm::mat4& {
     if (!done[i]) {
       if (ragdoll && driven[i] >= 0) {
-        global[i] = invRoot * m.drivenWorld[size_t(driven[i])];
+        const glm::mat4 rag = invRoot * m.drivenWorld[size_t(driven[i])];
+        if (m.drivenWeight >= 1.0f) {
+          global[i] = rag;
+        } else {  // posição e rotação misturadas no espaço do modelo (escala da animação)
+          const glm::mat4 anim = resolveAnim(i);  // a pose da animação pura: todos os ossos no mesmo ritmo
+          const float w = glm::clamp(m.drivenWeight, 0.0f, 1.0f);
+          const glm::vec3 sa(glm::length(glm::vec3(anim[0])), glm::length(glm::vec3(anim[1])), glm::length(glm::vec3(anim[2])));
+          const glm::vec3 sr(glm::length(glm::vec3(rag[0])), glm::length(glm::vec3(rag[1])), glm::length(glm::vec3(rag[2])));
+          const glm::quat qa = glm::quat_cast(glm::mat3(glm::vec3(anim[0]) / sa.x, glm::vec3(anim[1]) / sa.y, glm::vec3(anim[2]) / sa.z));
+          const glm::quat qr = glm::quat_cast(glm::mat3(glm::vec3(rag[0]) / sr.x, glm::vec3(rag[1]) / sr.y, glm::vec3(rag[2]) / sr.z));
+          global[i] = glm::translate(glm::mat4(1.0f), glm::mix(glm::vec3(anim[3]), glm::vec3(rag[3]), w)) *
+                      glm::mat4_cast(glm::slerp(qa, qr, w)) * glm::scale(glm::mat4(1.0f), sa);
+        }
       } else {
         glm::mat4 local = nodeMatrix(pose[i]);
         global[i] = pose[i].parent >= 0 ? resolve(size_t(pose[i].parent)) * local : local;

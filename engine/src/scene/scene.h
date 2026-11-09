@@ -307,6 +307,7 @@ struct Model {
   // animação. driven[nó] = índice em drivenWorld (-1 = animado). Vazio = desligado (e o IK dos pés volta).
   std::vector<int> driven;
   std::vector<glm::mat4> drivenWorld;
+  float drivenWeight = 1.0f;  // < 1: mistura com a animação (saindo do ragdoll sem salto)
 
   std::vector<ModelNode> nodes;
   std::vector<Animation> animations;

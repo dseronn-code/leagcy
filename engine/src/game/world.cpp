@@ -714,6 +714,7 @@ void World::update(scene::Scene& scene, float dt) {
       if (c.netHasLast) c.netVelocity = glm::mix(c.netVelocity, (pos - c.netLastPos) / dt, 1.0f - std::exp(-dt * 15.0f));
       c.netLastPos = pos;
       c.netHasLast = true;
+      ragdollBlendStep(scene, c, dt);
       animateCharacter(scene, c, pos - glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f), dt);
     }
     return;
@@ -898,6 +899,7 @@ void World::update(scene::Scene& scene, float dt) {
     auto& t = registry.get<Transform>(ent);
     Character& c = registry.get<Character>(ent);
     if (c.id == ~0u) continue;
+    ragdollBlendStep(scene, c, dt);
     if (c.ragdoll.active && c.visual.model >= 0) {
       scene::Model& m = scene.models[size_t(c.visual.model)];
       for (size_t k = 0; k < c.ragdoll.bodies.size(); ++k) {
@@ -932,6 +934,19 @@ void World::update(scene::Scene& scene, float dt) {
     const ParticleSource& ps = registry.get<ParticleSource>(ent);
     const Transform& t = registry.get<Transform>(ent);
     scene.setEmitter(ps.emitter, t.position + t.rotation * ps.offset, ps.enabled ? ps.scale : 0.0f);
+  }
+}
+
+void World::ragdollBlendStep(scene::Scene& scene, Character& c, float dt) {
+  if (c.ragdoll.active || c.ragdoll.blendOut <= 0.0f || c.visual.model < 0) return;
+  scene::Model& m = scene.models[size_t(c.visual.model)];
+  c.ragdoll.blendOut = std::max(c.ragdoll.blendOut - dt, 0.0f);
+  const float x = c.ragdoll.blendOut / kRagdollBlendOut;
+  m.drivenWeight = x * x * (3.0f - 2.0f * x);
+  if (c.ragdoll.blendOut <= 0.0f) {
+    m.driven.clear();
+    m.drivenWorld.clear();
+    m.drivenWeight = 1.0f;
   }
 }
 
@@ -1570,6 +1585,8 @@ bool World::startRagdoll(entt::entity e, glm::vec3 impulse) {
   r.active = true;
   r.bodies = bodies;
   r.nodes = nodes;
+  r.parents.clear();
+  for (const RagdollPart& part : parts) r.parents.push_back(part.parent);
   r.offset.resize(bodies.size());
   m.driven.assign(n, -1);
   m.drivenWorld.resize(bodies.size());
@@ -1593,10 +1610,26 @@ bool World::stopRagdoll(entt::entity e) {
   if (!c || !c->ragdoll.active || !scene) return false;
   scene::Model& m = scene->models[size_t(c->visual.model)];
   glm::vec3 pelvis(m.drivenWorld[0][3]);
+  // De pé olhando para onde estava o tronco: o centro do maior ramo da bacia (coluna, cabeça e braços; não a cauda
+  // nem uma perna).
+  const std::vector<int>& par = c->ragdoll.parents;
+  std::vector<int> branch(par.size(), -1), count(par.size(), 0);
+  for (size_t k = 1; k < par.size(); ++k) {
+    int b = int(k);
+    while (b >= 0 && par[size_t(b)] != 0) b = par[size_t(b)];
+    branch[k] = b;
+    if (b >= 0) ++count[size_t(b)];
+  }
+  const int big = int(std::max_element(count.begin(), count.end()) - count.begin());
+  glm::vec3 along(0.0f);
+  for (size_t k = 1; k < par.size() && k < m.drivenWorld.size(); ++k)
+    if (branch[k] == big) along += glm::vec3(m.drivenWorld[k][3]) - pelvis;
   physics->removeRagdoll(c->ragdoll.bodies);
-  m.driven.clear();
-  m.drivenWorld.clear();
+  // A pose caída fica parada em drivenWorld e se mistura com a animação até sumir (sem salto).
   c->ragdoll = Character::Ragdoll{};
+  c->ragdoll.blendOut = World::kRagdollBlendOut;
+  m.drivenWeight = 1.0f;
+  if (glm::length(glm::vec2(along.x, along.z)) > 1e-3f) c->visual.yaw = std::atan2(along.x, along.z);
   // De pé onde a bacia está: os pés no chão abaixo dela (ou na altura dela, sem chão).
   float dist = 0.0f;
   glm::vec3 feet = pelvis;

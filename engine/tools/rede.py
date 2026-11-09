@@ -14,6 +14,8 @@ Um script nos dois lados registra as posições a cada quadro. Confere:
   - previsão: com 150 ms de atraso simulado em cada sentido, o boneco do cliente reage na hora (com previsão) e não
     só depois da volta pela rede (sem previsão); no fim, os dois lados concordam;
   - rodas: um carro dirigido no anfitrião aparece igual no cliente (imagem final, chassi e rodas).
+  - ragdoll: uma raposa cai em ragdoll no anfitrião (1 s depois de o cliente entrar) e levanta 4 s depois: no
+    cliente ela cai junto (bacia perto do chão), deitada no mesmo lugar (< 2 cm) e de pé de novo no fim.
 """
 import argparse
 import json
@@ -184,6 +186,51 @@ def main():
         oks.append(ok)
         print(f'rodas      {"PASSOU" if ok else "FALHOU"}: carro dirigido no anfitrião, imagem final do cliente igual à do '
               f'anfitrião (diferença média {dif:.2f}/255, chassi e rodas)')
+        # 4) ragdoll no anfitrião, visto no cliente
+        lua_rag = os.path.join(pasta, 'rag.lua')
+        with open(lua_rag, 'w', encoding='utf-8') as f:
+            f.write('''
+function atualizar(e, dt)
+  local h = achar("heroi_2")
+  local _, hy = h:posicao()
+  if hy > -100 and not entrou then entrou = tempo() end
+  if entrou and not caiu and tempo() > entrou + 1 then caiu = true; e:ragdoll(30, 0, 10) end
+  if caiu and not levantou and tempo() > entrou + 5 then levantou = true; e:levantar() end
+  local x, y, z = e:osso("b_Hip_01")
+  local a, b, c = e:osso("b_Head_05")
+  if entrou then log("RAG", string.format("%.4f %.4f %.4f %.4f %.4f %.4f %.4f", tempo(), x, y, z, a, b, c)) end
+end
+''')
+        rag = dict(cena)
+        rag['entidades'] = [ent for ent in cena['entidades'] if ent['nome'] != 'bola'] + [
+            {'nome': 'raposa', 'posicao': [0, 0.4, 3], 'script': lua_rag, 'personagem': {
+                'controle': 'roteiro', 'roteiro': [], 'altura': 0.8, 'raio': 0.15, 'massa': 20,
+                'visual': dict(cena['entidades'][2]['personagem']['visual'])}}]
+        arq3 = os.path.join(pasta, 'rag.json')
+        with open(arq3, 'w', encoding='utf-8') as f:
+            json.dump(rag, f)
+        lh, lc = sessao(binario, pasta, arq3, a.porta + 2, '0:segurar:w:0.01')
+        reg = lambda ls: [tuple(map(float, l.split('RAG', 1)[1].split())) for l in ls if 'RAG ' in l]
+        rh, rc = reg(lh), reg(lc)
+        ok = bool(rh and rc)
+        msg = 'sem registros'
+        if ok:
+            t0 = rh[0][0]
+            deitado_h = [r for r in rh if t0 + 3.5 < r[0] < t0 + 4.9]
+            deitado_c = [r for r in rc if t0 + 3.5 < r[0] < t0 + 4.9]
+            if not deitado_h or not deitado_c:
+                ok, msg = False, f'o cliente não cobriu o tempo da queda ({rc[0][0]:.1f}–{rc[-1][0]:.1f} s; queda em {t0 + 1:.1f} s)'
+            else:
+                hc = deitado_c[-1]
+                hh = min(rh, key=lambda r: abs(r[0] - hc[0]))
+                dif = max(math.dist(hh[1:4], hc[1:4]), math.dist(hh[4:7], hc[4:7]))
+                baixo = hc[2]
+                fim_c = rc[-1][2]
+                ok = baixo < 0.15 and dif < 0.02 and fim_c > 0.35
+                msg = (f'no cliente a bacia caiu a {baixo:.2f} m; deitada, cliente e anfitrião a {100 * dif:.2f} cm '
+                       f'(bacia e cabeça); depois de levantar, bacia a {fim_c:.2f} m no cliente')
+        oks.append(ok)
+        print(f'ragdoll    {"PASSOU" if ok else "FALHOU"}: {msg}')
     sys.exit(0 if all(oks) else 1)
 
 

@@ -149,9 +149,11 @@ struct Character {
   struct Ragdoll {
     bool active = false;
     std::vector<uint32_t> bodies, nodes;  // corpo da física e nó do modelo de cada parte
+    std::vector<int> parents;             // parte mãe de cada parte (-1 = a bacia)
     std::vector<glm::mat4> offset;        // do corpo até o nó (fixo, da pose em que caiu)
     glm::mat4 rootBasis{1.0f};            // rotação e escala do modelo (sem a posição)
     glm::vec3 rootToPelvis{0.0f};         // da origem do modelo até a bacia, no mundo, na pose em que caiu
+    float blendOut = 0.0f;                // s que faltam da volta para a animação depois de levantar
   } ragdoll;
 };
 
@@ -248,6 +250,7 @@ class World {
   bool bonePosition(entt::entity e, const std::string& bone, glm::vec3& out) const;
   // Ragdoll num personagem com "visual": corpos por osso a partir da bacia, com a velocidade atual mais
   // impulse / massa. Falso se não houver esqueleto. stopRagdoll põe o personagem de pé onde a bacia caiu.
+  static constexpr float kRagdollBlendOut = 0.5f;  // s da pose caída até a animação ao levantar
   bool startRagdoll(entt::entity e, glm::vec3 impulse);
   bool stopRagdoll(entt::entity e);
   scene::Scene* scene = nullptr;  // a cena deste mundo (consultas dos scripts: ossos, animação)
@@ -331,6 +334,7 @@ class World {
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
   void animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt);
+  void ragdollBlendStep(scene::Scene& scene, Character& c, float dt);  // levantando: a pose caída some aos poucos
  public:
   // IA: o personagem `c` vê a entidade `other` (distância, cone de visão para onde ele olha e linha de visada)?
   bool sees(const Character& c, entt::entity other) const;

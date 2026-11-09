@@ -90,10 +90,17 @@ struct WheelPose {
   glm::vec3 p, s;
   glm::quat r;
 };
+struct RagPart {
+  uint16_t node;
+  glm::vec3 p;
+  float s;
+  glm::quat r;
+};
 struct Snapshot {
   float hostTime;
   std::vector<Pose> poses;
   std::map<uint16_t, std::array<WheelPose, 4>> wheels;  // rodas dos carros (índice da tabela)
+  std::map<uint16_t, std::vector<RagPart>> rags;         // personagens em ragdoll: nó e matriz de cada parte
 };
 
 double nowSeconds() {
@@ -230,6 +237,33 @@ struct Network::Impl {
         w.put(rot.z);
       }
     }
+    // Ragdolls: a matriz de cada parte (posição, escala uniforme do modelo e rotação).
+    uint16_t nRag = 0;
+    for (entt::entity e : table)
+      if (world.registry.valid(e))
+        if (const Character* c = world.registry.try_get<Character>(e); c && c->ragdoll.active) ++nRag;
+    w.put(nRag);
+    for (uint32_t i = 0; i < table.size(); ++i) {
+      if (!world.registry.valid(table[i]) || !world.scene) continue;
+      const Character* c = world.registry.try_get<Character>(table[i]);
+      if (!c || !c->ragdoll.active) continue;
+      const scene::Model& m = world.scene->models[size_t(c->visual.model)];
+      w.put(uint16_t(i));
+      w.put(uint8_t(c->ragdoll.nodes.size()));
+      for (size_t k = 0; k < c->ragdoll.nodes.size(); ++k) {
+        glm::vec3 pos(0.0f), scale(1.0f), skew;
+        glm::vec4 persp;
+        glm::quat rot(1.0f, 0.0f, 0.0f, 0.0f);
+        glm::decompose(m.drivenWorld[k], scale, rot, pos, skew, persp);
+        w.put(uint16_t(c->ragdoll.nodes[k]));
+        w.put(pos);
+        w.put(scale.x);
+        w.put(rot.w);
+        w.put(rot.x);
+        w.put(rot.y);
+        w.put(rot.z);
+      }
+    }
     ENetPacket* pk = enet_packet_create(w.b.data(), w.b.size(), 0);  // não confiável: o próximo estado substitui
     enet_host_broadcast(host, 1, pk);
   }
@@ -305,6 +339,22 @@ struct Network::Impl {
           p.r.z = r.get<float>();
         }
         if (r.ok) s.wheels[i] = wp;
+      }
+      const uint16_t nRag = r.get<uint16_t>();
+      for (uint16_t k = 0; k < nRag && r.ok; ++k) {
+        const uint16_t i = r.get<uint16_t>();
+        const uint8_t parts = r.get<uint8_t>();
+        std::vector<RagPart> v(parts);
+        for (RagPart& rp : v) {
+          rp.node = r.get<uint16_t>();
+          rp.p = r.get<glm::vec3>();
+          rp.s = r.get<float>();
+          rp.r.w = r.get<float>();
+          rp.r.x = r.get<float>();
+          rp.r.y = r.get<float>();
+          rp.r.z = r.get<float>();
+        }
+        if (r.ok) s.rags[i] = std::move(v);
       }
       if (!r.ok) return;
       if (hasAck) reconcile(world, s, ack);
@@ -407,6 +457,34 @@ struct Network::Impl {
         const glm::vec3 p = glm::mix(w0[k].p, w1[k].p, f), sc = glm::mix(w0[k].s, w1[k].s, f);
         const glm::quat q = glm::slerp(w0[k].r, w1[k].r, f);
         scene.setTransform(v.wheelObjects[k], glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(q) * glm::scale(glm::mat4(1.0f), sc));
+      }
+    }
+    // Ragdolls: o modelo segue as partes vindas do anfitrião; quando ele levanta, a pose caída some aos poucos.
+    for (size_t i = 0; i < clientTable.size(); ++i) {
+      if (clientTable[i] == entt::null) continue;
+      Character* c = world.registry.try_get<Character>(clientTable[i]);
+      if (!c || !c->visual.enabled || c->visual.model < 0) continue;
+      scene::Model& m = scene.models[size_t(c->visual.model)];
+      auto it1 = s1.rags.find(uint16_t(i));
+      if (it1 != s1.rags.end()) {
+        const std::vector<RagPart>& p1 = it1->second;
+        auto it0 = s0.rags.find(uint16_t(i));
+        const std::vector<RagPart>& p0 = it0 != s0.rags.end() && it0->second.size() == p1.size() ? it0->second : p1;
+        m.driven.assign(m.nodes.size(), -1);
+        m.drivenWorld.resize(p1.size());
+        m.drivenWeight = 1.0f;
+        for (size_t k = 0; k < p1.size(); ++k) {
+          if (p1[k].node >= m.nodes.size()) continue;
+          m.driven[p1[k].node] = int(k);
+          m.drivenWorld[k] = glm::translate(glm::mat4(1.0f), glm::mix(p0[k].p, p1[k].p, f)) *
+                             glm::mat4_cast(glm::slerp(p0[k].r, p1[k].r, f)) *
+                             glm::scale(glm::mat4(1.0f), glm::vec3(glm::mix(p0[k].s, p1[k].s, f)));
+        }
+        c->ragdoll.active = true;
+        c->ragdoll.blendOut = 0.0f;
+      } else if (c->ragdoll.active) {
+        c->ragdoll.active = false;
+        c->ragdoll.blendOut = World::kRagdollBlendOut;
       }
     }
     world.time = renderTime;

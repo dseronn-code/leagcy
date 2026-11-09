@@ -136,7 +136,10 @@ que corria).
   Juntas swing-twist do Jolt com limites (cone de 50°, torção de 25°) e um atrito leve; partes que se tocam na pose
   inicial não colidem entre si. A massa do personagem (`"massa"`) é dividida pelo volume das peças.
 - Contínuo (sem atravessar o chão em queda rápida) e no passo fixo da física: o mesmo resultado a qualquer FPS.
-- Só no anfitrião em rede (o cliente não vê o ragdoll ainda).
+- **Levantar sem salto**: a pose caída se mistura com a animação em 0,5 s (cada osso no mesmo ritmo, posição e
+  rotação), e o personagem fica de pé virado para onde o tronco estava deitado.
+- **Em rede**: o anfitrião simula e manda a matriz de cada parte junto com o estado; o cliente interpola entre dois
+  estados (como as rodas dos carros) e faz a mesma transição ao levantar.
 
 ![ragdoll](img/ragdoll.png)
 
@@ -150,6 +153,7 @@ Testes (`tools/ragdoll.py`, a raposa de 20 kg):
 | repouso | caída, nada se mexe > 1 cm em 0,5 s | 0,00 cm |
 | levantar | e:levantar e andar: de pé na altura normal | bacia a 0,41 m (antes: 0,41); andou 3,5 m |
 | degrau | cai sobre a quina de um degrau de 30 cm | nenhum osso dentro (0,0 cm) |
+| transicao | ao levantar, nenhum osso salta > 5 cm por quadro (60 quadros/s); virada como estava | 3,2 cm (sem a mistura: ~35 cm de uma vez); 10° |
 
 ## Navegação e NPCs (Recast/Detour)
 
