@@ -4,6 +4,8 @@
 #include <cgltf.h>
 #include <meshoptimizer.h>
 #include <basisu_transcoder.h>
+#include <draco/compression/decode.h>
+#include <memory>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
@@ -609,6 +611,90 @@ bool decodeMeshopt(cgltf_data* data, const std::string& path) {
   return true;
 }
 
+// KHR_draco_mesh_compression: decodifica cada primitiva comprimida e aponta os acessores dela (atributos e índices)
+// para os dados decodificados (buffer views criadas aqui, fora das listas do cgltf; liberadas com o DracoStorage). O
+// resto do carregador lê os acessores como sempre.
+struct DracoStorage {
+  std::vector<std::unique_ptr<cgltf_buffer_view>> views;
+  std::vector<std::vector<uint8_t>> blobs;
+};
+
+static void pointAccessor(DracoStorage& st, cgltf_accessor* acc, std::vector<uint8_t>&& bytes, cgltf_component_type ct,
+                          size_t comps, size_t count) {
+  st.blobs.push_back(std::move(bytes));
+  auto view = std::make_unique<cgltf_buffer_view>();
+  *view = cgltf_buffer_view{};
+  view->data = st.blobs.back().data();
+  view->size = st.blobs.back().size();
+  acc->buffer_view = view.get();
+  acc->offset = 0;
+  acc->component_type = ct;
+  acc->normalized = 0;
+  acc->stride = comps * 4;
+  acc->count = count;
+  acc->is_sparse = 0;
+  st.views.push_back(std::move(view));
+}
+
+bool decodeDraco(cgltf_data* data, const std::string& path, DracoStorage& st) {
+  for (size_t mi = 0; mi < data->meshes_count; ++mi)
+    for (size_t pi = 0; pi < data->meshes[mi].primitives_count; ++pi) {
+      cgltf_primitive& prim = data->meshes[mi].primitives[pi];
+      if (!prim.has_draco_mesh_compression) continue;
+      const cgltf_draco_mesh_compression& dc = prim.draco_mesh_compression;
+      if (!dc.buffer_view || !dc.buffer_view->buffer || !dc.buffer_view->buffer->data) {
+        LOG_ERROR("%s: primitiva Draco sem dados", path.c_str());
+        return false;
+      }
+      draco::DecoderBuffer buf;
+      buf.Init(static_cast<const char*>(dc.buffer_view->buffer->data) + dc.buffer_view->offset, dc.buffer_view->size);
+      draco::Decoder decoder;
+      auto res = decoder.DecodeMeshFromBuffer(&buf);
+      if (!res.ok()) {
+        LOG_ERROR("%s: falha ao decodificar Draco (%s)", path.c_str(), res.status().error_msg());
+        return false;
+      }
+      std::unique_ptr<draco::Mesh> mesh = std::move(res).value();
+      const size_t points = mesh->num_points();
+      for (size_t a = 0; a < dc.attributes_count; ++a) {
+        const int uid = int(dc.attributes[a].data - data->accessors);  // o cgltf guarda o id do Draco assim
+        const draco::PointAttribute* att = mesh->GetAttributeByUniqueId(uint32_t(uid));
+        cgltf_accessor* target = nullptr;
+        for (size_t k = 0; k < prim.attributes_count; ++k)
+          if (std::strcmp(prim.attributes[k].name, dc.attributes[a].name) == 0) target = prim.attributes[k].data;
+        if (!att || !target) continue;
+        const size_t comps = std::clamp<size_t>(att->num_components(), 1, 4);
+        std::vector<uint8_t> bytes(points * comps * 4);
+        const bool asUint = std::strncmp(dc.attributes[a].name, "JOINTS_", 7) == 0;
+        for (size_t i = 0; i < points; ++i) {
+          const draco::AttributeValueIndex vi = att->mapped_index(draco::PointIndex(uint32_t(i)));
+          if (asUint) {
+            uint32_t v[4] = {};
+            att->ConvertValue<uint32_t>(vi, int8_t(comps), v);
+            std::memcpy(&bytes[i * comps * 4], v, comps * 4);
+          } else {
+            float v[4] = {};
+            att->ConvertValue<float>(vi, int8_t(comps), v);
+            std::memcpy(&bytes[i * comps * 4], v, comps * 4);
+          }
+        }
+        pointAccessor(st, target, std::move(bytes), asUint ? cgltf_component_type_r_32u : cgltf_component_type_r_32f, comps, points);
+      }
+      if (prim.indices) {
+        std::vector<uint8_t> bytes(size_t(mesh->num_faces()) * 3 * 4);
+        for (uint32_t f = 0; f < mesh->num_faces(); ++f) {
+          const draco::Mesh::Face& face = mesh->face(draco::FaceIndex(f));
+          for (int c = 0; c < 3; ++c) {
+            const uint32_t idx = face[c].value();
+            std::memcpy(&bytes[(size_t(f) * 3 + size_t(c)) * 4], &idx, 4);
+          }
+        }
+        pointAccessor(st, prim.indices, std::move(bytes), cgltf_component_type_r_32u, 1, size_t(mesh->num_faces()) * 3);
+      }
+    }
+  return true;
+}
+
 bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform, int* modelOut) {
   cgltf_options options{};
   cgltf_data* data = nullptr;
@@ -621,7 +707,8 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
     cgltf_free(data);
     return false;
   }
-  if (!decodeMeshopt(data, path)) {
+  DracoStorage draco;  // dados das primitivas Draco: vivos até o fim desta função
+  if (!decodeMeshopt(data, path) || !decodeDraco(data, path, draco)) {
     cgltf_free(data);
     return false;
   }

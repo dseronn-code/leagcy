@@ -273,6 +273,17 @@ FetchContent_Declare(basisu
   GIT_SHALLOW TRUE
   SOURCE_SUBDIR _so_o_transcodificador)
 FetchContent_MakeAvailable(basisu)
+# Draco (Apache 2.0, Google): malhas comprimidas dos glTF (KHR_draco_mesh_compression). Só a biblioteca entra no build.
+set(DRACO_JS_GLUE OFF CACHE BOOL "" FORCE)
+set(DRACO_TESTS OFF CACHE BOOL "" FORCE)
+set(DRACO_TRANSCODER_SUPPORTED OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(draco
+  GIT_REPOSITORY https://github.com/google/draco.git
+  GIT_TAG 1.5.7
+  GIT_SHALLOW TRUE
+  EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(draco)
+
 add_library(legacy_basisu STATIC ${basisu_SOURCE_DIR}/transcoder/basisu_transcoder.cpp ${basisu_SOURCE_DIR}/zstd/zstddeclib.c)
 target_include_directories(legacy_basisu SYSTEM PUBLIC ${basisu_SOURCE_DIR}/transcoder ${basisu_SOURCE_DIR}/zstd)
 target_compile_definitions(legacy_basisu PUBLIC BASISD_SUPPORT_KTX2=1 BASISD_SUPPORT_KTX2_ZSTD=1)
@@ -288,7 +299,9 @@ target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
                                      EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}
-                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet meshoptimizer legacy_basisu)
+                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet meshoptimizer legacy_basisu draco::draco)
+# Os cabeçalhos do Draco incluem draco/draco_features.h, gerado no build dele.
+target_include_directories(legacy SYSTEM PRIVATE ${draco_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)

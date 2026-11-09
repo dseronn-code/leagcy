@@ -287,6 +287,22 @@ Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina, o jog
 
 Os scripts rodam nos dois lados (no cliente servem para a interface).
 
+## Malhas comprimidas (meshopt, Draco) e texturas KTX2
+
+- **meshopt** (`EXT_meshopt_compression`, o formato do gltfpack) e **malha quantizada** (`KHR_mesh_quantization`):
+  descompressão pela meshoptimizer (MIT). Teste: o DamagedHelmet convertido por `tools/gltf_meshopt.cpp` (comprime a
+  geometria com o codificador da meshoptimizer e ZERA os dados originais no .bin, então só aparece algo se o motor
+  descomprimir) sai igual ao original — diferença máxima de 1/255 por pixel, só comprimido e também quantizado; a
+  geometria cai para 64% (60% quantizada).
+- **Draco** (`KHR_draco_mesh_compression`, a compressão mais comum em modelos baixados da internet): decodificada
+  pela biblioteca do Google (Apache 2.0); os acessores da primitiva passam a apontar para os dados decodificados e o
+  resto do carregador não muda. Teste: o Avocado da Khronos na versão Draco contra a versão normal — diferença média
+  de 0,05/255 por pixel.
+- **Texturas KTX2** (`KHR_texture_basisu`, ETC1S ou UASTC com zstd, o formato do gltfpack e do Sketchfab):
+  decodificadas pelo transcodificador Basis Universal (Apache 2.0) e depois seguem o caminho normal (mipmaps e BC7).
+  Teste: o StainedGlassLamp da Khronos na versão KTX2 contra a versão PNG — diferença média de 0,03/255 por pixel
+  (19 texturas; a versão KTX2 do arquivo tem 1/3 dos texels e cabe em 24 MB de vídeo contra 78 MB).
+
 ## Exportar o jogo (`tools/empacotar.py`)
 
 ```
@@ -379,3 +395,4 @@ Comentários `//` são aceitos. Exemplos: `cenas/fisica.json`, `cenas/parque.jso
 | ENet | 1.3.18 | multijogador (UDP) | MIT |
 | meshoptimizer | 0.22 | malhas comprimidas dos glTF | MIT |
 | Basis Universal (transcodificador) + zstd | 1.60 | texturas KTX2 | Apache 2.0 / BSD |
+| Draco | 1.5.7 | malhas comprimidas (Draco) | Apache 2.0 |

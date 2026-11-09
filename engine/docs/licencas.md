@@ -32,6 +32,7 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [ENet](https://github.com/lsalzman/enet) 1.3.18 | Multijogador (UDP) | MIT | Manter o aviso de copyright |
 | [meshoptimizer](https://github.com/zeux/meshoptimizer) 0.22 | Malhas comprimidas dos glTF | MIT | Manter o aviso de copyright |
 | [Basis Universal](https://github.com/BinomialLLC/basis_universal) 1.60 (só o transcodificador, com zstd) | Texturas KTX2 dos glTF | Apache 2.0 (zstd: BSD) | Incluir o aviso da Apache 2.0 e o NOTICE ao distribuir |
+| [Draco](https://github.com/google/draco) 1.5.7 | Malhas comprimidas dos glTF (Draco) | Apache 2.0 | Incluir o aviso da Apache 2.0 ao distribuir |
 
 ## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
 
