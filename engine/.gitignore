@@ -1,6 +1,7 @@
 build/
 build2/
 build3/
+build_*/
 assets/
 *.png
 !docs/screenshots/*.png
