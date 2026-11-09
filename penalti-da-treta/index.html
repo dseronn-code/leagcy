@@ -287,7 +287,10 @@
       </ol>
       <p class="tag" style="font-size:12px;line-height:1.45;margin:0">Modelos 3D (Sketchfab, licença CC BY 4.0, cores e pose alteradas no jogo):
         "Man Player" de RiverofCreative; "Nathan Animated 003", "Manuel Animated 001", "Eric Rigged 001", "Sophia Animated 003", "Carla Rigged 001" e "Claudia Rigged 002" de Renderpeople;
-        "Rigged T-Pose Human Male" de Mike Alger.</p>
+        "Rigged T-Pose Human Male" de Mike Alger.
+        Animações (captura de movimento Mixamo, publicadas no Sketchfab sob CC BY 4.0, adaptadas ao jogador): "Soccer Penalty Kick" de louisbelanger; "Soccer Idle" de p136543;
+        "Goalkeeper Idle" de Appsbypaulhamilton; "Goalkeeper Diving Save" de gareths111; "Goalkeeper Catch" de 634230064; "Goalkeeper Body Block" de siouxsiepikachu;
+        "Fist Pump" de rodgercarr13601; "Cheering" de enealefons.</p>
       <button class="btn primary" data-back>Entendi</button>
     </div>
   </section>
@@ -1397,10 +1400,107 @@ function dressXbot(p) {
   const light = new THREE.Color(shirt); const lum = light.r * 0.3 + light.g * 0.59 + light.b * 0.11;
   x.back.draw(d.name, d.num, trim === shirt ? (lum > 0.5 ? "#111111" : "#ffffff") : trim, lum > 0.5 ? "#ffffff" : "#000000");
 }
+// =====================================================================================
+// animações de captura de movimento (Mixamo, retargetadas para o esqueleto do jogador)
+// O deslocamento no campo foi tirado dos clipes (meta.root): o jogo move o contêiner e o quadril fica na origem,
+// assim as transições misturam só a pose. Eventos: k_kick.contact (pé na bola), gk_*.reach (mãos no ponto de defesa).
+// =====================================================================================
+const ANIM = { ready: false, clips: {}, meta: {}, fps: 30 };
+fetch("assets/animacoes.json").then((r) => r.json()).then((j) => {
+  for (const c of j.clips) ANIM.clips[c.name] = THREE.AnimationClip.parse(c);
+  ANIM.meta = j.meta; ANIM.fps = j.fps; ANIM.ready = true;
+}).catch(() => {});
+const animOn = (p) => ANIM.ready && p.xbot && p.xbot.real;
+const KICKER_YAW = Math.PI - 0.22;
+function rootAt(name, t) {
+  const m = ANIM.meta[name], r = m && m.root; if (!r) return [0, 0];
+  const n = r.length / 2, f = clamp(t * ANIM.fps, 0, n - 1), i = Math.floor(f), k = f - i, j = Math.min(i + 1, n - 1);
+  return [lerp(r[i * 2], r[j * 2], k), lerp(r[i * 2 + 1], r[j * 2 + 1], k)];
+}
+const _rot = (x, z, yaw) => [x * Math.cos(yaw) + z * Math.sin(yaw), -x * Math.sin(yaw) + z * Math.cos(yaw)];
+function kickerBase() {
+  // o pé do chute encontra a bola: bico logo atrás do centro da bola
+  const f = ANIM.meta.k_kick.foot, [fx, fz] = _rot(f[0], f[2], KICKER_YAW);
+  return new THREE.Vector3(SPOT.x - fx + 0.02, 0, SPOT.z + 0.1 - fz);
+}
+function animReset() {
+  for (const p of [kicker, keeper]) { const x = p.xbot; if (x) { x.base = null; x.cur = null; x.next = null; x.lift = 0; } }
+}
+function animPlay(p, name, o = {}) {
+  const x = p.xbot; x.acts = x.acts || {};
+  if (!x.animStarted) { x.mixer.stopAllAction(); x.animStarted = true; }
+  let a = x.acts[name]; if (!a) a = x.acts[name] = x.mixer.clipAction(ANIM.clips[name]);
+  const prev = x.cur && x.acts[x.cur];
+  // o deslocamento acumulado do clipe anterior passa para a base
+  if (prev && x.base) { const [rx, rz] = rootAt(x.cur, prev.time), [wx, wz] = _rot(rx, rz, x.yaw); x.base.x += wx; x.base.z += wz; }
+  a.reset(); a.setLoop(o.once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity); a.clampWhenFinished = true;
+  a.time = o.time || 0; a.timeScale = 1; a.setEffectiveWeight(1); a.play();
+  if (prev && prev !== a) prev.crossFadeTo(a, o.fade == null ? 0.25 : o.fade, false);
+  x.cur = name; x.curT0 = o.time || 0; return a;
+}
+// mira os braços na bola perto do contato (defesas): mistura com a pose do clipe
+function reachArms(p, target, w) {
+  if (w <= 0.001) return;
+  const B = p.xbot.bones, q0 = new THREE.Quaternion();
+  for (const S of ["Right", "Left"]) {
+    const up = B[S + "Arm"], fo = B[S + "ForeArm"], ha = B[S + "Hand"];
+    const d = target.clone().sub(up.getWorldPosition(new THREE.Vector3()));
+    q0.copy(up.quaternion); aimBone(up, fo, d); up.quaternion.copy(q0.slerp(up.quaternion, w)); up.updateMatrixWorld(true);
+    q0.copy(fo.quaternion); aimBone(fo, ha, d); fo.quaternion.copy(q0.slerp(fo.quaternion, w)); fo.updateMatrixWorld(true);
+  }
+}
+function keeperClip(T) {
+  const ax = Math.abs(T.x), side = T.x >= 0 ? "_d" : "_e";
+  if (ax < 0.9) return "gk_pega";
+  if (T.y < 0.9 && ax < 2.6) return "gk_bloqueio" + side;
+  return "gk_mergulho" + side;
+}
+function animDrive(p, dt, isKeeper) {
+  const x = p.xbot, s = Shot;
+  if (isKeeper) {
+    if (!x.base) { x.yaw = 0; x.base = new THREE.Vector3(0, 0, 0.35); x.off = 0; x.lift = 0; animPlay(p, "gk_idle", { fade: 0 }); }
+    if (s && !s.gkClip) {
+      const name = keeperClip(s.diveT), m = ANIM.meta[name];
+      const tReach = s.diveStart + s.D, t0 = tReach - m.reach.t;
+      if (s.t >= t0) {
+        s.gkClip = name; s.gkT0 = t0;
+        animPlay(p, name, { once: true, time: s.t - t0, fade: 0.15 });
+        x.offT = clamp(s.diveT.x - m.reach.x, -1.1, 1.1); x.liftT = clamp(s.diveT.y - m.reach.y, 0, 1.5);
+      }
+    }
+    if (s && s.gkClip) {
+      const m = ANIM.meta[s.gkClip], ct = s.t - s.gkT0;
+      x.off = lerp(0, x.offT, smooth01(ct / Math.max(0.2, m.reach.t * 0.8)));
+      const bell = Math.sin(Math.PI * clamp((ct - (m.reach.t - 0.45)) / 0.95, 0, 1));
+      x.lift = x.liftT * bell;
+      const saved = s.res.type === "defesa" || s.res.type === "cavadinhaPega";
+      if (x.cur === s.gkClip && ct > m.dur + 0.1) { x.base.x += x.off; x.off = 0; x.offT = 0; animPlay(p, saved ? "gk_punho" : "gk_idle", { fade: 0.35 }); }
+    } else { x.off = 0; x.lift = 0; }
+  } else {
+    if (!x.base) { x.yaw = KICKER_YAW; x.base = kickerBase(); animPlay(p, "k_idle", { fade: 0 }); }
+    if (s && x.cur !== "k_kick" && !s.kStarted) { s.kStarted = true; animPlay(p, "k_kick", { once: true, fade: 0.2 }); }
+    if (s && x.cur === "k_kick") {
+      const a = x.acts.k_kick; a.time = Math.min(s.t, ANIM.meta.k_kick.dur);
+      if (s.t > ANIM.meta.k_kick.dur && s.outcomeAt != null) animPlay(p, s.res.goal ? "k_comemora" : "k_idle", { fade: 0.4 });
+    }
+  }
+  x.mixer.update(dt);
+  const a = x.cur && x.acts[x.cur], [rx, rz] = a ? rootAt(x.cur, a.time) : [0, 0], [wx, wz] = _rot(rx, rz, x.yaw);
+  x.root.position.set(x.base.x + wx + (x.off || 0), x.lift || 0, x.base.z + wz);
+  x.root.rotation.set(0, x.yaw, 0);
+  x.root.updateMatrixWorld(true);
+  if (isKeeper && s && s.gkClip && (s.res.type === "defesa" || s.res.type === "cavadinhaPega")) {
+    const m = ANIM.meta[s.gkClip], ct = s.t - s.gkT0;
+    const w = Math.max(0, 1 - Math.abs(ct - m.reach.t) / 0.32);
+    reachArms(p, s.phase === "flight" ? s.diveT : ball.position, w * 0.85);
+  }
+}
+const smooth01 = (v) => { v = clamp(v, 0, 1); return v * v * (3 - 2 * v); };
 const _dw = new THREE.Vector3(), _q1 = new THREE.Quaternion();
 const limbDir = (obj, x, y, z) => _dw.set(x, y, z).applyQuaternion(obj.getWorldQuaternion(_q1)).clone();
 function syncXbot(p, dt, keeperRig) {
   const x = p.xbot; if (!x) return;
+  if (animOn(p)) { animDrive(p, dt, keeperRig); return; }
   x.root.position.copy(p.root.position); x.root.quaternion.copy(p.root.quaternion);
   const crouch = 0.95 - p.body.position.y;
   x.root.position.y += -crouch * 0.55;
@@ -1645,6 +1745,7 @@ const Cam = {
 // poses dos jogadores
 // =====================================================================================
 function resetPoses() {
+  animReset();
   keeper.root.position.set(0, 0, 0.35); keeper.root.rotation.set(0, 0, 0); keeper.body.position.y = 0.95;
   kicker.root.position.set(-1.55, 0, 11.95); kicker.root.rotation.set(0, Math.PI - 0.45, 0); kicker.body.position.y = 0.95;
   [keeper, kicker].forEach((p) => { p.arms.forEach((a, i) => a.rotation.set(0, 0, (i ? 1 : -1) * 0.12)); p.legs.forEach((l) => l.rotation.set(0, 0, 0)); p.body.rotation.set(0, 0, 0); });
@@ -1731,11 +1832,12 @@ function startShot(kick, save, res, info) {
     else if (res.close) diveT.lerp(target, 0.6).x -= Math.sign(target.x || 1) * 0.35;
     const reflexDelay = { perfeito: 0.04, bom: 0.13, atrasado: F * 0.72 }[save.reflex];
     const D = 0.42;
-    let diveStart = 0.95 + reflexDelay;
-    if (contactS) diveStart = Math.min(diveStart, 0.95 + F * contactS - D);
-    if (res.type === "cavadinha") diveStart = 0.95 + 0.05;
+    const KICK = animOn(kicker) ? ANIM.meta.k_kick.contact : 0.95;
+    let diveStart = KICK + reflexDelay;
+    if (contactS) diveStart = Math.min(diveStart, KICK + F * contactS - D);
+    if (res.type === "cavadinha") diveStart = KICK + 0.05;
 
-    Shot = { t: 0, kick, save, res, F, target, c, contactS, diveT, diveStart, D, phase: "run", outcomeAt: null, done, info, vel: new THREE.Vector3(), hitNet: false, kicked: false };
+    Shot = { t: 0, KICK, kick, save, res, F, target, c, contactS, diveT, diveStart, D, phase: "run", outcomeAt: null, done, info, vel: new THREE.Vector3(), hitNet: false, kicked: false };
     trailHist.length = 0; trailMat.uniforms.uOn.value = 0;
     Sfx.whistle(); Sfx.crowdLevel(0.1, 0.4);
     Cam.mode = "shot";
@@ -1763,7 +1865,7 @@ function outcomeFx() {
 function updateShot(dt) {
   const s = Shot; if (!s) return;
   s.t += dt;
-  const t = s.t, KICK = 0.95;
+  const t = s.t, KICK = s.KICK;
   // corrida e chute
   if (t < KICK) {
     const p = t / KICK, from = new THREE.Vector3(-1.55, 0, 11.95), to = new THREE.Vector3(-0.42, 0, 11.38);
@@ -2899,6 +3001,6 @@ renderNames(); renderH2H();
 show("sHome");
 requestAnimationFrame((t) => { last = t; frame(t); });
 window.__treta = { Store, Camp, DB, resolveShot, decided, calcSeason, simulate, myStatus };
-window.__p3 = { kicker, keeper, camera, scene, Cam };
+window.__p3 = { kicker, keeper, camera, scene, Cam, startShot, resolveShot, ball, ANIM, get Shot() { return Shot; } };
 })();
 </script>

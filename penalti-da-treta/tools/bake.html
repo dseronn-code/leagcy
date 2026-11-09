@@ -1,0 +1,44 @@
+<!doctype html><html><body style="margin:0"><canvas id="c"></canvas>
+<script src="three.min.js"></script><script src="GLTFLoader.js"></script><script src="bake.js"></script>
+<script>
+const JOBS = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+const L = new THREE.GLTFLoader(); const load = (f) => new Promise((res, rej) => L.load(f, res, undefined, rej));
+(async () => {
+  const pg = await load('player.glb');
+  const model = pg.scene, root = new THREE.Group(); root.add(model);
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root); model.scale.multiplyScalar(1.82 / (box.max.y - box.min.y)); root.updateMatrixWorld(true);
+  const box2 = new THREE.Box3().setFromObject(root); model.position.y -= box2.min.y; root.updateMatrixWorld(true);
+  const B = {}; root.traverse((o) => { const c = o.isBone && canonTgt(o.name); if (c) B[c] = o; });
+  const tgt = { root, B };
+  const out = { clips: [], meta: {} };
+  for (const j of JOBS) {
+    const src = await load(j.src);
+    const r = retarget(src, tgt, j);
+    out.clips.push(THREE.AnimationClip.toJSON(r.clip)); out.meta[j.name] = r.meta;
+  }
+  window.OUT = JSON.stringify(out);
+  // tira de poses para conferir
+  const N = 8, W = 200, H = 300, rows = JOBS.length;
+  const rd = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true, preserveDrawingBuffer: true });
+  rd.setSize(W * N, H * rows); rd.outputEncoding = THREE.sRGBEncoding; rd.setScissorTest(true);
+  const sc = new THREE.Scene(); sc.background = new THREE.Color(0x3a4256);
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x445533, 1.2)); const d = new THREE.DirectionalLight(0xffffff, 1.5); d.position.set(2, 4, 5); sc.add(d);
+  const grid = new THREE.GridHelper(10, 20, 0x888888, 0x555555); sc.add(grid); sc.add(root);
+  root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
+  const mixer = new THREE.AnimationMixer(root);
+  const cam = new THREE.PerspectiveCamera(40, W / H, 0.1, 50);
+  out.clips.forEach((cj, ri) => {
+    const clip = THREE.AnimationClip.parse(cj); mixer.stopAllAction(); const a = mixer.clipAction(clip); a.play();
+    const view = JOBS[ri].view || [3.2, 1.2, 4.5];
+    for (let i = 0; i < N; i++) {
+      mixer.setTime(clip.duration * i / (N - 1)); root.updateMatrixWorld(true);
+      const hp = B.Hips.getWorldPosition(new THREE.Vector3());
+      cam.position.set(hp.x + view[0], view[1], hp.z + view[2]); cam.lookAt(hp.x, 0.9, hp.z);
+      const x = i * W, y = (rows - 1 - ri) * H; rd.setViewport(x, y, W, H); rd.setScissor(x, y, W, H); rd.render(sc, cam);
+    }
+    mixer.uncacheClip(clip);
+  });
+  window.IMG = rd.domElement.toDataURL('image/jpeg', 0.85); window.DONE = true;
+})().catch((e) => { console.log('ERR', e.message, e.stack); window.DONE = true; });
+</script></body></html>

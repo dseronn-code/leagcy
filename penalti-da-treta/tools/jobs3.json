@@ -1,0 +1,98 @@
+[
+{
+"name": "k_kick",
+"src": "2cec5a0e5335404b93f585c85bf94352.glb",
+"view": [
+3.5,
+1.2,
+0.5
+]
+},
+{
+"name": "k_idle",
+"src": "f988e7a98cb54ba2add3e7845eda3555.glb",
+"lockXZ": true
+},
+{
+"name": "gk_idle",
+"src": "38cb575beacb4db7807652177def87a1.glb",
+"lockXZ": true,
+"view": [
+0.8,
+1.3,
+4.2
+]
+},
+{
+"name": "gk_mergulho_d",
+"src": "d1e1ff9f8d5947a0b6287388e61a1b47.glb",
+"view": [
+0.0,
+1.4,
+6.5
+],
+"rootScale": [
+0.62,
+0.12
+]
+},
+{
+"name": "gk_mergulho_e",
+"src": "d1e1ff9f8d5947a0b6287388e61a1b47.glb",
+"mirror": true,
+"view": [
+0.0,
+1.4,
+6.5
+],
+"rootScale": [
+0.62,
+0.12
+]
+},
+{
+"name": "gk_pega",
+"src": "546f678947c64841b459f6525d99eb17.glb",
+"view": [
+1.5,
+1.3,
+4
+],
+"rootScale": [
+1,
+0.15
+]
+},
+{
+"name": "gk_bloqueio_d",
+"src": "2754f73ba35740ea97526060cd115616.glb",
+"view": [
+1.5,
+1.3,
+4
+],
+"rootScale": [
+1,
+0.3
+]
+},
+{
+"name": "k_comemora",
+"src": "f1a38af37cb14b6abb896fdee40d7b3c.glb",
+"lockXZ": true
+},
+{
+"name": "gk_punho",
+"src": "8d2c3686e3ac41a8a0aeda8c4ef0310d.glb",
+"lockXZ": true
+},
+{
+"name": "gk_bloqueio_e",
+"src": "2754f73ba35740ea97526060cd115616.glb",
+"mirror": true,
+"rootScale": [
+1,
+0.3
+]
+}
+]
