@@ -593,7 +593,9 @@ int runHeadless(const Options& opt) {
       // Sem janela não há teclado nem controle: só as entradas simuladas (--simular), no tempo do quadro.
       game::updateInput(w->gameInput, game::RawInput{}, simEvents, (float(f) - 1.0f) * dt, float(f) * dt);
       w->setPlayerInput(playerInputFrom(w->gameInput, camera.yaw));
-      if (net) net->update(*w, scene, dt, playerInputFrom(w->gameInput, camera.yaw));
+      if (net) w->networkStep = [&net, &scene, &camera, w](float stepDt) {
+        net->update(*w, scene, stepDt, playerInputFrom(w->gameInput, camera.yaw));
+      };
       applyGameOptions(*w, r.settings);
       w->qualityRequest.clear();  // sem janela a qualidade fica a da linha de comando
     }
@@ -838,7 +840,9 @@ int runWindowed(const Options& opt) {
     const bool hasPlayer = world && world->simulate && (hasCar || world->playerFeet(playerFeet));
     if (hasPlayer) {
       world->setPlayerInput(playerInputFrom(world->gameInput, camera.yaw));
-      if (net) net->update(*world, scene, glm::clamp(dt, 0.0f, 0.1f), playerInputFrom(world->gameInput, camera.yaw));
+      if (net) world->networkStep = [&net, &scene, &camera, w = world](float stepDt) {
+        net->update(*w, scene, stepDt, playerInputFrom(w->gameInput, camera.yaw));
+      };
     } else if (glm::length(move) > 0.0f) { camera.position += glm::normalize(move) * speed; moved = true; }
     float sunStep = world ? 0.0f : 0.6f * dt;  // controles de desenvolvimento (sol, exposição): só fora de um jogo
     if (key(GLFW_KEY_UP)) { sunElev += sunStep; moved = true; }

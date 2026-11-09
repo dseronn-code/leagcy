@@ -253,12 +253,14 @@ void Scene::update(float dt) {
   time += dt;
   // Os movidos no frame anterior assentam (anterior = atual); os outros já estão assim.
   for (uint32_t i : movedLast_) objects[i].prevTransform = objects[i].transform;
-  // Movidos fora de um update (pose inicial da animação, antes do primeiro frame): sem movimento a mostrar.
-  for (uint32_t i : movedNow_) {
+  // Movidos fora de um update (pose inicial da animação, editor, carregar o jogo): teletransporte, sem movimento a
+  // mostrar, mas a pose nova vai para a GPU (antes ela ficava só na CPU até o objeto se mexer dentro de um update).
+  std::vector<uint32_t> outside;
+  outside.swap(movedNow_);
+  for (uint32_t i : outside) {
     movedMark_[i] = 0;
     objects[i].prevTransform = objects[i].transform;
   }
-  movedNow_.clear();
   movedMark_.resize(objects.size(), 0);
   for (auto& a : animators_) a(*this, time, dt);
   for (auto& m : models) animateModel(m, dt);
@@ -272,8 +274,13 @@ void Scene::update(float dt) {
   }
   for (uint32_t i : movedNow_)  // luzes de malha acompanham o objeto
     if (i < meshLightSourceOf_.size() && meshLightSourceOf_[i] >= 0) writeMeshLights(meshLightSources_[size_t(meshLightSourceOf_[i])]);
+  for (uint32_t i : outside)
+    if (!movedMark_[i] && i < meshLightSourceOf_.size() && meshLightSourceOf_[i] >= 0)
+      writeMeshLights(meshLightSources_[size_t(meshLightSourceOf_[i])]);
   changed_ = movedLast_;
   changed_.insert(changed_.end(), movedNow_.begin(), movedNow_.end());
+  for (uint32_t i : outside)
+    if (!movedMark_[i]) changed_.push_back(i);  // os que não voltaram a se mexer dentro deste update
   for (uint32_t i : movedNow_) movedMark_[i] = 0;
   movedLast_.swap(movedNow_);
 }

@@ -679,6 +679,7 @@ void World::start() {
 void World::update(scene::Scene& scene, float dt) {
   if (audio && dt > 0.0f) audio->mix(dt);  // offline: a mixagem anda junto com o tempo do quadro
   if (dt <= 0.0f || !simulate) return;
+  if (networkStep) networkStep(dt);
   realTime += dt;
   if (paused) {  // jogo pausado: só os scripts (o menu); física, personagens e o tempo de jogo parados
     if (scripting) scripting->update(scene, dt);

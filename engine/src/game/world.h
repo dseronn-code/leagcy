@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -269,6 +270,9 @@ class World {
   bool setLanguage(const std::string& code, bool remember);
   std::vector<std::pair<std::string, std::string>> languages() const;  // (código, nome), em ordem de código
   std::string scenePath;
+  // Rede (main): roda no começo do update, dentro do Scene::update, para as poses recebidas contarem como movimento
+  // deste quadro (vetores de movimento certos no TAA e no motion blur).
+  std::function<void(float)> networkStep;
   bool playerControl = true;         // controle_jogador(falso): o jogador para de responder (cutscene)
   float realTime = 0.0f;             // s desde o início, mesmo pausado (tempo_real())
   std::string qualityRequest;        // qualidade("medio"): o main recria o renderizador com o preset
