@@ -285,6 +285,9 @@
         <li>O mata-mata só anda quando todo mundo terminar a fase. Quem cai pode assistir, mas só vê o lance depois que os dois escolheram.</li>
         <li>Vitória dá dinheiro. Com dinheiro você contrata batedores e recebe propostas para ser dono de clubes. Cada clube tem um dono só.</li>
       </ol>
+      <p class="tag" style="font-size:12px;line-height:1.45;margin:0">Modelos 3D (Sketchfab, licença CC BY 4.0, cores e pose alteradas no jogo):
+        "Man Player" de RiverofCreative; "Nathan Animated 003", "Manuel Animated 001", "Eric Rigged 001", "Sophia Animated 003", "Carla Rigged 001" e "Claudia Rigged 002" de Renderpeople;
+        "Rigged T-Pose Human Male" de Mike Alger.</p>
       <button class="btn primary" data-back>Entendi</button>
     </div>
   </section>
@@ -954,11 +957,20 @@ function crowdAtlas() {
   }
   const t = colorTex(c); t.anisotropy = 4; return t;
 }
-const crowdTex = crowdAtlas();
+// Torcida de verdade: 8 pessoas escaneadas (Renderpeople e outros, Sketchfab CC BY) renderizadas paradas (quadros 0-7)
+// e comemorando (8-15). Verde puro = camisa tingida com a cor do torcedor. Sem o arquivo, fica o desenho acima.
+const CROWD_FR = { n: 8, cheer: 4, pick: [0, 1, 2, 3] };
+let crowdTex = crowdAtlas();
+new THREE.TextureLoader().load("assets/torcida.png", (t) => {
+  t.encoding = THREE.sRGBEncoding; t.anisotropy = 4;
+  crowdTex = t; Object.assign(CROWD_FR, { n: 16, cheer: 8, pick: [0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7], real: true });
+  if (crowd) buildCrowd(crowd.userData.kitA, crowd.userData.kitB);
+});
 crowdUniforms.uCheer = { value: 0 };
 function buildCrowd(kitA, kitB) {
   if (crowd) { scene.remove(crowd); crowd.geometry.dispose(); }
-  const geo = new THREE.PlaneGeometry(0.58, 1.0); geo.translate(0, 0.42, 0);
+  const geo = CROWD_FR.real ? new THREE.PlaneGeometry(0.8, 1.37) : new THREE.PlaneGeometry(0.58, 1.0);
+  geo.translate(0, CROWD_FR.real ? 0.6 : 0.42, 0);
   const n = crowdSpots.length, phase = new Float32Array(n), frame = new Float32Array(n);
   const mat = new THREE.MeshLambertMaterial({ map: crowdTex, alphaTest: 0.5, side: THREE.DoubleSide, color: 0xffffff });
   mat.onBeforeCompile = (sh) => {
@@ -969,7 +981,8 @@ function buildCrowd(kitA, kitB) {
     // só a camisa (branco no atlas) pega a cor do torcedor
     sh.fragmentShader = sh.fragmentShader.replace("#include <color_fragment>", "#ifdef USE_COLOR\n float shirt = clamp((texelColor.g - max(texelColor.r, texelColor.b)) * 3.0, 0.0, 1.0);\n diffuseColor.rgb = mix(diffuseColor.rgb, vColor * (texelColor.g * 0.85 + 0.15), shirt);\n#endif");
   };
-  crowd = new THREE.InstancedMesh(geo, mat, n);
+  mat.customProgramCacheKey = () => "crowd" + CROWD_FR.n;
+  crowd = new THREE.InstancedMesh(geo, mat, n); crowd.userData = { kitA, kitB };
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), col = new THREE.Color();
   const pal = [kitA.a, kitA.b, kitB.a, kitB.b, "#1d1d22", "#e9e4da", "#3a3f55"];
   crowdSpots.forEach((c, i) => {
@@ -979,7 +992,7 @@ function buildCrowd(kitA, kitB) {
     const side = c.p.x < 0 ? 0 : 1;
     const base = Math.random() < 0.72 ? (side === 0 ? pick([kitA.a, kitA.a, kitA.b]) : pick([kitB.a, kitB.a, kitB.b])) : pick(pal);
     col.set(base).convertSRGBToLinear().multiplyScalar(rnd(0.6, 1.0)); crowd.setColorAt(i, col);
-    phase[i] = Math.random(); frame[i] = Math.floor(Math.random() * 4);
+    phase[i] = Math.random(); frame[i] = pick(CROWD_FR.pick);
   });
   geo.setAttribute("aPhase", new THREE.InstancedBufferAttribute(phase, 1));
   geo.setAttribute("aFrame", new THREE.InstancedBufferAttribute(frame, 1));
@@ -1294,37 +1307,93 @@ function backTexture() {
   return tex;
 }
 const XB = { gltf: null };
+// Ossos que o jogo mira, nos dois esqueletos aceitos: o jogador realista (Character Creator, "CC_Base_R_Upperarm_074")
+// e o manequim de reserva (mixamo, "mixamorigRightArm").
+const BONE_CC = { Spine2: "Spine02", Arm: "Upperarm", ForeArm: "Forearm", Hand: "Hand", UpLeg: "Thigh", Leg: "Calf", Foot: "Foot", ToeBase: "ToeBase" };
+function rigBones(root) {
+  const raw = {}, bones = {};
+  root.traverse((o) => { if (o.isBone && !/scaleCompensation/i.test(o.name)) raw[o.name.replace(/^mixamorig:?/, "").replace(/^CC_Base_/, "").replace(/_\d+$/, "")] = o; });
+  if (raw.RightArm) return raw;
+  bones.Spine2 = raw.Spine02;
+  for (const [S, c] of [["Right", "R"], ["Left", "L"]]) for (const k of Object.keys(BONE_CC)) if (k !== "Spine2") bones[S + k] = raw[c + "_" + BONE_CC[k]];
+  return bones;
+}
+// Pinta meia (perna abaixo do joelho) e luva (mão) por cima da pele, pela posição de repouso do vértice.
+function paintSkin(mat, u) {
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = "varying vec3 vBindPos;\n" + sh.vertexShader.replace("#include <begin_vertex>", "#include <begin_vertex>\n vBindPos = position;");
+    sh.fragmentShader = "varying vec3 vBindPos;\nuniform vec3 uSock, uGlove;\nuniform float uRib, uSockY, uGloveX, uSockOn, uGloveOn;\n" + sh.fragmentShader.replace("#include <map_fragment>",
+      "#include <map_fragment>\n float rib = 0.9 + 0.1 * sin(vBindPos.x * uRib);\n diffuseColor.rgb = mix(diffuseColor.rgb, uSock * rib, uSockOn * step(vBindPos.y, uSockY));\n diffuseColor.rgb = mix(diffuseColor.rgb, uGlove, uGloveOn * step(uGloveX, abs(vBindPos.x)));");
+  };
+  mat.customProgramCacheKey = () => "skinpaint";
+}
 function attachXbot(p) {
-  const root = THREE.SkeletonUtils.clone(XB.gltf.scene), bones = {}, mats = {};
+  const g = XB.gltf, model = THREE.SkeletonUtils.clone(g.scene), mats = {}, skin = [];
+  // o jogo move e gira só o contêiner: a rotação/escala que vem dentro do arquivo continua valendo
+  const root = new THREE.Group(); root.add(model);
+  const real = g.real;
   root.traverse((o) => {
-    if (o.isBone) bones[o.name.replace("mixamorig", "")] = o;
-    if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; o.material = o.material.clone(); o.material.roughness = 0.62; o.material.metalness = 0.05; mats[o.name] = o.material; }
+    if (!o.isMesh) return;
+    o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; o.material = o.material.clone();
+    if (!real) { o.material.roughness = 0.62; o.material.metalness = 0.05; }
+    mats[real ? o.material.name : o.name] = o.material;
+    if (o.isSkinnedMesh && /Skin_(Leg|Arm)/.test(o.material.name)) skin.push(o);
   });
+  const bones = rigBones(root);
+  // altura de um jogador de verdade
+  root.updateMatrixWorld(true);
+  if (real) {
+    const box = new THREE.Box3().setFromObject(root); model.scale.multiplyScalar(1.82 / (box.max.y - box.min.y)); root.updateMatrixWorld(true);
+    const box2 = new THREE.Box3().setFromObject(root); model.position.y -= box2.min.y; root.updateMatrixWorld(true);
+    // limites da meia e da luva na pose de repouso (T), no espaço da malha
+    const u = { uSock: { value: new THREE.Color() }, uGlove: { value: new THREE.Color() }, uSockY: { value: 0 }, uGloveX: { value: 1e9 }, uSockOn: { value: 0 }, uGloveOn: { value: 0 }, uRib: { value: 0 } };
+    for (const m of skin) {
+      // pela caixa da malha em repouso (pose T): perna = da sola até a barra do shorts; braço = até a ponta dos dedos
+      m.geometry.computeBoundingBox(); const bb = m.geometry.boundingBox;
+      if (/Leg/.test(m.material.name)) { u.uSockY.value = bb.min.y + 0.66 * (bb.max.y - bb.min.y); u.uRib.value = 60 / (bb.max.y - bb.min.y); }
+      else u.uGloveX.value = 0.79 * Math.max(bb.max.x, -bb.min.x);
+      paintSkin(m.material, u);
+    }
+    p.skinU = u;
+  }
   const mixer = new THREE.AnimationMixer(root);
-  const idle = XB.gltf.animations.find((a) => a.name === "idle");
+  const idle = g.animations.find((a) => /^(idle|Standing_03)$/.test(a.name));
   if (idle) mixer.clipAction(idle).play();
   mixer.update(0); root.updateMatrixWorld(true);
   // nome e número presos às costas (osso Spine2)
   const back = backTexture();
   const plate = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3), new THREE.MeshStandardMaterial({ map: back, transparent: true, alphaTest: 0.4, roughness: 0.8 }));
-  const sp = bones.Spine2, wpos = sp.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, -0.02, -0.135));
+  const sp = bones.Spine2, wpos = sp.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, real ? 0.0 : -0.02, real ? -0.17 : -0.135));
   const ws = sp.getWorldScale(new THREE.Vector3());
   plate.scale.set(1 / ws.x, 1 / ws.y, 1 / ws.z);
   plate.position.copy(sp.worldToLocal(wpos));
   plate.quaternion.copy(sp.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)));
   sp.add(plate);
   scene.add(root);
-  p.xbot = { root, bones, mats, mixer, back };
+  p.xbot = { root, bones, mats, mixer, back, real };
   p.root.traverse((o) => { if (o.isMesh) o.visible = false; });
   if (p.dressed) dressXbot(p);
 }
 function dressXbot(p) {
   const x = p.xbot, d = p.dressed; if (!x || !d) return;
-  const body = x.mats.Beta_Surface, joints = x.mats.Beta_Joints;
   const shirt = d.keeper ? (greenish(d.kit.a) || greenish(d.kit.b) ? "#ff7a1a" : "#2fd36b") : d.kit.a;
   const trim = d.keeper ? "#151515" : d.kit.b;
-  if (body) body.color.set(shirt).convertSRGBToLinear();
-  if (joints) joints.color.set(trim).convertSRGBToLinear();
+  const lin = (h) => new THREE.Color(h).convertSRGBToLinear();
+  if (x.real) {
+    const sh = x.mats.T_shirt, so = x.mats.Classic_Shorts;
+    if (sh) { sh.color.copy(lin(shirt)); sh.roughnessMap = null; sh.metalnessMap = null; sh.roughness = 0.88; sh.metalness = 0; sh.needsUpdate = true; }
+    if (so) { so.color.copy(lin(trim)); so.roughnessMap = null; so.metalnessMap = null; so.roughness = 0.8; so.metalness = 0; so.needsUpdate = true; }
+    const u = p.skinU;
+    if (u) {
+      u.uSock.value.copy(lin(d.keeper ? shirt : d.kit.a)); u.uSockOn.value = 1;
+      u.uGlove.value.copy(lin(d.keeper ? "#f2f2f2" : "#000000")); u.uGloveOn.value = d.keeper ? 1 : 0;
+    }
+  } else {
+    const body = x.mats.Beta_Surface, joints = x.mats.Beta_Joints;
+    if (body) body.color.copy(lin(shirt));
+    if (joints) joints.color.copy(lin(trim));
+  }
   const light = new THREE.Color(shirt); const lum = light.r * 0.3 + light.g * 0.59 + light.b * 0.11;
   x.back.draw(d.name, d.num, trim === shirt ? (lum > 0.5 ? "#111111" : "#ffffff") : trim, lum > 0.5 ? "#ffffff" : "#000000");
 }
@@ -1351,7 +1420,9 @@ function syncXbot(p, dt, keeperRig) {
   });
 }
 if (THREE.GLTFLoader && THREE.SkeletonUtils) {
-  new THREE.GLTFLoader().load("assets/xbot.json", (g) => { XB.gltf = g; attachXbot(keeper); attachXbot(kicker); }, undefined, () => {});
+  const ok = (real) => (g) => { g.real = real; XB.gltf = g; attachXbot(keeper); attachXbot(kicker); };
+  const xbot = () => new THREE.GLTFLoader().load("assets/xbot.json", ok(false), undefined, () => {});
+  new THREE.GLTFLoader().load("assets/jogador.json", ok(true), undefined, xbot);
 }
 
 // =====================================================================================
@@ -2828,5 +2899,6 @@ renderNames(); renderH2H();
 show("sHome");
 requestAnimationFrame((t) => { last = t; frame(t); });
 window.__treta = { Store, Camp, DB, resolveShot, decided, calcSeason, simulate, myStatus };
+window.__p3 = { kicker, keeper, camera, scene, Cam };
 })();
 </script>
