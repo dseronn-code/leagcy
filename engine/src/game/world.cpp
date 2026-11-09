@@ -317,6 +317,12 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             c.aiFollow = ia.value("seguir", "");
             if (!c.aiFollow.empty()) c.aiHasTarget = true;
             c.aiStopDistance = ia.value("parar_a", c.aiStopDistance);
+            for (const json& pt : ia.value("patrulha", json::array())) c.aiPatrol.push_back(vec3Of(pt, glm::vec3(0.0f)));
+            c.aiChase = ia.value("perseguir", "");
+            c.aiFlee = ia.value("fugir_de", "");
+            c.aiSight = ia.value("visao", c.aiSight);
+            c.aiFovDeg = ia.value("campo_visao", c.aiFovDeg);
+            if (!c.aiPatrol.empty() || !c.aiChase.empty() || !c.aiFlee.empty()) c.aiHasTarget = true;
           }
         }
         for (const json& k : pj.value("roteiro", json::array())) {
@@ -728,23 +734,82 @@ void World::update(scene::Scene& scene, float dt) {
       run = input_.run;
     } else if (c.ai && c.aiHasTarget && navigation) {
       const glm::vec3 feet = physics->characterFeet(c.id);
-      glm::vec3 target = c.aiTarget;
-      if (!c.aiFollow.empty()) {
-        for (auto other : registry.view<Name, Transform>())
-          if (registry.get<Name>(other).value == c.aiFollow) {
-            target = registry.get<Transform>(other).position;
-            if (const Character* oc = registry.try_get<Character>(other)) target.y -= 0.5f * oc->desc.height;
-          }
+      auto feetOf = [&](entt::entity e) {
+        glm::vec3 p = registry.get<Transform>(e).position;
+        if (const Character* oc = registry.try_get<Character>(e)) p.y -= 0.5f * oc->desc.height;
+        return p;
+      };
+      // Decide o objetivo deste quadro (prioridade: fugir > perseguir > procurar > seguir > patrulhar > ir ao alvo).
+      glm::vec3 goal = c.aiTarget;
+      float stop = c.aiStopDistance;
+      const std::string before = c.aiState;
+      c.aiState = "parado";
+      bool have = false;
+      if (const entt::entity threat = c.aiFlee.empty() ? entt::null : findByName(c.aiFlee);
+          threat != entt::null && sees(c, threat)) {
+        c.aiThreat = feetOf(threat);
+        c.aiFleeTime = 3.0f;  // continua fugindo mesmo de costas para ela
       }
-      // Caminho recalculado a cada 0,5 s (o alvo pode andar) ou quando acabou.
+      if (c.aiFleeTime > 0.0f) {
+        c.aiFleeTime -= dt;
+        glm::vec3 away = feet - c.aiThreat;
+        away.y = 0.0f;
+        away = glm::length(away) > 1e-3f ? glm::normalize(away) : glm::vec3(1.0f, 0.0f, 0.0f);
+        goal = feet + away * 8.0f;  // a navegação leva ao ponto alcançável mais perto
+        stop = 0.5f;
+        c.aiState = "fugindo";
+        run = true;
+        have = true;
+      }
+      if (!have && !c.aiChase.empty()) {
+        if (const entt::entity prey = findByName(c.aiChase); prey != entt::null && sees(c, prey)) {
+          goal = c.aiLastSeen = feetOf(prey);
+          c.aiSearchTime = 4.0f;  // perdeu de vista: procura no último lugar por 4 s
+          c.aiState = "perseguindo";
+          run = true;
+          have = true;
+        } else if (c.aiSearchTime > 0.0f) {
+          c.aiSearchTime -= dt;
+          goal = c.aiLastSeen;
+          stop = 0.6f;
+          c.aiState = "procurando";
+          have = true;
+          if (glm::length(glm::vec2(goal.x - feet.x, goal.z - feet.z)) < 0.7f) c.aiSearchTime = std::min(c.aiSearchTime, 1.0f);
+        }
+      }
+      if (!have && !c.aiFollow.empty()) {
+        if (const entt::entity e = findByName(c.aiFollow); e != entt::null) {
+          goal = feetOf(e);
+          c.aiState = "seguindo";
+          have = true;
+        }
+      }
+      if (!have && !c.aiPatrol.empty()) {
+        goal = c.aiPatrol[c.aiPatrolIdx % c.aiPatrol.size()];
+        stop = 0.5f;
+        if (glm::length(glm::vec2(goal.x - feet.x, goal.z - feet.z)) < 0.6f) {
+          c.aiPatrolIdx = (c.aiPatrolIdx + 1) % c.aiPatrol.size();
+          goal = c.aiPatrol[c.aiPatrolIdx];
+        }
+        c.aiState = "patrulhando";
+        have = true;
+      }
+      if (!have && c.aiChase.empty() && c.aiFlee.empty() && c.aiPatrol.empty()) {  // "alvo" ou e:ir_para
+        c.aiState = "indo";
+        have = true;
+      }
+      // Caminho recalculado a cada 0,5 s (o alvo pode andar), quando acabou ou quando o comportamento mudou.
       c.aiRepath -= dt;
-      if (c.aiRepath <= 0.0f || c.aiNext >= c.aiPath.size()) {
+      const bool goalMoved = !c.aiHasGoal || glm::length(goal - c.aiGoal) > 1.0f || c.aiState != before;
+      if (have && (c.aiRepath <= 0.0f || c.aiNext >= c.aiPath.size() || goalMoved)) {
         c.aiRepath = 0.5f;
-        navigation->findPath(feet, target, c.aiPath);
+        c.aiGoal = goal;
+        c.aiHasGoal = true;
+        navigation->findPath(feet, goal, c.aiPath);
         c.aiNext = c.aiPath.size() > 1 ? 1 : c.aiPath.size();
       }
-      const glm::vec2 toTarget(target.x - feet.x, target.z - feet.z);
-      if (glm::length(toTarget) > c.aiStopDistance) {
+      const glm::vec2 toGoal(goal.x - feet.x, goal.z - feet.z);
+      if (have && glm::length(toGoal) > stop) {
         while (c.aiNext < c.aiPath.size() &&
                glm::length(glm::vec2(c.aiPath[c.aiNext].x - feet.x, c.aiPath[c.aiNext].z - feet.z)) < 0.25f)
           ++c.aiNext;
@@ -752,7 +817,10 @@ void World::update(scene::Scene& scene, float dt) {
           const glm::vec3 d(c.aiPath[c.aiNext].x - feet.x, 0.0f, c.aiPath[c.aiNext].z - feet.z);
           if (glm::length(d) > 1e-3f) dir = glm::normalize(d);
         }
+      } else if (c.aiState == "indo") {
+        c.aiState = "parado";
       }
+      if (glm::length(dir) > 1e-3f) c.aiFacing = dir;  // para onde ele olha (cone de visão)
     } else if (!c.script.empty()) {
       size_t k = 0;
       while (k + 1 < c.script.size() && c.script[k + 1].time <= time) ++k;
@@ -1257,6 +1325,36 @@ void World::activateSlot(int slot, bool on) {
   physics->setCharacterFeet(c.id, feet);
   registry.get<Transform>(e).position = feet + glm::vec3(0.0f, 0.5f * c.desc.height, 0.0f);
   LOG_INFO("Multijogador: vaga %d %s", slot, on ? "ocupada" : "livre");
+}
+
+entt::entity World::findByName(const std::string& name) const {
+  for (auto e : registry.view<Name, Transform>())
+    if (registry.get<Name>(e).value == name) return e;
+  return entt::null;
+}
+
+bool World::sees(const Character& c, entt::entity other) const {
+  if (c.id == ~0u || !registry.valid(other) || !registry.all_of<Transform>(other)) return false;
+  const glm::vec3 eye = physics->characterFeet(c.id) + glm::vec3(0.0f, 0.85f * c.desc.height, 0.0f);
+  glm::vec3 target = registry.get<Transform>(other).position;  // centro (personagem: meio do corpo)
+  float radius = 0.3f;
+  if (const Character* oc = registry.try_get<Character>(other)) {
+    target.y += 0.25f * oc->desc.height;  // um pouco acima do meio: a cabeça/ombros
+    radius = oc->desc.radius;
+  }
+  const glm::vec3 to = target - eye;
+  const float dist = glm::length(to);
+  if (dist > c.aiSight) return false;
+  if (dist < 1e-3f) return true;
+  const glm::vec3 dir = to / dist;
+  const glm::vec2 flat(dir.x, dir.z), face(c.aiFacing.x, c.aiFacing.z);
+  const bool hears = glm::length(glm::vec2(to.x, to.z)) < c.aiHearing;  // bem perto: percebe mesmo de costas
+  if (!hears && glm::length(flat) > 1e-3f && glm::length(face) > 1e-3f &&
+      glm::dot(glm::normalize(flat), glm::normalize(face)) < std::cos(glm::radians(0.5f * c.aiFovDeg)))
+    return false;
+  float hit = 0.0f;  // linha de visada: nada entre os olhos e o alvo (o próprio alvo pode ser o que o raio acerta)
+  if (physics->castRayIgnoringCharacter(eye, dir, dist, c.id, &hit) && hit < dist - radius - 0.15f) return false;
+  return true;
 }
 
 bool World::explode(glm::vec3 position, float scale) {

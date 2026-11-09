@@ -105,6 +105,7 @@ struct Scripting::Impl {
     bool failed = false;
   };
   std::vector<Instance> instances;
+  Instance* current = nullptr;  // script rodando agora (incluir() carrega no ambiente dele)
   std::map<std::string, std::filesystem::file_time_type> stamps;
   float sinceCheck = 0.0f;
 
@@ -214,6 +215,48 @@ struct Scripting::Impl {
           if (!h.valid()) return 0.0f;
           const Vehicle* v = h.world->registry.try_get<Vehicle>(h.e);
           return v && v->id != ~0u ? h.world->physics->vehicleForwardSpeed(v->id) : 0.0f;
+        },
+        "patrulhar", [](const Entidade& h, sol::table pontos) {  // IA: patrulha os pontos {{x,y,z}, ...}
+          if (!h.valid()) return;
+          if (Character* c = h.world->registry.try_get<Character>(h.e)) {
+            c->aiPatrol.clear();
+            for (size_t i = 1; i <= pontos.size(); ++i) {
+              sol::table p = pontos[i];
+              c->aiPatrol.emplace_back(p.get_or(1, 0.0f), p.get_or(2, 0.0f), p.get_or(3, 0.0f));
+            }
+            c->aiPatrolIdx = 0;
+            c->ai = c->aiHasTarget = true;
+            c->player = false;
+            c->aiRepath = 0.0f;
+          }
+        },
+        "perseguir", [](const Entidade& h, const Entidade& alvo) {
+          if (!h.valid() || !alvo.valid()) return;
+          Character* c = h.world->registry.try_get<Character>(h.e);
+          const Name* n = alvo.world->registry.try_get<Name>(alvo.e);
+          if (!c || !n) return;
+          c->aiChase = n->value;
+          c->ai = c->aiHasTarget = true;
+          c->player = false;
+        },
+        "fugir_de", [](const Entidade& h, const Entidade& alvo) {
+          if (!h.valid() || !alvo.valid()) return;
+          Character* c = h.world->registry.try_get<Character>(h.e);
+          const Name* n = alvo.world->registry.try_get<Name>(alvo.e);
+          if (!c || !n) return;
+          c->aiFlee = n->value;
+          c->ai = c->aiHasTarget = true;
+          c->player = false;
+        },
+        "estado_ia", [](const Entidade& h) -> std::string {
+          if (!h.valid()) return "parado";
+          const Character* c = h.world->registry.try_get<Character>(h.e);
+          return c ? c->aiState : std::string("parado");
+        },
+        "ve", [](const Entidade& h, const Entidade& outra) {
+          if (!h.valid() || !outra.valid()) return false;
+          const Character* c = h.world->registry.try_get<Character>(h.e);
+          return c && h.world->sees(*c, outra.e);
         },
         "tocar_som", [](const Entidade& h) {
           if (!h.valid() || !h.world->audio) return;
@@ -386,6 +429,13 @@ struct Scripting::Impl {
     lua.set_function("explosao", [this](float x, float y, float z, sol::optional<float> scale) {
       return world.explode(glm::vec3(x, y, z), scale.value_or(1.0f));
     });
+    lua.set_function("camera", [this](float x, float y, float z, float ax, float ay, float az, sol::optional<float> fov) {
+      world.cameraOverride.active = true;
+      world.cameraOverride.position = glm::vec3(x, y, z);
+      world.cameraOverride.target = glm::vec3(ax, ay, az);
+      world.cameraOverride.fovDeg = fov.value_or(0.0f);
+    });
+    lua.set_function("camera_jogo", [this]() { world.cameraOverride.active = false; });
     lua.set_function("tempo_real", [this]() { return world.realTime; });
     lua.set_function("volume", [this](sol::optional<float> v) {
       if (!world.audio) return v.value_or(1.0f);
@@ -410,6 +460,28 @@ struct Scripting::Impl {
     });
     lua.set_function("existe_jogo", [](const std::string& name) { return World::gameExists(name); });
 
+    // incluir("lib/dialogo.lua"): roda outro arquivo no ambiente do script atual (bibliotecas de jogo). Procura como
+    // dado, ao lado do script e em scripts/.
+    lua.set_function("incluir", [this](const std::string& file) {
+      if (!current) return false;
+      std::vector<std::string> tries = {file};
+      const std::filesystem::path here = std::filesystem::path(current->path).parent_path();
+      tries.push_back((here / file).string());
+      tries.push_back((std::filesystem::path("scripts") / file).string());
+      for (const std::string& t : tries) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(t, ec)) continue;
+        sol::protected_function_result r = lua.safe_script_file(t, current->env, sol::script_pass_on_error);
+        if (!r.valid()) {
+          sol::error err = r;
+          LOG_ERROR("incluir(%s): %s", t.c_str(), err.what());
+          return false;
+        }
+        return true;
+      }
+      LOG_ERROR("incluir: %s não encontrado", file.c_str());
+      return false;
+    });
     lua.set_function("log", [](sol::variadic_args args, sol::this_state s) {
       sol::state_view L(s);
       std::ostringstream out;
@@ -422,7 +494,10 @@ struct Scripting::Impl {
   }
 
   bool run(Instance& inst) {
+    Instance* prev = current;
+    current = &inst;
     sol::protected_function_result r = lua.safe_script_file(inst.path, inst.env, sol::script_pass_on_error);
+    current = prev;
     if (!r.valid()) {
       sol::error err = r;
       LOG_ERROR("Script %s: %s", inst.path.c_str(), err.what());
@@ -438,7 +513,10 @@ struct Scripting::Impl {
     sol::object f = inst.env[fn];
     if (f.get_type() != sol::type::function) return;
     sol::protected_function pf = f;
+    Instance* prev = current;
+    current = &inst;
     sol::protected_function_result r = pf(std::forward<Args>(args)...);
+    current = prev;
     if (!r.valid()) {
       sol::error err = r;
       LOG_ERROR("Script %s, %s(): %s", inst.path.c_str(), fn, err.what());

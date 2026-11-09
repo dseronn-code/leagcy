@@ -131,6 +131,47 @@ começar a partida a partir do cenário parado (caixas estáticas e modelos com 
 personagem (altura, raio, degrau e rampa máximos), então desvia de paredes, sobe escadas e evita o que é íngreme. O
 caminho é recalculado a cada 0,5 s (o alvo pode andar). Lua: `e:ir_para(x, y, z)` e `e:seguir(outra)`.
 
+## Comportamentos de NPC
+
+Na cena: `"controle": "ia", "ia": {"patrulha": [[x, y, z], ...], "perseguir": "jogador", "fugir_de": "lobo",
+"visao": 12, "campo_visao": 140, "parar_a": 1.5}`. A cada quadro o NPC escolhe, em ordem: **fugir** de quem está em
+`fugir_de` quando o vê (e continua fugindo uns segundos de costas, pela memória de onde viu); **perseguir** quem está em
+`perseguir` enquanto o vê, correndo; **procurar** no último lugar onde o viu, por 4 s; **seguir**; **patrulhar** os
+pontos em laço; ou ir ao `alvo`. "Ver" = dentro de `visao` metros, dentro do cone de `campo_visao` graus para onde ele
+olha e com a linha de visada livre (raio da física); bem perto (2,5 m) ele percebe mesmo de costas. Tudo pela malha de
+navegação (desvia de paredes). Lua: `e:patrulhar({{x,y,z}, ...})`, `e:perseguir(outra)`, `e:fugir_de(outra)`,
+`e:ve(outra)`, `e:estado_ia()` (`parado`, `patrulhando`, `perseguindo`, `procurando`, `fugindo`, `seguindo`, `indo`).
+
+Testes (`tools/ia.py`):
+
+| Teste | Resultado |
+|---|---|
+| patrulha | passa pelos 3 pontos em ordem e recomeça (0 → 1 → 2 → 0 → 1 → 2) |
+| persegue | herói 8 m à frente: vê, corre e para a 1,40 m (pedido 1,5) |
+| parede | parede no meio: não vê, não sai do lugar |
+| costas | herói 6 m atrás (fora do cone de 140°): não vê |
+| procura | herói visto foge mais rápido até sair da visão: perseguindo → procurando → patrulhando |
+| foge | o herói anda até ele: foge, a distância vai de 6,2 m a 9,7 m |
+
+## Câmera de cinema e bibliotecas de jogo
+
+`camera(x, y, z, alvo_x, alvo_y, alvo_z [, fov])` põe a câmera onde o script quiser (cenas de cinema, câmeras fixas)
+e `camera_jogo()` devolve. Teste: o script vira a câmera da caixa azul para a vermelha (centro da imagem de
+27, 41, 107 para 45, 6, 8).
+
+`incluir("lib/dialogo.lua")` carrega uma biblioteca no ambiente do script (procura ao lado do script e em
+`scripts/`). Prontas:
+- **`lib/dialogo.lua`**: conversas em árvore (`quem`, `fala`, `proximo` ou `opcoes` com ação), fala letra a letra,
+  escolhas por mouse, setas + Enter ou direcional + A; pausa o jogo durante a conversa.
+- **`lib/inventario.lua`**: inventário (`adicionar`, `remover` sem ficar negativo, `quantidade`, `tem`, `itens`,
+  `desenhar`) e missões (`iniciar` com objetivos, `cumprir`, `estado`, `ao_concluir`, `desenhar`), com `dados()` e
+  `carregar()` para ir no `salvar_jogo`.
+
+Exemplo: o guarda de `cenas/parque.json` (`scripts/guarda.lua`) patrulha, conversa quando o jogador chega perto e
+aperta E, dá uma missão com dois objetivos e moedas. Testes em `tools/jogo.py`: `dialogo` (Enter avança, ↓ + Enter
+escolhe a 2ª opção e roda a ação dela, o jogo pausa e volta) e `inventario` (contas, missão concluída e tudo igual
+depois de salvar e carregar).
+
 ## Interface de jogo (HUD)
 
 Desenhada pelos scripts no `atualizar(e, dt)` de cada quadro, por cima da imagem (Dear ImGui, fonte vetorial
@@ -165,6 +206,8 @@ corre com Shift, L3 ou LB; no carro, RT acelera e LT freia. Nos scripts:
 | `hud.deslizar(t, x, y, l, a, valor, min, max)` | controle deslizante (arrastar, ou ←/→ com foco); devolve o valor |
 | `hud.alternar(t, x, y, l, a, valor)` | Sim/Não; devolve o valor |
 | `e:particulas(sim)`, `explosao(x, y, z, escala)` | liga/desliga as partículas da entidade; explosão na hora |
+| `camera(x, y, z, ax, ay, az, fov)`, `camera_jogo()` | câmera de cinema pelo script / volta à do jogo |
+| `incluir("lib/dialogo.lua")` | carrega uma biblioteca de jogo no ambiente do script |
 | `pausar(sim)`, `pausado()`, `tempo_real()` | pausa o jogo (física, personagens e `tempo()` param; os scripts continuam) |
 | `volume(v)`, `opcao("motion_blur", sim)`, `opcao("dof", sim)`, `opcao("exposicao", ev)` | opções na hora |
 | `qualidade("medio")` | troca o preset com o jogo rodando (o renderizador é refeito, a cena continua na GPU) |

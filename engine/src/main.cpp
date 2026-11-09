@@ -101,6 +101,14 @@ std::unique_ptr<game::Network> startNetwork(int hostPort, const std::string& con
   return net;
 }
 
+// Câmera de cinema pedida por script (camera() / camera_jogo()).
+void applyScriptCamera(const game::World& w, scene::Camera& camera) {
+  if (!w.cameraOverride.active) return;
+  camera.position = w.cameraOverride.position;
+  camera.lookAt(w.cameraOverride.target);
+  if (w.cameraOverride.fovDeg > 0.0f) camera.fovY = glm::radians(w.cameraOverride.fovDeg);
+}
+
 // Personagem/carro do jogador: WASD ou analógico esquerdo andam; espaço ou A pula (no carro: freio de mão, também
 // B); Shift, L3 ou LB correm; no carro, RT acelera e LT freia (somados ao W/S).
 game::PlayerInput playerInputFrom(const game::GameInput& in, float cameraYaw) {
@@ -572,6 +580,7 @@ int runHeadless(const Options& opt) {
       w->qualityRequest.clear();  // sem janela a qualidade fica a da linha de comando
     }
     scene.update(frozen ? 0.0f : dt);
+    if (game::World* w = game::currentWorld()) applyScriptCamera(*w, camera);
     scene.stream(ctx, camera.position);  // streaming do mundo (células perto da câmera)
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
@@ -849,6 +858,7 @@ int runWindowed(const Options& opt) {
       const glm::vec3 head = playerFeet + glm::vec3(0.0f, 1.6f, 0.0f);
       camera.position = head - camera.forward() * 4.5f + glm::vec3(0.0f, 0.4f, 0.0f);
     }
+    if (world) applyScriptCamera(*world, camera);
     scene.stream(ctx, camera.position);
 
     // ---- Frame ----

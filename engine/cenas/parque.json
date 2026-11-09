@@ -472,6 +472,17 @@
     "quique": 0.3
    }
   },
+  // Guarda: patrulha entre dois pontos e conversa (E perto dele): diálogo com escolhas, missão e inventário.
+  {
+   "nome": "guarda",
+   "posicao": [-2, 0, 7],
+   "material": "azul",
+   "personagem": {
+    "velocidade": 1.5, "controle": "ia",
+    "ia": {"patrulha": [[-2, 0, 7], [-5, 0, 10]]}
+   },
+   "script": "scripts/guarda.lua"
+  },
   // Raposa animada (modelo glTF CC-BY 4.0): segue o jogador pela navegação; parada/andando/correndo misturados pela
   // velocidade e as patas pousadas no chão de verdade (IK) nos degraus e na rampa.
   {

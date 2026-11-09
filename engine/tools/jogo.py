@@ -14,6 +14,10 @@ Sem janela, com entradas simuladas (--simular) no tempo do quadro; os scripts re
   - salvar:    salva no meio da queda (com dados do script: número, texto com acento, lista, tabela), deixa cair,
                carrega: a bola volta exatamente à posição e velocidade salvas e os dados voltam iguais.
   - analogico: analógico esquerdo para a frente anda o jogador para a frente da câmera; W segurado também.
+  - dialogo:   biblioteca de diálogos (scripts/lib/dialogo.lua): Enter avança a fala, ↓ + Enter escolhe a 2ª opção
+               (a ação dela roda), a conversa termina e o jogo, pausado durante a fala, volta.
+  - inventario: inventário e missões (scripts/lib/inventario.lua): somar, tirar (sem ficar negativo), objetivos e
+               conclusão, e tudo volta igual depois de salvar_jogo/carregar_jogo.
   - particulas (imagem 480x270): o fogo preso a uma tocha que anda vai junto com ela; e:particulas(false) apaga;
                explosao() no script acende o clarão e a bola de fogo na hora.
 """
@@ -243,8 +247,78 @@ def teste_particulas(b, pasta):
                 f'antes → {depois[regiao].mean():.3f} 0,1 s depois')
 
 
+LIB = os.path.join(AQUI, 'scripts', 'lib')
+
+
+def teste_dialogo(b, pasta):
+    lua = f'''
+incluir("{os.path.join(LIB, 'dialogo.lua')}")
+local conversa = {{
+  inicio = {{quem = "Guarda", fala = "Parado! Quem vem lá?", proximo = "pergunta"}},
+  pergunta = {{quem = "Guarda", fala = "Amigo ou inimigo?", opcoes = {{
+    {{"Amigo.", "amigo", function() log("ESCOLHEU A") end}},
+    {{"Inimigo.", "inimigo", function() log("ESCOLHEU B") end}},
+  }}}},
+  amigo = {{quem = "Guarda", fala = "Pode passar."}},
+  inimigo = {{quem = "Guarda", fala = "Então volte por onde veio!"}},
+}}
+dialogo.ao_terminar = function(no) log("FIM", no) end
+function iniciar(e) dialogo.iniciar(conversa, "inicio") end
+local antes = nil
+function atualizar(e, dt)
+  dialogo.atualizar(dt)
+  local p = tostring(pausado())
+  if p ~= antes then log("PAUSA", p); antes = p end
+  if dialogo.ativo() then
+    local no = dialogo.no_atual()
+    if no ~= ultimo then log("NO", no); ultimo = no end
+  end
+end
+'''
+    sim = '1.0:tecla:enter;1.6:tecla:baixo;1.8:tecla:enter;3.0:tecla:enter'
+    linhas = rodar(b, pasta, 'dialogo', [], 3.5, sim, lua)
+    eventos = [l for l in linhas if l.split()[0] in ('NO', 'ESCOLHEU', 'FIM', 'PAUSA')]
+    esperado = ['PAUSA true', 'NO inicio', 'NO pergunta', 'ESCOLHEU B', 'NO inimigo', 'FIM inimigo', 'PAUSA false']
+    ok = [e.strip() for e in eventos] == esperado
+    return ok, f'eventos: {" | ".join(e.strip() for e in eventos)}'
+
+
+def teste_inventario(b, pasta):
+    lua = f'''
+incluir("{os.path.join(LIB, 'inventario.lua')}")
+function iniciar(e)
+  inventario.adicionar("moeda", 10)
+  inventario.adicionar("chave")
+  local ok_rem = inventario.remover("moeda", 3)
+  local nao_rem = inventario.remover("moeda", 50)
+  log("INV", inventario.quantidade("moeda"), inventario.tem("chave"), tostring(ok_rem), tostring(nao_rem), #inventario.itens())
+  missoes.ao_concluir = function(id) log("CONCLUIU", id) end
+  missoes.iniciar("ponte", "Consertar a ponte", {{"tabuas", "pregos"}})
+  missoes.cumprir("ponte", "tabuas")
+  log("MISSAO", missoes.estado("ponte"))
+  missoes.cumprir("ponte", "pregos")
+  log("MISSAO", missoes.estado("ponte"))
+  salvar_jogo("inv", {{inventario = inventario.dados(), missoes = missoes.dados()}})
+  inventario.carregar({{}})
+  missoes.carregar({{}})
+  local d = carregar_jogo("inv")
+  inventario.carregar(d.inventario)
+  missoes.carregar(d.missoes)
+  log("RECARREGADO", inventario.quantidade("moeda"), inventario.quantidade("chave"), missoes.estado("ponte"))
+end
+function atualizar(e, dt) end
+'''
+    linhas = rodar(b, pasta, 'inventario', [CHAO], 0.3, '', lua)
+    pega = lambda k: [l.split()[1:] for l in linhas if l.startswith(k + ' ') or l == k]
+    inv, mis, conc, rec = pega('INV'), pega('MISSAO'), pega('CONCLUIU'), pega('RECARREGADO')
+    ok = (inv == [['7', 'true', 'true', 'false', '2']] and mis == [['ativa'], ['concluida']] and conc == [['ponte']]
+          and rec == [['7', '1', 'concluida']])
+    return ok, f'inventário {inv}; missão {mis} (concluiu: {conc}); depois de salvar e carregar: {rec}'
+
+
 TESTES = {'botao': teste_botao, 'teclado': teste_teclado, 'controle': teste_controle, 'deslizar': teste_deslizar,
-          'alternar': teste_alternar, 'pausa': teste_pausa, 'salvar': teste_salvar, 'analogico': teste_analogico, 'particulas': teste_particulas}
+          'alternar': teste_alternar, 'pausa': teste_pausa, 'salvar': teste_salvar, 'analogico': teste_analogico, 'particulas': teste_particulas, 'dialogo': teste_dialogo,
+          'inventario': teste_inventario}
 
 
 def main():

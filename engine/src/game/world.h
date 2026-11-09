@@ -128,6 +128,22 @@ struct Character {
   std::vector<glm::vec3> aiPath;
   size_t aiNext = 0;
   float aiRepath = 0.0f;     // s até recalcular o caminho
+  // Comportamentos ("ia": {"patrulha", "perseguir", "fugir_de", "visao", "campo_visao"}): patrulha os pontos; quem
+  // está em "perseguir" é perseguido enquanto visto (distância, cone de visão e linha de visada) e depois procurado no
+  // último lugar visto; de quem está em "fugir_de" foge quando vê.
+  std::vector<glm::vec3> aiPatrol;
+  size_t aiPatrolIdx = 0;
+  std::string aiChase, aiFlee;
+  float aiSight = 12.0f, aiFovDeg = 140.0f;
+  glm::vec3 aiFacing{0.0f, 0.0f, 1.0f};
+  glm::vec3 aiLastSeen{0.0f};
+  float aiSearchTime = 0.0f;
+  float aiFleeTime = 0.0f;  // s que ainda foge depois de perder a ameaça de vista
+  glm::vec3 aiThreat{0.0f};  // onde a ameaça foi vista por último
+  float aiHearing = 2.5f;    // m: perto assim percebe mesmo fora do cone de visão (ouve)
+  glm::vec3 aiGoal{0.0f};
+  bool aiHasGoal = false;
+  std::string aiState = "parado";  // parado, patrulhando, perseguindo, procurando, fugindo, indo, seguindo
 };
 
 // Um passo do roteiro de um veículo (testes, carros de IA simples): a partir de `time` s, pedais e direção.
@@ -231,6 +247,13 @@ class World {
   bool quitRequested = false;        // sair() no script
   float realTime = 0.0f;             // s desde o início, mesmo pausado (tempo_real())
   std::string qualityRequest;        // qualidade("medio"): o main recria o renderizador com o preset
+  // Câmera de cinema pelo script (camera(x, y, z, ax, ay, az) / camera_jogo()): com `active`, o main põe a câmera em
+  // `position` olhando para `target` (e o FOV, se > 0) no lugar da câmera do jogador.
+  struct CameraOverride {
+    bool active = false;
+    glm::vec3 position{0.0f}, target{0.0f, 0.0f, -1.0f};
+    float fovDeg = 0.0f;
+  } cameraOverride;
   std::vector<std::pair<std::string, float>> optionRequests;  // opcao("motion_blur", 1): aplicadas pelo main
   // Salvar e carregar o jogo (saves/<nome>.json): poses e velocidades das entidades com nome que se movem, o tempo de
   // jogo e os dados do script (JSON). Carregar aplica no mundo atual (a mesma cena) e devolve os dados.
@@ -283,6 +306,11 @@ class World {
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
   void animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt);
+ public:
+  // IA: o personagem `c` vê a entidade `other` (distância, cone de visão para onde ele olha e linha de visada)?
+  bool sees(const Character& c, entt::entity other) const;
+  entt::entity findByName(const std::string& name) const;
+ private:
   std::vector<std::pair<entt::entity, Transform>> snapshot_;
   float snapshotTime_ = 0.0f;
   scene::Scene* loadedScene_ = nullptr;  // para ler os triângulos dos modelos em start() (antes do upload)
