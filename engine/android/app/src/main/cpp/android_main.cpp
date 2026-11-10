@@ -1,4 +1,4 @@
-// Pênalti da Treta para Android: o Legacy Engine numa NativeActivity (Vulkan direto na janela do Android).
+// FCLegacy para Android: o Legacy Engine numa NativeActivity (Vulkan direto na janela do Android).
 // Ciclo: ao ganhar a janela, monta contexto, cena, swapchain e renderer; ao perder, desmonta tudo. Os shaders e os
 // arquivos do jogo vêm dentro do APK e são copiados para a pasta interna do app na primeira abertura (o motor lê
 // arquivos comuns). Toque = Pointer do jogo. Erro fatal (celular sem um recurso que o motor exige) vira uma caixa
@@ -10,6 +10,11 @@
 #include <sys/stat.h>
 
 #include <array>
+#include <atomic>
+#include <cstdarg>
+#include <deque>
+#include <mutex>
+#include <thread>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -25,6 +30,31 @@
 #include "scene/demo_scene.h"
 
 void legacyVk13SetInstance(VkInstance instance);  // vk13_shim.cpp
+
+// Log: vai para o logcat e as últimas linhas ficam na memória, para o vigia mostrar onde o jogo parou.
+namespace {
+std::mutex gLogMutex;
+std::deque<std::string> gLogLines;
+std::string recentLog(size_t n) {
+  std::lock_guard<std::mutex> lock(gLogMutex);
+  std::string out;
+  for (size_t i = gLogLines.size() > n ? gLogLines.size() - n : 0; i < gLogLines.size(); ++i) out += gLogLines[i] + "\n";
+  return out;
+}
+}  // namespace
+void legacyLog(int priority, const char* fmt, ...) {
+  char buf[1024];
+  va_list ap;
+  va_start(ap, fmt);
+  std::vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  __android_log_write(priority, "Legacy", buf);
+  std::lock_guard<std::mutex> lock(gLogMutex);
+  std::string line = buf;
+  if (line.size() > 160) line = line.substr(0, 160) + "...";
+  gLogLines.push_back(line);
+  if (gLogLines.size() > 40) gLogLines.pop_front();
+}
 
 namespace {
 
@@ -80,7 +110,8 @@ struct Engine {
   renderer::Renderer r;
   game::PartidaGame game;
   std::array<FrameSync, renderer::Renderer::kFramesInFlight> frames{};
-  uint32_t slot = 0;
+  uint32_t slot = 0, frameCount = 0;
+  std::atomic<uint32_t> framesPresented{0};
   ANativeWindow* window = nullptr;
   bool rendererReady = false, swapchainReady = false, sceneReady = false;
 
@@ -98,11 +129,14 @@ struct Engine {
 
     scene::DemoOptions opt;
     opt.name = "partida";
+    LOG_INFO("Etapa: montando o estádio");
     if (!scene::buildDemoScene(scene, camera, opt)) FATAL("Não foi possível montar o estádio (arquivos do jogo faltando).");
     scene.textureCacheDir = cacheDir + "/texcache";
     scene.textureStreaming = false;
+    LOG_INFO("Etapa: enviando a cena para a GPU");
     scene.upload(ctx);
     sceneReady = true;
+    LOG_INFO("Etapa: criando a tela (swapchain)");
 
     swapchain.create(ctx, surface, {uint32_t(ANativeWindow_getWidth(window)), uint32_t(ANativeWindow_getHeight(window))}, true);
     swapchainReady = true;
@@ -113,8 +147,10 @@ struct Engine {
     rs.quality.renderScale = 0.5f;
     rs.motionBlur = true;
     rs.lensFlare = 0.6f;
+    LOG_INFO("Etapa: criando o renderer (%ux%u)", swapchain.extent.width, swapchain.extent.height);
     r.init(ctx, scene, swapchain.extent, swapchain.format, rs);
     rendererReady = true;
+    LOG_INFO("Etapa: iniciando a partida");
     game.init(scene, r, false, ctx.rayTracing);
     ctx.checkPipelineErrors();
 
@@ -146,11 +182,16 @@ struct Engine {
     const float sceneDt = game.update(dt, touches, scene, camera, r, screen);
     scene.update(sceneDt);
     FrameSync& f = frames[slot];
-    VK_CHECK(vkWaitForFences(ctx.device, 1, &f.inFlight, VK_TRUE, UINT64_MAX));
+    const uint64_t kTimeout = 8'000'000'000ull;  // 8 s: a GPU travada vira erro com o log, não tela preta
+    const VkResult wf = vkWaitForFences(ctx.device, 1, &f.inFlight, VK_TRUE, kTimeout);
+    if (wf == VK_TIMEOUT) FATAL("A GPU não terminou o frame %u em 8 s (travou)", frameCount);
+    if (wf != VK_SUCCESS) FATAL("vkWaitForFences: %d (frame %u)", int(wf), frameCount);
     uint32_t imageIndex = 0;
-    VkResult acq = vkAcquireNextImageKHR(ctx.device, swapchain.handle, UINT64_MAX, f.imageAvailable, VK_NULL_HANDLE, &imageIndex);
+    VkResult acq = vkAcquireNextImageKHR(ctx.device, swapchain.handle, kTimeout, f.imageAvailable, VK_NULL_HANDLE, &imageIndex);
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapchain(); return; }
+    if (acq == VK_TIMEOUT) FATAL("A tela não liberou imagem em 8 s (frame %u)", frameCount);
     if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) FATAL("vkAcquireNextImageKHR: %d", acq);
+    if (frameCount < 3) LOG_INFO("Frame %u: gravando", frameCount);
     VK_CHECK(vkResetFences(ctx.device, 1, &f.inFlight));
     VK_CHECK(vkResetCommandBuffer(f.cmd, 0));
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -187,6 +228,9 @@ struct Engine {
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) recreateSwapchain();
     else if (pres != VK_SUCCESS) FATAL("vkQueuePresentKHR: %d", pres);
     slot = (slot + 1) % renderer::Renderer::kFramesInFlight;
+    if (frameCount < 3) LOG_INFO("Frame %u: apresentado", frameCount);
+    ++frameCount;
+    framesPresented.store(frameCount);
   }
 
   void destroy() {
@@ -209,12 +253,33 @@ struct App {
   android_app* app = nullptr;
   std::unique_ptr<Engine> engine;
   std::string cacheDir;
-  bool focused = false, failed = false;
+  // Desenha sempre que a janela existe e o app não está pausado. O foco não conta: painéis por cima do jogo (o Game
+  // Booster da Samsung, notificações) tiram o foco e, antes, deixavam a tela preta.
+  bool paused = false;
+  std::atomic<bool> failed{false};
   std::vector<game::Touch> touches;  // dedos na tela agora (joystick + botões ao mesmo tempo)
 };
 
+// Vigia: se em 40 s nenhum frame chegou à tela, mostra as últimas linhas do log (onde o jogo parou).
+void startWatchdog(App& a) {
+  static std::atomic<bool> started{false};
+  if (started.exchange(true)) return;
+  std::thread([&a] {
+    for (int s = 0; s < 40; ++s) {
+      std::this_thread::sleep_for(std::chrono::seconds(1));
+      if (a.failed || a.app->destroyRequested) return;
+      Engine* e = a.engine.get();
+      if (e && e->framesPresented.load() > 0) return;
+    }
+    if (a.failed) return;
+    a.failed = true;
+    showError(a.app, "O FCLegacy travou antes de mostrar a primeira imagem (40 s). Últimas etapas:\n\n" + recentLog(14));
+  }).detach();
+}
+
 void startEngine(App& a) {
   if (a.engine || a.failed || !a.app->window) return;
+  startWatchdog(a);
   try {
     a.engine = std::make_unique<Engine>();
     a.engine->init(a.app->window, a.cacheDir);
@@ -222,6 +287,7 @@ void startEngine(App& a) {
     a.failed = true;
     if (a.engine) { try { a.engine->destroy(); } catch (...) {} a.engine.reset(); }
     showError(a.app, std::string("O FCLegacy não conseguiu iniciar neste celular:\n\n") + e.what());
+    return;
   }
 }
 
@@ -232,8 +298,8 @@ void handleCmd(android_app* app, int32_t cmd) {
     case APP_CMD_TERM_WINDOW:
       if (a.engine) { a.engine->destroy(); a.engine.reset(); }
       break;
-    case APP_CMD_GAINED_FOCUS: a.focused = true; break;
-    case APP_CMD_LOST_FOCUS: a.focused = false; break;
+    case APP_CMD_RESUME: a.paused = false; break;
+    case APP_CMD_PAUSE: a.paused = true; break;
     default: break;
   }
 }
@@ -275,23 +341,24 @@ void android_main(android_app* app) {
   while (!app->destroyRequested) {
     int events = 0;
     android_poll_source* source = nullptr;
-    const bool animating = a.engine && a.focused;
+    const bool animating = a.engine && !a.paused;
     while (ALooper_pollOnce(animating ? 0 : -1, nullptr, &events, reinterpret_cast<void**>(&source)) >= 0) {
       if (source) source->process(app, source);
       if (app->destroyRequested) break;
     }
     if (app->destroyRequested) break;
-    if (!a.engine || !a.focused) { last = std::chrono::steady_clock::now(); continue; }
+    if (!a.engine || a.paused) { last = std::chrono::steady_clock::now(); continue; }
     const auto now = std::chrono::steady_clock::now();
     const float dt = std::min(std::chrono::duration<float>(now - last).count(), 0.1f);
     last = now;
     try {
       a.engine->frame(dt, a.touches);
     } catch (const std::exception& e) {
+      const bool already = a.failed;
       a.failed = true;
       a.engine->destroy();
       a.engine.reset();
-      showError(app, std::string("Erro durante o jogo:\n\n") + e.what());
+      if (!already) showError(app, std::string("Erro durante o jogo:\n\n") + e.what() + "\n\nÚltimas linhas:\n" + recentLog(8));
     }
   }
   if (a.engine) a.engine->destroy();

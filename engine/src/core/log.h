@@ -7,9 +7,11 @@
 // mostra numa caixa de diálogo antes de fechar o app.
 #include <android/log.h>
 #include <stdexcept>
-#define LOG_INFO(...)  __android_log_print(ANDROID_LOG_INFO, "Legacy", __VA_ARGS__)
-#define LOG_WARN(...)  __android_log_print(ANDROID_LOG_WARN, "Legacy", __VA_ARGS__)
-#define LOG_ERROR(...) __android_log_print(ANDROID_LOG_ERROR, "Legacy", __VA_ARGS__)
+// legacyLog: logcat + as últimas linhas guardadas na memória (android_main mostra se o jogo travar).
+void legacyLog(int priority, const char* fmt, ...) __attribute__((format(printf, 2, 3)));
+#define LOG_INFO(...)  legacyLog(ANDROID_LOG_INFO, __VA_ARGS__)
+#define LOG_WARN(...)  legacyLog(ANDROID_LOG_WARN, __VA_ARGS__)
+#define LOG_ERROR(...) legacyLog(ANDROID_LOG_ERROR, __VA_ARGS__)
 #define FATAL(...)                                                         \
   do {                                                                     \
     char fatalMessage_[1024];                                              \

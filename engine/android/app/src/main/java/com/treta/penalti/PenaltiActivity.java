@@ -5,6 +5,7 @@ import android.app.NativeActivity;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.Toast;
 
 // A tela do jogo é a NativeActivity (o motor desenha direto na janela). Esta classe só deixa a tela cheia e acesa e
 // mostra os erros do motor numa caixa de diálogo (no celular não há console para ler o log).
@@ -14,6 +15,7 @@ public class PenaltiActivity extends NativeActivity {
     super.onCreate(savedInstanceState);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     hideSystemBars();
+    Toast.makeText(this, "Carregando o estádio...", Toast.LENGTH_LONG).show();
   }
 
   @Override
