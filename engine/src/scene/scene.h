@@ -467,6 +467,28 @@ class Scene {
     indices = r ? meshes[mesh].indices.address : emptyIndices_.address;
     colors = r ? meshes[mesh].colors.address : 0;
   }
+  // Uma entrada do buffer de instâncias (== InstanceData em shaders/scene.glsl). Os meshlets entram para a superfície
+  // exata dos pedaços simplificados da geometria virtualizada (o triângulo não existe na lista de índices).
+  struct InstanceGpu {
+    uint64_t vertices, indices;
+    uint32_t material, meshletLodBase;
+    uint64_t colors;  // cor por vértice (COLOR_0) ou 0
+    uint64_t meshlets;
+    uint32_t meshletVertexBase, meshletTriangleBase;
+  };
+  InstanceGpu instanceData(uint32_t object) const {
+    const uint32_t mesh = objects[object].mesh;
+    InstanceGpu g{};
+    g.material = objects[object].material;
+    instanceAddresses(mesh, g.vertices, g.indices, g.colors);
+    if (meshes[mesh].resident && meshes[mesh].meshletLodBase != 0) {
+      g.meshlets = meshes[mesh].meshlets.address;
+      g.meshletVertexBase = meshes[mesh].meshletVertexBase;
+      g.meshletTriangleBase = meshes[mesh].meshletTriangleBase;
+      g.meshletLodBase = meshes[mesh].meshletLodBase;
+    }
+    return g;
+  }
   // Assa `frames` poses do clipe ativo da malha com esqueleto do modelo (pele feita na CPU) e devolve o índice do
   // clipe. Chame antes do upload.
   uint32_t bakeCrowdClip(int model, uint32_t frames);

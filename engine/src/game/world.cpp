@@ -154,6 +154,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
     return false;
   }
   scenePath = path;
+  // Geometria virtualizada (tipo Nanite) para a cena inteira: "nanite": true (o --nanite / --no-nanite vale acima).
+  if (doc.contains("nanite") && doc["nanite"].is_boolean()) scene.clusterLod = doc["nanite"].get<bool>();
   loadLanguages();
   {
     std::string saved;

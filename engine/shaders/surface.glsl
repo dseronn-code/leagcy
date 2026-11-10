@@ -34,11 +34,31 @@ const uint NO_MATERIAL = 0xFFFFFFFFu;
 
 // Interseção exata do raio (C, dir) com o triângulo `prim` do objeto `obj` (transformação `model`).
 // Preenche P, Ng, V, Nb, Pshadow e rayBias de `s`; falso se o triângulo está de lado para o raio.
+layout(buffer_reference, scalar) readonly buffer SurfaceMeshletWords { uint w[]; };
+
 bool intersectTriangle(uint obj, uint prim, mat4 model, vec3 C, vec3 dir, inout PixelSurface s) {
   InstanceData d = instances[obj];
-  IndexData ib = IndexData(d.indices);
   VertexData vb = VertexData(d.vertices);
-  uint i0 = ib.i[prim * 3u], i1 = ib.i[prim * 3u + 1u], i2 = ib.i[prim * 3u + 2u];
+  uint i0, i1, i2;
+  float lodError = 0.0;  // distância máxima (unidades da malha) do triângulo desenhado até a malha completa
+  if ((prim & 0x80000000u) != 0u) {
+    // Pedaço simplificado da geometria virtualizada: meshlet (bits 7..30) e triângulo dentro dele (bits 0..6). O
+    // Meshlet tem 12 uints (vertexOffset no 9º, triangleOffset no 10º) e o MeshletLod 12 floats (erro no 9º).
+    if (d.meshlets == 0ul) return false;
+    uint m = (prim >> 7) & 0xFFFFFFu, t = prim & 127u;
+    SurfaceMeshletWords w = SurfaceMeshletWords(d.meshlets);
+    uint vOff = w.w[m * 12u + 8u], tOff = w.w[m * 12u + 9u];
+    uint packed = w.w[d.meshletTriangleBase + tOff + t];
+    i0 = w.w[d.meshletVertexBase + vOff + (packed & 0xFFu)];
+    i1 = w.w[d.meshletVertexBase + vOff + ((packed >> 8) & 0xFFu)];
+    i2 = w.w[d.meshletVertexBase + vOff + ((packed >> 16) & 0xFFu)];
+    lodError = uintBitsToFloat(w.w[d.meshletLodBase + m * 12u + 8u]);
+  } else {
+    IndexData ib = IndexData(d.indices);
+    i0 = ib.i[prim * 3u];
+    i1 = ib.i[prim * 3u + 1u];
+    i2 = ib.i[prim * 3u + 2u];
+  }
   mat3 normalMatrix = transpose(inverse(mat3(model)));
   vec3 p0 = (model * vec4(fetchVertexPosition(vb, i0), 1.0)).xyz;
   vec3 p1 = (model * vec4(fetchVertexPosition(vb, i1), 1.0)).xyz;
@@ -79,6 +99,9 @@ bool intersectTriangle(uint obj, uint prim, mat4 model, vec3 C, vec3 dir, inout 
   s.Nb = Nb;
   s.Pshadow = shadowTerminatorPoint(P, p0, p1, p2, n0, n1, n2, b);
   s.rayBias = RAY_BIAS_EXACT * t;
+  // Triângulo simplificado: a malha do ray tracing (a completa) pode estar até lodError dele; os raios saem além disso,
+  // senão ela sombreia o próprio ponto (manchas escuras).
+  if (lodError > 0.0) s.rayBias = max(s.rayBias, 1.5 * lodError * max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz))));
   return true;
 }
 

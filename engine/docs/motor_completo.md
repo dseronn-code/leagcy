@@ -141,7 +141,7 @@ que corria).
 - **Em rede**: o anfitrião simula e manda a matriz de cada parte junto com o estado; o cliente interpola entre dois
   estados (como as rodas dos carros) e faz a mesma transição ao levantar (teste `ragdoll` em `tools/rede.py`).
 
-![ragdoll](img/ragdoll.png)
+![ragdoll](screenshots/ragdoll.png)
 
 Testes (`tools/ragdoll.py`, a raposa de 20 kg):
 
@@ -362,6 +362,36 @@ Teste (`tools/rede.py`, anfitrião e cliente sem janela na mesma máquina, o jog
 | ragdoll | raposa em ragdoll no anfitrião: no cliente cai junto (bacia a 2 cm do chão), deitada no mesmo lugar (0,00 cm) e de pé no fim (0,41 m) |
 
 Os scripts rodam nos dois lados (no cliente servem para a interface).
+
+## Geometria virtualizada (no estilo do Nanite)
+
+`--nanite` (ou `"nanite": true` na cena) troca os LODs inteiros das malhas rígidas grandes por uma hierarquia de
+pedaços que a GPU escolhe um a um, com erro de até `--lod-pixels` (1) na tela:
+
+- **Na carga** (em paralelo, uma malha por núcleo): os triângulos são reordenados em pedaços compactos de até 124
+  triângulos (o nível 0; a numeração nova vale para tudo: luzes de malha, ray tracing, visibility buffer). Grupos de
+  ~8 pedaços vizinhos são juntados, simplificados pela metade com a borda do grupo travada (meshoptimizer, guardando
+  normais e UV) e divididos de novo, nível após nível, até a raiz. Cada pedaço guarda a esfera e o erro do grupo que o
+  formou e do que o substitui.
+- **Na GPU** (task shader): um pedaço é desenhado quando o próprio erro projetado cabe no limite e o do grupo
+  seguinte não; irmãos usam a mesma esfera, então o corte nunca abre buracos e não há troca brusca de LOD.
+- **Com o ray tracing**: o pixel de um pedaço simplificado guarda o pedaço e o triângulo no visibility buffer, e os
+  passes de raios reconstroem a superfície exata dele pelos meshlets; os raios saem além do erro daquele pedaço (a
+  malha do ray tracing é a completa), sem manchas de sombra, e o ReSTIR mantém o reuso temporal.
+- Desligada por padrão: no Sponza (480x270, contra a referência por path tracing) o erro vai de 0,0655 para 0,0734 —
+  essas cenas já batem a meta de desempenho sem ela. Ela é para cenas que sem ela não cabem.
+
+![campo de rochas](screenshots/nanite_campo.png)
+
+Cena `nanite`: um campo de 16 x 16 rochas procedurais de 589.824 triângulos cada — **151 milhões de triângulos** —
+com o detalhe de perto e cada rocha distante reduzida a poucos pedaços. Testes (`tools/nanite.py`):
+
+| Teste | Critério | Resultado |
+|---|---|---|
+| nivel0 | erro de 0,01 pixel: igual à malha inteira | diferença 0,000/255 |
+| grafo | rocha de 589.824 triângulos | 14 níveis; 6.423 → 14.767 pedaços (2,3x); raiz com 1.545 (0,26%) |
+| qualidade | 1 pixel, contra a malha inteira | diferença média 0,48/255 |
+| desempenho | G-buffer, 4 x 4 rochas (9,4 milhões de triângulos), sem GPU | 950 ms com, 4.954 ms sem (5,2x) |
 
 ## Malhas comprimidas (meshopt, Draco) e texturas KTX2
 

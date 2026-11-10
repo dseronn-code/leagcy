@@ -1631,8 +1631,7 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   // que mudaram (medido na cidade de 98 mil objetos: ~35 ms de CPU por frame reescrevendo tudo).
   // Streaming: endereços das malhas que acabaram de entrar no buffer de instâncias (antes dos passes que o leem).
   for (uint32_t o : s.takeInstanceUpdates()) {
-    struct { uint64_t vertices, indices; uint32_t material, pad0; uint64_t colors; } inst{0, 0, s.objects[o].material, 0, 0};
-    s.instanceAddresses(s.objects[o].mesh, inst.vertices, inst.indices, inst.colors);
+    const scene::Scene::InstanceGpu inst = s.instanceData(o);
     vkCmdUpdateBuffer(cmd, s.instances().handle, VkDeviceSize(o) * sizeof(inst), sizeof(inst), &inst);
   }
   const auto& changed = s.changedObjects();

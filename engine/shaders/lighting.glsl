@@ -90,7 +90,7 @@ void hairBSDF(vec3 T, vec3 N, vec3 V, vec3 L, vec3 color, float roughness, out v
 // Tangente do fio de cabelo no pixel (triângulo do visibility buffer, média das tangentes dos 3 vértices).
 vec3 hairTangentAt(ivec2 id) {
   uvec2 vis = texelFetch(gVisibility, id, 0).xy;
-  if (vis.x == 0u) return vec3(0.0, 1.0, 0.0);
+  if (vis.x == 0u || (vis.y & 0x80000000u) != 0u) return vec3(0.0, 1.0, 0.0);  // sem triângulo da lista (LOD)
   uint obj = vis.x - 1u;
   InstanceData d = instances[obj];
   IndexData ib = IndexData(d.indices);

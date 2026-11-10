@@ -28,6 +28,10 @@ void main() {
   uint vertexCount = ml.counts & 0xFFu, triangleCount = ml.counts >> 8;
   SetMeshOutputsEXT(vertexCount, triangleCount);
   uint object = task.entry & 0xFFFFFFu, dither = (task.entry >> 24) & 63u, lod = task.entry >> 30, material = instances[object].material;
+  // Pedaço simplificado da geometria virtualizada: o triângulo não está na lista de índices; o número dele é
+  // 0x80000000 | meshlet << 7 | triângulo no meshlet (surface.glsl acha os vértices pelos meshlets).
+  uint meshletIndex = task.meshlets[gl_WorkGroupID.x];
+  bool simplified = ml.firstTriangle == 0xFFFFFFFFu;
   ObjectData o = objects[object];
   mat3 normalMatrix = transpose(inverse(mat3(o.model)));
   VertexData vb = VertexData(pc.vertices);
@@ -57,6 +61,6 @@ void main() {
   for (uint i = gl_LocalInvocationIndex; i < triangleCount; i += 32u) {
     uint t = words.w[pc.triangleBase + ml.triangleOffset + i];
     gl_PrimitiveTriangleIndicesEXT[i] = uvec3(t & 0xFFu, (t >> 8) & 0xFFu, (t >> 16) & 0xFFu);
-    gl_MeshPrimitivesEXT[i].gl_PrimitiveID = int(ml.firstTriangle + i);
+    gl_MeshPrimitivesEXT[i].gl_PrimitiveID = int(simplified ? (0x80000000u | (meshletIndex << 7) | i) : ml.firstTriangle + i);
   }
 }

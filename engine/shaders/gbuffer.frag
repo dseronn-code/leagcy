@@ -104,5 +104,7 @@ void main() {
   // Mar: a superfície deslocada não é o triângulo guardado (plano parado nos raios): os passes de RT reconstroem o
   // ponto pela profundidade (0 = sem triângulo exato).
   // O mesmo vale para os LODs (o triângulo é da malha simplificada, não da guardada no objeto).
+  // Pedaços simplificados da geometria virtualizada entram como os outros: o número do triângulo tem o bit 31 e aponta
+  // para o meshlet (surface.glsl).
   outVisibility = ((m.flags & MATERIAL_WATER) != 0u || vLod != 0u) ? uvec2(0u) : uvec2(vObject + 1u, uint(gl_PrimitiveID));
 }

@@ -1420,8 +1420,8 @@ bool buildNaniteTest(Scene& s, Camera& camera, const DemoOptions& opt) {
   s.sunDirection = sunFrom(opt.night ? -10.0f : 28.0f, 140.0f);
   s.sunIlluminance = opt.night ? 0.0f : 110000.0f;
   s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
-  camera.position = glm::vec3(0.0f, 2.2f, 4.0f);
-  camera.lookAt(glm::vec3(0.0f, 1.2f, -30.0f));
+  camera.position = glm::vec3(-6.0f, 7.0f, 8.0f);  // do alto, olhando o campo até o horizonte
+  camera.lookAt(glm::vec3(4.0f, 0.0f, -45.0f));
   return true;
 }
 

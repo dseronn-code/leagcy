@@ -35,12 +35,7 @@ namespace scene {
 
 namespace {
 // Espelhado em shaders/scene.glsl (InstanceData).
-struct InstanceGpu {  // == InstanceData em shaders/scene.glsl
-  uint64_t vertices, indices;
-  uint32_t material, pad0;
-  uint64_t colors;  // cor por vértice (COLOR_0) ou 0
-};
-static_assert(sizeof(InstanceGpu) == 32);
+static_assert(sizeof(Scene::InstanceGpu) == 48);
 
 // Espelhado em shaders/skinning.comp.
 struct SkinVertex {
@@ -1544,11 +1539,7 @@ void Scene::upload(rhi::Context& ctx) {
     emptyIndices_ = rhi::createBufferWithData(ctx, idx, sizeof(idx), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | geometryUsage);
   }
   std::vector<InstanceGpu> inst;
-  for (auto& o : objects) {
-    InstanceGpu g{0, 0, o.material, 0, 0};
-    instanceAddresses(o.mesh, g.vertices, g.indices, g.colors);
-    inst.push_back(g);
-  }
+  for (uint32_t i = 0; i < objects.size(); ++i) inst.push_back(instanceData(i));
   // TRANSFER_DST: o streaming reescreve os endereços das malhas que entram (Renderer::updateDynamicScene).
   instanceBuffer = rhi::createBufferWithData(ctx, inst.data(), inst.size() * sizeof(InstanceGpu),
                                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
