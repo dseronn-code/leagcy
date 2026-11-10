@@ -349,8 +349,9 @@ void android_main(android_app* app) {
   while (!app->destroyRequested) {
     int events = 0;
     android_poll_source* source = nullptr;
-    const bool animating = a.engine && !a.paused;
-    while (ALooper_pollOnce(animating ? 0 : -1, nullptr, &events, reinterpret_cast<void**>(&source)) >= 0) {
+    // O prazo é recalculado a cada evento: o motor nasce DENTRO de um evento (INIT_WINDOW). Calculado uma vez só,
+    // o laço seguia esperando eventos para sempre depois da carga, e o primeiro frame nunca era desenhado.
+    while (ALooper_pollOnce((a.engine && !a.paused) ? 0 : -1, nullptr, &events, reinterpret_cast<void**>(&source)) >= 0) {
       if (source) source->process(app, source);
       if (app->destroyRequested) break;
     }
