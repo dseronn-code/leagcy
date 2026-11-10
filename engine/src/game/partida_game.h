@@ -95,6 +95,7 @@ class PartidaGame {
   TeamInfo teams_[2];
   int lastScore_[2] = {0, 0};
   bool cheering_ = false;
+  float fps_ = 0.0f;  // média móvel dos quadros por segundo (mostrada no HUD)
 };
 
 }  // namespace game

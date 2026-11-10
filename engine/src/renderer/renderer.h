@@ -301,6 +301,7 @@ class Renderer {
   rhi::ComputePass skinningPass_, aerialPerspectivePass_, radianceCacheResolvePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
   bool restirOff_ = false, reservoirsCleared_ = false;
+  VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;  // D16 em GPUs que não filtram D32
  public:
   bool skinningFailed = false;  // o driver recusou skinning.comp (personagens na pose de repouso)
  private:

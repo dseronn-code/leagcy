@@ -361,6 +361,11 @@ void PartidaGame::drawMinimap(glm::vec2 screen) {
 
 void PartidaGame::drawHud(const Camera& cam, glm::vec2 screen) {
   const float u = screen.y / 100.0f;
+  if (fps_ > 0.0f) {  // desempenho (discreto, no topo)
+    char f[16];
+    std::snprintf(f, sizeof(f), "%.0f fps", fps_);
+    ui_.text(f, {screen.x * 0.5f, 4.0f * u}, 3.2f * u, rgb(0xffffff, 0.7f), Font::Body, Align::Center);
+  }
   // ---- placar no estilo de transmissão ----
   {
     const float x = 4 * u, y = 2.5f * u, h = 7.5f * u;
@@ -469,6 +474,7 @@ void PartidaGame::drawHud(const Camera& cam, glm::vec2 screen) {
 float PartidaGame::update(float realDt, const std::vector<Touch>& touches, Scene& s, Camera& cam, renderer::Renderer& r, glm::vec2 screen) {
   const float dt = std::min(realDt, 0.1f);
   screenTime_ += dt;
+  if (realDt > 0.0f) fps_ = fps_ <= 0.0f ? 1.0f / realDt : fps_ + (1.0f / realDt - fps_) * 0.05f;
   const bool wasPaused = paused_;
   readTouches(touches, screen);
   if (screen_ == Screen::Menu && (tapped_ || ((autoplay_ || std::getenv("FCLEGACY_HUMANO")) && screenTime_ > 0.3f))) { screen_ = Screen::Playing; startMatch(s); }

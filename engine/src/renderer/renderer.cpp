@@ -254,11 +254,27 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   useShadowMaps_ = !ctx.rayTracing || settings.shadowMaps;
   {
     const uint32_t size = useShadowMaps_ ? kShadowMapSize : 16;  // sem uso: só um alvo válido para o descritor
-    shadowMap_ = rhi::createImage2DArray(ctx, {size, size}, 4, kDepthFormat,
+    // A comparação com filtro linear exige FILTER_LINEAR no formato. GPUs de celular (Adreno) não têm isso em D32:
+    // o resultado vira indefinido (tudo "na sombra", campo preto). Ordem: D32 linear > D16 linear > D32 sem filtro.
+    auto linearDepth = [&](VkFormat f) {
+      VkFormatProperties fp{};
+      vkGetPhysicalDeviceFormatProperties(ctx.gpu, f, &fp);
+      const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+      return (fp.optimalTilingFeatures & need) == need;
+    };
+    VkFilter shadowFilter = VK_FILTER_LINEAR;
+    if (linearDepth(VK_FORMAT_D32_SFLOAT) && !std::getenv("LEGACY_SHADOW_D16")) shadowFormat_ = VK_FORMAT_D32_SFLOAT;  // env: testa o caminho do celular
+    else if (linearDepth(VK_FORMAT_D16_UNORM)) shadowFormat_ = VK_FORMAT_D16_UNORM;
+    else { shadowFormat_ = VK_FORMAT_D32_SFLOAT; shadowFilter = VK_FILTER_NEAREST; }
+    if (shadowFormat_ != VK_FORMAT_D32_SFLOAT || shadowFilter != VK_FILTER_LINEAR)
+      LOG_INFO("Sombras: %s com filtro %s (a GPU não filtra D32)", shadowFormat_ == VK_FORMAT_D16_UNORM ? "D16" : "D32",
+               shadowFilter == VK_FILTER_LINEAR ? "linear" : "nearest");
+    shadowMap_ = rhi::createImage2DArray(ctx, {size, size}, 4, shadowFormat_,
                                          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
     for (uint32_t c = 0; c < 4; ++c) shadowLayerViews_[c] = rhi::createLayerView(ctx, shadowMap_, c);
     VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-    si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+    si.magFilter = si.minFilter = shadowFilter;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     si.compareEnable = VK_TRUE;
     si.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
@@ -653,6 +669,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     sd.fragmentShader = "shadow.frag";
     sd.layout = shadowLayout_.pipelineLayout;
     sd.colorFormats = {};
+    sd.depthFormat = shadowFormat_;
     sd.depthCompare = VK_COMPARE_OP_LESS_OR_EQUAL;
     sd.dynamicCulling = false;
     sd.cullMode = VK_CULL_MODE_NONE;  // as duas faces projetam sombra (sem vazamento em paredes finas)

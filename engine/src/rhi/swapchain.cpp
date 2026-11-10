@@ -46,7 +46,10 @@ void Swapchain::create(Context& ctx, VkSurfaceKHR surface, VkExtent2D desired, b
   ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                   (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);  // captura da janela (--screenshot)
   ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-  ci.preTransform = caps.currentTransform;
+  // Sem pré-rotação: o motor desenha na orientação da janela e o sistema gira se a tela estiver deitada (no Android,
+  // currentTransform = ROTATE_90 em paisagem; passar isso dizia "a imagem já vem girada" e ela saía em pé e esticada).
+  ci.preTransform = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+                                                                                     : caps.currentTransform;
   ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
   ci.presentMode = mode;
   ci.clipped = VK_TRUE;
