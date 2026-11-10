@@ -1,4 +1,10 @@
-# FCLegacy Mobile — documento de projeto (v0.1, 10/11/2026)
+# FCLegacy Mobile — documento de projeto (v0.2, 10/11/2026)
+
+> **Decisão (10/11):** primeiro um jogo **solo** para o dono do projeto (Galaxy S23 Ultra: Snapdragon 8 Gen 2, Adreno
+> 740 — tem geometry shader e ray tracing). A ideia central é **"o Empire Eleven jogável"**: a carreira de técnico →
+> dono → império do Empire Eleven, mas cada partida do seu clube é jogada por você, com jogabilidade no nível do
+> eFootball. Os outros clubes são da IA. Nomes reais de clubes e competições (uso privado). O online e a campanha com
+> amigos ficam para depois e reaproveitam tudo (a simulação já nasce determinística).
 
 Jogo de futebol 11 contra 11 para celular, no Legacy Engine. Jogabilidade no estilo eFootball, com a meta de ser
 melhor que ele. Partidas de 6 minutos (2 tempos de 3, com acréscimos). Campanha online com gente de verdade: cada um
@@ -69,7 +75,42 @@ A animação nunca decide a jogada: ela segue a simulação.
   computador assume e o servidor decide.
 - **Sem script, provado:** replay com os comandos sobrepostos, log da partida, estatísticas (xG, duelos, posse).
 
-## 3. Campanha (o diferencial)
+## 2b. Modo Império (solo) — o Empire Eleven jogável
+
+- **Começo:** você cria seu técnico e escolhe por onde começar: técnico de um clube pequeno de um estadual (proposta
+  inicial), ou técnico de um clube da Série B. Salário vai para a sua **carteira pessoal**.
+- **Partidas:** as do seu clube você **joga** (6 min) ou, se quiser, **simula** com o mesmo motor (resultado pela mesma
+  física e IA, em segundos). As dos outros clubes são simuladas.
+- **Carreira:** reputação sobe com resultados; propostas de outros clubes; demissão se o dono da IA perder a paciência.
+- **Virar dono:** com a carteira, compre cotas ou o clube inteiro (clubes da IA têm preço por elenco, estádio, dívida,
+  torcida). Como dono: presidente, contrata técnico (ou continua técnico de si mesmo), define orçamento, preço do
+  ingresso, obras, patrocínio, base.
+- **Império:** grupo multiclube (clube satélite em outro estado/divisão, empréstimos internos com regras), estádio
+  próprio (obra em fases, aluguel para outros clubes), marca própria que patrocina clubes da IA, investidores e
+  conselho, cotas de TV, venda do clube.
+- **Mundo vivo:** clubes da IA também compram, vendem, trocam de dono e de técnico; jogadores envelhecem, se aposentam,
+  surgem da base; notícias e histórico permanente.
+- **Temporada:** estadual → Brasileirão/Série B (com playoff) → Copa do Brasil → Libertadores/Sul-Americana pelas
+  vagas reais → Supercopa/Recopa, com calendário do ano.
+
+## 2c. Inovações (o que nenhum jogo de futebol tem junto)
+
+1. **Partida e gestão no mesmo motor:** simular ou jogar dá resultados coerentes (a simulação é a própria partida, sem
+   tabela de probabilidade); dá até para entrar no meio de uma partida simulada e assumir o controle.
+2. **Sem script, provado:** replay com os comandos sobrepostos e semente registrada; estatísticas avançadas (xG,
+   mapa de passes, pressão, duelos) depois de cada jogo.
+3. **Física de bola de verdade** (arrasto com crise, Magnus, quique e rolagem calibrados pela FIFA) e **toque na bola
+   que depende da física** (velocidade, ângulo, pressão), não de animação pronta.
+4. **IA tática legível:** a IA usa *pitch control* e ameaça esperada; dá para ver na pausa o "mapa de controle" e
+   entender por que o adversário pressiona ali.
+5. **Treino que ensina:** desafios por mecânica (contenção, primeiro toque, fintas, finalização) com medalhas.
+6. **Controles de verdade no celular:** dois esquemas, HUD editável, controle Bluetooth, buffer de comando, 120 fps no
+   S23 Ultra, modo economia de bateria a 30 fps.
+7. **Narrativa do império:** histórico permanente do clube e do seu império (títulos, compras, ídolos, recordes), linha
+   do tempo e "hall da fama" do seu legado.
+8. **Duração ajustável** (2x3 padrão; 2x5, 2x8) e dificuldade da IA honesta (a IA não ganha atributos escondidos).
+
+## 3. Campanha online com amigos (depois do solo)
 
 ### Começo: de técnico a dono
 - Todo mundo começa como **técnico** de um clube (da IA ou de outro jogador). Salário e prêmios vão para a **carteira
@@ -136,13 +177,14 @@ Moeda só dentro do jogo; nada que vire dinheiro real. Sem pagar para vencer: na
 | **M0 — Núcleo** | Simulação determinística: bola, 22 jogadores (cinemática), posse, toque, passe, chute, regras básicas; visualização 2D de depuração | Testes automáticos (física da bola contra os números da FIFA, determinismo por checksum, replay) |
 | **M1 — Partida jogável** | 11x11 contra o computador no celular: câmera de TV, controles clássicos, IA de time e goleiro, animações Mixamo, estádio do Pênalti | APK; partida de 6 minutos inteira |
 | **M2 — Sensação** | Primeiro toque, fintas, defesa manual, bolas paradas, faltas e cartões, substituições; ajuste fino | Playtests com você e seus amigos |
-| **M3 — Online 1x1** | Rollback + relay, ping na tela, anti-trapaça por re-simulação | Partida entre dois celulares no 4G |
-| **M4 — Campanha** | Backend, contas, clubes, competições por configuração, calendário, mercado, compra e venda de clubes | Temporada de teste com o grupo |
+| **(depois) Online 1x1** | Rollback + relay, ping na tela, anti-trapaça por re-simulação | Partida entre dois celulares no 4G |
+| **M4 — Império solo** | Mundo, competições por configuração, calendário, finanças, compra de clubes, estádio, marca, simulação das outras partidas | Uma temporada inteira no celular |
+| **M4b — Online** | Backend, contas, ligas com amigos | Temporada de teste com o grupo |
 | **M5 — Animação de verdade** | Motion matching + captura própria | Comparação lado a lado |
 | **M6 — Acabamento** | Torcida, menus, narração/sons, desempenho, ajuste térmico | Celulares de entrada e topo |
 
 ## 7. Decisões em aberto
-1. Modelo do seu celular e dos amigos (Adreno/Snapdragon roda hoje; Mali precisa da troca do renderizador).
+1. ~~Celular~~: S23 Ultra (Adreno 740) — resolvido.
 2. Onde hospedar o servidor da campanha e do online.
-3. Público-alvo: só o grupo de amigos (nomes reais) ou loja (fictício + editor).
+3. ~~Público~~: só o dono, solo, nomes reais de clubes e competições — resolvido.
 4. Captura de movimento própria (roupa/câmeras) para a fase de animação de verdade.
