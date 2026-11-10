@@ -808,6 +808,19 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
         stuck += merged.size() / 3;
         continue;
       }
+      if (std::getenv("LEGACY_DEBUG_LOD")) {  // diagnóstico: área antes e depois (um grupo que encolhe deixa buraco)
+        auto area = [&](const std::vector<uint32_t>& ix) {
+          double a = 0.0;
+          for (size_t t = 0; t + 2 < ix.size(); t += 3)
+            a += 0.5 * glm::length(glm::cross(mesh.vertices[ix[t + 1]].position - mesh.vertices[ix[t]].position,
+                                              mesh.vertices[ix[t + 2]].position - mesh.vertices[ix[t]].position));
+          return a;
+        };
+        const double a0 = area(merged), a1 = area(simplified);
+        if (simplified.empty() || a1 < 0.8 * a0)
+          std::fprintf(stderr, "nivel %u: grupo de %zu pedaços encolheu: %zu -> %zu tri, área %.4f -> %.4f, erro %.5f\n",
+                       levels, group.size(), merged.size() / 3, simplified.size() / 3, a0, a1, error);
+      }
       LodSphere g = mergeSpheres(cl, group);
       g.error += error;  // conservador: o erro da simplificação soma ao dos filhos
       for (uint32_t c : group) cl[c].parent = g;

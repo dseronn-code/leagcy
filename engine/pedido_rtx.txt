@@ -1,5 +1,9 @@
-# Rodada 21e: o buraco do Nanite na RTX era um triângulo simplificado do avesso (dobra), descartado como face de trás.
-# Agora os virados são desvirados no grafo (cache versão 4). Teste e as imagens da bisseção de novo.
-python tools\nanite.py --bin build\Release\legacy.exe
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\b_padrao.png
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\b_sem.png --no-nanite
+# Rodada 21f: o buraco não era triângulo virado. Diagnóstico do grafo no Windows (níveis e grupos que encolhem) e o
+# buraco em vários limites de erro.
+del /q texcache\*.lod
+set LEGACY_DEBUG_LOD=1 && build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_1px.png
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_025px.png --lod-pixels 0.25
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_05px.png --lod-pixels 0.5
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_2px.png --lod-pixels 2
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_4px.png --lod-pixels 4
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_sem.png --no-nanite
