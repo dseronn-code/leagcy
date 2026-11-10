@@ -59,10 +59,10 @@ val prepareAssets by tasks.registering {
         val glslc = android.ndkDirectory.resolve("shader-tools/$host/glslc" + if (OperatingSystem.current().isWindows) ".exe" else "")
         engineDir.resolve("shaders").listFiles { f -> f.extension in setOf("vert", "frag", "comp", "task", "mesh") }!!.forEach { src ->
             exec {
-                // O otimizador do glslc do NDK 27 trava (segfault) no lighting_rt.comp: esse vai sem -O (o desktop
-                // compila todos sem otimizar, pelo glslangValidator).
-                val opt = if (src.name == "lighting_rt.comp") listOf() else listOf("-O")
-                commandLine(listOf(glslc.absolutePath, "--target-env=vulkan1.3") + opt + listOf(src.absolutePath, "-o", shaderOut.resolve(src.name + ".spv").absolutePath))
+                // Vulkan 1.2 (SPIR-V 1.5): com 1.3 o glslc escreve o tamanho do grupo como LocalSizeId, que exige
+                // maintenance4; o Adreno 740 rodava só 1 linha de cada grupo 8x8 (a imagem saía só na faixa de cima).
+                // Sem -O, como no desktop (glslangValidator): o mesmo SPIR-V que é testado no PC.
+                commandLine(listOf(glslc.absolutePath, "--target-env=vulkan1.2", src.absolutePath, "-o", shaderOut.resolve(src.name + ".spv").absolutePath))
             }
         }
         copy {

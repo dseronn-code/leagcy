@@ -59,7 +59,7 @@ void legacyLog(int priority, const char* fmt, ...) {
 namespace {
 
 // Copia uma pasta de dentro do APK para `dest` (só os arquivos que faltam ou mudaram de tamanho).
-void extractAssetDir(AAssetManager* am, const std::string& dir, const std::string& dest) {
+void extractAssetDir(AAssetManager* am, const std::string& dir, const std::string& dest, bool always = false) {
   mkdir(dest.c_str(), 0755);
   AAssetDir* d = AAssetManager_openDir(am, dir.c_str());
   if (!d) return;
@@ -69,7 +69,7 @@ void extractAssetDir(AAssetManager* am, const std::string& dir, const std::strin
     if (!a) continue;
     const off_t size = AAsset_getLength(a);
     struct stat st{};
-    if (stat(out.c_str(), &st) == 0 && st.st_size == size) { AAsset_close(a); continue; }
+    if (!always && stat(out.c_str(), &st) == 0 && st.st_size == size) { AAsset_close(a); continue; }
     std::ofstream f(out, std::ios::binary | std::ios::trunc);
     char buf[65536];
     int n;
@@ -340,7 +340,7 @@ void android_main(android_app* app) {
   // Arquivos do APK -> pasta interna; o motor e o cache de texturas usam caminhos comuns.
   const std::string internal = app->activity->internalDataPath ? app->activity->internalDataPath : "/data/local/tmp";
   a.cacheDir = internal;
-  extractAssetDir(app->activity->assetManager, "shaders", internal + "/shaders");
+  extractAssetDir(app->activity->assetManager, "shaders", internal + "/shaders", true);  // sempre: shader novo pode ter o mesmo tamanho
   extractAssetDir(app->activity->assetManager, "game", internal + "/game");
   core::setDataDirs(internal + "/shaders", internal + "/game");
   setenv("TMPDIR", internal.c_str(), 1);  // arquivos temporários do streaming
