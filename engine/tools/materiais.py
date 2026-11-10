@@ -147,8 +147,20 @@ def teste_erro(b, pasta):
     return ok, f'mensagem: {msg[0] if msg else "nenhuma"}'
 
 
+def teste_arquivo(b, pasta):
+    """O grafo num arquivo ("grafo": "x.mat.json", o que o editor de grafos grava) assa igual ao grafo na cena."""
+    import numpy as np
+    arq = os.path.join(pasta, 'tijolo.mat.json')
+    with open(arq, 'w', encoding='utf-8') as f:
+        json.dump(TIJOLOS, f)
+    dump, _, _ = rodar(b, pasta, {'a': {'grafo': arq}, 'b': METAL}, 'arquivo', tamanho=(32, 18), quadros=1)
+    ref, _, _ = assado(b, pasta)
+    d = np.abs(img(os.path.join(dump, 'a_cor.png')) - img(os.path.join(ref, 'a_cor.png'))).max()
+    return d == 0, f'maior diferença entre o assado do arquivo e o da cena: {d:.0f}/255'
+
+
 TESTES = {'tijolos': teste_tijolos, 'emenda': teste_emenda, 'metal': teste_metal, 'imagem': teste_imagem,
-          'erro': teste_erro}
+          'erro': teste_erro, 'arquivo': teste_arquivo}
 
 
 def main():

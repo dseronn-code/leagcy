@@ -207,7 +207,22 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         mat.roughness = m.value("rugosidade", 0.5f);
         mat.metallic = m.value("metalico", 0.0f);
         mat.emissive = vec3Of(m.value("emissao", json()), glm::vec3(0.0f));
-        if (m.contains("nos")) {  // material por nós: assado em texturas (node_material.h)
+        json graphFile;
+        if (m.contains("grafo") && m["grafo"].is_string()) {  // o grafo num arquivo (o editor de grafos grava nele)
+          std::string gp = m["grafo"].get<std::string>();
+          const size_t slash = path.find_last_of("/\\");
+          const std::string dir = slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+          if (!std::ifstream(gp) && std::ifstream(dir + gp)) gp = dir + gp;
+          std::ifstream gf(gp);
+          try {
+            graphFile = json::parse(gf);
+          } catch (const json::exception& ex) {
+            LOG_ERROR("Material %s: grafo %s inválido (%s)", name.c_str(), gp.c_str(), ex.what());
+          }
+        }
+        const json& mg = graphFile.is_object() ? graphFile : m;
+        if (mg.contains("nos")) {  // material por nós: assado em texturas (node_material.h)
+          const json& m = mg;
           NodeMaterialBake bake;
           std::string error;
           const uint32_t res = std::clamp(m.value("resolucao", 512u), 16u, 4096u);

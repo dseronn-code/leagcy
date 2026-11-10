@@ -10,6 +10,7 @@ Cena: uma caixa com um script visual e o jogador longe; um diretor em Lua leva o
               e "esperar" 0,5 s; depois a caixa está 2 m acima.
   - recarga:  com o jogo rodando, o .json muda (texto novo): o Lua é gerado de novo e o texto novo aparece.
   - erro:     um grafo com ciclo (sem "repetir") é recusado com mensagem, sem derrubar o motor.
+  - editor:   o editor de grafos (janela) abre o .vs.json, liga um nó novo e salva; o script editado roda.
 """
 import argparse
 import json
@@ -160,7 +161,29 @@ def teste_erro(b, pasta):
     return ok, f'código {p.returncode}; mensagem: {msg[0].split("] ", 1)[-1] if msg else "nenhuma"}'
 
 
-TESTES = {'eventos': teste_eventos, 'perto': teste_perto, 'recarga': teste_recarga, 'erro': teste_erro}
+def teste_editor(b, pasta):
+    """Editor de grafos (janela; no Linux sem tela, xvfb-run): abre o .vs.json, um nó "log" novo é ligado ao primeiro
+    evento e salvo; o grafo salvo continua compilando e o nó novo roda."""
+    import shutil
+    if sys.platform.startswith('linux') and not os.environ.get('DISPLAY') and not shutil.which('xvfb-run'):
+        return True, 'sem tela nem xvfb-run: pulado'
+    arq, vs = cena(pasta, GRAFO, 'editor')
+    cmd = [b, '--editor', '--scene', arq, '--grafo', vs, '--width', '640', '--height', '360', '--quit-after', '5']
+    if sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
+        cmd = ['xvfb-run', '-a', '-s', '-screen 0 1280x720x24'] + cmd
+    subprocess.run(cmd, capture_output=True, timeout=600, env=dict(os.environ, LEGACY_EDITOR_TESTE='grafo'), cwd=pasta)
+    with open(vs, encoding='utf-8') as f:
+        g = json.load(f)
+    novo = [n for n in g['nos'] if n['tipo'] == 'log' and n.get('texto') == 'oi']
+    ligado = bool(novo) and any(l[:2] == [1, novo[0]['id']] for l in g['ligacoes'] if isinstance(l, list))
+    posicoes = all('pos_editor' in n for n in g['nos'])
+    p = subprocess.run(comando(b, arq, 0.5), capture_output=True, text=True, encoding='utf-8', errors='replace')
+    rodou = 'oi' in mensagens(p.stdout + p.stderr)
+    return bool(novo) and ligado and posicoes and rodou, (f'nó novo: {bool(novo)}, ligado ao evento 1: {ligado}, posições '
+                                                          f'gravadas: {posicoes}; o script editado roda o nó novo: {rodou}')
+
+
+TESTES = {'eventos': teste_eventos, 'perto': teste_perto, 'recarga': teste_recarga, 'erro': teste_erro, 'editor': teste_editor}
 
 
 def main():

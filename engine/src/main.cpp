@@ -175,6 +175,7 @@ struct Options {
   bool editor = false;     // janela: editor visual (painéis, seleção, alças)
   std::string screenshot;  // janela: grava a imagem da janela (com a interface) no último quadro
   std::string select;      // editor: entidade selecionada ao abrir (testes)
+  std::string graph;  // --grafo: abre no editor de grafos (script visual ou material por nós)
   bool testRestore = false;  // sem janela: guarda as poses no início e volta a elas antes do --save-world (teste)
   std::string audioWav;      // sem janela: grava a mixagem do áudio 3D (ouvinte = câmera) em WAV
   std::string simulate;      // entradas simuladas (teclas, cliques, controle) para testes: ver game/input.h
@@ -226,6 +227,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--editor") o.editor = true;
     else if (a == "--screenshot") o.screenshot = next();
     else if (a == "--select") o.select = next();
+    else if (a == "--grafo") o.graph = next();
     else if (a == "--test-restore") o.testRestore = true;
     else if (a == "--audio-wav") o.audioWav = next();
     else if (a == "--simular") o.simulate = next();
@@ -784,6 +786,7 @@ int runWindowed(const Options& opt) {
   if (opt.editor || game::currentWorld())
     ed.init(ctx, window, swapchain.format, uint32_t(swapchain.images.size()), opt.editor);
   if (ed.ready() && !opt.select.empty() && game::currentWorld()) ed.selectByName(*game::currentWorld(), opt.select);
+  if (ed.ready() && !opt.graph.empty()) ed.openGraph(opt.graph);
   rhi::Buffer shotBuffer{};  // --screenshot: cópia da imagem da janela no último quadro
   VkExtent2D shotExtent{};
 

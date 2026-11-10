@@ -163,6 +163,9 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
     ImGui::InputText("##arquivo", savePath_, sizeof(savePath_));
     ImGui::SameLine();
     if (ImGui::Button("Salvar")) status_ = world->save(savePath_) ? std::string("Salvo em ") + savePath_ : "Falha ao salvar";
+    ImGui::InputText("##grafo", graphPath_, sizeof(graphPath_));
+    ImGui::SameLine();
+    if (ImGui::Button("Abrir grafo")) status_ = graph_.open(graphPath_) ? "" : std::string("Não abri ") + graphPath_;
     if (!status_.empty()) ImGui::TextUnformatted(status_.c_str());
   } else {
     ImGui::TextWrapped("Cena sem mundo de jogo: abra uma cena .json (ex.: --scene cenas/parque.json) para editar.");
@@ -174,6 +177,8 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
     properties(*world, scene);
     gizmo(*world, scene, camera, extent);
     if (world->terrain.enabled) terrainPanel(*world, scene, camera, extent, frameMs / 1000.0f);
+    graphTest();
+    graph_.draw();
     if (!brushOn_) picking(*world, camera, extent);
   }
 }
@@ -433,6 +438,24 @@ void Editor::render(VkCommandBuffer cmd, VkImageView target, VkExtent2D extent) 
   vkCmdBeginRendering(cmd, &ri);
   ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
   vkCmdEndRendering(cmd);
+}
+
+// Teste sem mouse (LEGACY_EDITOR_TESTE=grafo, com --grafo): no 3º quadro, um nó "log" novo ligado ao primeiro nó do
+// grafo (script) ou um "ruido" ligado à cor da saída (material), e salva.
+void Editor::graphTest() {
+  static int frameNo = 0;
+  static const char* autoTest = std::getenv("LEGACY_EDITOR_TESTE");
+  if (!autoTest || std::string(autoTest) != "grafo" || !graph_.isOpen() || ++frameNo != 3) return;
+  const nlohmann::json& g = graph_.graph();
+  if (g.contains("saida")) {
+    const int id = graph_.addNode("ruido", glm::vec2(40.0f, 300.0f));
+    graph_.connect(id, "cor", -1000);
+  } else if (!g["nos"].empty()) {
+    const int first = g["nos"][0].value("id", 0);
+    const int id = graph_.addNode("log", glm::vec2(300.0f, 300.0f));
+    graph_.connect(first, "proximo", id);
+  }
+  graph_.save();
 }
 
 }  // namespace editor

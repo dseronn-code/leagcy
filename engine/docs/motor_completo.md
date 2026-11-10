@@ -91,9 +91,18 @@ vira Lua e roda no mesmo motor de scripts. Editar o `.json` com o jogo rodando g
   rodam numa corrotina por disparo (o jogo segue); um disparo novo do mesmo evento espera o anterior terminar. Ciclo
   fora de `repetir` é recusado com mensagem.
 
+**Editor de grafos** (no `--editor`: campo + "Abrir grafo", ou `--grafo arquivo`): os nós viram caixas arrastáveis
+com os campos editáveis; fios curvos entre os pinos (arraste de uma saída, à direita, até a entrada de outro nó;
+botão direito numa saída apaga os fios dela); botão direito no fundo abre o menu de nós novos; Delete apaga o
+selecionado; "Salvar" grava o `.json` (e a recarga a quente põe o script novo no jogo). O mesmo editor abre os
+materiais por nós (cada campo com `{"no": id}` é um pino de dados; a "saída do material" aparece como um nó).
+
+![Editor de grafos com um script visual](screenshots/editor_grafo.png)
+
 Testes (`tools/visual.py`): eventos (início 1x, repetir 1-3, `a_cada` + `se` chega a 3 em 1,50 s, `quando` dispara
 1x), chegar perto do jogador (2,03 s) e subir 2 m em 1 s + esperar 0,5 s (y = 2,5 em 3,53 s), recarga do `.json`
-com o jogo rodando e o grafo com ciclo recusado sem derrubar o motor.
+com o jogo rodando, o grafo com ciclo recusado sem derrubar o motor e o editor de grafos (Xvfb: um nó novo ligado e
+salvo; o script editado roda o nó).
 
 ## Materiais por nós
 
@@ -117,6 +126,7 @@ se a saída tem `"altura"`, o normal map do relevo.
   (`entrada`, `cores`), `deformar` (desloca a UV da `entrada` por `x`/`y`, `forca`).
 - **Entradas:** número, cor `[r, g, b]` (linear) ou `"#rrggbb"` (sRGB), ou `{"no": id}`. Saída: `cor`, `rugosidade`,
   `metalico`, `altura` (+ `forca_relevo`).
+- **Num arquivo:** `"tijolo": {"grafo": "tijolo.mat.json"}` — o que o editor de grafos abre e grava.
 
 Testes (`tools/materiais.py`): tijolos com 8 fileiras e argamassa em 18% da textura; nenhuma emenda nas bordas (a
 diferença na emenda é menor que entre vizinhas no meio); metal enferrujado com metal 5/255 na ferrugem e 228 fora,

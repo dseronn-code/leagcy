@@ -4,6 +4,7 @@
 #include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
+#include "editor/graph_editor.h"
 #include "rhi/vk_common.h"
 
 struct GLFWwindow;
@@ -46,6 +47,7 @@ class Editor {
   }
   // Seleciona a entidade com este nome (--select: testes e capturas de tela).
   void selectByName(game::World& world, const std::string& name);
+  bool openGraph(const std::string& path) { return graph_.open(path); }  // --grafo
 
  private:
   void entityList(game::World& world);
@@ -70,9 +72,12 @@ class Editor {
   int brushMode_ = 0;  // subir, descer, aplanar, suavizar
   float brushRadius_ = 6.0f, brushStrength_ = 2.0f, brushLevel_ = 0.0f;
   char terrainPath_[256] = "terreno.altura";
+  GraphEditor graph_;
+  char graphPath_[256] = "script.vs.json";
   std::string status_;
   std::string reload_;
   void requestReload(game::World& world);
+  void graphTest();
 };
 
 }  // namespace editor
