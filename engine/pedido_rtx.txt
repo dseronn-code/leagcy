@@ -1,3 +1,4 @@
+# Rodada 20b (10/11): a 20 parou na compilação (CMake 4 recusava a Recast); corrigido no CMakeLists.
 # Rodada 20 (6/11). Parte A: o motor completo no Windows (física, veículos, NPCs, áudio, animação, HUD, menus,
 # salvar, partículas, multijogador, exportar). Parte B: o Bistro ~10% mais escuro que a referência. Achado aqui:
 # a luz do motor está certa (acumulação: +1%); escurecia no TAA (corte e pesos de Karis em imagem com ruído) e no

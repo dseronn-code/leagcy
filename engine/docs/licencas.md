@@ -34,7 +34,7 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [Basis Universal](https://github.com/BinomialLLC/basis_universal) 1.60 (só o transcodificador, com zstd) | Texturas KTX2 dos glTF | Apache 2.0 (zstd: BSD) | Incluir o aviso da Apache 2.0 e o NOTICE ao distribuir |
 | [Draco](https://github.com/google/draco) 1.5.7 | Malhas comprimidas dos glTF (Draco) | Apache 2.0 | Incluir o aviso da Apache 2.0 ao distribuir |
 
-## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
+## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd_sdk-src/LICENSE.txt`)
 
 - **Uso comercial é permitido**, inclusive em jogos vendidos, sem pagamento.
 - **Crédito obrigatório:** jogos e aplicativos que usam o NRD precisam mostrar a marca da NVIDIA / o nome

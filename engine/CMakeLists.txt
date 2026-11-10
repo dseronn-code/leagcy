@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.30)  # o NRD exige 3.30
 project(LegacyEngine LANGUAGES C CXX)
+# CMake 4 recusa bibliotecas que pedem uma versão mínima antiga (a Recast pede 3.0): elas configuram com as
+# políticas da 3.5 em diante. Sem efeito no CMake 3.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -85,10 +88,11 @@ FetchContent_Declare(nri
   GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRI.git
   GIT_TAG v190
   GIT_SHALLOW TRUE)
-FetchContent_Declare(nrd
+# NRD pelo commit do v4.18.0 de 09/10/2026: a NVIDIA moveu a tag v4.18.0 para um commit que exige o NRI 191 (o build
+# do zero quebrava). Nome novo (nrd_sdk) para os builds antigos baixarem de novo em vez de tentar mover a cópia rasa.
+FetchContent_Declare(nrd_sdk
   GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRD.git
-  GIT_TAG v4.18.0
-  GIT_SHALLOW TRUE)
+  GIT_TAG e06852bd545973cb224eb28820b891205cfc1624)
 
 # Upscalers dos fabricantes pela extensão Upscaler do NRI (src/renderer/upscaler.cpp). Sem eles o motor usa o
 # próprio TAA/TAAU; com eles, --upscaler dlss|fsr escolhe em tempo de execução (volta ao TAAU se a GPU não suportar).
@@ -108,7 +112,7 @@ if(LEGACY_DLSS)
     GIT_SHALLOW TRUE
     SOURCE_SUBDIR _sem_cmake)
 endif()
-FetchContent_MakeAvailable(nrd)
+FetchContent_MakeAvailable(nrd_sdk)
 
 # Compressão de texturas BC7/BC5 (bc7enc_rdo, Rich Geldreich — MIT ou domínio público). Só os codificadores e o
 # decodificador; o CMakeLists do projeto (ferramenta de linha de comando, ISPC) não é usado.
@@ -303,7 +307,7 @@ target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocat
 # Os cabeçalhos do Draco incluem draco/draco_features.h, gerado no build dele.
 target_include_directories(legacy SYSTEM PRIVATE ${draco_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
-target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
+target_include_directories(legacy SYSTEM PRIVATE ${nrd_sdk_SOURCE_DIR}/Include ${nrd_sdk_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 if(LEGACY_MIKKTSPACE)
   target_link_libraries(legacy PRIVATE mikktspace)
   target_compile_definitions(legacy PRIVATE LEGACY_MIKKTSPACE=1)
