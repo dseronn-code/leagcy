@@ -95,6 +95,36 @@ Testes (`tools/visual.py`): eventos (início 1x, repetir 1-3, `a_cada` + `se` ch
 1x), chegar perto do jogador (2,03 s) e subir 2 m em 1 s + esperar 0,5 s (y = 2,5 em 3,53 s), recarga do `.json`
 com o jogo rodando e o grafo com ciclo recusado sem derrubar o motor.
 
+## Materiais por nós
+
+Como o editor de materiais do Unreal ou o Substance: em `"materiais"`, um material com `"nos"` é um grafo assado em
+texturas na carga da cena (todas repetem sem emenda: os ruídos são periódicos) — cor (sRGB), rugosidade + metal e,
+se a saída tem `"altura"`, o normal map do relevo.
+
+```json
+"tijolo": {"resolucao": 512,
+  "nos": [{"id": 1, "tipo": "tijolos", "linhas": 8, "colunas": 4, "argamassa": 0.08},
+          {"id": 2, "tipo": "ruido", "escala": 16, "oitavas": 4},
+          {"id": 3, "tipo": "rampa", "entrada": {"no": 2}, "cores": [[0, "#8a3324"], [1, "#b5523a"]]},
+          {"id": 4, "tipo": "misturar", "a": "#bdb6a8", "b": {"no": 3}, "t": {"no": 1}}],
+  "saida": {"cor": {"no": 4}, "rugosidade": 0.85, "altura": {"no": 1}, "forca_relevo": 0.01}}
+```
+
+- **Geradores:** `ruido` (`escala`, `oitavas`, `ganho`, `semente`), `voronoi` (`saida`: `distancia` ou `borda`),
+  `tijolos` (`linhas`, `colunas`, `argamassa`), `listras` (`escala`, `inclinacao`), `gradiente` (`eixo` u/v),
+  `constante`.
+- **Operações:** `misturar` (`a`, `b`, `t`), `multiplicar`, `somar`, `inverter`, `contraste` (`min`, `max`), `rampa`
+  (`entrada`, `cores`), `deformar` (desloca a UV da `entrada` por `x`/`y`, `forca`).
+- **Entradas:** número, cor `[r, g, b]` (linear) ou `"#rrggbb"` (sRGB), ou `{"no": id}`. Saída: `cor`, `rugosidade`,
+  `metalico`, `altura` (+ `forca_relevo`).
+
+Testes (`tools/materiais.py`): tijolos com 8 fileiras e argamassa em 18% da textura; nenhuma emenda nas bordas (a
+diferença na emenda é menor que entre vizinhas no meio); metal enferrujado com metal 5/255 na ferrugem e 228 fora,
+rugosidade 227 x 81 e normal map inclinado nas bordas; a face renderizada varia 15,5 contra 0,4 lisa; nó desconhecido
+recusado com mensagem.
+
+![Materiais por nós: tijolos e metal enferrujado](screenshots/materiais_nos.png)
+
 ## Áudio 3D (miniaudio)
 
 Na entidade: `"som": {"arquivo": "sons/motor.wav", "volume": 1, "laco": true, "espacial": true, "dist_min": 1,

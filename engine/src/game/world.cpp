@@ -2,6 +2,8 @@
 #include "game/navigation.h"
 #include "game/scripting.h"
 #include "game/visual_script.h"
+#include "game/node_material.h"
+#include "util/png.h"
 
 #include <algorithm>
 #include <cctype>
@@ -203,6 +205,28 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         mat.roughness = m.value("rugosidade", 0.5f);
         mat.metallic = m.value("metalico", 0.0f);
         mat.emissive = vec3Of(m.value("emissao", json()), glm::vec3(0.0f));
+        if (m.contains("nos")) {  // material por nós: assado em texturas (node_material.h)
+          NodeMaterialBake bake;
+          std::string error;
+          const uint32_t res = std::clamp(m.value("resolucao", 512u), 16u, 4096u);
+          if (bakeNodeMaterial(m, res, bake, error)) {
+            if (const char* dump = std::getenv("LEGACY_DUMP_MATERIAIS")) {  // testes: as texturas assadas em PNG
+              const std::string base = std::string(dump) + "/" + name;
+              util::writePng(base + "_cor.png", bake.color.rgba.data(), res, res);
+              util::writePng(base + "_rugmetal.png", bake.metalRough.rgba.data(), res, res);
+              if (bake.hasNormal) util::writePng(base + "_normal.png", bake.normal.rgba.data(), res, res);
+            }
+            mat.baseColor = glm::vec4(1.0f);  // as texturas já têm os valores (os fatores do glTF multiplicam)
+            mat.roughness = 1.0f;
+            mat.metallic = 1.0f;
+            mat.baseColorTex = int32_t(scene.addTexture(std::move(bake.color)));
+            mat.metalRoughTex = int32_t(scene.addTexture(std::move(bake.metalRough)));
+            if (bake.hasNormal) mat.normalTex = int32_t(scene.addTexture(std::move(bake.normal)));
+            LOG_INFO("Material %s: grafo de %zu nós assado em %ux%u", name.c_str(), m["nos"].size(), res, res);
+          } else {
+            LOG_ERROR("Material %s: %s", name.c_str(), error.c_str());
+          }
+        }
         if (m.value("terreno", false)) {  // grama, terra, rocha e cascalho pela inclinação e por ruído (material.glsl)
           mat.flags |= scene::kMaterialTerrain;
           if (scene.terrainLayers.albedo[0] < 0) scene::addTerrainLayers(scene);
