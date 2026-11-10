@@ -3,8 +3,8 @@
 
     python3 tools/demo.py [--bin build/legacy] [--so abertura,...]
 
-Joga sozinho: a cena original com um script de teste a mais, que depois da abertura leva o jogador até cada cristal,
-depois para perto do guarda (e aperta F) e por fim fica na frente dele.
+Joga sozinho: a cena original com um script de teste a mais, que depois da abertura leva o jogador para perto do
+guarda (e aperta F), depois para a frente dele e por fim até cada cristal.
   - abertura:  a cena de abertura (linha do tempo) toca ao começar e termina em ~7 s.
   - cristais:  os 5 cristais (scripts visuais) são coletados quando o jogador chega perto; com os 5, a cena de vitória
                toca e termina.
@@ -25,28 +25,31 @@ TESTE = '''
 local CRISTAIS = {"cristal_1", "cristal_2", "cristal_3", "cristal_4", "cristal_5"}
 function atualizar(e, dt)
   local t = tempo()
-  local jog = achar("jogador")
+  local jog, g = achar("jogador"), achar("guarda")
+  -- 8 s: perto do guarda (o F é simulado em 8,4 s); 12,5 s: 6 m na frente dele (para onde ele anda).
+  if t >= 8.0 and not perto then
+    perto = true
+    local gx, gy, gz = g:posicao()
+    jog:mover_para(gx + 1.2, altura_terreno(gx + 1.2, gz) + 0.95, gz)
+  end
+  if t >= 12.5 and not frente then
+    frente = true
+    local gx, gy, gz = g:posicao()
+    local vx, vy, vz = g:velocidade()
+    local n = math.sqrt(vx * vx + vz * vz)
+    if n < 0.1 then vx, vz, n = 0, 1, 1 end
+    local px, pz = gx + vx / n * 6, gz + vz / n * 6
+    jog:mover_para(px, altura_terreno(px, pz) + 0.95, pz)
+  end
+  if t >= 12.6 and t < 14.5 then log("IA", t, g:estado_ia()) end
   for i, nome in ipairs(CRISTAIS) do
-    if t >= 7.5 + (i - 1) * 1.2 and not feito[i] then
+    if t >= 15.0 + (i - 1) * 1.2 and not feito[i] then
       feito[i] = true
       local c = achar(nome)
       local x, y, z = c:posicao()
       jog:mover_para(x + 0.5, y, z)
     end
   end
-  if t >= 15.0 and not perto then
-    perto = true
-    local g = achar("guarda")
-    local gx, gy, gz = g:posicao()
-    jog:mover_para(gx + 1.5, altura_terreno(gx + 1.5, gz) + 0.95, gz)
-  end
-  if t >= 21.0 and not frente then
-    frente = true
-    local g = achar("guarda")
-    local gx, gy, gz = g:posicao()
-    jog:mover_para(gx, altura_terreno(gx, gz + 5) + 0.95, gz + 5)
-  end
-  if t >= 21.5 then log("IA", t, achar("guarda"):estado_ia()) end
 end
 feito = {}
 '''
@@ -83,7 +86,7 @@ def sessao(b, pasta):
         arq = preparar(pasta)
         out = os.path.join(pasta, 'vale.png')
         p = subprocess.run([b, '--headless', '--scene', arq, '--width', '320', '--height', '180', '--fps', str(FPS),
-                            '--frames', str(24 * FPS), '--no-motion-blur', '--out', out, '--simular', '15.4:tecla:f'],
+                            '--frames', str(28 * FPS), '--no-motion-blur', '--out', out, '--simular', '8.4:tecla:f'],
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3000)
         if p.returncode:
             raise RuntimeError(f'motor falhou ({p.returncode}): {p.stderr[-400:]}')
