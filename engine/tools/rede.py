@@ -55,7 +55,7 @@ def sessao(binario, pasta, arq, porta, simular, env_cliente=None):
     def ler():
         for l in anfitriao.stdout:
             linhas_h.append(l)
-            if 'anfitrião na porta' in l:
+            if 'frame 1/' in l:  # já atende a rede (a porta abre antes de montar o renderer)
                 pronto.set()
     t = threading.Thread(target=ler)
     t.start()
@@ -170,7 +170,7 @@ def main():
         h = subprocess.Popen(base + ['--host', str(a.porta + 1), '--frames', '1500', '--out', os.path.join(pasta, 'ch.png')],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
         for l in h.stdout:
-            if 'anfitrião na porta' in l:
+            if 'frame 1/' in l:  # já atende a rede (a porta abre antes de montar o renderer)
                 break
         threading.Thread(target=lambda: [None for _ in h.stdout]).start()
         time.sleep(0.5)

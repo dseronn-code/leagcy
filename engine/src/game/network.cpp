@@ -526,10 +526,21 @@ bool Network::connect(World& world, const std::string& address, uint16_t port, f
     return false;
   }
   addr.port = port;
-  p_->server = enet_host_connect(p_->host, &addr, 2, 0);
-  ENetEvent ev;
-  if (!p_->server || enet_host_service(p_->host, &ev, uint32_t(timeoutSeconds * 1000.0f)) <= 0 ||
-      ev.type != ENET_EVENT_TYPE_CONNECT) {
+  // Tentativas de 5 s até o prazo: o anfitrião pode estar montando o renderer (sem atender a rede) logo depois de abrir
+  // a porta, e o ENet desiste de uma tentativa sem resposta depois de alguns segundos.
+  ENetEvent ev{};
+  bool ok = false;
+  const auto start = std::chrono::steady_clock::now();
+  while (!ok) {
+    p_->server = enet_host_connect(p_->host, &addr, 2, 0);
+    if (!p_->server) break;
+    ok = enet_host_service(p_->host, &ev, 5000) > 0 && ev.type == ENET_EVENT_TYPE_CONNECT;
+    if (ok) break;
+    enet_peer_reset(p_->server);
+    p_->server = nullptr;
+    if (std::chrono::duration<float>(std::chrono::steady_clock::now() - start).count() >= timeoutSeconds) break;
+  }
+  if (!ok) {
     LOG_ERROR("Multijogador: não consegui conectar em %s:%u", address.c_str(), port);
     if (p_->server) enet_peer_reset(p_->server);
     p_->server = nullptr;

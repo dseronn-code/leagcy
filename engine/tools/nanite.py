@@ -13,6 +13,8 @@ Cena "nanite": rochas procedurais (esfera de 768 segmentos deformada por ruído 
                 metade do tempo de --no-nanite.
   - software:   rasterização por software dos pedaços pequenos (--sw-raster, limite de 64 pixels para mandar quase tudo
                 por ela): a imagem bate com a do rasterizador fixo (média < 0,5/255; < 0,5% dos pixels acima de 8).
+(Sempre com o TAAU do motor: numa RTX o padrão seria o DLSS-RR, cuja reconstrução varia de uma imagem para
+outra e mascara a comparação da geometria.)
 """
 import argparse
 import os
@@ -26,7 +28,7 @@ def rodar(b, pasta, nome, extra, rochas=2, segmentos=256, tamanho=(480, 270), qu
     out = os.path.join(pasta, f'{nome}.png')
     p = subprocess.run([b, '--headless', '--scene', 'nanite', '--rochas', str(rochas), '--rocha-segmentos', str(segmentos),
                         '--width', str(tamanho[0]), '--height', str(tamanho[1]), '--frames', str(quadros),
-                        '--no-motion-blur', '--out', out] + extra, capture_output=True, text=True, encoding='utf-8',
+                        '--no-motion-blur', '--upscaler', 'taau', '--out', out] + extra, capture_output=True, text=True, encoding='utf-8',
                        errors='replace')
     if p.returncode:
         raise RuntimeError(f'motor falhou ({p.returncode}): {p.stderr[-400:]}')

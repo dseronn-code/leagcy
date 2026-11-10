@@ -22,7 +22,7 @@ class Network {
   Network();
   ~Network();
   bool host(World& world, uint16_t port);
-  bool connect(World& world, const std::string& address, uint16_t port, float timeoutSeconds = 15.0f);
+  bool connect(World& world, const std::string& address, uint16_t port, float timeoutSeconds = 60.0f);
   // A cada quadro, antes do World::update: recebe e manda pacotes; no cliente, aplica o estado interpolado.
   void update(World& world, scene::Scene& scene, float dt, const PlayerInput& localInput);
   bool isHost() const;
