@@ -194,6 +194,10 @@ struct Scripting::Impl {
           return h.valid() && h.world->startRagdoll(h.e, glm::vec3(ix.value_or(0.0f), iy.value_or(0.0f), iz.value_or(0.0f)));
         },
         "levantar", [](const Entidade& h) { return h.valid() && h.world->stopRagdoll(h.e); },
+        "ragdoll_ativo", [](const Entidade& h, float forca, sol::optional<std::string> alvo) {
+          return h.valid() && h.world->setRagdollStrength(h.e, forca, alvo.value_or("pose") == "animacao");
+        },
+        "ragdoll_desvio", [](const Entidade& h) { return h.valid() ? h.world->ragdollDeviation(h.e) : -1.0f; },
         "dormindo", [](const Entidade& h) { return h.valid() && h.world->registry.all_of<Dormant>(h.e); },
         "caido", [](const Entidade& h) {
           const Character* c = h.valid() ? h.world->registry.try_get<Character>(h.e) : nullptr;

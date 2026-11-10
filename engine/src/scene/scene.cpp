@@ -162,7 +162,7 @@ void Scene::animateModel(Model& m, float dt) {
   const bool ragdoll = driven.size() == pose.size() && !m.drivenWorld.empty();
   const glm::mat4 invRoot = ragdoll ? glm::inverse(m.root) : glm::mat4(1.0f);
   // Pose só da animação (sem o ragdoll), para a mistura ao levantar.
-  std::vector<glm::mat4> animGlobal(ragdoll && m.drivenWeight < 1.0f ? pose.size() : 0);
+  std::vector<glm::mat4> animGlobal(ragdoll && (m.drivenWeight < 1.0f || m.keepAnimPose) ? pose.size() : 0);
   std::vector<uint8_t> animDone(animGlobal.size(), 0);
   std::function<const glm::mat4&(size_t)> resolveAnim = [&](size_t i) -> const glm::mat4& {
     if (!animDone[i]) {
@@ -196,6 +196,10 @@ void Scene::animateModel(Model& m, float dt) {
     }
     return global[i];
   };
+  if (ragdoll && m.keepAnimPose) {
+    m.animPose.resize(pose.size());
+    for (size_t i = 0; i < pose.size(); ++i) m.animPose[i] = resolveAnim(i);
+  }
   glm::mat4 root = m.root;
 
   // IK dos pés.
@@ -1635,6 +1639,170 @@ void Scene::destroy(rhi::Context& ctx) {
   pendingDestroy_.clear();
   meshes.clear();
   textures.clear();
+}
+
+// Retargeting (ver scene.h). Pose de repouso e pose animada no espaço do modelo; cada osso mapeado gira, no espaço do
+// modelo, o mesmo tanto que o osso de origem girou a partir do repouso (delta global aplicado à rotação de repouso do
+// destino); os ossos sem mapa seguem o pai com a rotação local de repouso. A bacia (o osso mapeado mais perto da
+// raiz) anda o deslocamento da origem escalado pela razão das alturas de repouso dela. Assado a `fps` quadros/s.
+int retargetAnimation(Model& dst, const Model& src, int srcAnimation, const std::vector<std::pair<std::string, std::string>>& map,
+                      const std::string& name, float fps) {
+  if (srcAnimation < 0 || size_t(srcAnimation) >= src.animations.size()) return -1;
+  const Animation& a = src.animations[size_t(srcAnimation)];
+  auto globals = [](const std::vector<ModelNode>& nodes) {
+    std::vector<glm::mat4> g(nodes.size());
+    std::vector<uint8_t> done(nodes.size(), 0);
+    std::function<const glm::mat4&(size_t)> at = [&](size_t i) -> const glm::mat4& {
+      if (!done[i]) {
+        g[i] = nodes[i].parent >= 0 ? at(size_t(nodes[i].parent)) * nodeMatrix(nodes[i]) : nodeMatrix(nodes[i]);
+        done[i] = 1;
+      }
+      return g[i];
+    };
+    for (size_t i = 0; i < nodes.size(); ++i) at(i);
+    return g;
+  };
+  std::vector<int> srcOf(dst.nodes.size(), -1);  // nó de destino -> nó de origem
+  for (const auto& [s, d] : map) {
+    const int si = src.findNode(s), di = dst.findNode(d);
+    if (si >= 0 && di >= 0) srcOf[size_t(di)] = si;
+  }
+  // Bacia: o nó mapeado com menos ancestrais.
+  int hips = -1, best = 1 << 30;
+  for (size_t i = 0; i < dst.nodes.size(); ++i) {
+    if (srcOf[i] < 0) continue;
+    int depth = 0;
+    for (int p = dst.nodes[i].parent; p >= 0; p = dst.nodes[size_t(p)].parent) ++depth;
+    if (depth < best) {
+      best = depth;
+      hips = int(i);
+    }
+  }
+  if (hips < 0) return -1;
+  const std::vector<glm::mat4> srcRest = globals(src.nodes), dstRest = globals(dst.nodes);
+  const int srcHips = srcOf[size_t(hips)];
+  // Alturas de repouso da bacia no espaço do modelo, pelo eixo "para cima" do modelo (a maior componente do vetor da
+  // raiz até a bacia: Y ou Z, conforme o arquivo).
+  const glm::vec3 sh = glm::vec3(srcRest[size_t(srcHips)][3]), dh = glm::vec3(dstRest[size_t(hips)][3]);
+  const int up = std::abs(sh.y) >= std::abs(sh.z) ? 1 : 2;
+  // Altura da bacia acima do osso mapeado mais baixo (o pé): pernas mais longas, passos e quique proporcionais.
+  float srcLow = sh[up], dstLow = dh[up];
+  for (size_t i = 0; i < dst.nodes.size(); ++i)
+    if (srcOf[i] >= 0) {
+      dstLow = std::min(dstLow, dstRest[i][3][up]);
+      srcLow = std::min(srcLow, srcRest[size_t(srcOf[i])][3][up]);
+    }
+  const float ratio = sh[up] - srcLow > 1e-6f ? (dh[up] - dstLow) / (sh[up] - srcLow) : 1.0f;
+
+  // Pose de retargeting automática: cada osso mapeado com um descendente mapeado ganha a correção que gira a direção
+  // de repouso dele (até o descendente) para a direção do osso de origem — esqueletos com posturas de repouso
+  // diferentes (braços abertos x caídos, tronco inclinado) passam a apontar igual; um osso sem descendente mapeado usa
+  // a correção do pai mapeado.
+  std::vector<glm::quat> fix(dst.nodes.size(), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+  {
+    std::vector<int> mappedChild(dst.nodes.size(), -1);
+    for (size_t i = 0; i < dst.nodes.size(); ++i) {
+      if (srcOf[i] < 0) continue;
+      for (int p = dst.nodes[i].parent; p >= 0; p = dst.nodes[size_t(p)].parent)
+        if (srcOf[size_t(p)] >= 0) {
+          if (mappedChild[size_t(p)] < 0) mappedChild[size_t(p)] = int(i);
+          break;
+        }
+    }
+    std::vector<uint8_t> done(dst.nodes.size(), 0);
+    std::function<glm::quat(size_t)> fixOf = [&](size_t i) -> glm::quat {
+      if (done[i]) return fix[i];
+      done[i] = 1;
+      const int c = mappedChild[i];
+      if (srcOf[i] >= 0 && c >= 0) {
+        const glm::vec3 dd = glm::vec3(dstRest[size_t(c)][3]) - glm::vec3(dstRest[i][3]);
+        const glm::vec3 sd = glm::vec3(srcRest[size_t(srcOf[size_t(c)])][3]) - glm::vec3(srcRest[size_t(srcOf[i])][3]);
+        if (glm::length(dd) > 1e-6f && glm::length(sd) > 1e-6f)
+        {
+          const glm::vec3 u = glm::normalize(dd), w = glm::normalize(sd);  // menor giro de u para w
+          const float cosA = glm::dot(u, w);
+          if (cosA > -0.9999f) {
+            const glm::vec3 axis = glm::cross(u, w);
+            fix[i] = glm::normalize(glm::quat(1.0f + cosA, axis.x, axis.y, axis.z));
+          } else {
+            const glm::vec3 o = glm::normalize(glm::cross(u, std::abs(u.x) < 0.9f ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0)));
+            fix[i] = glm::quat(0.0f, o.x, o.y, o.z);
+          }
+        }
+      } else {
+        for (int p = dst.nodes[i].parent; p >= 0; p = dst.nodes[size_t(p)].parent)
+          if (srcOf[size_t(p)] >= 0) {
+            fix[i] = fixOf(size_t(p));
+            break;
+          }
+      }
+      return fix[i];
+    };
+    for (size_t i = 0; i < dst.nodes.size(); ++i) fixOf(i);
+  }
+
+  Animation out;
+  out.name = name;
+  out.duration = a.duration;
+  const int frames = std::max(2, int(std::ceil(a.duration * fps)) + 1);
+  std::vector<float> keyTimes(static_cast<size_t>(frames), 0.0f);
+  for (int f = 0; f < frames; ++f) keyTimes[size_t(f)] = std::min(a.duration, float(f) / fps);
+  // Um canal de rotação por nó de destino que tem mapa ou fica abaixo de um nó com mapa, e a translação da bacia.
+  std::vector<int> rotSampler(dst.nodes.size(), -1);
+  for (size_t i = 0; i < dst.nodes.size(); ++i) {
+    bool affected = srcOf[i] >= 0;
+    for (int p = dst.nodes[i].parent; p >= 0 && !affected; p = dst.nodes[size_t(p)].parent) affected = srcOf[size_t(p)] >= 0;
+    if (!affected) continue;
+    rotSampler[i] = int(out.samplers.size());
+    out.samplers.push_back({keyTimes, {}, false});
+    out.channels.push_back({uint32_t(i), AnimationChannel::kRotation, uint32_t(rotSampler[i])});
+  }
+  const uint32_t hipsT = uint32_t(out.samplers.size());
+  out.samplers.push_back({keyTimes, {}, false});
+  out.channels.push_back({uint32_t(hips), AnimationChannel::kTranslation, hipsT});
+
+  std::vector<ModelNode> pose = src.nodes;
+  for (int f = 0; f < frames; ++f) {
+    pose = src.nodes;
+    samplePose(a, keyTimes[size_t(f)], pose);
+    const std::vector<glm::mat4> sg = globals(pose);
+    // Rotação no modelo de cada nó de destino, pais antes dos filhos (na ordem do arquivo os pais podem vir depois).
+    std::vector<glm::quat> dstRot(dst.nodes.size());
+    std::vector<uint8_t> done(dst.nodes.size(), 0);
+    std::function<const glm::quat&(size_t)> rot = [&](size_t i) -> const glm::quat& {
+      if (!done[i]) {
+        const int s = srcOf[i];
+        if (s >= 0) {
+          const glm::quat delta = rotationOf(sg[size_t(s)]) * glm::inverse(rotationOf(srcRest[size_t(s)]));
+          dstRot[i] = glm::normalize(delta * fix[i] * rotationOf(dstRest[i]));
+        } else {
+          const glm::quat parent = dst.nodes[i].parent >= 0 ? rot(size_t(dst.nodes[i].parent)) : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+          dstRot[i] = glm::normalize(parent * dst.nodes[i].rotation);
+        }
+        done[i] = 1;
+      }
+      return dstRot[i];
+    };
+    for (size_t i = 0; i < dst.nodes.size(); ++i) {
+      if (rotSampler[i] < 0) continue;
+      const glm::quat parent = dst.nodes[i].parent >= 0 ? rot(size_t(dst.nodes[i].parent)) : glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+      glm::quat local = glm::normalize(glm::inverse(parent) * rot(i));
+      // Mesmo hemisfério do quadro anterior (a interpolação não dá a volta longa).
+      if (!out.samplers[size_t(rotSampler[i])].values.empty()) {
+        const glm::vec4 prev = out.samplers[size_t(rotSampler[i])].values.back();
+        if (glm::dot(glm::quat(prev.w, prev.x, prev.y, prev.z), local) < 0.0f) local = -local;
+      }
+      out.samplers[size_t(rotSampler[i])].values.push_back(glm::vec4(local.x, local.y, local.z, local.w));
+    }
+    // Bacia: o deslocamento da origem (no modelo) escalado, levado para o espaço do pai.
+    const glm::vec3 delta = (glm::vec3(sg[size_t(srcHips)][3]) - glm::vec3(srcRest[size_t(srcHips)][3])) * ratio;
+    const glm::vec3 want = glm::vec3(dstRest[size_t(hips)][3]) + delta;
+    const int hp = dst.nodes[size_t(hips)].parent;
+    const glm::vec3 local = hp >= 0 ? glm::vec3(glm::inverse(dstRest[size_t(hp)]) * glm::vec4(want, 1.0f)) : want;
+    out.samplers[hipsT].values.push_back(glm::vec4(local, 0.0f));
+  }
+  dst.animations.push_back(std::move(out));
+  return int(dst.animations.size() - 1);
 }
 
 }  // namespace scene

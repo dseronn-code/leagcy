@@ -429,6 +429,16 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           for (const json& leg : vj.value("pernas", json::array()))
             if (leg.is_array() && leg.size() == 3)
               v.legs.push_back({leg[0].get<std::string>(), leg[1].get<std::string>(), leg[2].get<std::string>()});
+          if (vj.contains("retarget")) {  // animações de outro esqueleto
+            const json& rj = vj["retarget"];
+            v.retargetFrom = rj.value("de", "");
+            if (!v.retargetFrom.empty() && !std::ifstream(v.retargetFrom) && std::ifstream(sceneDir + v.retargetFrom))
+              v.retargetFrom = sceneDir + v.retargetFrom;
+            v.retargetSrcPrefix = rj.value("prefixo_origem", "");
+            v.retargetDstPrefix = rj.value("prefixo_destino", "");
+            const json mapa = rj.value("mapa", json::object());  // cópia: items() de um temporário apontaria para nada
+            for (auto& [a, b] : mapa.items()) v.retargetMap.push_back({a, b.get<std::string>()});
+          }
         }
         shape.type = ShapeType::Capsule;
         shape.radius = c.desc.radius;
@@ -543,6 +553,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               int model = -1;
               if (scene::loadGltf(scene, v.path, glm::mat4(1.0f), &model) && model >= 0) {
                 v.model = model;
+                if (!v.retargetFrom.empty()) retargetCharacter(scene, model, v);
                 scene::Model& sm = scene.models[size_t(model)];
                 v.idleA = sm.findAnimation(v.idle);
                 v.walkA = sm.findAnimation(v.walk);
@@ -1113,6 +1124,14 @@ void World::update(scene::Scene& scene, float dt) {
         glm::quat q;
         physics->pose(c.ragdoll.bodies[k], p, q);
         m.drivenWorld[k] = glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(q) * c.ragdoll.offset[k];
+      }
+      // Ragdoll ativo: alvos dos motores pela pose pura da animação (relativa entre as partes: a raiz se cancela).
+      m.keepAnimPose = c.ragdoll.strength > 0.0f && c.ragdoll.followAnimation;
+      if (c.ragdoll.strength > 0.0f || c.ragdoll.motorsOn) {
+        std::vector<glm::quat> targets;
+        if (c.ragdoll.strength > 0.0f) targets = ragdollTargets(m, c.ragdoll);
+        physics->setRagdollMotors(c.ragdoll.bodies, targets, targets.empty() ? 0.0f : c.ragdoll.strength);
+        c.ragdoll.motorsOn = !targets.empty();
       }
       // A origem do modelo acompanha a bacia (a caixa de recorte do desenho fica no lugar certo).
       const glm::vec3 pelvis(m.drivenWorld[0][3]);
@@ -1883,10 +1902,15 @@ bool World::startRagdoll(entt::entity e, glm::vec3 impulse) {
   r.offset.resize(bodies.size());
   m.driven.assign(n, -1);
   m.drivenWorld.resize(bodies.size());
+  r.fallRotation.resize(bodies.size());
+  r.strength = 0.0f;
+  r.followAnimation = false;
+  r.motorsOn = false;
   for (size_t k = 0; k < bodies.size(); ++k) {
     glm::vec3 p;
     glm::quat q;
     physics->pose(bodies[k], p, q);
+    r.fallRotation[k] = q;
     r.offset[k] = glm::inverse(glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(q)) * m.nodeWorld[nodes[k]];
     m.driven[nodes[k]] = int(k);
     m.drivenWorld[k] = m.nodeWorld[nodes[k]];
@@ -2179,6 +2203,86 @@ bool World::saveTerrainMap(const std::string& path) const {
     }
   }
   return bool(f);
+}
+
+// Rotação no mundo que cada parte do ragdoll teria na pose pura da animação (corpo = nó × inverso do deslocamento).
+std::vector<glm::quat> World::ragdollTargets(const scene::Model& m, const Character::Ragdoll& r) const {
+  if (!r.followAnimation || m.animPose.size() != m.nodes.size()) return r.fallRotation;  // a pose de quando caiu
+  std::vector<glm::quat> out(r.bodies.size(), glm::quat(1.0f, 0.0f, 0.0f, 0.0f));
+  for (size_t k = 0; k < r.bodies.size(); ++k) {
+    const glm::mat4 body = m.root * m.animPose[r.nodes[k]] * glm::inverse(r.offset[k]);
+    const glm::vec3 x = glm::normalize(glm::vec3(body[0])), y = glm::normalize(glm::vec3(body[1]));
+    const glm::vec3 z = glm::normalize(glm::cross(x, y));
+    out[k] = glm::normalize(glm::quat_cast(glm::mat3(x, glm::cross(z, x), z)));
+  }
+  return out;
+}
+
+bool World::setRagdollStrength(entt::entity e, float strength, bool followAnimation) {
+  Character* c = registry.try_get<Character>(e);
+  if (!c || !c->ragdoll.active) return false;
+  c->ragdoll.strength = glm::clamp(strength, 0.0f, 1.0f);
+  c->ragdoll.followAnimation = followAnimation;
+  if (scene && c->visual.model >= 0 && followAnimation) {
+    scene::Model& m = scene->models[size_t(c->visual.model)];
+    m.keepAnimPose = c->ragdoll.strength > 0.0f;
+    if (m.keepAnimPose && m.animPose.size() != m.nodes.size()) scene->poseModel(c->visual.model);  // a pose alvo já
+  }
+  return true;
+}
+
+float World::ragdollDeviation(entt::entity e) const {
+  const Character* c = registry.try_get<Character>(e);
+  if (!c || !c->ragdoll.active || !scene || c->visual.model < 0) return -1.0f;
+  scene::Model& m = scene->models[size_t(c->visual.model)];
+  if (c->ragdoll.followAnimation && m.animPose.size() != m.nodes.size()) {
+    m.keepAnimPose = true;
+    scene->poseModel(c->visual.model);
+  }
+  const std::vector<glm::quat> target = ragdollTargets(m, c->ragdoll);
+  float sum = 0.0f;
+  int count = 0;
+  for (size_t k = 0; k < c->ragdoll.bodies.size(); ++k) {
+    const int p = c->ragdoll.parents[k];
+    if (p < 0) continue;
+    glm::vec3 pp, pc;
+    glm::quat qp, qc;
+    physics->pose(c->ragdoll.bodies[size_t(p)], pp, qp);
+    physics->pose(c->ragdoll.bodies[k], pc, qc);
+    const glm::quat now = glm::inverse(qp) * qc, want = glm::inverse(target[size_t(p)]) * target[k];
+    const float d = std::abs(glm::dot(glm::normalize(now), glm::normalize(want)));
+    sum += glm::degrees(2.0f * std::acos(std::min(d, 1.0f)));
+    ++count;
+  }
+  return count ? sum / float(count) : -1.0f;
+}
+
+// Retargeting de um personagem: carrega o modelo de origem (escondido: só o esqueleto e as animações interessam) e
+// assa no modelo do personagem cada clipe dele, pelo mapa de ossos ou pelos nomes (sem os prefixos).
+void World::retargetCharacter(scene::Scene& scene, int model, const CharacterVisual& v) {
+  int src = -1;
+  if (!scene::loadGltf(scene, v.retargetFrom, glm::mat4(1.0f), &src) || src < 0) {
+    LOG_WARN("Retargeting: não carreguei %s", v.retargetFrom.c_str());
+    return;
+  }
+  scene::Model& s = scene.models[size_t(src)];
+  for (const auto& [node, object] : s.rigidObjects) scene.setObjectHidden(object, true);
+  for (uint32_t object : s.skinnedObjects) scene.setObjectHidden(object, true);
+  s.animation = -1;
+  scene::Model& d = scene.models[size_t(model)];
+  std::vector<std::pair<std::string, std::string>> map = v.retargetMap;
+  if (map.empty())
+    for (const std::string& n : s.nodeNames) {
+      if (n.rfind(v.retargetSrcPrefix, 0) != 0) continue;
+      const std::string dn = v.retargetDstPrefix + n.substr(v.retargetSrcPrefix.size());
+      if (d.findNode(dn) >= 0) map.push_back({n, dn});
+    }
+  uint32_t made = 0;
+  for (size_t a = 0; a < s.animations.size(); ++a) {
+    const std::string name = s.animations[a].name.empty() ? "clipe" + std::to_string(a) : s.animations[a].name;
+    if (scene::retargetAnimation(d, s, int(a), map, name) >= 0) ++made;
+  }
+  LOG_INFO("Retargeting: %u animações de %s em %zu ossos casados", made, v.retargetFrom.c_str(), map.size());
 }
 
 }  // namespace game

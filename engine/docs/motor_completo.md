@@ -224,6 +224,30 @@ Testes (`tools/ragdoll.py`, a raposa de 20 kg):
 | degrau | cai sobre a quina de um degrau de 30 cm | nenhum osso dentro (0,0 cm) |
 | transicao | ao levantar, nenhum osso salta > 5 cm por quadro (60 quadros/s); virada como estava | 3,2 cm (sem a mistura: ~35 cm de uma vez); 10° |
 
+### Ragdoll ativo (no estilo do Physical Animation)
+
+`e:ragdoll_ativo(forca, alvo)` liga motores nas juntas do ragdoll (motores de posição do Jolt, mola criticamente
+amortecida, torque pela massa de cada parte): cada parte é puxada para a orientação que tinha em relação à mãe na pose
+alvo — `"pose"` (padrão: a pose de quando caiu) ou `"animacao"` (o clipe tocando). `forca` 0 desliga (ragdoll mole), 1
+segura a pose (cai "duro", reage a golpes sem desmontar). `e:ragdoll_desvio()` dá o desvio médio das juntas em graus.
+
+Teste (`tools/ragdoll.py ativo`): sem contato nenhum ragdoll muda de pose; tombando, 0,3 s depois o desvio é 37,5° solto
+e 14,7° com os motores; deitado no chão (2,5 s), 44,6° x 9,0° (o que sobra é o chão empurrando as partes).
+
+### Retargeting (animação de um esqueleto em outro)
+
+No `"visual"` do personagem: `"retarget": {"de": "outro.gltf", "prefixo_origem": "", "prefixo_destino": "Var_"}` (ou
+`"mapa": {"osso_origem": "osso_destino", ...}`) copia todos os clipes do outro modelo para este, assados a 30 quadros/s.
+Cada osso mapeado gira, no espaço do modelo, o mesmo que o de origem a partir do repouso; uma **pose de retargeting
+automática** corrige posturas de repouso diferentes (cada osso aponta como o da origem); a bacia anda o deslocamento da
+origem escalado pela altura dela acima do pé (pernas mais longas, passos e quique maiores). Ossos fora do mapa seguem o
+pai.
+
+Testes (`tools/retarget.py`, com uma variante do CesiumMan de outro esqueleto — nomes trocados, pernas 30% maiores,
+braços 20% menores, tronco inclinado no repouso e sem animação): cada osso aponta igual ao da original em todos os
+quadros (pior 0,01°); o quique da bacia sai 1,27x o da original (altura da bacia acima do tornozelo 1,24x); com o mapa
+de uma perna só, a outra fica parada (3,3° contra 111,3° no passo).
+
 ## Navegação e NPCs (Recast/Detour)
 
 Personagem com `"controle": "ia"` anda sozinho pela malha de navegação: `"ia": {"alvo": [x, y, z]}` vai até um

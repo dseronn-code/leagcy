@@ -118,6 +118,9 @@ class Physics {
   // partes. removeRagdoll tira as juntas e os corpos.
   std::vector<uint32_t> addRagdoll(const std::vector<RagdollPart>& parts, glm::vec3 velocity);
   void removeRagdoll(const std::vector<uint32_t>& bodies);
+  // Ragdoll ativo: motores nas juntas levando cada parte à orientação relativa de `targets` (rotação no mundo de cada
+  // parte, na ordem de addRagdoll). strength 0..1; 0 desliga os motores.
+  void setRagdollMotors(const std::vector<uint32_t>& bodies, const std::vector<glm::quat>& targets, float strength);
 
   // Veículos. drive: acelerador -1..1 (negativo = ré, com câmbio automático), direção -1..1 (+ = direita), freio e
   // freio de mão 0..1.

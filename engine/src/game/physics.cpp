@@ -151,6 +151,8 @@ struct Physics::Impl {
   struct Ragdoll {
     std::vector<uint32_t> bodies;
     std::vector<JPH::Ref<JPH::Constraint>> joints;
+    std::vector<int> jointParent, jointChild;  // partes de cada junta
+    std::vector<float> jointMass;              // massa da parte filha (escala do torque dos motores)
   };
   std::vector<Ragdoll> ragdolls;
   JPH::CollisionGroup::GroupID nextGroup = 1;
@@ -399,11 +401,45 @@ std::vector<uint32_t> Physics::addRagdoll(const std::vector<RagdollPart>& parts,
     if (!b1 || !b2) continue;
     JPH::Ref<JPH::Constraint> c = cs.Create(*b1, *b2);
     rd.joints.push_back(c);
+    rd.jointParent.push_back(part.parent);
+    rd.jointChild.push_back(int(i));
+    rd.jointMass.push_back(part.mass);
   }
   for (auto& c : rd.joints) p_->system->AddConstraint(c);
   rd.bodies = out;
   p_->ragdolls.push_back(std::move(rd));
   return out;
+}
+
+// Ragdoll ativo: cada junta gira a parte filha para a orientação relativa da pose alvo (targets: rotação de cada corpo
+// no mundo), com motores de posição do Jolt (mola criticamente amortecida). strength 0 = solto (motores desligados).
+void Physics::setRagdollMotors(const std::vector<uint32_t>& bodies, const std::vector<glm::quat>& targets, float strength) {
+  if (bodies.empty()) return;
+  for (Impl::Ragdoll& rd : p_->ragdolls) {
+    if (rd.bodies.empty() || rd.bodies[0] != bodies[0]) continue;
+    for (size_t j = 0; j < rd.joints.size(); ++j) {
+      auto* c = static_cast<JPH::SwingTwistConstraint*>(rd.joints[j].GetPtr());
+      const int pa = rd.jointParent[j], ch = rd.jointChild[j];
+      if (strength <= 0.0f || size_t(std::max(pa, ch)) >= targets.size()) {
+        c->SetSwingMotorState(JPH::EMotorState::Off);
+        c->SetTwistMotorState(JPH::EMotorState::Off);
+        continue;
+      }
+      const glm::quat rel = glm::normalize(glm::inverse(targets[size_t(pa)]) * targets[size_t(ch)]);
+      for (JPH::MotorSettings* ms : {&c->GetSwingMotorSettings(), &c->GetTwistMotorSettings()}) {
+        ms->mSpringSettings.mFrequency = 2.0f + 28.0f * strength;  // Hz
+        ms->mSpringSettings.mDamping = 1.0f;
+        const float torque = 1500.0f * strength * std::max(rd.jointMass[j], 0.1f);  // N·m: o músculo da parte
+        ms->SetTorqueLimit(torque);
+      }
+      c->SetMaxFrictionTorque(0.0f);
+      c->SetSwingMotorState(JPH::EMotorState::Position);
+      c->SetTwistMotorState(JPH::EMotorState::Position);
+      c->SetTargetOrientationBS(toJolt(rel));
+      p_->bodies().ActivateBody(bodyId(rd.bodies[size_t(ch)]));
+    }
+    return;
+  }
 }
 
 void Physics::removeRagdoll(const std::vector<uint32_t>& bodies) {

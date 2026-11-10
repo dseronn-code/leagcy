@@ -310,6 +310,9 @@ struct Model {
   std::vector<int> driven;
   std::vector<glm::mat4> drivenWorld;
   float drivenWeight = 1.0f;  // < 1: mistura com a animação (saindo do ragdoll sem salto)
+  // Ragdoll ativo: a pose pura da animação (espaço do modelo, por nó), escrita a cada animateModel com keepAnimPose.
+  bool keepAnimPose = false;
+  std::vector<glm::mat4> animPose;
 
   std::vector<ModelNode> nodes;
   std::vector<Animation> animations;
@@ -322,6 +325,11 @@ struct Model {
   int findNode(const std::string& name) const;
   std::vector<std::string> nodeNames;  // nome de cada nó do glTF
 };
+
+// Retargeting: assa em `dst` uma cópia do clipe `srcAnimation` de `src` (outro esqueleto) pelos pares de nomes
+// (origem, destino) de `map`. Devolve o índice da animação nova em dst (-1 se nada casou).
+int retargetAnimation(Model& dst, const Model& src, int srcAnimation, const std::vector<std::pair<std::string, std::string>>& map,
+                      const std::string& name, float fps = 30.0f);
 
 struct GpuMesh {
   rhi::Buffer vertices, indices;

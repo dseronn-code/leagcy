@@ -11,6 +11,7 @@ quadro e o teste confere:
   - repouso:   no fim, deitada, nada se mexe mais de 1 cm em meio segundo (não fica tremendo).
   - levantar:  e:levantar() em t = 5 s e o roteiro manda andar: a raposa volta a andar de pé, na altura normal.
   - degrau:    cai sobre a quina de um degrau de 30 cm: nenhum osso dentro do degrau nem do chão.
+  - ativo:     e:ragdoll_ativo(1): os motores das juntas seguram a pose da animação caindo e no chão.
   - transicao: ao levantar, a pose caída se mistura com a animação em 0,5 s: nenhum osso salta mais de 5 cm de um
                quadro para o outro, e a raposa fica de pé virada para onde o tronco estava deitado.
 """
@@ -190,8 +191,40 @@ def teste_transicao(b, pasta):
     return ok, f'maior salto de um osso por quadro ao levantar: {pior * 100:.1f} cm ({qual}); de pé virada a {giro:.0f}° de como estava deitada'
 
 
+def teste_ativo(b, pasta):
+    """Ragdoll ativo (e:ragdoll_ativo): com força 0 o corpo cai mole e a pose foge da animação; com força 1 os motores
+    das juntas seguram a pose (o desvio médio das juntas fica pequeno) e ele cai "duro"."""
+    desvios = {}
+    for forca in (0.0, 1.0):
+        lua = os.path.join(pasta, f'ativo_{int(forca)}.lua')
+        with open(lua, 'w', encoding='utf-8') as f:
+            f.write('function atualizar(e, dt)\n'
+                    f'  if tempo() >= 1.0 and not caiu then caiu = true; e:ragdoll(0, 0, 40); e:ragdoll_ativo({forca}) end\n'
+                    '  if caiu and tempo() >= 1.3 and not ar then ar = true; log("DESVIO_AR", e:ragdoll_desvio()) end\n'
+                    '  if caiu and tempo() >= 3.5 and not fim then fim = true; log("DESVIO", e:ragdoll_desvio()) end\n'
+                    'end\n')
+        ent = raposa([0, 0, 0], [])
+        ent['script'] = lua
+        cena = os.path.join(pasta, f'ativo_{int(forca)}.json')
+        with open(cena, 'w', encoding='utf-8') as f:
+            json.dump({'entidades': [chao(), ent]}, f)
+        p = subprocess.run([b, '--headless', '--scene', cena, '--width', '32', '--height', '18', '--fps', str(FPS),
+                            '--frames', str(int(4.0 * FPS)), '--out', os.path.join(pasta, f'ativo_{int(forca)}.png')],
+                           capture_output=True, text=True, encoding='utf-8', errors='replace')
+        linhas = (p.stdout + p.stderr).splitlines()
+        ar = [float(l.split('DESVIO_AR', 1)[1].split()[0]) for l in linhas if 'DESVIO_AR' in l]
+        fim = [float(l.split('DESVIO ', 1)[1].split()[0]) for l in linhas if 'DESVIO ' in l and 'DESVIO_AR' not in l]
+        desvios[forca] = (ar[0], fim[0]) if ar and fim else None
+    if not desvios[0.0] or not desvios[1.0]:
+        return False, f'sem medida: {desvios}'
+    (mole_ar, mole), (duro_ar, duro) = desvios[0.0], desvios[1.0]
+    ok = duro_ar < 0.5 * mole_ar and duro < 0.3 * mole  # sem contato a pose não muda; o desvio vem do chão
+    return ok, (f'desvio médio das juntas da pose da animação: caindo (0,3 s) {mole_ar:.1f}° solto x {duro_ar:.1f}° com os '
+                f'motores; deitado no chão (2,5 s) {mole:.1f}° x {duro:.1f}° (o chão empurra as partes)')
+
+
 TESTES = {'cai': teste_cai, 'juntas': teste_juntas, 'empurrao': teste_empurrao, 'repouso': teste_repouso,
-          'levantar': teste_levantar, 'degrau': teste_degrau, 'transicao': teste_transicao}
+          'levantar': teste_levantar, 'degrau': teste_degrau, 'transicao': teste_transicao, 'ativo': teste_ativo}
 
 
 def main():

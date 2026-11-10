@@ -22,6 +22,7 @@
 namespace scene {
 class Scene;
 struct Camera;
+struct Model;
 }  // namespace scene
 
 namespace game {
@@ -106,6 +107,10 @@ struct CharacterVisual {
   float fade = 0.2f;                    // s de transição
   bool ik = true;
   std::vector<std::array<std::string, 3>> legs;  // quadril, joelho, tornozelo
+  // Retargeting: as animações de outro modelo (outro esqueleto) copiadas para este, pelo mapa de ossos (origem ->
+  // destino) ou pelos nomes iguais tirando os prefixos de cada lado.
+  std::string retargetFrom, retargetSrcPrefix, retargetDstPrefix;
+  std::vector<std::pair<std::string, std::string>> retargetMap;
   // Estado.
   int model = -1, idleA = -1, walkA = -1, runA = -1;
   float speed = 0.0f, yaw = 0.0f, phase = 0.0f, idleTime = 0.0f;
@@ -160,6 +165,10 @@ struct Character {
     glm::mat4 rootBasis{1.0f};            // rotação e escala do modelo (sem a posição)
     glm::vec3 rootToPelvis{0.0f};         // da origem do modelo até a bacia, no mundo, na pose em que caiu
     float blendOut = 0.0f;                // s que faltam da volta para a animação depois de levantar
+    float strength = 0.0f;                // ragdoll ativo: força dos motores das juntas (0 = solto)
+    bool followAnimation = false;         // alvo: a animação tocando (senão, a pose de quando caiu)
+    std::vector<glm::quat> fallRotation;  // rotação de cada parte na hora da queda
+    bool motorsOn = false;
   } ragdoll;
 };
 
@@ -270,6 +279,10 @@ class World {
   // impulse / massa. Falso se não houver esqueleto. stopRagdoll põe o personagem de pé onde a bacia caiu.
   static constexpr float kRagdollBlendOut = 0.5f;  // s da pose caída até a animação ao levantar
   bool startRagdoll(entt::entity e, glm::vec3 impulse);
+  // Ragdoll ativo (no estilo do Physical Animation): motores nas juntas puxam cada parte para a pose da animação.
+  bool setRagdollStrength(entt::entity e, float strength, bool followAnimation = false);
+  float ragdollDeviation(entt::entity e) const;
+  std::vector<glm::quat> ragdollTargets(const scene::Model& m, const Character::Ragdoll& r) const;  // graus: média, nas juntas, entre a pose da física e a da animação
   bool stopRagdoll(entt::entity e);
   scene::Scene* scene = nullptr;  // a cena deste mundo (consultas dos scripts: ossos, animação)
   std::vector<HudItem> hud;  // interface de jogo deste quadro (refeita pelos scripts enquanto o jogo roda)
@@ -384,7 +397,8 @@ class World {
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
   void animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt);
-  void ragdollBlendStep(scene::Scene& scene, Character& c, float dt);  // levantando: a pose caída some aos poucos
+  void ragdollBlendStep(scene::Scene& scene, Character& c, float dt);
+  void retargetCharacter(scene::Scene& scene, int model, const CharacterVisual& v);  // levantando: a pose caída some aos poucos
  public:
   // IA: o personagem `c` vê a entidade `other` (distância, cone de visão para onde ele olha e linha de visada)?
   bool sees(const Character& c, entt::entity other) const;
