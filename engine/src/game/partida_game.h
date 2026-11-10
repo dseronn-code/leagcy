@@ -1,7 +1,8 @@
 #pragma once
 // FCLegacy: a partida 11 x 11 jogável no Legacy Engine. A simulação (física da bola, regras, IA) é o núcleo fcsim,
-// determinístico a 30 Hz; aqui ficam o desenho (22 jogadores realistas animados por captura de movimento, bola,
-// rede), a câmera de transmissão, os controles por toque (joystick + botões, vários dedos ao mesmo tempo) e o HUD.
+// determinístico a 30 Hz; aqui ficam o desenho (22 jogadores realistas animados por captura de movimento, juiz e
+// bandeirinhas, bola, rede, torcida), a câmera de transmissão, os controles por toque (joystick fixo + 4 botões,
+// vários dedos ao mesmo tempo, pausa e jogo automático) e o HUD no estilo de transmissão (placar, nomes, minimapa).
 #include <array>
 #include <string>
 #include <vector>
@@ -37,7 +38,7 @@ class PartidaGame {
     std::string action;           // clipe de ação em andamento ("" = só locomoção)
     float actionT = 0.0f, actionEnd = 0.0f, actionW = 0.0f;
     float yaw = 0.0f;
-    glm::vec3 prevPos{0.0f}, pos{0.0f};
+    glm::vec3 prevPos{0.0f}, pos{0.0f}, vel{0.0f};
     bool celebrate = false;
   };
   struct Button {
@@ -47,15 +48,26 @@ class PartidaGame {
     glm::vec2 c;
     float r;
   };
+  struct TeamInfo {
+    std::string name, abbr;
+    glm::vec3 shirt, shorts, keeper;
+    std::array<std::string, 11> players;
+  };
 
+  void loadTeams();
   void startMatch(scene::Scene& s);
   void readTouches(const std::vector<Touch>& touches, glm::vec2 screen);
   void layoutButtons(glm::vec2 screen);
+  void animateBody(scene::Scene& s, Player& P, Anim& a, glm::vec3 pos, glm::vec3 vel, float targetYaw, bool keeper, float dt);
   void animatePlayers(scene::Scene& s, float dt, float alpha);
+  void moveOfficials(float dt);
   void drawBall(scene::Scene& s, float dt, float alpha);
+  void crowdCheer(scene::Scene& s, bool cheer);
   void cameraUpdate(float dt, scene::Camera& cam, glm::vec2 screen);
   glm::vec2 project(const scene::Camera& cam, glm::vec3 p, glm::vec2 screen) const;
   void drawHud(const scene::Camera& cam, glm::vec2 screen);
+  void drawGroundRing(const scene::Camera& cam, glm::vec2 screen, glm::vec3 at, float radius, glm::vec4 color, float thickness);
+  void drawMinimap(glm::vec2 screen);
 
   Ui ui_;
   bool autoplay_ = false;
@@ -64,6 +76,7 @@ class PartidaGame {
   fcsim::Match match_;
   float acc_ = 0.0f;
   std::array<Anim, 22> anim_;
+  std::array<Anim, 3> officials_;
   glm::vec3 ballPrev_{0.0f}, ballPos_{0.0f};
   glm::quat ballRot_{1, 0, 0, 0};
   // entrada
@@ -72,16 +85,16 @@ class PartidaGame {
   glm::vec2 stickBase_{0.0f}, stickVec_{0.0f};
   std::vector<Button> buttons_;
   std::vector<int> prevTouchIds_;
-  bool tapped_ = false;
+  bool tapped_ = false, paused_ = false, autoTeam_ = false;
+  glm::vec2 pauseBtn_{0.0f}, autoBtn_{0.0f};
+  float topBtnR_ = 0.0f;
   // câmera
   glm::vec3 camTarget_{0.0f};
   bool camInit_ = false;
   // times
-  struct TeamInfo { std::string name, abbr; glm::vec3 shirt, shorts, keeper; };
   TeamInfo teams_[2];
-  int goalBanner_ = 0;
-  float bannerTime_ = 0.0f;
   int lastScore_[2] = {0, 0};
+  bool cheering_ = false;
 };
 
 }  // namespace game

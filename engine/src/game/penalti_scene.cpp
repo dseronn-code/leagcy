@@ -866,25 +866,49 @@ bool buildPartidaScene(Scene& s, Camera& camera, const DemoOptions& opt) {
     }
   }
 
-  // ---- arquibancadas, cobertura e torcida (o manequim assado em 6 cores de camisa) ----
+  // ---- arquibancadas, cobertura e torcida ----
+  // Torcida em recortes de pessoas reais (8 pessoas, parada e comemorando) com camisas da casa, do visitante e
+  // neutras; sem os arquivos, volta o manequim assado.
   {
     const uint32_t concrete = mat({0.32f, 0.32f, 0.34f}, 0.92f), roof = mat({0.08f, 0.085f, 0.1f}, 0.5f, 0.6f);
     const uint32_t seatA = mat({0.05f, 0.18f, 0.5f}, 0.45f), seatB = mat({0.55f, 0.06f, 0.07f}, 0.45f);
+    // recortes: materiais com o atlas de 16 quadros (uvScale 1/16; uvOffset escolhe a pessoa e o quadro)
+    const char* variants[3] = {"torcida_casa.png", "torcida_fora.png", "torcida_neutra.png"};
+    for (const char* v : variants) {
+      TextureData t;
+      if (!loadImageFile(core::gameDir() + "/" + v, true, false, t)) { W.crowdMaterials.clear(); break; }
+      t.wrapU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+      const int32_t tex = int32_t(s.addTexture(std::move(t)));
+      s.setTextureAlphaCutoff(tex, 0.5f);
+      for (int person = 0; person < 8; ++person) {
+        Material cm;
+        cm.baseColor = glm::vec4(1.0f);
+        cm.roughness = 0.9f;
+        cm.flags = kMaterialAlphaMask;
+        cm.alphaCutoff = 0.5f;
+        cm.baseColorTex = tex;
+        cm.uvScale = glm::vec2(1.0f / 16.0f, 1.0f);
+        cm.uvOffset = glm::vec2(float(person) / 16.0f, 0.0f);
+        W.crowdMaterials.push_back(s.addMaterial(cm));
+      }
+    }
     std::vector<uint32_t> crowdClips;
-    Player crowdSrc;
-    const int cm = loadPlayer(s, crowdSrc);
-    if (cm >= 0) {
-      Model& m = s.models[size_t(cm)];
-      m.poseHook = nullptr;
-      m.animation = crowdSrc.agree >= 0 ? crowdSrc.agree : crowdSrc.idle;
-      m.root = glm::translate(glm::mat4(1.0f), {0.0f, -100.0f, 0.0f});
-      const uint32_t clip = s.bakeCrowdClip(cm, 16, 1);
-      const glm::vec3 shirts[6] = {{0.6f, 0.04f, 0.05f}, {0.02f, 0.02f, 0.02f}, {0.85f, 0.85f, 0.82f}, {0.03f, 0.25f, 0.08f}, {0.75f, 0.6f, 0.02f}, {0.02f, 0.08f, 0.4f}};
-      for (const glm::vec3& c : shirts) {
-        CrowdClip cc = s.crowdClips[clip];
-        cc.material = mat(c, 0.75f);
-        s.crowdClips.push_back(cc);
-        crowdClips.push_back(uint32_t(s.crowdClips.size() - 1));
+    if (W.crowdMaterials.empty()) {
+      Player crowdSrc;
+      const int cm = loadPlayer(s, crowdSrc);
+      if (cm >= 0) {
+        Model& m = s.models[size_t(cm)];
+        m.poseHook = nullptr;
+        m.animation = crowdSrc.agree >= 0 ? crowdSrc.agree : crowdSrc.idle;
+        m.root = glm::translate(glm::mat4(1.0f), {0.0f, -100.0f, 0.0f});
+        const uint32_t clip = s.bakeCrowdClip(cm, 16, 1);
+        const glm::vec3 shirts[6] = {{0.6f, 0.04f, 0.05f}, {0.02f, 0.02f, 0.02f}, {0.85f, 0.85f, 0.82f}, {0.03f, 0.25f, 0.08f}, {0.75f, 0.6f, 0.02f}, {0.02f, 0.08f, 0.4f}};
+        for (const glm::vec3& c : shirts) {
+          CrowdClip cc = s.crowdClips[clip];
+          cc.material = mat(c, 0.75f);
+          s.crowdClips.push_back(cc);
+          crowdClips.push_back(uint32_t(s.crowdClips.size() - 1));
+        }
       }
     }
     std::mt19937 rng(9);
@@ -894,6 +918,7 @@ bool buildPartidaScene(Scene& s, Camera& camera, const DemoOptions& opt) {
                              {{-60.0f, 0.0f, 0.0f}, 80.0f, glm::half_pi<float>()}, {{60.0f, 0.0f, 0.0f}, 80.0f, -glm::half_pi<float>()}};
     const int rows = 12;
     const float base = 2.2f, rise = 0.62f, depth = 1.15f;
+    size_t people = 0;
     for (const Stand& st : stands) {
       const glm::mat4 S = glm::rotate(glm::translate(glm::mat4(1.0f), st.c), st.yaw, glm::vec3(0, 1, 0));
       s.addObject(cube, S * trs({0.0f, 0.5f * base, 0.0f}, {0.5f * st.len, 0.5f * base, 0.2f}), concrete);
@@ -901,22 +926,37 @@ bool buildPartidaScene(Scene& s, Camera& camera, const DemoOptions& opt) {
         const float y = base + float(r) * rise, z = -0.8f - float(r) * depth;
         s.addObject(cube, S * trs({0.0f, 0.5f * y, z}, {0.5f * st.len, 0.5f * y, 0.5f * depth}), concrete);
         s.addObject(cube, S * trs({0.0f, y + 0.22f, z + 0.15f}, {0.5f * st.len, 0.04f, 0.2f}), (r / 3) % 2 ? seatA : seatB);
-        if (crowdClips.empty()) continue;
-        for (float x = -0.5f * st.len + 0.5f; x < 0.5f * st.len - 0.5f; x += 0.7f) {
-          if (u(rng) < 0.12f) continue;
+        for (float x = -0.5f * st.len + 0.5f; x < 0.5f * st.len - 0.5f; x += 0.62f) {
+          if (u(rng) < 0.08f) continue;
+          if (!W.crowdMaterials.empty()) {
+            // recorte de 0,8 x 1,37 m: do meio da coxa até acima da cabeça, em pé na fileira
+            const float sc = 0.92f + 0.14f * u(rng);
+            const float side = u(rng);
+            const int variant = side < 0.5f ? 0 : side < 0.85f ? 1 : 2;
+            const uint32_t m = W.crowdMaterials[size_t(variant * 8 + int(u(rng) * 7.999f))];
+            const glm::vec3 p(x + (u(rng) - 0.5f) * 0.15f, y - 0.05f + 0.685f * sc, z + 0.1f + (u(rng) - 0.5f) * 0.1f);
+            s.addObject(quad, S * glm::rotate(glm::translate(glm::mat4(1.0f), p), (u(rng) - 0.5f) * 0.3f, glm::vec3(0, 1, 0)) *
+                                  glm::scale(glm::mat4(1.0f), {0.4f * sc, 0.685f * sc, 1.0f}), m);
+            ++people;
+            continue;
+          }
+          if (crowdClips.empty()) continue;
           const glm::vec3 p(x + (u(rng) - 0.5f) * 0.12f, y + 0.05f, z + (u(rng) - 0.5f) * 0.1f);
           glm::mat4 t = S * glm::translate(glm::mat4(1.0f), p);
           t = glm::rotate(t, (u(rng) - 0.5f) * 0.5f, glm::vec3(0, 1, 0));
           t = glm::scale(t, glm::vec3(0.9f + 0.16f * u(rng)));
           s.addCrowdAgent(crowdClips[size_t(u(rng) * float(crowdClips.size())) % crowdClips.size()], t, 4.0f * u(rng));
+          ++people;
         }
       }
+      if (st.c.z > 0.0f) continue;  // arquibancada da câmera de TV: sem cobertura (nunca aparece e taparia a vista)
       s.addObject(cube, S * trs({0.0f, base + rows * rise + 5.6f, -0.5f * rows * depth - 1.0f}, {0.5f * st.len, 0.2f, 0.5f * rows * depth + 1.5f}), roof);
       Material strip;
       strip.baseColor = glm::vec4(0.1f);
-      strip.emissive = glm::vec3(5200.0f, 4800.0f, 4100.0f);
+      strip.emissive = opt.night ? glm::vec3(5200.0f, 4800.0f, 4100.0f) : glm::vec3(0.0f);
       s.addObject(cube, S * trs({0.0f, base + rows * rise + 5.3f, 0.4f}, {0.5f * st.len, 0.05f, 0.05f}), s.addMaterial(strip));
     }
+    LOG_INFO("FCLegacy: torcida com %zu pessoas (%s)", people, W.crowdMaterials.empty() ? "manequim" : "recortes de pessoas reais");
   }
 
   // ---- torres de refletores nos quatro cantos ----
@@ -925,7 +965,7 @@ bool buildPartidaScene(Scene& s, Camera& camera, const DemoOptions& opt) {
     Material lampM;
     lampM.baseColor = glm::vec4(0.05f);
     lampM.emissiveTex = int32_t(s.addTexture(lampTexture()));
-    lampM.emissive = glm::vec3(420000.0f);
+    lampM.emissive = opt.night ? glm::vec3(420000.0f) : glm::vec3(0.0f);
     const uint32_t lampMat = s.addMaterial(lampM);
     const glm::vec2 towers[4] = {{-66.0f, -50.0f}, {66.0f, -50.0f}, {-66.0f, 50.0f}, {66.0f, 50.0f}};
     for (const glm::vec2& t : towers) {
@@ -965,11 +1005,28 @@ bool buildPartidaScene(Scene& s, Camera& camera, const DemoOptions& opt) {
     s.models[size_t(W.players[size_t(i)].model)].root = glm::translate(glm::mat4(1.0f), {0.0f, -200.0f, 0.0f});
   }
 
-  // ---- noite ----
-  s.sunIlluminance = 0.0f;
-  s.moonIlluminance = 0.25f;
-  s.moonDirection = glm::normalize(glm::vec3(-0.4f, 0.5f, -0.6f));
-  s.fogDensity = opt.fog >= 0.0f ? opt.fog : 0.003f;
+  // ---- juiz e bandeirinhas (o mesmo modelo, uniforme preto) ----
+  for (Player& o : W.officials) {
+    if (loadRealPlayer(s, o) < 0) return false;
+    s.models[size_t(o.model)].root = glm::translate(glm::mat4(1.0f), {0.0f, -200.0f, 0.0f});
+    setKit(s, o, glm::vec3(0.015f), glm::vec3(0.015f));
+  }
+
+  // ---- dia (sol de tarde) ou noite (--night) ----
+  W.day = !opt.night;
+  if (W.day) {
+    // sol alto do lado da câmera (os jogadores ficam iluminados de frente) e um pouco de lado: a arquibancada da
+    // esquerda joga sombra numa faixa do campo, como nas transmissões de jogo à tarde
+    s.sunIlluminance = 110000.0f;
+    s.sunDirection = glm::normalize(glm::vec3(-0.55f, 0.62f, 0.42f));
+    s.moonIlluminance = 0.0f;
+    s.fogDensity = opt.fog >= 0.0f ? opt.fog : 0.0008f;
+  } else {
+    s.sunIlluminance = 0.0f;
+    s.moonIlluminance = 0.25f;
+    s.moonDirection = glm::normalize(glm::vec3(-0.4f, 0.5f, -0.6f));
+    s.fogDensity = opt.fog >= 0.0f ? opt.fog : 0.003f;
+  }
   s.fogFalloff = 0.05f;
   camera.position = glm::vec3(0.0f, 20.0f, 62.0f);
   camera.lookAt(glm::vec3(0.0f, 0.0f, 0.0f));

@@ -9,6 +9,11 @@ namespace game {
 
 struct PartidaWorld {
   std::array<Player, 22> players;   // 0-10 time da casa, 11-21 visitante (o 0 e o 11 são os goleiros)
+  std::array<Player, 3> officials;  // juiz e os dois bandeirinhas
+  // Torcida em recortes: material de cada pessoa do atlas (8) em cada versão de camisa (casa, fora, neutra). O jogo
+  // troca o quadro (parado/comemorando) mexendo no deslocamento de UV desses materiais.
+  std::vector<uint32_t> crowdMaterials;
+  bool day = true;
   uint32_t ball = 0;
   uint32_t netMesh[2] = {0, 0};     // fundo da rede do gol em x = -52,5 e em x = +52,5
   glm::mat4 netTransform[2]{glm::mat4(1.0f), glm::mat4(1.0f)};

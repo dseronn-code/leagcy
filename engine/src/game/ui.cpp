@@ -72,6 +72,23 @@ void Ui::quad(glm::vec2 a, glm::vec2 b, glm::vec2 uva, glm::vec2 uvb, glm::vec4 
 
 void Ui::rect(glm::vec2 pos, glm::vec2 size, glm::vec4 color) { quad(pos, pos + size, {-1, -1}, {-1, -1}, color); }
 
+void Ui::line(glm::vec2 a, glm::vec2 b, float t, glm::vec4 color) {
+  if (!out_) return;
+  using V = renderer::Renderer::UiVertex;
+  glm::vec2 d = b - a;
+  const float l = glm::length(d);
+  if (l < 1e-3f) return;
+  const glm::vec2 n = glm::vec2(-d.y, d.x) / l * (0.5f * t);
+  const V v0{a + n, {-1, -1}, color}, v1{b + n, {-1, -1}, color}, v2{a - n, {-1, -1}, color}, v3{b - n, {-1, -1}, color};
+  out_->insert(out_->end(), {v0, v1, v2, v2, v1, v3});
+}
+
+void Ui::triangle(glm::vec2 a, glm::vec2 b, glm::vec2 c, glm::vec4 color) {
+  if (!out_) return;
+  using V = renderer::Renderer::UiVertex;
+  out_->insert(out_->end(), {V{a, {-1, -1}, color}, V{b, {-1, -1}, color}, V{c, {-1, -1}, color}});
+}
+
 void Ui::disc(glm::vec2 c, float r, glm::vec4 color, int n) {
   if (!out_) return;
   using V = renderer::Renderer::UiVertex;
