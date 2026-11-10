@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <string>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -86,12 +87,27 @@ struct MeshletLod {  // == MeshletLod em shaders/meshlet.glsl (48 bytes)
 };
 static_assert(sizeof(MeshletLod) == 48);
 constexpr uint32_t kNoTriangle = 0xFFFFFFFFu;
+// Bloco de kMeshletBlock meshlets seguidos (um grupo do task shader): limites conservadores para descartar o bloco
+// inteiro — fino demais (até o maior erro do pai cabe no limite), grosso demais (até o menor erro próprio passa) ou
+// fora da tela (esfera de `self`).
+constexpr uint32_t kMeshletBlock = 32;
+struct MeshletBlock {  // == MeshletBlock em shaders/meshlet.glsl (48 bytes)
+  glm::vec4 self;    // esfera que contém as esferas `self` dos meshlets
+  glm::vec4 parent;  // esfera que contém as esferas `parent`
+  float minSelfError, maxParentError, pad0, pad1;
+};
+static_assert(sizeof(MeshletBlock) == 48);
+std::vector<MeshletBlock> buildMeshletBlocks(const std::vector<MeshletLod>& lods);
 struct ClusterLodStats {
   uint32_t levels = 0, baseMeshlets = 0, totalMeshlets = 0;
   uint64_t baseTriangles = 0, rootTriangles = 0;
 };
 // Devolve os meshlets de todos os níveis (o nível 0 primeiro, na ordem de buildMeshlets) e `lods` paralelo a eles.
 MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods, ClusterLodStats* stats = nullptr);
+// O mesmo, guardado em disco (`cacheDir`/<hash>.lod; a chave é o conteúdo da malha e a versão do algoritmo): a
+// primeira carga monta o grafo, as outras só leem. cacheDir vazio = sem cache.
+MeshletData buildClusterLodCached(const MeshData& mesh, std::vector<MeshletLod>& lods, ClusterLodStats* stats,
+                                  const std::string& cacheDir);
 // Reordena os triângulos em meshlets compactos da meshoptimizer (cada um contínuo na lista) e preenche clusterStarts.
 // Os vértices não mudam; muda só a numeração dos triângulos (antes do upload e das luzes de malha).
 void reorderForClusters(MeshData& mesh);

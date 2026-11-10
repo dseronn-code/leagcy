@@ -315,14 +315,15 @@ void Scene::rebuildTlasLayout() {
 namespace {
 // Meshlets de uma malha rígida (com mesh shaders), num bloco só: [Meshlet × n][vértices][triângulos]. Preenche os
 // contadores da malha; vazio sem mesh shaders ou para malha deformável.
-std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const MeshData& data, bool clusterLod) {
+std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const MeshData& data, bool clusterLod,
+                                  const std::string& cacheDir) {
   if (!ctx.meshShaders || data.clothWidth > 0 || data.hairStrands > 0 || !data.joints.empty() || data.indices.empty()) return {};
   // Geometria virtualizada a partir de ~1.000 triângulos (8 meshlets, o mínimo para o desenho por meshlets): [Meshlet ×
   // n][vértices][triângulos][MeshletLod × n].
   std::vector<MeshletLod> lods;
   const bool virtualized = clusterLod && data.indices.size() / 3 >= 8 * kMeshletMaxTriangles;
   ClusterLodStats st;
-  const MeshletData md = virtualized ? buildClusterLod(data, lods, &st) : buildMeshlets(data);
+  const MeshletData md = virtualized ? buildClusterLodCached(data, lods, &st, cacheDir) : buildMeshlets(data);
   if (virtualized)
     LOG_INFO("Geometria virtualizada: %llu triângulos em %u níveis (%u -> %u pedaços; a raiz tem %llu triângulos)",
              (unsigned long long)st.baseTriangles, st.levels, st.baseMeshlets, st.totalMeshlets,
@@ -335,10 +336,15 @@ std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const Me
   gm.meshletTriangleBase = uint32_t(blob.size());
   blob.insert(blob.end(), md.triangles.begin(), md.triangles.end());
   gm.meshletLodBase = 0;
+  gm.meshletBlockBase = 0;
   if (virtualized && lods.size() == md.meshlets.size()) {
     gm.meshletLodBase = uint32_t(blob.size());
     const uint32_t* w = reinterpret_cast<const uint32_t*>(lods.data());
     blob.insert(blob.end(), w, w + lods.size() * (sizeof(MeshletLod) / 4));
+    const std::vector<MeshletBlock> blocks = buildMeshletBlocks(lods);
+    gm.meshletBlockBase = uint32_t(blob.size());
+    const uint32_t* b = reinterpret_cast<const uint32_t*>(blocks.data());
+    blob.insert(blob.end(), b, b + blocks.size() * (sizeof(MeshletBlock) / 4));
   }
   return blob;
 }
@@ -1300,7 +1306,7 @@ void Scene::upload(rhi::Context& ctx) {
     std::atomic<size_t> next{0};
     auto work = [&] {
       for (size_t i = next++; i < cpuMeshes_.size(); i = next++)
-        prepared[i].blob = meshletBlob(ctx, prepared[i].fields, cpuMeshes_[i], clusterLod);
+        prepared[i].blob = meshletBlob(ctx, prepared[i].fields, cpuMeshes_[i], clusterLod, textureCacheDir);
     };
     const unsigned n = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
     std::vector<std::thread> pool;
@@ -1313,6 +1319,7 @@ void Scene::upload(rhi::Context& ctx) {
     gm.meshletVertexBase = prepared[i].fields.meshletVertexBase;
     gm.meshletTriangleBase = prepared[i].fields.meshletTriangleBase;
     gm.meshletLodBase = prepared[i].fields.meshletLodBase;
+    gm.meshletBlockBase = prepared[i].fields.meshletBlockBase;
     return std::move(prepared[i].blob);
   };
   for (auto& data : cpuMeshes_) {

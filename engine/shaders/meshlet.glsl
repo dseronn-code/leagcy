@@ -26,6 +26,12 @@ struct MeshletLod {  // == scene::MeshletLod
   float selfError, parentError, pad0, pad1;
 };
 layout(buffer_reference, scalar) readonly buffer MeshletLodList { MeshletLod l[]; };
+struct MeshletBlock {  // == scene::MeshletBlock
+  vec4 self;
+  vec4 parent;
+  float minSelfError, maxParentError, pad0, pad1;
+};
+layout(buffer_reference, scalar) readonly buffer MeshletBlockList { MeshletBlock b[]; };
 struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
 
 layout(buffer_reference, scalar) readonly buffer MeshletList { Meshlet m[]; };
@@ -42,6 +48,7 @@ layout(push_constant) uniform Push {
   uint flags;  // 1 = culling ligado, 2 = dos dois lados (sem teste de costas)
   uint lodBase;     // MeshletLod de cada meshlet, em uints a partir de `meshlets` (0 = malha sem níveis)
   float lodPixels;  // erro máximo na tela, em pixels
+  uint blockBase;   // MeshletBlock de cada MESHLET_GROUP meshlets (uints; 0 = sem)
 } pc;
 
 // O que o task shader passa a cada grupo do mesh shader: a entrada da lista (objeto | nível << 30) e os meshlets que
@@ -89,6 +96,39 @@ float lodErrorPixels(vec4 sphere, float err, mat4 model, float scale) {
   float d = max(length(c - frame.cameraPos.xyz) - sphere.w * scale, 0.01);
   return err * scale / d * abs(frame.proj[1][1]) * 0.5 * frame.renderSize.y;
 }
+// Esfera fora da tela (4 planos laterais).
+bool sphereOutside(vec3 c, float r) {
+  mat4 vp = frame.viewProjNoJitter;
+  vec4 row0 = vec4(vp[0][0], vp[1][0], vp[2][0], vp[3][0]), row1 = vec4(vp[0][1], vp[1][1], vp[2][1], vp[3][1]),
+       row3 = vec4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]);
+  vec4 planes[4] = vec4[4](row3 + row0, row3 - row0, row3 + row1, row3 - row1);
+  for (int i = 0; i < 4; ++i) {
+    vec4 p = planes[i] / length(planes[i].xyz);
+    if (dot(p.xyz, c) + p.w < -r) return true;
+  }
+  return false;
+}
+
+// O bloco `b` (MESHLET_GROUP meshlets seguidos) pode ter algum meshlet no corte? Falso se todos são finos demais
+// (cota superior do erro dos pais cabe no limite), grossos demais (cota inferior do erro próprio passa dele) ou se o
+// bloco está fora da tela. Os limites valem para qualquer meshlet do bloco (esferas que contêm as deles).
+bool blockMayDraw(uint b, mat4 model) {
+  if (pc.blockBase == 0u) return true;
+  MeshletBlock k = MeshletBlockList(pc.meshlets + uint64_t(pc.blockBase) * 4ul).b[b];
+  float scale = max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz)));
+  float K = abs(frame.proj[1][1]) * 0.5 * frame.renderSize.y;
+  vec3 cs = (model * vec4(k.self.xyz, 1.0)).xyz;
+  float rs = k.self.w * scale, ds = length(cs - frame.cameraPos.xyz);
+  if (k.minSelfError * scale / max(ds + rs, 0.01) * K > pc.lodPixels) return false;
+  if (k.maxParentError < 1.0e37) {
+    vec3 cp = (model * vec4(k.parent.xyz, 1.0)).xyz;
+    float dp = max(length(cp - frame.cameraPos.xyz) - k.parent.w * scale, 0.01);
+    if (k.maxParentError * scale / dp * K <= pc.lodPixels) return false;
+  }
+  if ((pc.flags & 1u) != 0u && sphereOutside(cs, rs + 2.0 * ds / (abs(frame.proj[1][1]) * frame.renderSize.y))) return false;
+  return true;
+}
+
 // O meshlet `m` está no corte do grafo: o próprio erro cabe no limite e o do grupo que o substitui, não.
 bool meshletInLodCut(uint m, mat4 model) {
   if (pc.lodBase == 0u) return true;

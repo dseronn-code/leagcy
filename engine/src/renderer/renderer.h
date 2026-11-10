@@ -71,6 +71,7 @@ struct Settings {
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
+  bool lodBlocks = true;         // geometria virtualizada: descarte de blocos de 32 pedaços (--no-lod-blocks: medição)
   float lodPixels = 1.0f;        // geometria virtualizada: erro máximo de um pedaço na tela, em pixels (--lod-pixels)
   bool subsurface = true;        // espalhamento subsuperficial da pele (--no-sss: medição de energia)
   bool cloudReference = false;   // nuvens da tela por Monte Carlo volumétrico sem aproximação (--clouds-reference)

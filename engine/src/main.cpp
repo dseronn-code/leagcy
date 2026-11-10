@@ -241,6 +241,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-lod") o.meshLods = false;
     else if (a == "--no-nanite") o.clusterLod = 0;
     else if (a == "--nanite") o.clusterLod = 1;
+    else if (a == "--no-lod-blocks") o.render.lodBlocks = false;
     else if (a == "--lod-pixels") o.render.lodPixels = std::max(0.01f, float(std::atof(next())));
     else if (a == "--no-firefly-clamp") noFireflyClamp = true;
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));

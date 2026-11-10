@@ -5,8 +5,11 @@
 #endif
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <cfloat>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <limits>
 #include <cmath>
@@ -606,6 +609,7 @@ struct LodCluster {
   LodSphere self, parent;
   bool base = false;              // nível 0 (o meshlet já existe em `out`)
   uint32_t baseMeshlet = 0;
+  uint32_t level = 0;
 };
 
 // Esfera de um grupo: contém as esferas de todos os membros; erro = o maior deles (monotonia do grafo).
@@ -789,11 +793,14 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
       const size_t target = (merged.size() / 6) * 3;  // metade dos triângulos (os pedaços nem sempre estão cheios)
       std::vector<uint32_t> simplified(merged.size());
       float error = 0.0f;
-      const float weights[5] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f};  // normal xyz e uv
-      simplified.resize(meshopt_simplifyWithAttributes(
-          simplified.data(), merged.data(), merged.size(), &mesh.vertices[0].position.x, mesh.vertices.size(),
-          sizeof(Vertex), &mesh.vertices[0].normal.x, sizeof(Vertex), weights, 5, locks.data(), target, FLT_MAX,
-          meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute, &error));
+      // Só pela geometria: o erro devolvido é então a distância (unidades da malha) que a GPU projeta na tela. Com peso
+      // em normais e UV ele misturava o desvio desses atributos e passava do tamanho da própria rocha (a GPU nunca
+      // escolhia os níveis grossos: 8 milhões de triângulos para uma tela de 480x270). As costuras de UV e normal
+      // continuam presas: a meshoptimizer acha vértices na mesma posição com atributos diferentes sozinha.
+      simplified.resize(meshopt_simplifyWithAttributes(simplified.data(), merged.data(), merged.size(),
+                                                       &mesh.vertices[0].position.x, mesh.vertices.size(), sizeof(Vertex),
+                                                       nullptr, 0, nullptr, 0, locks.data(), target, FLT_MAX,
+                                                       meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute, &error));
       // Sem reduzir o bastante (borda travada demais): o grupo fica para o próximo nível.
       if (simplified.size() > merged.size() * 0.85f ||
           simplified.size() / (kMeshletMaxTriangles * 3) >= merged.size() / (kMeshletMaxTriangles * 3)) {
@@ -808,6 +815,7 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
         LodCluster n;
         n.indices = std::move(part);
         n.self = g;
+        n.level = levels;
         n.parent.error = std::numeric_limits<float>::infinity();
         made += n.indices.size() / 3;
         pending.push_back(uint32_t(cl.size()));
@@ -844,7 +852,146 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
   }
   st.levels = levels;
   st.totalMeshlets = uint32_t(out.meshlets.size());
+  // Ordem final: por nível e, dentro dele, pela posição (curva de Morton). Os blocos de 32 do task shader ficam de um
+  // nível só e de uma região pequena: buildMeshletBlocks consegue descartá-los inteiros.
+  std::vector<uint32_t> level(out.meshlets.size(), 0);
+  {
+    size_t k = st.baseMeshlets;
+    for (const LodCluster& c : cl)
+      if (!c.base) level[k++] = c.level;
+  }
+  glm::vec3 lo(1e30f), hi(-1e30f);
+  for (const Meshlet& m : out.meshlets) {
+    lo = glm::min(lo, m.center);
+    hi = glm::max(hi, m.center);
+  }
+  const glm::vec3 ext = glm::max(hi - lo, glm::vec3(1e-6f));
+  auto morton = [&](glm::vec3 p) {
+    const glm::uvec3 q = glm::uvec3(glm::clamp((p - lo) / ext, 0.0f, 1.0f) * 1023.0f);
+    auto spread = [](uint32_t x) {
+      x = (x | (x << 16)) & 0x030000FFu;
+      x = (x | (x << 8)) & 0x0300F00Fu;
+      x = (x | (x << 4)) & 0x030C30C3u;
+      return (x | (x << 2)) & 0x09249249u;
+    };
+    return spread(q.x) | (spread(q.y) << 1) | (spread(q.z) << 2);
+  };
+  std::vector<uint32_t> order(out.meshlets.size());
+  for (uint32_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::vector<uint32_t> code(out.meshlets.size());
+  for (size_t i = 0; i < code.size(); ++i) code[i] = morton(out.meshlets[i].center);
+  std::stable_sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) {
+    return level[a] != level[b] ? level[a] < level[b] : code[a] < code[b];
+  });
+  std::vector<Meshlet> sortedMeshlets(order.size());
+  std::vector<MeshletLod> sortedLods(order.size());
+  for (size_t i = 0; i < order.size(); ++i) {
+    sortedMeshlets[i] = out.meshlets[order[i]];
+    sortedLods[i] = lods[order[i]];
+  }
+  out.meshlets = std::move(sortedMeshlets);
+  lods = std::move(sortedLods);
   if (stats) *stats = st;
+  return out;
+}
+
+std::vector<MeshletBlock> buildMeshletBlocks(const std::vector<MeshletLod>& lods) {
+  std::vector<MeshletBlock> blocks((lods.size() + kMeshletBlock - 1) / kMeshletBlock);
+  auto unite = [](const MeshletLod* l, size_t n, bool parent) {
+    glm::vec3 c(0.0f);
+    for (size_t i = 0; i < n; ++i) c += glm::vec3(parent ? l[i].parent : l[i].self);
+    c /= float(n);
+    float r = 0.0f;
+    for (size_t i = 0; i < n; ++i) {
+      const glm::vec4 s = parent ? l[i].parent : l[i].self;
+      r = std::max(r, glm::length(glm::vec3(s) - c) + s.w);
+    }
+    return glm::vec4(c, r);
+  };
+  for (size_t b = 0; b < blocks.size(); ++b) {
+    const size_t first = b * kMeshletBlock, n = std::min<size_t>(kMeshletBlock, lods.size() - first);
+    MeshletBlock& k = blocks[b];
+    k.self = unite(&lods[first], n, false);
+    k.minSelfError = FLT_MAX;
+    k.maxParentError = 0.0f;
+    bool anyRoot = false;
+    for (size_t i = first; i < first + n; ++i) {
+      k.minSelfError = std::min(k.minSelfError, lods[i].selfError);
+      if (lods[i].parentError >= FLT_MAX) anyRoot = true;
+      else k.maxParentError = std::max(k.maxParentError, lods[i].parentError);
+    }
+    if (anyRoot) k.maxParentError = FLT_MAX;  // a raiz nunca é fina demais
+    k.parent = anyRoot ? k.self : unite(&lods[first], n, true);
+  }
+  return blocks;
+}
+
+namespace {
+constexpr uint32_t kClusterLodCacheVersion = 3;  // mude quando o algoritmo do grafo mudar
+uint64_t fnv1aBytes(const void* data, size_t n, uint64_t h) {
+  const uint8_t* b = static_cast<const uint8_t*>(data);
+  for (size_t i = 0; i < n; ++i) h = (h ^ b[i]) * 1099511628211ull;
+  return h;
+}
+template <class T>
+bool readVec(std::ifstream& in, std::vector<T>& v, uint64_t count) {
+  v.resize(size_t(count));
+  in.read(reinterpret_cast<char*>(v.data()), std::streamsize(count * sizeof(T)));
+  return bool(in);
+}
+template <class T>
+void writeVec(std::ofstream& out, const std::vector<T>& v) {
+  out.write(reinterpret_cast<const char*>(v.data()), std::streamsize(v.size() * sizeof(T)));
+}
+}  // namespace
+
+MeshletData buildClusterLodCached(const MeshData& mesh, std::vector<MeshletLod>& lods, ClusterLodStats* stats,
+                                  const std::string& cacheDir) {
+  if (cacheDir.empty()) return buildClusterLod(mesh, lods, stats);
+  uint64_t h = 1469598103934665603ull;
+  const uint32_t key[3] = {kClusterLodCacheVersion, kMeshletMaxVertices, kMeshletMaxTriangles};
+  h = fnv1aBytes(key, sizeof(key), h);
+  h = fnv1aBytes(mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex), h);
+  h = fnv1aBytes(mesh.indices.data(), mesh.indices.size() * sizeof(uint32_t), h);
+  h = fnv1aBytes(mesh.clusterStarts.data(), mesh.clusterStarts.size() * sizeof(uint32_t), h);
+  char name[40];
+  std::snprintf(name, sizeof(name), "%016llx.lod", static_cast<unsigned long long>(h));
+  const std::filesystem::path file = std::filesystem::path(cacheDir) / name;
+  struct Header {
+    char magic[4];
+    uint32_t version;
+    ClusterLodStats st;
+    uint64_t meshlets, vertices, triangles;
+  };
+  {
+    std::ifstream in(file, std::ios::binary);
+    Header hd{};
+    if (in && in.read(reinterpret_cast<char*>(&hd), sizeof(hd)) && std::memcmp(hd.magic, "LGLD", 4) == 0 &&
+        hd.version == kClusterLodCacheVersion) {
+      MeshletData out;
+      if (readVec(in, out.meshlets, hd.meshlets) && readVec(in, out.vertices, hd.vertices) &&
+          readVec(in, out.triangles, hd.triangles) && readVec(in, lods, hd.meshlets)) {
+        if (stats) *stats = hd.st;
+        return out;
+      }
+    }
+  }
+  ClusterLodStats st;
+  MeshletData out = buildClusterLod(mesh, lods, &st);
+  if (stats) *stats = st;
+  std::error_code ec;
+  std::filesystem::create_directories(cacheDir, ec);
+  const std::filesystem::path tmp = file.string() + ".tmp";  // escreve inteiro e renomeia: nunca um arquivo pela metade
+  {
+    std::ofstream o(tmp, std::ios::binary);
+    Header hd{{'L', 'G', 'L', 'D'}, kClusterLodCacheVersion, st, out.meshlets.size(), out.vertices.size(), out.triangles.size()};
+    o.write(reinterpret_cast<const char*>(&hd), sizeof(hd));
+    writeVec(o, out.meshlets);
+    writeVec(o, out.vertices);
+    writeVec(o, out.triangles);
+    writeVec(o, lods);
+  }
+  std::filesystem::rename(tmp, file, ec);
   return out;
 }
 

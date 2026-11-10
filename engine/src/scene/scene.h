@@ -352,6 +352,7 @@ struct GpuMesh {
   // Geometria virtualizada (buildClusterLod): meshlets de todos os níveis e, a partir de meshletLodBase (em uints), um
   // MeshletLod por meshlet. 0 = malha sem níveis (todos os meshlets são da malha inteira).
   uint32_t meshletLodBase = 0;
+  uint32_t meshletBlockBase = 0;  // MeshletBlock de cada 32 meshlets (uints), com meshletLodBase
   // Níveis de detalhe (só a rasterização; o ray tracing usa a malha completa): malhas simplificadas e a distância
   // (m) a partir da qual cada uma é usada. -1 = sem esse nível.
   int lod[2] = {-1, -1};

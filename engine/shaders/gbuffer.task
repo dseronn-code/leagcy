@@ -20,7 +20,9 @@ void main() {
   bool live = slot < cmd.instanceCount;
   uint entry = live ? DrawList(pc.drawList).objects[cmd.firstInstance + slot] : 0u;
   mat4 model = objects[entry & 0xFFFFFFu].model;
-  bool keep = live && m < pc.meshletCount && meshletInLodCut(m, model) &&
+  // O bloco inteiro antes (o mesmo resultado nas 32 invocações): fora do corte ou da tela, nenhum meshlet é testado.
+  bool blockLive = live && blockMayDraw(group % groupsPerInstance, model);
+  bool keep = blockLive && m < pc.meshletCount && meshletInLodCut(m, model) &&
               meshletVisible(MeshletList(pc.meshlets).m[m], model);
   if (keep) atomicOr(keepMask, 1u << lane);
   barrier();

@@ -81,7 +81,8 @@ struct GBufferPush {
   VkDeviceAddress commands, meshlets, vertices;
   uint32_t batch, meshletCount, vertexBase, triangleBase;
   uint32_t flags, lodBase;  // lodBase: MeshletLod de cada meshlet (em uints no bloco dos meshlets; 0 = sem níveis)
-  float lodPixels, pad;
+  float lodPixels;
+  uint32_t blockBase;  // MeshletBlock de cada 32 meshlets (uints; 0 = sem)
 };
 // Espelha ObjectData em shaders/scene.glsl.
 struct ObjectGpu {
@@ -1257,6 +1258,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
             p.flags = (settings.gpuCulling ? 1u : 0u) | (b.doubleSided ? 2u : 0u);
             p.lodBase = m.meshletLodBase;
             p.lodPixels = settings.lodPixels;
+            p.blockBase = settings.lodBlocks ? m.meshletBlockBase : 0u;
             vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
             ctx_->vkCmdDrawMeshTasksIndirectEXT(cmd, meshArgs.handle, VkDeviceSize(bi) * 3 * sizeof(uint32_t), 1,
                                                 3 * sizeof(uint32_t));
