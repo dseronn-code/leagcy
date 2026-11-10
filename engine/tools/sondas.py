@@ -70,7 +70,8 @@ def sala(pasta):
 def teste_parede(b, pasta):
     arq = sala(pasta)
     gi = os.path.join(pasta, 'sala.gi')
-    rodar(b, pasta, 'sala_assar', ['--sondas-gi', gi, '--assar-gi', '--exposure', '12'], quadros=5, cena=arq)
+    rodar(b, pasta, 'sala_assar', ['--sondas-gi', gi, '--assar-gi', '--gi-espacamento', '0.5', '--exposure', '12'],
+          quadros=5, cena=arq)
     rt, _ = rodar(b, pasta, 'sala_rt', ['--exposure', '12'], cena=arq)
     sem, _ = rodar(b, pasta, 'sala_sem', ['--no-rt', '--exposure', '12'], cena=arq)
     com, _ = rodar(b, pasta, 'sala_com', ['--no-rt', '--sondas-gi', gi, '--exposure', '12'], cena=arq)

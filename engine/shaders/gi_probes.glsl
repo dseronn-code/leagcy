@@ -17,7 +17,8 @@ bool giProbesAvailable() { return giHeader[1].w > 0.5; }
 float giProbeVisibility(uint i, vec3 d) {
   float dist = length(d);
   if (dist < 1e-4) return 1.0;
-  vec3 u = d / dist, w = u * u;
+  vec3 u = d / dist, w = pow(abs(u), vec3(8.0));
+  w /= max(w.x + w.y + w.z, 1e-6);  // os mesmos lobos estreitos do bake
   vec4 a = giData[i + 4u], b = giData[i + 5u], c = giData[i + 6u];
   float mean = w.x * (u.x >= 0.0 ? a.x : a.y) + w.y * (u.y >= 0.0 ? a.z : a.w) + w.z * (u.z >= 0.0 ? b.x : b.y);
   float mean2 = w.x * (u.x >= 0.0 ? b.z : b.w) + w.y * (u.y >= 0.0 ? c.x : c.y) + w.z * (u.z >= 0.0 ? c.z : c.w);

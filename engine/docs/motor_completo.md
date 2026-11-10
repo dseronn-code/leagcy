@@ -464,6 +464,32 @@ entre os ladrilhos de perto e de longe.
 Ainda não: origem flutuante (para mundos acima de ~10 km, onde o float perde precisão) e carregar células de arquivos
 separados do disco (hoje a cena inteira é lida no início; a célula só liga e desliga).
 
+## Luz global sem ray tracing (sondas de irradiância assadas)
+
+Para GPUs sem ray tracing (`--no-rt`), a luz ambiente vem de uma grade de sondas pré-calculada (como o "volumetric
+lightmap" do Unreal), no lugar do céu sem sombra de antes. Numa GPU com ray tracing, `--assar-gi` assa: cada sonda lança
+256 raios (espiral de Fibonacci); no ponto atingido entra a luz direta (sol e uma luz local, com sombra) e o difuso
+das sondas do passe anterior — 3 passes = 3 rebotes. Cada sonda guarda a irradiância em harmônicos esféricos L1 (já
+convolvida com o cosseno), se está dentro de uma parede (mais de 1/4 dos raios no verso das faces) e, para não vazar
+luz pelas paredes, a distância média até as superfícies em 6 lados; na leitura, as 8 sondas em volta do ponto são
+pesadas pela posição, pelo lado da superfície e por um teste de Chebyshev nessa distância (como o DDGI).
+
+Opções: `--sondas-gi arquivo.gi` (sem ela: `cena.json.gi` ao lado da cena, ou `texcache/gi_<cena>.gi` nas de
+demonstração, se existir), `--assar-gi` (assa de novo), `--gi-espacamento m` (padrão: o maior lado da cena / 48),
+`--gi-raios n`, `--gi-rebotes n`. O arquivo vai junto com o jogo; as sondas valem para o sol e o céu de quando foram
+assadas (luz que muda de lugar não atualiza).
+
+Com ray tracing, as sondas (se houver) também servem de palpite para o cache de radiância onde ele ainda não tem dados.
+Sem sondas, o palpite agora é o céu por um raio de visibilidade — antes era o céu × 0,5 sem teste, o que fazia uma sala
+fechada brilhar azul com RT (medido: 64/255 de azul numa sala sem luz; agora 0,4). A suíte do renderer
+(`tools/testes.py`: fornalha, atmosfera, cintilação, sombras, ReSTIR) segue passando.
+
+Testes (`tools/sondas.py`, lavapipe): no Sponza sem RT, o erro contra a imagem com RT cai de 31,7/255 (só céu) para
+9,8/255 com as sondas (3,2x menor), assadas em 35 s; numa sala fechada com o sol lá fora, por dentro fica 1,5/255 com
+as sondas (0,4 com RT; 84,5 só com o céu); a segunda execução lê o arquivo sem assar de novo.
+
+![Sponza: com RT, sem RT só com o céu, sem RT com as sondas](screenshots/sondas_gi_sponza.png)
+
 ## Malhas comprimidas (meshopt, Draco) e texturas KTX2
 
 - **meshopt** (`EXT_meshopt_compression`, o formato do gltfpack) e **malha quantizada** (`KHR_mesh_quantization`):

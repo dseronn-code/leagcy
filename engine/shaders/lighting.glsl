@@ -432,12 +432,14 @@ vec3 localLightsReference(PixelSurface sf, BrdfContext bc) {
 // Assar as sondas (gi_bake.comp): um grupo de 64 por sonda, um raio por invocação (espiral de Fibonacci na esfera,
 // girada a cada lote). No ponto atingido: luz direta (sol e uma luz local, com sombra) + o difuso da irradiância das
 // sondas do passe anterior (cada passe soma um rebote). O verso de uma face de um lado só conta como parede (a
-// sonda está dentro dela). Acumula em `acc` a radiância projetada em SH L1 e as contagens.
+// sonda está dentro dela). Acumula em `acc` a radiância projetada em SH L1, as contagens e, para a visibilidade, a
+// distância até a superfície (e o quadrado) em 6 lados (±x, ±y, ±z), cada raio pesado por |componente|^8.
 layout(set = 1, binding = 0, std430) buffer GiAccum { vec4 acc[]; };  // por sonda: R, G, B (L0, L1 xyz), contagens
 layout(push_constant) uniform BakePush {
   uint firstProbe, groupsX, batch, raysTotal;
 } bake;
-shared vec4 bakeSum[64][4];
+const uint GI_ACC = 9u;  // R, G, B, contagens, 5 de distâncias (6 lados × peso, d, d²)
+shared vec4 bakeSum[64][GI_ACC];
 
 void main() {
   uint local = gl_LocalInvocationIndex;
@@ -445,6 +447,8 @@ void main() {
   ivec3 dims = ivec3(giHeader[1].xyz);
   uint count = uint(dims.x * dims.y * dims.z);
   vec4 r = vec4(0.0), gch = vec4(0.0), bch = vec4(0.0), cnt = vec4(0.0);
+  float dv[20];
+  for (int i = 0; i < 20; ++i) dv[i] = 0.0;
   if (probe < count) {
     ivec3 q = ivec3(int(probe) % dims.x, (int(probe) / dims.x) % dims.y, int(probe) / (dims.x * dims.y));
     vec3 origin = giHeader[0].xyz + vec3(q) * giHeader[0].w;
@@ -481,7 +485,7 @@ void main() {
     }
     for (int a = 0; a < 3; ++a) {
       int b = (a * 2 + (dir[a] < 0.0 ? 1 : 0)) * 3;
-      float w = dir[a] * dir[a];
+      float w = pow(abs(dir[a]), 8.0);  // lobo estreito: um raio quase paralelo à parede não conta para ela
       dv[b] += w;
       dv[b + 1] += w * t;
       dv[b + 2] += w * t * t;
