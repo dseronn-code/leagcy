@@ -1,5 +1,6 @@
 #pragma once
 // Pênalti da Treta no Legacy Engine: o estádio (cena) e o jogo de pênaltis que roda em cima dele.
+#include <map>
 #include <string>
 #include <vector>
 
@@ -25,10 +26,34 @@ struct Player {
   // Pose pedida pelo jogo (direções no espaço do mundo; comprimento 0 = deixa o clipe). Aplicada no poseHook.
   glm::vec3 armDir[2]{}, foreArmDir[2]{}, upLegDir[2]{}, legDir[2]{}, footDir[2]{};
   glm::vec3 spineDir{0.0f};
+
+  // Jogador realista (game/jogador.glb): clipes de captura de movimento tocados por camadas, com transição.
+  bool real = false;
+  glm::mat4 fix{1.0f};          // escala e altura do modelo (1,82 m, pés em y = 0)
+  std::vector<uint32_t> shirtMats, shortsMats;
+  struct Anim {
+    std::string cur, prev;
+    float tCur = 0.0f, tPrev = 0.0f, fade = 1.0f, fadeDur = 0.25f;
+    bool once = false;
+    glm::vec3 base{0.0f};       // contêiner: o clipe soma o próprio deslocamento (meta.root)
+    float yaw = 0.0f, off = 0.0f, offT = 0.0f, lift = 0.0f, liftT = 0.0f;
+    glm::vec3 reach{0.0f};      // mira dos braços (defesa)
+    float reachW = 0.0f;
+  } anim;
+};
+
+// Dados dos clipes do jogador realista (game/jogador_anim.json): deslocamento no campo por quadro e eventos.
+struct ClipMeta {
+  float dur = 0.0f;
+  std::vector<glm::vec2> root;  // x, z por quadro (fps)
+  float contact = -1.0f;        // k_kick: pé na bola
+  glm::vec3 foot{0.0f};         // k_kick: bico do pé no contato (espaço do jogador)
+  float reachT = -1.0f;         // goleiro: instante e ponto das mãos
+  glm::vec2 reach{0.0f};
 };
 
 // Tudo o que o jogo mexe depois de montar a cena.
-struct World {
+struct PenaltiWorld {
   Player kicker, keeper;
   uint32_t ball = 0;           // objeto
   uint32_t netMesh = 0;        // malha de tecido do fundo da rede (colisor da bola)
@@ -37,9 +62,11 @@ struct World {
   int32_t ledTexture = -1;
   std::vector<uint32_t> crowdClips;
   float crowdCheer = 0.0f;     // 0..1: torcida pulando
+  std::map<std::string, ClipMeta> clips;
+  float clipFps = 30.0f;
 };
 
-World& world();  // a cena "penalti" preenche; o jogo lê
+PenaltiWorld& world();  // a cena "penalti" preenche; o jogo lê
 
 // Monta o estádio à noite (refletores, torcida, placas de LED), o gol com rede de tecido, a bola e os dois jogadores.
 bool buildPenaltiScene(scene::Scene& s, scene::Camera& camera, const scene::DemoOptions& opt);

@@ -2,19 +2,25 @@
 //   legacy                      janela interativa (WASD + botão direito do mouse)
 //   legacy --headless --frames 32 --out frame.png
 //   legacy --scene outdoor --night --lights 1000
+#include <cctype>
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <thread>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
+#include <new>
 #include <string>
 #include <vector>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "editor/editor.h"
+#include "game/network.h"
+#include "game/world.h"
 #include "renderer/renderer.h"
 #include "rhi/swapchain.h"
 #include "scene/demo_scene.h"
@@ -22,6 +28,131 @@
 #include "game/penalti_game.h"
 
 namespace {
+
+// ---- Entrada do jogo (teclado, mouse, controle) ----
+const std::pair<const char*, int> kGameKeys[] = {
+    {"a", GLFW_KEY_A}, {"b", GLFW_KEY_B}, {"c", GLFW_KEY_C}, {"d", GLFW_KEY_D}, {"e", GLFW_KEY_E}, {"f", GLFW_KEY_F},
+    {"g", GLFW_KEY_G}, {"h", GLFW_KEY_H}, {"i", GLFW_KEY_I}, {"j", GLFW_KEY_J}, {"k", GLFW_KEY_K}, {"l", GLFW_KEY_L},
+    {"m", GLFW_KEY_M}, {"n", GLFW_KEY_N}, {"o", GLFW_KEY_O}, {"p", GLFW_KEY_P}, {"q", GLFW_KEY_Q}, {"r", GLFW_KEY_R},
+    {"s", GLFW_KEY_S}, {"t", GLFW_KEY_T}, {"u", GLFW_KEY_U}, {"v", GLFW_KEY_V}, {"w", GLFW_KEY_W}, {"x", GLFW_KEY_X},
+    {"y", GLFW_KEY_Y}, {"z", GLFW_KEY_Z}, {"0", GLFW_KEY_0}, {"1", GLFW_KEY_1}, {"2", GLFW_KEY_2}, {"3", GLFW_KEY_3},
+    {"4", GLFW_KEY_4}, {"5", GLFW_KEY_5}, {"6", GLFW_KEY_6}, {"7", GLFW_KEY_7}, {"8", GLFW_KEY_8}, {"9", GLFW_KEY_9},
+    {"espaco", GLFW_KEY_SPACE}, {"esc", GLFW_KEY_ESCAPE}, {"enter", GLFW_KEY_ENTER}, {"enter", GLFW_KEY_KP_ENTER},
+    {"tab", GLFW_KEY_TAB}, {"shift", GLFW_KEY_LEFT_SHIFT}, {"shift", GLFW_KEY_RIGHT_SHIFT},
+    {"ctrl", GLFW_KEY_LEFT_CONTROL}, {"ctrl", GLFW_KEY_RIGHT_CONTROL}, {"alt", GLFW_KEY_LEFT_ALT},
+    {"backspace", GLFW_KEY_BACKSPACE}, {"cima", GLFW_KEY_UP}, {"baixo", GLFW_KEY_DOWN}, {"esquerda", GLFW_KEY_LEFT},
+    {"direita", GLFW_KEY_RIGHT}, {"f1", GLFW_KEY_F1}, {"f2", GLFW_KEY_F2}, {"f3", GLFW_KEY_F3}, {"f4", GLFW_KEY_F4},
+    {"f5", GLFW_KEY_F5}, {"f6", GLFW_KEY_F6}, {"f7", GLFW_KEY_F7}, {"f8", GLFW_KEY_F8}, {"f9", GLFW_KEY_F9},
+    {"f10", GLFW_KEY_F10}, {"f11", GLFW_KEY_F11}, {"f12", GLFW_KEY_F12}};
+const std::pair<const char*, int> kPadButtons[] = {
+    {"pad_a", GLFW_GAMEPAD_BUTTON_A}, {"pad_b", GLFW_GAMEPAD_BUTTON_B}, {"pad_x", GLFW_GAMEPAD_BUTTON_X},
+    {"pad_y", GLFW_GAMEPAD_BUTTON_Y}, {"pad_lb", GLFW_GAMEPAD_BUTTON_LEFT_BUMPER},
+    {"pad_rb", GLFW_GAMEPAD_BUTTON_RIGHT_BUMPER}, {"pad_back", GLFW_GAMEPAD_BUTTON_BACK},
+    {"pad_start", GLFW_GAMEPAD_BUTTON_START}, {"pad_l3", GLFW_GAMEPAD_BUTTON_LEFT_THUMB},
+    {"pad_r3", GLFW_GAMEPAD_BUTTON_RIGHT_THUMB}, {"pad_cima", GLFW_GAMEPAD_BUTTON_DPAD_UP},
+    {"pad_baixo", GLFW_GAMEPAD_BUTTON_DPAD_DOWN}, {"pad_esquerda", GLFW_GAMEPAD_BUTTON_DPAD_LEFT},
+    {"pad_direita", GLFW_GAMEPAD_BUTTON_DPAD_RIGHT}};
+
+// Entrada crua da janela: teclado (se a interface do editor não o estiver usando), mouse e o primeiro controle.
+game::RawInput readRawInput(GLFWwindow* window, bool keyboard, bool mouse) {
+  game::RawInput raw;
+  if (keyboard)
+    for (const auto& [name, k] : kGameKeys)
+      if (glfwGetKey(window, k) == GLFW_PRESS) raw.held.insert(name);
+  int w = 0, h = 0;
+  glfwGetWindowSize(window, &w, &h);
+  double mx = 0.0, my = 0.0;
+  glfwGetCursorPos(window, &mx, &my);
+  if (w > 0 && h > 0) raw.mouse = glm::vec2(float(mx / w), float(my / h));
+  raw.mouseDown = mouse && glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+  for (int j = GLFW_JOYSTICK_1; j <= GLFW_JOYSTICK_LAST; ++j) {
+    GLFWgamepadstate st;
+    if (!glfwJoystickIsGamepad(j) || !glfwGetGamepadState(j, &st)) continue;
+    raw.pad = true;
+    for (const auto& [name, b] : kPadButtons)
+      if (st.buttons[b] == GLFW_PRESS) raw.held.insert(name);
+    const int axes[6] = {GLFW_GAMEPAD_AXIS_LEFT_X, GLFW_GAMEPAD_AXIS_LEFT_Y, GLFW_GAMEPAD_AXIS_RIGHT_X,
+                         GLFW_GAMEPAD_AXIS_RIGHT_Y, GLFW_GAMEPAD_AXIS_LEFT_TRIGGER, GLFW_GAMEPAD_AXIS_RIGHT_TRIGGER};
+    for (int i = 0; i < 6; ++i) {
+      float v = st.axes[axes[i]];
+      if (i >= 4) v = 0.5f * (v + 1.0f);  // gatilhos: -1..1 -> 0..1
+      else if (std::abs(v) < 0.15f) v = 0.0f;  // zona morta dos analógicos
+      raw.axes[i] = v;
+    }
+    break;
+  }
+  return raw;
+}
+
+// Multijogador: --host abre o anfitrião, --conectar liga como cliente (cena .json com "multijogador").
+std::unique_ptr<game::Network> startNetwork(int hostPort, const std::string& connectTo) {
+  game::World* w = game::currentWorld();
+  if (!w || (hostPort == 0 && connectTo.empty())) return nullptr;
+  auto net = std::make_unique<game::Network>();
+  if (hostPort > 0) {
+    if (!net->host(*w, uint16_t(hostPort))) return nullptr;
+  } else {
+    std::string addr = connectTo;
+    uint16_t port = 7777;
+    if (const size_t c = addr.rfind(':'); c != std::string::npos) {
+      port = uint16_t(std::atoi(addr.substr(c + 1).c_str()));
+      addr = addr.substr(0, c);
+    }
+    if (!net->connect(*w, addr, port)) return nullptr;
+  }
+  return net;
+}
+
+// Câmera de cinema pedida por script (camera() / camera_jogo()).
+// A câmera de antes da cena volta quando o script devolve o controle (camera_jogo): posição, direção e FOV.
+void applyScriptCamera(const game::World& w, scene::Camera& camera) {
+  static bool wasActive = false;
+  static scene::Camera saved;
+  if (!w.cameraOverride.active) {
+    if (wasActive) {
+      camera.position = saved.position;
+      camera.yaw = saved.yaw;
+      camera.pitch = saved.pitch;
+      camera.fovY = saved.fovY;
+      wasActive = false;
+    }
+    return;
+  }
+  if (!wasActive) {
+    saved = camera;
+    wasActive = true;
+  }
+  camera.position = w.cameraOverride.position;
+  camera.lookAt(w.cameraOverride.target);
+  if (w.cameraOverride.fovDeg > 0.0f) camera.fovY = glm::radians(w.cameraOverride.fovDeg);
+}
+
+// Personagem/carro do jogador: WASD ou analógico esquerdo andam; espaço ou A pula (no carro: freio de mão, também
+// B); Shift, L3 ou LB correm; no carro, RT acelera e LT freia (somados ao W/S).
+game::PlayerInput playerInputFrom(const game::GameInput& in, float cameraYaw) {
+  game::PlayerInput p;
+  glm::vec2 m(float(in.down("d")) - float(in.down("a")), float(in.down("w")) - float(in.down("s")));
+  m += glm::vec2(in.axis("esquerdo_x"), -in.axis("esquerdo_y"));
+  m.y += in.axis("rt") - in.axis("lt");
+  if (glm::length(m) > 1.0f) m = glm::normalize(m);
+  p.move = m;
+  p.cameraYaw = cameraYaw;
+  p.jump = in.down("espaco") || in.down("pad_a") || in.down("pad_b");
+  p.run = in.down("shift") || in.down("pad_l3") || in.down("pad_lb");
+  return p;
+}
+
+// Pedidos dos scripts que mexem no renderizador: opcao("motion_blur", v), opcao("dof", v), opcao("exposicao", ev).
+void applyGameOptions(game::World& w, renderer::Settings& s) {
+  for (const auto& [name, v] : w.optionRequests) {
+    if (name == "motion_blur") s.motionBlur = v != 0.0f;
+    else if (name == "dof") s.depthOfField = v != 0.0f;
+    else if (name == "exposicao") s.exposureCompensation = v;
+    else LOG_WARN("opcao: '%s' desconhecida (motion_blur, dof, exposicao)", name.c_str());
+  }
+  w.optionRequests.clear();
+}
+
 
 struct Options {
   bool headless = false;
@@ -37,8 +168,18 @@ struct Options {
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
   std::string cameraPath;  // headless: trajetória de câmera de cinema (arquivo de quadros-chave; ver loadCameraPath)
   float fps = 30.0f;       // headless: quadros por segundo do tempo simulado (vídeo)
+  bool realTime = false;   // headless: cada quadro espera o relógio (rede e recarga de script em GPUs rápidas)
   uint32_t warmup = 0;     // headless: frames iniciais parados e não salvos (TAA, denoiser e caches se assentam)
   float quitAfter = 0.0f;  // janela: fecha sozinha depois de N segundos e imprime as estatísticas do tempo de quadro
+  std::string saveWorld;   // cena .json: grava o estado do mundo (poses depois da física) ao terminar
+  bool editor = false;     // janela: editor visual (painéis, seleção, alças)
+  std::string screenshot;  // janela: grava a imagem da janela (com a interface) no último quadro
+  std::string select;      // editor: entidade selecionada ao abrir (testes)
+  bool testRestore = false;  // sem janela: guarda as poses no início e volta a elas antes do --save-world (teste)
+  std::string audioWav;      // sem janela: grava a mixagem do áudio 3D (ouvinte = câmera) em WAV
+  std::string simulate;      // entradas simuladas (teclas, cliques, controle) para testes: ver game/input.h
+  int hostPort = 0;          // --host [porta]: anfitrião de multijogador
+  std::string connectTo;     // --conectar ip[:porta]: cliente
   uint32_t moveStop = 0;   // > 0: a câmera anda só nos primeiros N frames (referência na mesma pose final)
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool autoplay = false;   // --scene penalti: o jogo escolhe sozinho pelo jogador (vídeos e testes sem tela)
@@ -49,6 +190,7 @@ struct Options {
   bool ignoreTangents = false;   // --ignore-tangents  // texturas em BC7 (--no-texture-compression = RGBA8)
   bool meshLights = true;        // triângulos emissivos como luzes (--no-mesh-lights: só pelos raios de GI)
   bool meshLods = true;          // níveis de detalhe das malhas grandes (--no-lod)
+  int clusterLod = -1;           // geometria virtualizada: -1 = a da cena, 1 = --nanite, 0 = --no-nanite
   std::string tangentTest;      // --tangent-test arquivo.gltf: tangentes do arquivo x aproximação x MikkTSpace
   uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
   float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
@@ -78,14 +220,31 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--move") o.move = float(std::atof(next()));
     else if (a == "--camera-path") o.cameraPath = next();
     else if (a == "--fps") o.fps = std::max(1.0f, float(std::atof(next())));
+    else if (a == "--tempo-real") o.realTime = true;
     else if (a == "--warmup") o.warmup = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--quit-after") o.quitAfter = std::max(0.0f, float(std::atof(next())));
+    else if (a == "--save-world") o.saveWorld = next();
+    else if (a == "--editor") o.editor = true;
+    else if (a == "--screenshot") o.screenshot = next();
+    else if (a == "--select") o.select = next();
+    else if (a == "--test-restore") o.testRestore = true;
+    else if (a == "--audio-wav") o.audioWav = next();
+    else if (a == "--simular") o.simulate = next();
+    else if (a == "--idioma") game::setLanguageOverride(next());
+    else if (a == "--host") {
+      o.hostPort = 7777;
+      if (i + 1 < argc && std::isdigit(static_cast<unsigned char>(argv[i + 1][0]))) o.hostPort = std::atoi(argv[++i]);
+    }
+    else if (a == "--conectar") o.connectTo = next();
     else if (a == "--move-stop") o.moveStop = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--pause") o.pause = true;
     else if (a == "--autoplay") o.autoplay = true;
     else if (a == "--no-texture-compression") o.compressTextures = false;
     else if (a == "--no-mesh-lights") o.meshLights = false;
     else if (a == "--no-lod") o.meshLods = false;
+    else if (a == "--no-nanite") o.clusterLod = 0;
+    else if (a == "--nanite") o.clusterLod = 1;
+    else if (a == "--lod-pixels") o.render.lodPixels = std::max(0.01f, float(std::atof(next())));
     else if (a == "--no-firefly-clamp") noFireflyClamp = true;
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
@@ -107,6 +266,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--rain") o.scene.rain = float(std::atof(next()));
     else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--city-blocks") o.scene.cityBlocks = uint32_t(std::max(1, std::atoi(next())));
+    else if (a == "--rochas") o.scene.rocks = uint32_t(std::max(1, std::atoi(next())));
+    else if (a == "--rocha-segmentos") o.scene.rockSegments = uint32_t(std::max(16, std::atoi(next())));
     else if (a == "--scale") o.scaleOverride = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
     else if (a == "--fullscreen") o.fullscreen = true;
     else if (a == "--quality") {
@@ -160,7 +321,9 @@ Options parseArgs(int argc, char** argv) {
       const std::pair<const char*, uint32_t> kinds[] = {{"sol", 1u}, {"gi", 2u}, {"especular", 4u}, {"sombras-acerto", 8u},
                                                         {"secundarios", 16u | 64u}, {"luz", 32u},
                                                         {"espelho", 16u}, {"cache", 64u}, {"espelho-gi", 128u}, {"opaco", 256u}, {"gi-metade", 512u}, {"especular-fosco", 1024u}, {"cache-oitavo", 2048u},
-                                                        {"sombra-acerto-opaca", 4096u}};
+                                                        {"sombra-acerto-opaca", 4096u},
+                                                        {"diag-cache-direto", 16384u}, {"diag-cache-ref2", 32768u},
+                                                        {"diag-taa-antigo", 65536u}};
       for (auto& [n, b] : kinds)
         if (v.find(std::string(",") + n + ",") != std::string::npos) o.render.perfSkipMask |= b;
     }
@@ -228,6 +391,7 @@ Options parseArgs(int argc, char** argv) {
           "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
           "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"
           "  --no-gpu-culling --no-occlusion --no-meshlets   desligam partes do culling/desenho (medição)\n"
+          "  --nanite            geometria virtualizada (pedaços com erro de até --lod-pixels 1 na tela)\n"
           "  --hlod                   liga os proxies de HLOD (desligados: mais lentos na RTX)\n"
           "  --no-ripples --no-sss --no-texture-streaming --stream-sync  idem (ondulações, pele, texturas, streaming)\n"
           "  --clouds-reference         nuvens por Monte Carlo volumétrico exato (tools/nuvens.py)\n"
@@ -238,7 +402,16 @@ Options parseArgs(int argc, char** argv) {
           "  --headless --frames N --out arquivo.png [--save-every N] [--move m/s [--move-stop N]] [--pause | --pause-at N]\n"
           "  --scene penalti [--autoplay]  o jogo de pênaltis (clique = toque); --autoplay escolhe sozinho (vídeo)\n"
           "  --camera-path arquivo --fps N --warmup N   câmera de cinema por quadros-chave (vídeo: --save-every 1)\n"
-          "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n");
+          "  janela: --move m/s, --camera-path, --warmup N (quadros), --quit-after S (fecha e imprime o tempo de quadro)\n"
+          "  --scene cena.json [--save-world saida.json]   cena em arquivo com física (ex.: cenas/fisica.json)\n"
+          "  --audio-wav saida.wav    sem janela: grava o áudio 3D da cena .json (ouvinte = câmera)\n"
+          "  --simular \"t:evento;...\"  entradas simuladas para testes (tecla, segurar, clique, mouse, eixo)\n"
+          "  --idioma en         idioma dos textos do jogo (idiomas/<codigo>.json)\n"
+          "  --tempo-real        sem janela: cada quadro espera o relógio (testes de rede e recarga)\n"
+          "  --host [porta]           multijogador: anfitrião (padrão 7777; cena com \"multijogador\")\n"
+          "  --conectar ip[:porta]    multijogador: entra no jogo de outro computador\n"
+          "  --editor                 editor visual na janela (entidades, propriedades, alças, jogar/pausar, salvar)\n"
+          "  --screenshot arq.png     janela: grava a tela (com a interface) ao fechar (use com --quit-after)\n");
       std::exit(0);
     }
   }
@@ -284,6 +457,7 @@ int runAtmosphereTest(const Options& opt) {
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
+  if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
   scene.streamSync = opt.streamSync;
   scene.textureStreaming = opt.textureStreaming;
   scene.upload(ctx);
@@ -363,7 +537,9 @@ int runHeadless(const Options& opt) {
   scene::Scene scene;
   scene::Camera camera;
   scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
+  game::setAudioOffline(true);  // sem janela: sem placa de som (a mixagem vai para --audio-wav)
   if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
+  if (opt.testRestore && game::currentWorld()) game::currentWorld()->snapshot();  // o "Jogar" do editor
   if (opt.customCamera) {
     camera.position = opt.cameraPos;
     camera.lookAt(opt.cameraTarget);
@@ -372,6 +548,7 @@ int runHeadless(const Options& opt) {
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
+  if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
   scene.streamSync = opt.streamSync;
   scene.textureStreaming = opt.textureStreaming;
   scene.upload(ctx);
@@ -402,6 +579,8 @@ int runHeadless(const Options& opt) {
   };
 
   const float dt = 1.0f / opt.fps;  // tempo simulado fixo: resultado determinístico
+  const std::vector<game::SimEvent> simEvents = game::parseSimulated(opt.simulate);
+  std::unique_ptr<game::Network> net = startNetwork(opt.hostPort, opt.connectTo);
   glm::vec3 moveDir = camera.forward();
   const std::vector<CameraKey> cameraKeys = opt.cameraPath.empty() ? std::vector<CameraKey>{} : loadCameraPath(opt.cameraPath);
   if (!cameraKeys.empty()) {
@@ -415,7 +594,13 @@ int runHeadless(const Options& opt) {
   // Medição: com 20 frames ou mais, os tempos (GPU, CPU e o total) contam só a segunda metade; a primeira inclui a
   // placa subindo o clock depois do carregamento (na RTX, a mesma configuração variava até 30% entre execuções).
   const uint32_t timedFrom = opt.frames >= 20 ? opt.frames / 2 : 0;
+  const auto realStart = std::chrono::steady_clock::now();
   for (uint32_t f = 0; f < opt.frames; ++f) {
+    // --tempo-real: o quadro f começa em f·dt segundos de relógio (numa GPU rápida, sem isso 900 quadros passam em
+    // 1 s e um cliente de rede nem chega a conectar).
+    if (opt.realTime)
+      std::this_thread::sleep_until(realStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                    std::chrono::duration<double>(double(f) * dt)));
     if (f == timedFrom && timedFrom > 0) {
       (void)r.gpuTimings();
       (void)r.cpuTimings();
@@ -431,7 +616,19 @@ int runHeadless(const Options& opt) {
     const bool frozen = warming || opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
     float sceneDt = dt;
     if (playing && !warming) sceneDt = penalti.update(dt, game::Pointer{}, scene, camera, r, glm::vec2(float(extent.width), float(extent.height)));
+    if (game::World* w = game::currentWorld()) {
+      w->setListener(camera.position, camera.forward());
+      // Sem janela não há teclado nem controle: só as entradas simuladas (--simular), no tempo do quadro.
+      game::updateInput(w->gameInput, game::RawInput{}, simEvents, (float(f) - 1.0f) * dt, float(f) * dt);
+      w->setPlayerInput(playerInputFrom(w->gameInput, camera.yaw));
+      if (net) w->networkStep = [&net, &scene, &camera, w](float stepDt) {
+        net->update(*w, scene, stepDt, playerInputFrom(w->gameInput, camera.yaw));
+      };
+      applyGameOptions(*w, r.settings);
+      w->qualityRequest.clear();  // sem janela a qualidade fica a da linha de comando
+    }
     scene.update(frozen ? 0.0f : sceneDt);
+    if (game::World* w = game::currentWorld()) applyScriptCamera(*w, camera);
     scene.stream(ctx, camera.position);  // streaming do mundo (células perto da câmera)
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
     ctx.immediateSubmit([&](VkCommandBuffer cmd) {
@@ -466,6 +663,17 @@ int runHeadless(const Options& opt) {
   if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   ok &= savePng(opt.out);
+  if (!opt.audioWav.empty()) {
+    if (game::World* w = game::currentWorld(); w && w->audio) ok &= w->audio->writeWav(opt.audioWav);
+    else LOG_WARN("--audio-wav: a cena não é um arquivo .json com mundo");
+  }
+  if (!opt.saveWorld.empty()) {
+    if (game::World* w = game::currentWorld()) {
+      if (opt.testRestore) w->restore(scene);  // o "Parar" do editor
+      ok &= w->save(opt.saveWorld);
+    }
+    else LOG_WARN("--save-world: a cena não é um arquivo .json com mundo");
+  }
 
   rhi::destroyBuffer(ctx, readback);
   rhi::destroyImage(ctx, output);
@@ -509,19 +717,27 @@ int runWindowed(const Options& opt) {
 
   scene::Scene scene;
   scene::Camera camera;
-  scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
-  if (!scene::buildDemoScene(scene, camera, opt.scene)) return 1;
+  // Monta a cena (no início e quando o editor pede para recarregar depois de criar ou apagar entidades).
+  auto buildScene = [&](const std::string& name) {
+    scene::DemoOptions so = opt.scene;
+    so.name = name;
+    scene.ignoreFileTangents = opt.ignoreTangents;  // antes de carregar o glTF
+    if (!scene::buildDemoScene(scene, camera, so)) return false;
+    applySunOverride(opt, scene);
+    scene.compressTextures = opt.compressTextures;
+    scene.meshLights = opt.meshLights;
+    scene.meshLods = opt.meshLods;
+  if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
+    scene.streamSync = opt.streamSync;
+    scene.textureStreaming = opt.textureStreaming;
+    scene.upload(ctx);
+    return true;
+  };
+  if (!buildScene(opt.scene.name)) return 1;
   if (opt.customCamera) {
     camera.position = opt.cameraPos;
     camera.lookAt(opt.cameraTarget);
   }
-  applySunOverride(opt, scene);
-  scene.compressTextures = opt.compressTextures;
-  scene.meshLights = opt.meshLights;
-  scene.meshLods = opt.meshLods;
-  scene.streamSync = opt.streamSync;
-  scene.textureStreaming = opt.textureStreaming;
-  scene.upload(ctx);
 
   int fbw, fbh;
   glfwGetFramebufferSize(window, &fbw, &fbh);
@@ -555,6 +771,14 @@ int runWindowed(const Options& opt) {
   glfwSetWindowUserPointer(window, &resized);
   glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int, int) { *static_cast<bool*>(glfwGetWindowUserPointer(w)) = true; });
 
+  editor::Editor ed;
+  // Cena de jogo (.json) sem o editor: só a interface de jogo (HUD dos scripts).
+  if (opt.editor || game::currentWorld())
+    ed.init(ctx, window, swapchain.format, uint32_t(swapchain.images.size()), opt.editor);
+  if (ed.ready() && !opt.select.empty() && game::currentWorld()) ed.selectByName(*game::currentWorld(), opt.select);
+  rhi::Buffer shotBuffer{};  // --screenshot: cópia da imagem da janela no último quadro
+  VkExtent2D shotExtent{};
+
   auto recreate = [&]() {
     int w = 0, h = 0;
     glfwGetFramebufferSize(window, &w, &h);
@@ -580,6 +804,10 @@ int runWindowed(const Options& opt) {
   std::vector<double> frameMs;
   if (!cameraKeys.empty()) applyCameraPath(cameraKeys, 0.0f, camera);
   bool looking = false;
+  const double startTime = glfwGetTime();
+  float tPrevInput = -1.0f;
+  const std::vector<game::SimEvent> simEvents = game::parseSimulated(opt.simulate);
+  std::unique_ptr<game::Network> net = startNetwork(opt.hostPort, opt.connectTo);
   float sunElev = std::asin(scene.sunDirection.y);
   float sunAzim = std::atan2(scene.sunDirection.x, -scene.sunDirection.z);
 
@@ -588,7 +816,13 @@ int runWindowed(const Options& opt) {
     double now = glfwGetTime();
     float dt = float(now - lastTime);
     lastTime = now;
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
+    // Esc fecha o programa só fora de um jogo com menu (no jogo, Esc abre o menu de pausa).
+    {
+      game::World* gw = game::currentWorld();
+      const bool hasMenu = gw && !gw->registry.view<game::SystemEntity>().empty();
+      if (!hasMenu && glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(window, 1);
+    }
+    if (ed.ready()) ed.frame(game::currentWorld(), scene, camera, swapchain.extent, dt * 1000.0f);
     ++frameCount;
     const bool warming = frameCount <= opt.warmup;
     if (!warming && runStart < 0.0) runStart = now;
@@ -602,7 +836,7 @@ int runWindowed(const Options& opt) {
     bool moved = false;
     double mx, my;
     glfwGetCursorPos(window, &mx, &my);
-    bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
+    bool rmb = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS && !ed.capturingMouse();
     if (rmb && looking && (mx != lastX || my != lastY) && !playing) {
       camera.yaw += float(mx - lastX) * 0.0025f;
       camera.pitch = glm::clamp(camera.pitch - float(my - lastY) * 0.0025f, -1.55f, 1.55f);
@@ -612,7 +846,7 @@ int runWindowed(const Options& opt) {
     lastX = mx;
     lastY = my;
     float speed = (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS ? 40.0f : 6.0f) * dt;
-    auto key = [&](int k) { return glfwGetKey(window, k) == GLFW_PRESS; };
+    auto key = [&](int k) { return !ed.capturingKeyboard() && glfwGetKey(window, k) == GLFW_PRESS; };
     glm::vec3 move(0.0f);
     if (key(GLFW_KEY_W)) move += camera.forward();
     if (key(GLFW_KEY_S)) move -= camera.forward();
@@ -620,24 +854,48 @@ int runWindowed(const Options& opt) {
     if (key(GLFW_KEY_A)) move -= camera.right();
     if (key(GLFW_KEY_E)) move.y += 1.0f;
     if (key(GLFW_KEY_Q)) move.y -= 1.0f;
-    if (glm::length(move) > 0.0f && !playing) { camera.position += glm::normalize(move) * speed; moved = true; }
-    float sunStep = 0.6f * dt;
+    // Cena com jogador (personagem com "controle": "jogador"): WASD anda, espaço pula, Shift corre; a câmera segue
+    // atrás dele (botão direito + mouse gira). Sem jogador: câmera livre.
+    game::World* world = game::currentWorld();
+    if (world) {
+      const float tNow = float(now - startTime);
+      game::updateInput(world->gameInput, readRawInput(window, !ed.capturingKeyboard(), !ed.capturingMouse()), simEvents,
+                        tPrevInput, tNow);
+      tPrevInput = tNow;
+      // Analógico direito gira a câmera (como o mouse com o botão direito).
+      camera.yaw += world->gameInput.axis("direito_x") * 2.5f * dt;
+      camera.pitch = glm::clamp(camera.pitch - world->gameInput.axis("direito_y") * 1.8f * dt, -1.55f, 1.55f);
+    }
+    glm::vec3 playerFeet(0.0f);
+    // No editor parado (editando), a câmera fica livre mesmo com jogador na cena.
+    glm::vec3 carPos(0.0f), carFwd(0.0f, 0.0f, 1.0f);
+    const bool hasCar = world && world->simulate && world->playerVehicle(carPos, carFwd);
+    const bool hasPlayer = world && world->simulate && (hasCar || world->playerFeet(playerFeet));
+    if (hasPlayer) {
+      world->setPlayerInput(playerInputFrom(world->gameInput, camera.yaw));
+      if (net) world->networkStep = [&net, &scene, &camera, w = world](float stepDt) {
+        net->update(*w, scene, stepDt, playerInputFrom(w->gameInput, camera.yaw));
+      };
+    } else if (glm::length(move) > 0.0f && !playing) { camera.position += glm::normalize(move) * speed; moved = true; }
+    float sunStep = world ? 0.0f : 0.6f * dt;  // controles de desenvolvimento (sol, exposição): só fora de um jogo
     if (key(GLFW_KEY_UP)) { sunElev += sunStep; moved = true; }
     if (key(GLFW_KEY_DOWN)) { sunElev -= sunStep; moved = true; }
     if (key(GLFW_KEY_LEFT)) { sunAzim -= sunStep; moved = true; }
     if (key(GLFW_KEY_RIGHT)) { sunAzim += sunStep; moved = true; }
     sunElev = glm::clamp(sunElev, -0.1f, 1.55f);
     scene.sunDirection = {std::cos(sunElev) * std::sin(sunAzim), std::sin(sunElev), -std::cos(sunElev) * std::cos(sunAzim)};
-    if (key(GLFW_KEY_EQUAL) || key(GLFW_KEY_KP_ADD)) r.settings.exposureCompensation += dt;
-    if (key(GLFW_KEY_MINUS) || key(GLFW_KEY_KP_SUBTRACT)) r.settings.exposureCompensation -= dt;
+    if (!world && (key(GLFW_KEY_EQUAL) || key(GLFW_KEY_KP_ADD))) r.settings.exposureCompensation += dt;
+    if (!world && (key(GLFW_KEY_MINUS) || key(GLFW_KEY_KP_SUBTRACT))) r.settings.exposureCompensation -= dt;
     auto toggle = [&](int k, bool& state, bool& setting) {
       bool down = key(k);
       if (down && !state) setting = !setting;
       state = down;
     };
     static bool fDown = false, mDown = false;
-    toggle(GLFW_KEY_F, fDown, r.settings.depthOfField);
-    toggle(GLFW_KEY_M, mDown, r.settings.motionBlur);
+    if (!world) {
+      toggle(GLFW_KEY_F, fDown, r.settings.depthOfField);
+      toggle(GLFW_KEY_M, mDown, r.settings.motionBlur);
+    }
     (void)moved;  // o histórico temporal é reprojetado: mover a câmera não reinicia nada
 
     float sceneDt = glm::clamp(dt, 0.0f, 0.1f);
@@ -653,7 +911,22 @@ int runWindowed(const Options& opt) {
       mouseWasDown = down;
       sceneDt = penalti.update(sceneDt, p, scene, camera, r, glm::vec2(float(swapchain.extent.width), float(swapchain.extent.height)));
     }
+    if (world) world->setListener(camera.position, camera.forward());
     scene.update(opt.pause ? 0.0f : sceneDt);
+    if (world) {
+      if (world->quitRequested) glfwSetWindowShouldClose(window, 1);
+      applyGameOptions(*world, r.settings);
+    }
+    if (hasCar && world->playerVehicle(carPos, carFwd)) {  // câmera de perseguição: 7 m atrás, 2,5 m acima
+      const glm::vec3 flat = glm::length(glm::vec3(carFwd.x, 0.0f, carFwd.z)) > 1e-3f
+                                 ? glm::normalize(glm::vec3(carFwd.x, 0.0f, carFwd.z)) : glm::vec3(0.0f, 0.0f, 1.0f);
+      camera.position = carPos - flat * 7.0f + glm::vec3(0.0f, 2.5f, 0.0f);
+      camera.lookAt(carPos + glm::vec3(0.0f, 1.0f, 0.0f));
+    } else if (hasPlayer && world->playerFeet(playerFeet)) {  // terceira pessoa: 4,5 m atrás da cabeça
+      const glm::vec3 head = playerFeet + glm::vec3(0.0f, 1.6f, 0.0f);
+      camera.position = head - camera.forward() * 4.5f + glm::vec3(0.0f, 0.4f, 0.0f);
+    }
+    if (world) applyScriptCamera(*world, camera);
     scene.stream(ctx, camera.position);
 
     // ---- Frame ----
@@ -670,6 +943,22 @@ int runWindowed(const Options& opt) {
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(f.cmd, &bi));
     r.record(f.cmd, slot, camera, swapchain.images[imageIndex], swapchain.views[imageIndex], glm::clamp(dt, 0.0f, 0.1f));
+    ed.render(f.cmd, swapchain.views[imageIndex], swapchain.extent);
+    if (!opt.screenshot.empty() && glfwWindowShouldClose(window) && shotBuffer.handle == VK_NULL_HANDLE) {
+      shotExtent = swapchain.extent;
+      shotBuffer = rhi::createBuffer(ctx, VkDeviceSize(shotExtent.width) * shotExtent.height * 4,
+                                     VK_BUFFER_USAGE_TRANSFER_DST_BIT, rhi::MemoryUsage::GpuToCpu);
+      rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                        VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageExtent = {shotExtent.width, shotExtent.height, 1};
+      vkCmdCopyImageToBuffer(f.cmd, swapchain.images[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, shotBuffer.handle, 1, &region);
+      rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                        VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    }
     rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT,
                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -708,6 +997,44 @@ int runWindowed(const Options& opt) {
     }
     slot = (slot + 1) % renderer::Renderer::kFramesInFlight;
 
+    // Opções do jogo: outra qualidade => o renderizador é refeito no lugar com o preset (a cena na GPU continua).
+    if (game::World* w = game::currentWorld(); w && !w->qualityRequest.empty()) {
+      renderer::QualityPreset preset;
+      if (renderer::parseQualityPreset(w->qualityRequest.c_str(), preset)) {
+        vkDeviceWaitIdle(ctx.device);
+        renderer::Settings keep = r.settings;
+        keep.quality = renderer::qualityPreset(preset);
+        r.destroy();
+        r.~Renderer();
+        new (&r) renderer::Renderer();
+        r.init(ctx, scene, swapchain.extent, swapchain.format, keep);
+        LOG_INFO("Qualidade trocada para %s", w->qualityRequest.c_str());
+        lastTime = glfwGetTime();
+      } else {
+        LOG_WARN("qualidade: '%s' desconhecida (baixo, medio, alto, ultra, cinema)", w->qualityRequest.c_str());
+      }
+      w->qualityRequest.clear();
+    }
+
+    // Editor: entidade criada ou apagada => a cena foi gravada num arquivo temporário e é montada de novo (a GPU
+    // recebe tudo outra vez). A câmera continua onde estava.
+    if (std::string reload; ed.consumeReload(reload)) {
+      vkDeviceWaitIdle(ctx.device);
+      const scene::Camera keep = camera;
+      r.destroy();
+      scene.destroy(ctx);
+      // Objetos refeitos no lugar (mesmo tipo, não constantes): os nomes `scene` e `r` passam a se referir aos novos.
+      scene.~Scene();
+      new (&scene) scene::Scene();
+      r.~Renderer();
+      new (&r) renderer::Renderer();
+      if (!buildScene(reload)) FATAL("Editor: não consegui recarregar %s", reload.c_str());
+      camera = keep;
+      if (game::World* w = game::currentWorld()) w->simulate = false;  // continua no modo de edição
+      r.init(ctx, scene, swapchain.extent, swapchain.format, opt.render);
+      lastTime = glfwGetTime();
+    }
+
     ++fpsFrames;
     if (now - fpsTimer >= 0.5) {
       char title[160];
@@ -727,6 +1054,17 @@ int runWindowed(const Options& opt) {
   }
 
   vkDeviceWaitIdle(ctx.device);
+  if (shotBuffer.handle != VK_NULL_HANDLE) {
+    vmaInvalidateAllocation(ctx.allocator, shotBuffer.allocation, 0, VK_WHOLE_SIZE);
+    std::vector<uint8_t> px(static_cast<const uint8_t*>(shotBuffer.mapped),
+                            static_cast<const uint8_t*>(shotBuffer.mapped) + size_t(shotExtent.width) * shotExtent.height * 4);
+    if (swapchain.format == VK_FORMAT_B8G8R8A8_SRGB || swapchain.format == VK_FORMAT_B8G8R8A8_UNORM)
+      for (size_t i = 0; i < px.size(); i += 4) std::swap(px[i], px[i + 2]);  // BGRA -> RGBA
+    for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
+    if (util::writePng(opt.screenshot, px.data(), shotExtent.width, shotExtent.height)) LOG_INFO("Tela salva em %s", opt.screenshot.c_str());
+    rhi::destroyBuffer(ctx, shotBuffer);
+  }
+  ed.shutdown();
   if (opt.quitAfter > 0.0f && frameMs.size() >= 4) {
     std::vector<double> v(frameMs.begin() + std::ptrdiff_t(frameMs.size() / 2), frameMs.end());  // segunda metade
     double sum = 0.0;
@@ -753,6 +1091,7 @@ int runWindowed(const Options& opt) {
   glfwTerminate();
   return 0;
 }
+
 
 }  // namespace
 

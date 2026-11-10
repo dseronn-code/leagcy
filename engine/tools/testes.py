@@ -160,7 +160,7 @@ def main():
     if not os.path.exists(binario) and os.path.exists(os.path.join('build', 'Release', 'legacy.exe')):
         binario = os.path.join('build', 'Release', 'legacy.exe')
     resultados = []
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         for t in TESTES:
             if args.so and args.so not in t.__name__:
                 continue

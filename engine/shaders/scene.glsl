@@ -87,12 +87,14 @@ struct Material {  // == scene::Material (192 bytes)
   float pad4b, pad4c;
 };
 
-struct InstanceData {  // == InstanceGpu em scene.cpp
+struct InstanceData {  // == Scene::InstanceGpu
   uint64_t vertices;
   uint64_t indices;
   uint material;
-  uint pad0;
+  uint meshletLodBase;  // geometria virtualizada: MeshletLod de cada meshlet (uints a partir de `meshlets`); 0 = sem
   uint64_t colors;  // cor por vértice (glTF COLOR_0, vec4 linear) ou 0
+  uint64_t meshlets;  // bloco dos meshlets da malha (só com geometria virtualizada)
+  uint meshletVertexBase, meshletTriangleBase;
 };
 
 struct PointLight {  // == scene::PointLight (esfera/spot ou triângulo emissivo)

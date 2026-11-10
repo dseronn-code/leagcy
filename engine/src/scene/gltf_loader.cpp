@@ -2,6 +2,10 @@
 // materiais PBR e texturas (com espaço de cor correto por uso).
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
+#include <meshoptimizer.h>
+#include <basisu_transcoder.h>
+#include <draco/compression/decode.h>
+#include <memory>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
@@ -18,6 +22,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -76,8 +81,54 @@ struct Loader {
     return nullptr;
   }
 
+  // Textura KTX2 (KHR_texture_basisu: ETC1S ou UASTC, com zstd) decodificada para RGBA8 pelo Basis Universal; o resto
+  // do caminho é o de sempre (mipmaps e BC7 do motor).
+  static bool decodeKtx2(const std::vector<uint8_t>& bytes, int& w, int& h, std::vector<uint8_t>& rgba) {
+    static const bool init = [] { basist::basisu_transcoder_init(); return true; }();
+    (void)init;
+    basist::ktx2_transcoder tr;
+    if (!tr.init(bytes.data(), uint32_t(bytes.size())) || !tr.start_transcoding()) return false;
+    w = int(tr.get_width());
+    h = int(tr.get_height());
+    if (w <= 0 || h <= 0) return false;
+    rgba.resize(size_t(w) * h * 4);
+    return tr.transcode_image_level(0, 0, 0, rgba.data(), uint32_t(w * h), basist::transcoder_texture_format::cTFRGBA32);
+  }
+  std::vector<uint8_t> imageBytes(const cgltf_image* img) const {
+    if (img->buffer_view) {
+      const uint8_t* src = static_cast<const uint8_t*>(img->buffer_view->buffer->data) + img->buffer_view->offset;
+      return std::vector<uint8_t>(src, src + img->buffer_view->size);
+    }
+    if (!img->uri) return {};
+    std::string uri = img->uri;
+    cgltf_decode_uri(uri.data());
+    uri.resize(std::strlen(uri.c_str()));
+    std::ifstream f(dir / uri, std::ios::binary);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  }
+
   int32_t texture(const cgltf_texture_view& view, bool srgb, bool normalMap = false) {
-    if (!view.texture || !view.texture->image) return -1;
+    if (!view.texture) return -1;
+    if (view.texture->has_basisu && view.texture->basisu_image) {
+      const cgltf_image* img = view.texture->basisu_image;
+      const cgltf_sampler* smp = view.texture->sampler;
+      auto key = std::make_tuple(img, srgb, smp ? smp->wrap_s : 10497, smp ? smp->wrap_t : 10497);
+      if (auto it = textureCache.find(key); it != textureCache.end()) return it->second;
+      TextureData t;
+      int w = 0, h = 0;
+      if (decodeKtx2(imageBytes(img), w, h, t.rgba)) {
+        t.width = uint32_t(w);
+        t.height = uint32_t(h);
+        t.srgb = srgb;
+        t.normalMap = normalMap;
+        t.name = img->uri ? img->uri : (img->name ? img->name : "(ktx2 embutida)");
+        setWrap(t, smp);
+        return textureCache[key] = int32_t(scene.addTexture(std::move(t)));
+      }
+      LOG_WARN("Textura KTX2 não decodificada: %s", img->uri ? img->uri : "(embutida)");
+      if (!view.texture->image) return textureCache[key] = -1;  // sem alternativa PNG/JPG
+    }
+    if (!view.texture->image) return -1;
     const cgltf_image* img = view.texture->image;
     const cgltf_sampler* smp = view.texture->sampler;
     auto key = std::make_tuple(img, srgb, smp ? smp->wrap_s : 10497, smp ? smp->wrap_t : 10497);
@@ -279,9 +330,11 @@ struct Loader {
     m.root = root;
     auto nodeIndex = [&](const cgltf_node* n) { return uint32_t(n - data->nodes); };
     m.nodes.resize(data->nodes_count);
+    m.nodeNames.resize(data->nodes_count);
     for (size_t i = 0; i < data->nodes_count; ++i) {
       const cgltf_node& n = data->nodes[i];
       ModelNode& mn = m.nodes[i];
+      if (n.name) m.nodeNames[i] = n.name;
       mn.parent = n.parent ? int(nodeIndex(n.parent)) : -1;
       if (n.name) mn.name = n.name;
       if (n.has_matrix) {
@@ -521,6 +574,128 @@ bool loadImageFile(const std::string& path, bool srgb, bool normalMap, TextureDa
   return true;
 }
 
+// EXT_meshopt_compression (gltfpack): descomprime cada buffer view comprimido para a memória que o cgltf lê
+// (buffer_view->data, liberado pelo cgltf_free). Atributos quantizados (KHR_mesh_quantization) o cgltf já converte na
+// leitura (cgltf_accessor_read_float entende inteiros normalizados).
+bool decodeMeshopt(cgltf_data* data, const std::string& path) {
+  for (size_t i = 0; i < data->buffer_views_count; ++i) {
+    cgltf_buffer_view& bv = data->buffer_views[i];
+    if (!bv.has_meshopt_compression) continue;
+    const cgltf_meshopt_compression& mc = bv.meshopt_compression;
+    if (!mc.buffer || !mc.buffer->data) {
+      LOG_ERROR("%s: buffer comprimido (meshopt) sem dados", path.c_str());
+      return false;
+    }
+    const auto* src = static_cast<const unsigned char*>(mc.buffer->data) + mc.offset;
+    void* dst = std::malloc(mc.count * mc.stride);
+    if (!dst) return false;
+    int rc = -1;
+    switch (mc.mode) {
+      case cgltf_meshopt_compression_mode_attributes: rc = meshopt_decodeVertexBuffer(dst, mc.count, mc.stride, src, mc.size); break;
+      case cgltf_meshopt_compression_mode_triangles: rc = meshopt_decodeIndexBuffer(dst, mc.count, mc.stride, src, mc.size); break;
+      case cgltf_meshopt_compression_mode_indices: rc = meshopt_decodeIndexSequence(dst, mc.count, mc.stride, src, mc.size); break;
+      default: break;
+    }
+    if (rc != 0) {
+      std::free(dst);
+      LOG_ERROR("%s: falha ao descomprimir a malha (meshopt, view %zu)", path.c_str(), i);
+      return false;
+    }
+    switch (mc.filter) {
+      case cgltf_meshopt_compression_filter_octahedral: meshopt_decodeFilterOct(dst, mc.count, mc.stride); break;
+      case cgltf_meshopt_compression_filter_quaternion: meshopt_decodeFilterQuat(dst, mc.count, mc.stride); break;
+      case cgltf_meshopt_compression_filter_exponential: meshopt_decodeFilterExp(dst, mc.count, mc.stride); break;
+      default: break;
+    }
+    bv.data = dst;
+  }
+  return true;
+}
+
+// KHR_draco_mesh_compression: decodifica cada primitiva comprimida e aponta os acessores dela (atributos e índices)
+// para os dados decodificados (buffer views criadas aqui, fora das listas do cgltf; liberadas com o DracoStorage). O
+// resto do carregador lê os acessores como sempre.
+struct DracoStorage {
+  std::vector<std::unique_ptr<cgltf_buffer_view>> views;
+  std::vector<std::vector<uint8_t>> blobs;
+};
+
+static void pointAccessor(DracoStorage& st, cgltf_accessor* acc, std::vector<uint8_t>&& bytes, cgltf_component_type ct,
+                          size_t comps, size_t count) {
+  st.blobs.push_back(std::move(bytes));
+  auto view = std::make_unique<cgltf_buffer_view>();
+  *view = cgltf_buffer_view{};
+  view->data = st.blobs.back().data();
+  view->size = st.blobs.back().size();
+  acc->buffer_view = view.get();
+  acc->offset = 0;
+  acc->component_type = ct;
+  acc->normalized = 0;
+  acc->stride = comps * 4;
+  acc->count = count;
+  acc->is_sparse = 0;
+  st.views.push_back(std::move(view));
+}
+
+bool decodeDraco(cgltf_data* data, const std::string& path, DracoStorage& st) {
+  for (size_t mi = 0; mi < data->meshes_count; ++mi)
+    for (size_t pi = 0; pi < data->meshes[mi].primitives_count; ++pi) {
+      cgltf_primitive& prim = data->meshes[mi].primitives[pi];
+      if (!prim.has_draco_mesh_compression) continue;
+      const cgltf_draco_mesh_compression& dc = prim.draco_mesh_compression;
+      if (!dc.buffer_view || !dc.buffer_view->buffer || !dc.buffer_view->buffer->data) {
+        LOG_ERROR("%s: primitiva Draco sem dados", path.c_str());
+        return false;
+      }
+      draco::DecoderBuffer buf;
+      buf.Init(static_cast<const char*>(dc.buffer_view->buffer->data) + dc.buffer_view->offset, dc.buffer_view->size);
+      draco::Decoder decoder;
+      auto res = decoder.DecodeMeshFromBuffer(&buf);
+      if (!res.ok()) {
+        LOG_ERROR("%s: falha ao decodificar Draco (%s)", path.c_str(), res.status().error_msg());
+        return false;
+      }
+      std::unique_ptr<draco::Mesh> mesh = std::move(res).value();
+      const size_t points = mesh->num_points();
+      for (size_t a = 0; a < dc.attributes_count; ++a) {
+        const int uid = int(dc.attributes[a].data - data->accessors);  // o cgltf guarda o id do Draco assim
+        const draco::PointAttribute* att = mesh->GetAttributeByUniqueId(uint32_t(uid));
+        cgltf_accessor* target = nullptr;
+        for (size_t k = 0; k < prim.attributes_count; ++k)
+          if (std::strcmp(prim.attributes[k].name, dc.attributes[a].name) == 0) target = prim.attributes[k].data;
+        if (!att || !target) continue;
+        const size_t comps = std::clamp<size_t>(att->num_components(), 1, 4);
+        std::vector<uint8_t> bytes(points * comps * 4);
+        const bool asUint = std::strncmp(dc.attributes[a].name, "JOINTS_", 7) == 0;
+        for (size_t i = 0; i < points; ++i) {
+          const draco::AttributeValueIndex vi = att->mapped_index(draco::PointIndex(uint32_t(i)));
+          if (asUint) {
+            uint32_t v[4] = {};
+            att->ConvertValue<uint32_t>(vi, int8_t(comps), v);
+            std::memcpy(&bytes[i * comps * 4], v, comps * 4);
+          } else {
+            float v[4] = {};
+            att->ConvertValue<float>(vi, int8_t(comps), v);
+            std::memcpy(&bytes[i * comps * 4], v, comps * 4);
+          }
+        }
+        pointAccessor(st, target, std::move(bytes), asUint ? cgltf_component_type_r_32u : cgltf_component_type_r_32f, comps, points);
+      }
+      if (prim.indices) {
+        std::vector<uint8_t> bytes(size_t(mesh->num_faces()) * 3 * 4);
+        for (uint32_t f = 0; f < mesh->num_faces(); ++f) {
+          const draco::Mesh::Face& face = mesh->face(draco::FaceIndex(f));
+          for (int c = 0; c < 3; ++c) {
+            const uint32_t idx = face[c].value();
+            std::memcpy(&bytes[(size_t(f) * 3 + size_t(c)) * 4], &idx, 4);
+          }
+        }
+        pointAccessor(st, prim.indices, std::move(bytes), cgltf_component_type_r_32u, 1, size_t(mesh->num_faces()) * 3);
+      }
+    }
+  return true;
+}
+
 bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransform, int* modelOut) {
   cgltf_options options{};
   cgltf_data* data = nullptr;
@@ -530,6 +705,11 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
   }
   if (cgltf_load_buffers(&options, data, path.c_str()) != cgltf_result_success) {
     LOG_ERROR("Buffers de %s não carregados", path.c_str());
+    cgltf_free(data);
+    return false;
+  }
+  DracoStorage draco;  // dados das primitivas Draco: vivos até o fim desta função
+  if (!decodeMeshopt(data, path) || !decodeDraco(data, path, draco)) {
     cgltf_free(data);
     return false;
   }

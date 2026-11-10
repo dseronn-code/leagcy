@@ -18,8 +18,23 @@ O Legacy Engine baixa estas bibliotecas na compilação (CMake FetchContent). Ne
 | [cgltf](https://github.com/jkuhlmann/cgltf) | Leitor glTF | MIT | Manter o aviso |
 | [stb_image](https://github.com/nothings/stb) | Imagens | MIT / domínio público | — |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) | Headers (dentro do NRI) | Apache 2.0 / MIT | — |
+| [Jolt Physics](https://github.com/jrouwe/JoltPhysics) v5.2.0 | Física: corpos rígidos, personagem, colisão por malha | MIT | Manter o aviso |
+| [EnTT](https://github.com/skypjack/entt) v3.13.2 | Entidades e componentes da camada de jogo | MIT | Manter o aviso |
+| [nlohmann/json](https://github.com/nlohmann/json) v3.11.3 | Cenas em arquivo (.json) | MIT | Manter o aviso |
+| [Dear ImGui](https://github.com/ocornut/imgui) v1.92.8 (docking) | Interface do editor | MIT | Manter o aviso |
+| [ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo) | Alças de mover/girar no editor | MIT | Manter o aviso |
+| [Lua](https://github.com/lua/lua) v5.4.7 | Scripts | MIT | Manter o aviso |
+| [sol2](https://github.com/ThePhD/sol2) v3.5.0 | Ponte C++ ↔ Lua | MIT | Manter o aviso |
+| [miniaudio](https://github.com/mackron/miniaudio) 0.11.24 | Áudio 3D | Domínio público ou MIT-0 | — |
+| [Recast/Detour](https://github.com/recastnavigation/recastnavigation) 1.6.0 | Navegação dos NPCs | zlib | Não apresentar como próprio; manter o aviso nos fontes |
+| [Roboto](https://fonts.google.com/specimen/Roboto) (fonte, `fontes/Roboto-Medium.ttf`) | Texto do HUD | Apache 2.0 | Manter o aviso de licença |
+| Raposa (`assets/Fox`, glTF Sample Models) | Personagem animado de exemplo (`cenas/parque.json`) | CC-BY 4.0 | Créditos: PixelMannen, @tomkranis, AsoboStudio e @scurest |
+| [ENet](https://github.com/lsalzman/enet) 1.3.18 | Multijogador (UDP) | MIT | Manter o aviso de copyright |
+| [meshoptimizer](https://github.com/zeux/meshoptimizer) 0.22 | Malhas comprimidas dos glTF | MIT | Manter o aviso de copyright |
+| [Basis Universal](https://github.com/BinomialLLC/basis_universal) 1.60 (só o transcodificador, com zstd) | Texturas KTX2 dos glTF | Apache 2.0 (zstd: BSD) | Incluir o aviso da Apache 2.0 e o NOTICE ao distribuir |
+| [Draco](https://github.com/google/draco) 1.5.7 | Malhas comprimidas dos glTF (Draco) | Apache 2.0 | Incluir o aviso da Apache 2.0 ao distribuir |
 
-## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd-src/LICENSE.txt`)
+## NVIDIA NRD — o que a licença exige (texto completo em `build/_deps/nrd_sdk-src/LICENSE.txt`)
 
 - **Uso comercial é permitido**, inclusive em jogos vendidos, sem pagamento.
 - **Crédito obrigatório:** jogos e aplicativos que usam o NRD precisam mostrar a marca da NVIDIA / o nome

@@ -71,6 +71,7 @@ struct Settings {
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
+  float lodPixels = 1.0f;        // geometria virtualizada: erro máximo de um pedaço na tela, em pixels (--lod-pixels)
   bool subsurface = true;        // espalhamento subsuperficial da pele (--no-sss: medição de energia)
   bool cloudReference = false;   // nuvens da tela por Monte Carlo volumétrico sem aproximação (--clouds-reference)
   bool fogReference = false;     // névoa integrada por pixel com sombra e céu exatos, sem grade (--fog-reference; RT)
@@ -116,6 +117,10 @@ enum DebugView : uint32_t {
   // estimativa do ReSTIR e referência por força bruta (todas as luzes no alcance, com sombra).
   kDebugLocalLights = 5,          // "luzes"
   kDebugLocalLightsReference = 6, // "luzes-ref"
+  // Cache de radiância no ponto visível (M, sem sol nem luzes locais) e a amostra do raio de GI que o alimenta,
+  // na mesma codificação: a média de muitos quadros de "gi-raio" deve bater com "cache" (diagnóstico do viés).
+  kDebugRadianceCache = 7,        // "cache"
+  kDebugGiSample = 8,             // "gi-raio"
 };
 bool parseDebugView(const char* name, uint32_t& out);
 
@@ -186,6 +191,7 @@ class Renderer {
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
+    rhi::Image reactive;  // máscara reativa das partículas (o TAA corta o histórico onde elas passam)
     std::array<rhi::Image, 2> taa;
     std::array<rhi::Image, 2> clouds;  // nuvens da vista principal em meia resolução (atual / anterior)
     std::array<rhi::Image, 2> fogInject;  // névoa volumétrica: células da grade 3D (atual / anterior)
@@ -298,7 +304,9 @@ class Renderer {
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;
   rhi::PassLayout gbufferLayout_, tonemapLayout_, particleLayout_;
   VkPipeline particlePipeline_ = VK_NULL_HANDLE;
-  rhi::Buffer emitterBuffer_;  // scene::ParticleEmitter (só com partículas na cena)
+  rhi::Buffer emitterBuffer_[kFramesInFlight];  // scene::ParticleEmitter por slot (o jogo move e dispara emissores)
+  uint64_t emitterVersion_[kFramesInFlight] = {};
+  bool reactiveCleared_ = false;
   VkPipeline gbufferPipeline_ = VK_NULL_HANDLE, tonemapPipeline_ = VK_NULL_HANDLE;
   VkPipeline gbufferBlendPipeline_ = VK_NULL_HANDLE;  // decals BLEND: mistura na cor, normal e especular
 

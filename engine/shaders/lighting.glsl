@@ -90,7 +90,7 @@ void hairBSDF(vec3 T, vec3 N, vec3 V, vec3 L, vec3 color, float roughness, out v
 // Tangente do fio de cabelo no pixel (triângulo do visibility buffer, média das tangentes dos 3 vértices).
 vec3 hairTangentAt(ivec2 id) {
   uvec2 vis = texelFetch(gVisibility, id, 0).xy;
-  if (vis.x == 0u) return vec3(0.0, 1.0, 0.0);
+  if (vis.x == 0u || (vis.y & 0x80000000u) != 0u) return vec3(0.0, 1.0, 0.0);  // sem triângulo da lista (LOD)
   uint obj = vis.x - 1u;
   InstanceData d = instances[obj];
   IndexData ib = IndexData(d.indices);
@@ -304,18 +304,22 @@ vec3 cachedIndirect(vec3 P, vec3 Ng, vec3 N) {
 
 // Radiância que chega por um raio de 2º rebote: luz direta no ponto atingido + indireta pelo cache (difusa e,
 // aproximada pelo mesmo M, especular). Ruído branco.
+vec3 secondaryRadianceAt(HitInfo h, vec3 dir, inout uint st) {
+  Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv, h.color);
+  BrdfContext c = makeBrdfContext(h.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
+  vec2 uSun = rand2(st), uLight = rand2(st);
+  vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st), false);
+  if (perfSkip(PERF_DIAG_CACHE_REF2)) return L + pathContinue(h, s, c, st);  // diagnóstico: o resto por path tracing
+  L += (s.diffuseColor * c.diffuseWeight + specularAlbedo(s.f0, s.f90, c.dfg) * c.energyCompensation) * cachedIndirect(h.P, h.Ng, h.N);
+  return L;
+}
 vec3 secondaryRadiance(vec3 origin, vec3 dir, inout uint st) {
   HitInfo h;
   vec3 Tg;
   bool blocked;
   if (!traceHitThroughGlass(origin, dir, 1e4, h, Tg, blocked)) return clampFirefly(Tg * sampleSky(dir));
   if (blocked) return vec3(0.0);
-  Surface s = evalMaterial(materials[h.material], h.P, h.N, vec4(0.0), h.uv, h.color);
-  BrdfContext c = makeBrdfContext(h.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
-  vec2 uSun = rand2(st), uLight = rand2(st);
-  vec3 L = hitDirectLighting(h, s, c, uSun, uLight, pcg(st), false);
-  L += (s.diffuseColor * c.diffuseWeight + specularAlbedo(s.f0, s.f90, c.dfg) * c.energyCompensation) * cachedIndirect(h.P, h.Ng, h.N);
-  return clampFirefly(Tg * L);
+  return clampFirefly(Tg * secondaryRadianceAt(h, dir, st));
 }
 
 // Radiância que sai de `hit` para a origem do raio (ver traceRadiance, logo abaixo).
@@ -336,6 +340,11 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
   vec3 M;
   bool cached = rcQuery(hit.P, hit.Ng, M);
   if (!cached) M = sampleSky(normalize(hit.N + vec3(0, 1, 0))) * 0.5;  // célula nova: céu aproximado
+  if (perfSkip(PERF_DIAG_CACHE_DIRECT)) {  // diagnóstico: uma amostra nova no lugar do cache (sem reuso espacial)
+    vec3 dd = cosineSampleHemisphere(hit.N, rand2(st));
+    M = dot(dd, hit.Ng) > 0.0 ? secondaryRadiance(offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t), dd, st) : vec3(0.0);
+    cached = true;
+  }
   radiance += s.diffuseColor * bc.diffuseWeight * M;
   vec3 hitOrigin = offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t);
   // Indireta especular: superfícies espelhadas refletem por um raio (amostra VNDF); as outras, pelo cache.
@@ -482,6 +491,7 @@ void main() {
   float sunVisSum = 0.0;  // só para as visualizações de depuração
   // Distância dos raios indiretos para o NRD: média no difuso, menor acerto no especular (NRD_FrontEnd_SpecHitDistAveraging).
   float diffHitSum = 0.0, diffHitCount = 0.0, specHitMin = HIT_DIST_MISS + 1.0;
+  vec3 debugGiSample = vec3(0.0);  // --debug-view gi-raio: radiância que o raio de GI trouxe (a que alimenta o cache)
   for (uint k = 0u; k < spp; ++k) {
     SampleGen sg = makeSampleGen(uvec2(id), frame.frameInfo.x * spp + k);
 
@@ -531,6 +541,7 @@ void main() {
     if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI) && giTake) {
       float t;
       vec3 Li = traceRadiance(origin, dirD, sg, 0u, t, false);
+      debugGiSample = Li;
       diffuse += bc.diffuseWeight * Li * aoDiffuse * (giHalf ? 2.0 : 1.0);
       if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
       diffHitSum += t;
@@ -644,10 +655,15 @@ void main() {
   }
 
   uint debugView = uint(frame.environment.y);
-  if (debugView == 5u || debugView == 6u) {
+  if (debugView >= 5u && debugView <= 8u) {
     vec3 v = localLight;
 #ifdef RAY_TRACING
     if (debugView == 6u) v = localLightsReference(sf, bc);
+    if (debugView == 7u) {  // cache: M guardado na célula do ponto visível (0 se a célula não tem dados)
+      vec3 M;
+      v = rcQuery(g.P, g.Ng, M) ? M : vec3(0.0);
+    }
+    if (debugView == 8u) v = debugGiSample;  // gi-raio: uma amostra por quadro (a média de vários dá E[Li])
 #endif
     v = v / preExposure() * frame.environment.z;
     imageStore(outDiffuse, id, vec4(v / (1.0 + v), 1.0));  // codificação inversível: nada satura no PNG

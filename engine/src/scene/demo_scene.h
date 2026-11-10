@@ -15,6 +15,8 @@ struct DemoOptions {
   float rain = 0.0f;            // chuva 0..1 (--rain): molhado, poças e respingos
   uint32_t lightCount = 0;      // 0 = padrão da cena
   uint32_t cityBlocks = 16;     // cena "city": quarteirões por lado (16 = ~5 mil objetos; 64 = ~90 mil)
+  uint32_t rocks = 16;          // cena "nanite": rochas por lado (cada uma com ~590 mil triângulos)
+  uint32_t rockSegments = 768;  // cena "nanite": resolução da rocha (segmentos da esfera; triângulos = segmentos²)
 };
 
 // Monta a cena de demonstração escolhida. Retorna false se os assets não existirem.

@@ -2,9 +2,22 @@
 
 #include "core/paths.h"
 
+#include <filesystem>
 #include <fstream>
+#include <vector>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace rhi {
+
 
 VkShaderModule loadShader(Context& ctx, const std::string& name) {
   std::string path = core::shaderDir() + "/" + name + ".spv";

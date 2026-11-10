@@ -9,6 +9,7 @@ layout(location = 0) in vec2 vCorner;
 layout(location = 1) in vec4 vColor;
 layout(location = 2) in float vViewDepth;
 layout(location = 0) out vec4 outColor;
+layout(location = 1) out float outReactive;  // máscara reativa para o TAA (soma)
 
 void main() {
   float r2 = dot(vCorner, vCorner);
@@ -24,4 +25,6 @@ void main() {
   // do float16 — e centenas delas somadas na mistura viram infinito, que o TAA espalharia pela imagem. 200 já é muito
   // acima do branco da tela (exposição ~1): o que passa disso aparece estourado de qualquer forma.
   outColor = vec4(min(vColor.rgb * k, vec3(200.0)), vColor.a * k);
+  // Quanto esta partícula pesa no pixel: cobertura (fumaça) ou brilho (chama, que é luz pura).
+  outReactive = clamp(vColor.a * k * 4.0 + dot(outColor.rgb, vec3(0.2126, 0.7152, 0.0722)) * 0.5, 0.0, 1.0);
 }

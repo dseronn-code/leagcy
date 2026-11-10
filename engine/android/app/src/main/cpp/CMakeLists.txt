@@ -15,6 +15,19 @@ FetchContent_Declare(stb GIT_REPOSITORY https://github.com/nothings/stb.git GIT_
 FetchContent_Declare(bc7enc GIT_REPOSITORY https://github.com/richgel999/bc7enc_rdo.git GIT_TAG b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 SOURCE_SUBDIR _sem_cmake)
 FetchContent_Declare(mikktspace GIT_REPOSITORY https://github.com/mmikk/MikkTSpace.git GIT_TAG 3e895b49d05ea07e4c2133156cfa94369e19e409 SOURCE_SUBDIR _sem_cmake)
 FetchContent_MakeAvailable(vma glm cgltf stb bc7enc mikktspace)
+# Leitura de glTF comprimidos (meshopt, KTX2, Draco): as mesmas versões do motor.
+FetchContent_Declare(meshoptimizer GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git GIT_TAG v0.22 GIT_SHALLOW TRUE)
+FetchContent_Declare(basisu GIT_REPOSITORY https://github.com/BinomialLLC/basis_universal.git GIT_TAG v1_60 GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _so_o_transcodificador)
+set(DRACO_JS_GLUE OFF CACHE BOOL "" FORCE)
+set(DRACO_TESTS OFF CACHE BOOL "" FORCE)
+set(DRACO_TRANSCODER_SUPPORTED OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(draco GIT_REPOSITORY https://github.com/google/draco.git GIT_TAG 1.5.7 GIT_SHALLOW TRUE EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(meshoptimizer basisu draco)
+add_library(legacy_basisu STATIC ${basisu_SOURCE_DIR}/transcoder/basisu_transcoder.cpp ${basisu_SOURCE_DIR}/zstd/zstddeclib.c)
+target_include_directories(legacy_basisu SYSTEM PUBLIC ${basisu_SOURCE_DIR}/transcoder ${basisu_SOURCE_DIR}/zstd)
+target_compile_definitions(legacy_basisu PUBLIC BASISD_SUPPORT_KTX2=1 BASISD_SUPPORT_KTX2_ZSTD=1)
+target_compile_options(legacy_basisu PRIVATE -w)
 
 add_library(native_app_glue STATIC ${ANDROID_NDK}/sources/android/native_app_glue/android_native_app_glue.c)
 target_include_directories(native_app_glue PUBLIC ${ANDROID_NDK}/sources/android/native_app_glue)
@@ -26,12 +39,16 @@ target_include_directories(mikktspace SYSTEM PUBLIC ${mikktspace_SOURCE_DIR})
 
 file(GLOB_RECURSE ENGINE_SOURCES ${ENGINE}/src/*.cpp)
 list(REMOVE_ITEM ENGINE_SOURCES ${ENGINE}/src/main.cpp ${ENGINE}/src/renderer/nrd_denoiser.cpp ${ENGINE}/src/renderer/upscaler.cpp)
+# O celular roda só o pênalti: sem editor (ImGui/GLFW) e sem a camada de jogo genérica (Jolt, Lua, ENet, áudio,
+# navegação), que o pênalti não usa. LEGACY_NO_GAMELAYER tira as cenas .json do demo_scene.
+list(FILTER ENGINE_SOURCES EXCLUDE REGEX "/src/editor/|/src/game/(world|physics|scripting|navigation|network|audio|input)\\.cpp$")
 add_library(penalti SHARED ${ENGINE_SOURCES} ${ENGINE}/sem_nrd/sem_nrd.cpp android_main.cpp)
 target_include_directories(penalti PRIVATE ${ENGINE}/src)
-target_include_directories(penalti SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
+target_include_directories(penalti SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR} ${draco_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 target_compile_definitions(penalti PRIVATE
-  GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_RADIANS VK_USE_PLATFORM_ANDROID_KHR LEGACY_MIKKTSPACE=1
+  GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_RADIANS VK_USE_PLATFORM_ANDROID_KHR LEGACY_MIKKTSPACE=1 LEGACY_NO_GAMELAYER=1
   SHADER_DIR="shaders" ASSET_DIR="assets" GAME_DIR="game")
-target_link_libraries(penalti PRIVATE native_app_glue GPUOpen::VulkanMemoryAllocator glm::glm bc7enc mikktspace vulkan android log)
+target_link_libraries(penalti PRIVATE native_app_glue GPUOpen::VulkanMemoryAllocator glm::glm bc7enc mikktspace
+                                      meshoptimizer legacy_basisu draco::draco vulkan android log)
 # A NativeActivity procura ANativeActivity_onCreate: não deixar o linker jogar fora o ponto de entrada da glue.
 set_target_properties(penalti PROPERTIES LINK_FLAGS "-u ANativeActivity_onCreate")

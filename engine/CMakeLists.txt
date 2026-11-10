@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.30)  # o NRD exige 3.30
 project(LegacyEngine LANGUAGES C CXX)
+# CMake 4 recusa bibliotecas que pedem uma versão mínima antiga (a Recast pede 3.0): elas configuram com as
+# políticas da 3.5 em diante. Sem efeito no CMake 3.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,10 +95,11 @@ FetchContent_Declare(nri
   GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRI.git
   GIT_TAG v191
   GIT_SHALLOW TRUE)
-FetchContent_Declare(nrd
+# NRD pelo commit do v4.18.0 de 09/10/2026: a NVIDIA moveu a tag v4.18.0 para um commit que exige o NRI 191 (o build
+# do zero quebrava). Nome novo (nrd_sdk) para os builds antigos baixarem de novo em vez de tentar mover a cópia rasa.
+FetchContent_Declare(nrd_sdk
   GIT_REPOSITORY https://github.com/NVIDIA-RTX/NRD.git
-  GIT_TAG v4.18.0
-  GIT_SHALLOW TRUE)
+  GIT_TAG e06852bd545973cb224eb28820b891205cfc1624)
 
 # Upscalers dos fabricantes pela extensão Upscaler do NRI (src/renderer/upscaler.cpp). Sem eles o motor usa o
 # próprio TAA/TAAU; com eles, --upscaler dlss|fsr escolhe em tempo de execução (volta ao TAAU se a GPU não suportar).
@@ -115,7 +119,7 @@ if(LEGACY_DLSS)
     GIT_SHALLOW TRUE
     SOURCE_SUBDIR _sem_cmake)
 endif()
-FetchContent_MakeAvailable(nrd)
+FetchContent_MakeAvailable(nrd_sdk)
 endif()  # LEGACY_NRD
 
 # Compressão de texturas BC7/BC5 (bc7enc_rdo, Rich Geldreich — MIT ou domínio público). Só os codificadores e o
@@ -167,6 +171,138 @@ foreach(SRC ${SHADER_SOURCES})
 endforeach()
 add_custom_target(shaders DEPENDS ${SPIRV_FILES})
 
+# ---- Camada de jogo (motor completo) ----
+# EnTT: registro de entidades e componentes (ECS), só headers, MIT (usado no Minecraft Bedrock).
+FetchContent_Declare(entt
+  GIT_REPOSITORY https://github.com/skypjack/entt.git
+  GIT_TAG v3.13.2
+  GIT_SHALLOW TRUE)
+# nlohmann/json: formato das cenas em arquivo, só headers, MIT.
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+FetchContent_Declare(nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
+  GIT_SHALLOW TRUE)
+# Jolt Physics: corpos rígidos, personagem e veículos, MIT (o motor de física do Horizon Forbidden West e do
+# Death Stranding 2). Runtime do MSVC dinâmico (/MD), igual ao resto do motor.
+set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+set(ENABLE_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(jolt
+  GIT_REPOSITORY https://github.com/jrouwe/JoltPhysics.git
+  GIT_TAG v5.2.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR Build)
+FetchContent_MakeAvailable(entt nlohmann_json jolt)
+
+# Editor: Dear ImGui (ramo docking: janelas encaixáveis) + ImGuizmo (alças de mover/girar/escalar), MIT.
+FetchContent_Declare(imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG v1.92.8-docking
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_Declare(imguizmo
+  GIT_REPOSITORY https://github.com/CedricGuillemet/ImGuizmo.git
+  GIT_TAG 105e4fde45e4e74aae8973d98750820ef7aca7e2
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(imgui imguizmo)
+add_library(legacy_imgui STATIC
+  ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp ${imgui_SOURCE_DIR}/imgui_tables.cpp
+  ${imgui_SOURCE_DIR}/imgui_widgets.cpp ${imgui_SOURCE_DIR}/imgui_demo.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+  ${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp)
+target_include_directories(legacy_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends ${imguizmo_SOURCE_DIR}/src)
+target_link_libraries(legacy_imgui PUBLIC Vulkan::Vulkan glfw)
+
+# Scripts: Lua 5.4 (MIT, a linguagem de Roblox, WoW e Defold) + sol2 (MIT, ponte C++ <-> Lua, só headers).
+FetchContent_Declare(lua
+  GIT_REPOSITORY https://github.com/lua/lua.git
+  GIT_TAG v5.4.7
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_Declare(sol2
+  GIT_REPOSITORY https://github.com/ThePhD/sol2.git
+  GIT_TAG v3.5.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(lua sol2)
+file(GLOB LUA_SOURCES ${lua_SOURCE_DIR}/*.c)
+list(FILTER LUA_SOURCES EXCLUDE REGEX "/(lua|luac|onelua|ltests)\\.c$")
+add_library(legacy_lua STATIC ${LUA_SOURCES})
+set_target_properties(legacy_lua PROPERTIES LINKER_LANGUAGE C)
+target_include_directories(legacy_lua SYSTEM PUBLIC ${lua_SOURCE_DIR} ${sol2_SOURCE_DIR}/include)
+target_compile_definitions(legacy_lua PUBLIC SOL_ALL_SAFETIES_ON=1)
+
+# Áudio: miniaudio (domínio público / MIT-0, um arquivo só): mixagem, som 3D com atenuação e Doppler, WAV/MP3/FLAC.
+FetchContent_Declare(miniaudio
+  GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+  GIT_TAG 0.11.24
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _sem_cmake)
+FetchContent_MakeAvailable(miniaudio)
+
+# Navegação: Recast (gera a malha de navegação) + Detour (caminhos), zlib (a base da navegação de Unreal e Unity).
+set(RECASTNAVIGATION_DEMO OFF CACHE BOOL "" FORCE)
+set(RECASTNAVIGATION_TESTS OFF CACHE BOOL "" FORCE)
+set(RECASTNAVIGATION_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(recastnavigation
+  GIT_REPOSITORY https://github.com/recastnavigation/recastnavigation.git
+  GIT_TAG v1.6.0
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(recastnavigation)
+
+# Rede: ENet (MIT; UDP confiável/não confiável por canais, a base de rede de vários jogos e motores).
+FetchContent_Declare(enet
+  GIT_REPOSITORY https://github.com/lsalzman/enet.git
+  GIT_TAG v1.3.18
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(enet)  # alvo "enet" (o CMake dele já liga ws2_32/winmm no Windows)
+add_library(legacy_enet INTERFACE)
+target_link_libraries(legacy_enet INTERFACE enet)
+target_include_directories(legacy_enet SYSTEM INTERFACE ${enet_SOURCE_DIR}/include)
+if(WIN32)
+  target_link_libraries(legacy_enet INTERFACE ws2_32 winmm)
+endif()
+
+# meshoptimizer (MIT): decodifica malhas comprimidas dos glTF (EXT_meshopt_compression, o formato do gltfpack).
+FetchContent_Declare(meshoptimizer
+  GIT_REPOSITORY https://github.com/zeux/meshoptimizer.git
+  GIT_TAG v0.22
+  GIT_SHALLOW TRUE)
+FetchContent_MakeAvailable(meshoptimizer)
+
+# Basis Universal (Apache 2.0): texturas KTX2 dos glTF (KHR_texture_basisu, ETC1S e UASTC, com zstd). Só o
+# transcodificador (o CMake do projeto, que monta o codificador, fica de fora).
+FetchContent_Declare(basisu
+  GIT_REPOSITORY https://github.com/BinomialLLC/basis_universal.git
+  GIT_TAG v1_60
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR _so_o_transcodificador)
+FetchContent_MakeAvailable(basisu)
+# Draco (Apache 2.0, Google): malhas comprimidas dos glTF (KHR_draco_mesh_compression). Só a biblioteca entra no build.
+set(DRACO_JS_GLUE OFF CACHE BOOL "" FORCE)
+set(DRACO_TESTS OFF CACHE BOOL "" FORCE)
+set(DRACO_TRANSCODER_SUPPORTED OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(draco
+  GIT_REPOSITORY https://github.com/google/draco.git
+  GIT_TAG 1.5.7
+  GIT_SHALLOW TRUE
+  EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(draco)
+
+add_library(legacy_basisu STATIC ${basisu_SOURCE_DIR}/transcoder/basisu_transcoder.cpp ${basisu_SOURCE_DIR}/zstd/zstddeclib.c)
+target_include_directories(legacy_basisu SYSTEM PUBLIC ${basisu_SOURCE_DIR}/transcoder ${basisu_SOURCE_DIR}/zstd)
+target_compile_definitions(legacy_basisu PUBLIC BASISD_SUPPORT_KTX2=1 BASISD_SUPPORT_KTX2_ZSTD=1)
+if(NOT MSVC)
+  target_compile_options(legacy_basisu PRIVATE -w)
+endif()
+
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 if(NOT LEGACY_NRD)
@@ -177,10 +313,15 @@ add_executable(legacy ${ENGINE_SOURCES})
 add_dependencies(legacy shaders)
 target_include_directories(legacy PRIVATE src)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
-target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw bc7enc)
+target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw bc7enc
+                                     EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}
+                                     RecastNavigation::Recast RecastNavigation::Detour legacy_enet meshoptimizer legacy_basisu draco::draco)
+# Os cabeçalhos do Draco incluem draco/draco_features.h, gerado no build dele.
+target_include_directories(legacy SYSTEM PRIVATE ${draco_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})
 if(LEGACY_NRD)
   target_link_libraries(legacy PRIVATE NRD NRI)
-  target_include_directories(legacy SYSTEM PRIVATE ${nrd_SOURCE_DIR}/Include ${nrd_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
+  target_include_directories(legacy SYSTEM PRIVATE ${nrd_sdk_SOURCE_DIR}/Include ${nrd_sdk_SOURCE_DIR}/Integration ${nri_SOURCE_DIR}/Include)
 endif()
 if(LEGACY_MIKKTSPACE)
   target_link_libraries(legacy PRIVATE mikktspace)

@@ -54,6 +54,11 @@ class PenaltiGame {
   void outcomeFx();
   void resetPoses(scene::Scene& s);
   void poseKeeperReady(float t);
+  // jogador realista: clipes de captura de movimento
+  void animPlay(Player& p, const std::string& name, bool once, float time, float fade);
+  void animApply(scene::Scene& s, Player& p, float dt);
+  void animShot(scene::Scene& s);
+  glm::vec3 kickerBase() const;
   // câmera
   void cameraAim(scene::Camera& cam, glm::vec2 screen);
   void cameraUpdate(float dt, scene::Camera& cam, glm::vec2 screen);
@@ -96,6 +101,10 @@ class PenaltiGame {
     glm::vec3 target{0.0f}, ctrl{0.0f}, diveT{0.0f}, vel{0.0f}, ballPos{0.0f};
     glm::quat ballRot{1, 0, 0, 0};
     bool kicked = false, free = false, held = false, hitNet = false, done = false;
+    float kickT = 0.95f;            // pé na bola (jogador realista: o instante do clipe de chute)
+    std::string gkClip;             // clipe de defesa escolhido (jogador realista)
+    float gkT0 = 0.0f;
+    bool kStarted = false;
   } shot_;
   float timeScale_ = 1.0f, tsTarget_ = 1.0f;
   // câmera

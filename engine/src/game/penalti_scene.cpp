@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <random>
 
 #include <glm/gtc/constants.hpp>
@@ -13,14 +14,15 @@
 
 #include "core/log.h"
 #include "core/paths.h"
+#include <nlohmann/json.hpp>
 #include "stb_easy_font.h"
 
 namespace game {
 
 using namespace scene;
 
-World& world() {
-  static World w;
+PenaltiWorld& world() {
+  static PenaltiWorld w;
   return w;
 }
 
@@ -282,6 +284,69 @@ void aimBone(std::vector<ModelNode>& pose, const glm::mat4& root, int bone, int 
   pose[size_t(bone)].rotation = glm::normalize(glm::inverse(parentRot) * (q * rotationOf(gb)));
 }
 
+// Nó do esqueleto Character Creator pelo nome curto ("R_Upperarm" -> "CC_Base_R_Upperarm_074").
+int findCC(const Model& m, const std::string& shortName) {
+  const std::string pre = "CC_Base_" + shortName + "_";
+  for (size_t i = 0; i < m.nodeNames.size(); ++i) {
+    const std::string& n = m.nodeNames[i];
+    if (n.compare(0, pre.size(), pre) == 0 && n.find("scaleCompensation") == std::string::npos &&
+        n.find_first_not_of("0123456789", pre.size()) == std::string::npos)
+      return int(i);
+  }
+  return -1;
+}
+
+// Jogador realista: modelo escaneado com camisa e calção em materiais próprios e os clipes de captura de movimento.
+int loadRealPlayer(Scene& s, Player& p) {
+  int model = -1;
+  const size_t matBase = s.materials.size();
+  if (!loadGltf(s, core::gameDir() + "/jogador.glb", glm::mat4(1.0f), &model) || model < 0) return -1;
+  Model& m = s.models[size_t(model)];
+  p = Player{};
+  p.model = model;
+  p.real = true;
+  // Altura de 1,82 m (o modelo tem 1,863 m na pose T) e pés no chão.
+  p.fix = glm::scale(glm::translate(glm::mat4(1.0f), {0.0f, 0.0096f, 0.0f}), glm::vec3(1.82f / 1.863f));
+  p.hips = findCC(m, "Hip"); p.spine = findCC(m, "Spine02"); p.head = findCC(m, "Head");
+  const char* side[2] = {"R", "L"};
+  for (int i = 0; i < 2; ++i) {
+    const std::string S = side[i];
+    p.arm[i] = findCC(m, S + "_Upperarm"); p.foreArm[i] = findCC(m, S + "_Forearm"); p.hand[i] = findCC(m, S + "_Hand");
+    p.upLeg[i] = findCC(m, S + "_Thigh"); p.leg[i] = findCC(m, S + "_Calf"); p.foot[i] = findCC(m, S + "_Foot");
+    p.toe[i] = findCC(m, S + "_ToeBase");
+  }
+  m.animation = m.findAnimation("k_idle");
+  // Materiais próprios deste jogador; os do glTF entram em ordem a partir de matBase (10 = camisa, 11 = calção).
+  auto own = [&](uint32_t obj) {
+    const uint32_t orig = s.objects[obj].material;
+    Material mat = s.materials[orig];
+    const uint32_t idx = s.addMaterial(mat);
+    s.objects[obj].material = idx;
+    if (orig == matBase + 10) { s.materials[idx].roughness = 0.88f; s.materials[idx].metallic = 0.0f; p.shirtMats.push_back(idx); }
+    if (orig == matBase + 11) { s.materials[idx].roughness = 0.8f; s.materials[idx].metallic = 0.0f; p.shortsMats.push_back(idx); }
+  };
+  for (uint32_t obj : m.skinnedObjects) own(obj);
+  for (const auto& ro : m.rigidObjects) own(ro.second);
+  if (p.shirtMats.empty()) LOG_WARN("Pênalti: o jogador não tem o material da camisa (T_shirt)");
+  Player* pp = &p;
+  m.poseHook = [pp](const Model& mm, std::vector<ModelNode>& pose) {
+    const Player& P = *pp;
+    if (P.anim.reachW <= 0.001f) return;
+    // Braços do goleiro na bola perto da defesa, misturados com o clipe.
+    for (int i = 0; i < 2; ++i) {
+      for (int k = 0; k < 2; ++k) {
+        const int bone = k == 0 ? P.arm[i] : P.foreArm[i], child = k == 0 ? P.foreArm[i] : P.hand[i];
+        if (bone < 0 || child < 0) continue;
+        const glm::quat before = pose[size_t(bone)].rotation;
+        const glm::vec3 sh = glm::vec3(globalOf(pose, mm.root, P.arm[i])[3]);
+        aimBone(pose, mm.root, bone, child, P.anim.reach - sh);
+        pose[size_t(bone)].rotation = glm::normalize(glm::slerp(before, pose[size_t(bone)].rotation, P.anim.reachW));
+      }
+    }
+  };
+  return model;
+}
+
 int loadPlayer(Scene& s, Player& p) {
   int model = -1;
   if (!loadGltf(s, core::gameDir() + "/xbot.gltf", glm::mat4(1.0f), &model) || model < 0) return -1;
@@ -330,13 +395,40 @@ int loadPlayer(Scene& s, Player& p) {
 }  // namespace
 
 void setKit(Scene& s, const Player& p, glm::vec3 shirt, glm::vec3 shorts) {
+  if (p.real) {
+    for (uint32_t m : p.shirtMats) s.materials[m].baseColor = glm::vec4(shirt, 1.0f);
+    for (uint32_t m : p.shortsMats) s.materials[m].baseColor = glm::vec4(shorts, 1.0f);
+    return;
+  }
   s.materials[p.bodyMaterial].baseColor = glm::vec4(shirt, 1.0f);
   s.materials[p.jointMaterial].baseColor = glm::vec4(shorts, 1.0f);
 }
 
+bool loadClipMeta(PenaltiWorld& W) {
+  std::ifstream f(core::gameDir() + "/jogador_anim.json");
+  if (!f) return false;
+  try {
+    const nlohmann::json j = nlohmann::json::parse(f);
+    W.clipFps = j.value("fps", 30.0f);
+    for (const auto& [name, v] : j.at("meta").items()) {
+      ClipMeta c;
+      c.dur = v.value("dur", 0.0f);
+      const auto& r = v.at("root");
+      for (size_t i = 0; i + 1 < r.size(); i += 2) c.root.push_back({r[i].get<float>(), r[i + 1].get<float>()});
+      if (v.contains("contact")) { c.contact = v["contact"].get<float>(); const auto& ft = v["foot"]; c.foot = {ft[0].get<float>(), ft[1].get<float>(), ft[2].get<float>()}; }
+      if (v.contains("reach")) { c.reachT = v["reach"]["t"].get<float>(); c.reach = {v["reach"]["x"].get<float>(), v["reach"]["y"].get<float>()}; }
+      W.clips[name] = std::move(c);
+    }
+  } catch (const std::exception& e) {
+    LOG_WARN("Pênalti: jogador_anim.json inválido (%s)", e.what());
+    return false;
+  }
+  return W.clips.count("k_kick") && W.clips.count("gk_idle");
+}
+
 bool buildPenaltiScene(Scene& s, Camera& camera, const DemoOptions& opt) {
-  World& W = world();
-  W = World{};
+  PenaltiWorld& W = world();
+  W = PenaltiWorld{};
   const uint32_t cube = s.addMesh(makeCube()), cyl = s.addMesh(makeCylinder(32)), quad = s.addMesh(makeQuad());
   const uint32_t sphere = s.addMesh(makeSphere(64, 32));
   auto mat = [&](glm::vec3 albedo, float rough, float metal = 0.0f, uint32_t flags = 0) {
@@ -544,16 +636,19 @@ bool buildPenaltiScene(Scene& s, Camera& camera, const DemoOptions& opt) {
   }
 
   // ---- jogadores ----
-  if (loadPlayer(s, W.kicker) < 0 || loadPlayer(s, W.keeper) < 0) {
+  // Realistas (escaneados, com captura de movimento) quando os arquivos existem; senão, o manequim.
+  if (loadClipMeta(W) && loadRealPlayer(s, W.kicker) >= 0 && loadRealPlayer(s, W.keeper) >= 0) {
+    LOG_INFO("Pênalti: jogadores realistas com %zu clipes de captura de movimento", W.clips.size());
+  } else if (loadPlayer(s, W.kicker) < 0 || loadPlayer(s, W.keeper) < 0) {
     LOG_ERROR("Pênalti: não achei o personagem em %s/xbot.gltf", core::gameDir().c_str());
     return false;
   }
   setKit(s, W.kicker, {0.62f, 0.03f, 0.05f}, {0.02f, 0.02f, 0.02f});
   setKit(s, W.keeper, {0.1f, 0.6f, 0.18f}, {0.02f, 0.02f, 0.02f});
-  s.models[size_t(W.kicker.model)].root = glm::rotate(glm::translate(glm::mat4(1.0f), {-1.55f, 0.0f, 11.95f}), glm::pi<float>() - 0.45f, glm::vec3(0, 1, 0));
-  s.models[size_t(W.keeper.model)].root = glm::translate(glm::mat4(1.0f), {0.0f, 0.0f, 0.35f});
+  s.models[size_t(W.kicker.model)].root = glm::rotate(glm::translate(glm::mat4(1.0f), {-1.55f, 0.0f, 11.95f}), glm::pi<float>() - 0.45f, glm::vec3(0, 1, 0)) * W.kicker.fix;
+  s.models[size_t(W.keeper.model)].root = glm::translate(glm::mat4(1.0f), {0.0f, 0.0f, 0.35f}) * W.keeper.fix;
   // goleiro esperando: braços abertos à frente, joelhos dobrados
-  {
+  if (!W.keeper.real) {
     Player& k = W.keeper;
     for (int i = 0; i < 2; ++i) {
       const float sx = i == 0 ? -1.0f : 1.0f;  // direita do goleiro (que olha para +z) fica em -x

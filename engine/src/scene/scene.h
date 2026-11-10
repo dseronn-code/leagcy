@@ -272,12 +272,43 @@ struct Skin {
   std::vector<glm::mat4> inverseBind;
 };
 
-// Instância de um glTF animado. O jogo controla root/animation/speed; o motor faz o resto.
+// Uma camada de animação: clipe, instante (s) e peso. Com `layers` preenchido, a pose é a média ponderada das
+// camadas (os pesos são normalizados) e animation/time/speed deixam de valer.
+struct AnimLayer {
+  int animation = -1;
+  float time = 0.0f;
+  float weight = 1.0f;
+};
+// Perna para o IK dos pés: três juntas em cadeia (quadril, joelho, tornozelo).
+struct LegIK {
+  uint32_t upper = 0, lower = 0, foot = 0;
+};
+
+// Instância de um glTF animado. O jogo controla root/animation/speed (ou layers); o motor faz o resto.
 struct Model {
   glm::mat4 root{1.0f};
   int animation = 0;  // clipe ativo (-1 = pose de repouso)
   float speed = 1.0f;
   float time = 0.0f;
+  std::vector<AnimLayer> layers;  // mistura de clipes (vazio = um clipe só, o de `animation`)
+
+  // IK dos pés: depois da animação, cada pé desce ou sobe até o chão de verdade (raio `ground`, em coordenadas do
+  // mundo: devolve a altura do chão abaixo de um ponto). A altura de cada pé acima de `groundBase` (o plano em que
+  // a animação foi feita, no mundo) é mantida acima do chão encontrado; a bacia desce o necessário para o pé mais
+  // baixo alcançar, suavizada no tempo.
+  std::vector<LegIK> legs;
+  std::function<bool(glm::vec3 from, float& groundY)> ground;
+  float groundBase = 0.0f;
+  float ikWeight = 1.0f;
+  float pelvisOffset = 0.0f;   // m (estado: suavizado entre quadros)
+  float maxPelvisDrop = 0.4f;  // m
+
+  std::vector<glm::mat4> nodeWorld;  // saída: matriz de cada nó no mundo (root incluído), depois do IK
+  // Ragdoll: nós com a matriz no mundo dada de fora (a física); os filhos sem corpo seguem o pai com a pose da
+  // animação. driven[nó] = índice em drivenWorld (-1 = animado). Vazio = desligado (e o IK dos pés volta).
+  std::vector<int> driven;
+  std::vector<glm::mat4> drivenWorld;
+  float drivenWeight = 1.0f;  // < 1: mistura com a animação (saindo do ragdoll sem salto)
 
   std::vector<ModelNode> nodes;
   std::vector<Animation> animations;
@@ -288,6 +319,7 @@ struct Model {
 
   int findAnimation(const std::string& name) const;
   int findNode(const std::string& name) const;  // -1 = não existe
+  std::vector<std::string> nodeNames;  // nome de cada nó do glTF
   // Ajuste da pose pelo jogo, depois do clipe e antes das matrizes globais (mira de braços e pernas, mergulho do
   // goleiro, chute). Recebe a pose local de todos os nós; pode alterar rotações e translações.
   std::function<void(const Model&, std::vector<ModelNode>& pose)> poseHook;
@@ -322,6 +354,9 @@ struct GpuMesh {
   rhi::Buffer meshlets;
   rhi::Buffer colors;  // cor por vértice (vec4 linear), só se o glTF tiver COLOR_0
   uint32_t meshletCount = 0, meshletVertexBase = 0, meshletTriangleBase = 0;
+  // Geometria virtualizada (buildClusterLod): meshlets de todos os níveis e, a partir de meshletLodBase (em uints), um
+  // MeshletLod por meshlet. 0 = malha sem níveis (todos os meshlets são da malha inteira).
+  uint32_t meshletLodBase = 0;
   // Níveis de detalhe (só a rasterização; o ray tracing usa a malha completa): malhas simplificadas e a distância
   // (m) a partir da qual cada uma é usada. -1 = sem esse nível.
   int lod[2] = {-1, -1};
@@ -349,6 +384,10 @@ class Scene {
   bool ignoreFileTangents = false;  // --ignore-tangents: recalcula mesmo quando o glTF traz TANGENT (teste das tangentes)
   bool meshLights = true;  // triângulos emissivos viram luzes no upload
   bool meshLods = true;    // gera LODs das malhas grandes no upload
+  // Geometria virtualizada nas malhas rígidas desenhadas por meshlets (no lugar dos LODs inteiros acima): cada pedaço
+  // escolhe na GPU o nível com erro de até ~1 pixel. Desligada por padrão enquanto é validada contra as metas
+  // (--nanite liga; a cena "nanite" liga sozinha).
+  bool clusterLod = false;
   // HLOD (> 0 liga): objetos `hlodCandidate` agrupados em células desse tamanho (m) e por material; cada grupo vira
   // um proxy fundido, trocado pelos membros a partir de hlodDistance (m) da caixa da célula.
   float hlodCellSize = 0.0f, hlodDistance = 0.0f;
@@ -357,6 +396,8 @@ class Scene {
   std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
 
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }
+  // Dados de uma malha na CPU (válidos antes do upload; usados, p.ex., para a colisão da física).
+  const MeshData& cpuMesh(uint32_t mesh) const { return cpuMeshes_[mesh]; }
   uint32_t addMaterial(const Material& m) { materials.push_back(m); return uint32_t(materials.size() - 1); }
   uint32_t addTexture(TextureData t) { cpuTextures_.push_back(std::move(t)); return uint32_t(cpuTextures_.size() - 1); }
   // Marca a textura como cor base de material recortado por alfa (antes do upload).
@@ -376,6 +417,7 @@ class Scene {
   void bounds(glm::vec3& lo, glm::vec3& hi) const;
   // Caixa envolvente da pose de repouso de um modelo (válida antes do upload).
   void modelBounds(int model, glm::vec3& lo, glm::vec3& hi) const;
+  void poseModel(int model) { animateModel(models[size_t(model)], 0.0f); }  // calcula a pose agora (sem avançar)
 
   // Envia tudo para a GPU e constrói BLAS/TLAS (se houver ray tracing).
   void upload(rhi::Context& ctx);
@@ -430,6 +472,28 @@ class Scene {
     indices = r ? meshes[mesh].indices.address : emptyIndices_.address;
     colors = r ? meshes[mesh].colors.address : 0;
   }
+  // Uma entrada do buffer de instâncias (== InstanceData em shaders/scene.glsl). Os meshlets entram para a superfície
+  // exata dos pedaços simplificados da geometria virtualizada (o triângulo não existe na lista de índices).
+  struct InstanceGpu {
+    uint64_t vertices, indices;
+    uint32_t material, meshletLodBase;
+    uint64_t colors;  // cor por vértice (COLOR_0) ou 0
+    uint64_t meshlets;
+    uint32_t meshletVertexBase, meshletTriangleBase;
+  };
+  InstanceGpu instanceData(uint32_t object) const {
+    const uint32_t mesh = objects[object].mesh;
+    InstanceGpu g{};
+    g.material = objects[object].material;
+    instanceAddresses(mesh, g.vertices, g.indices, g.colors);
+    if (meshes[mesh].resident && meshes[mesh].meshletLodBase != 0) {
+      g.meshlets = meshes[mesh].meshlets.address;
+      g.meshletVertexBase = meshes[mesh].meshletVertexBase;
+      g.meshletTriangleBase = meshes[mesh].meshletTriangleBase;
+      g.meshletLodBase = meshes[mesh].meshletLodBase;
+    }
+    return g;
+  }
   // Assa `frames` poses do clipe ativo da malha com esqueleto do modelo (pele feita na CPU) e devolve o índice do
   // clipe. Chame antes do upload.
   // `skinned`: qual das malhas com esqueleto do modelo (personagens com corpo e juntas em malhas separadas).
@@ -444,7 +508,15 @@ class Scene {
   void addWallDecal(int32_t texture, glm::vec3 center, glm::vec3 wallNormal, float width, float height, float roughness = 0.6f);
   uint32_t particleCount = 0;
   // Acrescenta um emissor com `count` partículas. Fogo também cria uma luz que tremula (a chama ilumina a cena).
-  void addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count);
+  // Devolve o índice do emissor. Emissores podem ser movidos/apagados depois (setEmitter: escala 0 = apagado) e as
+  // explosões de um tiro (addExplosionSlot + triggerExplosion) disparadas a qualquer momento pelo jogo.
+  uint32_t addEmitter(ParticleType type, glm::vec3 position, float radius, float scale, uint32_t count);
+  void setEmitter(uint32_t emitter, glm::vec3 position, float scale);
+  uint32_t addExplosionSlot(uint32_t count);
+  void triggerExplosion(uint32_t emitter, glm::vec3 position, float scale);
+  std::vector<int32_t> emitterLight;  // luz de cada emissor (fogo e explosão), -1 sem luz
+  std::vector<float> emitterScale0;   // escala de criação (a luz do fogo acompanha escala / escala0)
+  uint64_t emitterVersion = 0;        // muda quando um emissor muda (o renderizador reenvia)
   std::vector<Model> models;
   std::vector<GpuMesh> meshes;
   std::vector<rhi::Image> textures;

@@ -5,11 +5,16 @@
 #endif
 
 #include <algorithm>
+#include <cfloat>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
 #include <cmath>
 #include <unordered_map>
 #include <unordered_set>
 
 #include <glm/gtc/constants.hpp>
+#include <meshoptimizer.h>
 
 namespace scene {
 
@@ -511,75 +516,335 @@ void computeTangentsMikk(MeshData& m, std::vector<uint32_t>* origin) {
 }
 #endif
 
+namespace {
+// Um meshlet a partir de `count` triângulos (índices de vértice em `tri`, 3 por triângulo): esfera, cone das normais e
+// os triângulos com índices locais. `local` é um rascunho do tamanho dos vértices, todo -1 (volta assim).
+void appendMeshlet(MeshletData& out, const MeshData& mesh, const uint32_t* tri, uint32_t count, uint32_t firstTriangle,
+                   std::vector<int32_t>& local) {
+  if (count == 0) return;
+  std::vector<uint32_t> verts;
+  Meshlet m{};
+  m.vertexOffset = uint32_t(out.vertices.size());
+  m.triangleOffset = uint32_t(out.triangles.size());
+  m.firstTriangle = firstTriangle;
+  for (uint32_t k = 0; k < 3 * count; ++k)
+    if (local[tri[k]] < 0) {
+      local[tri[k]] = int32_t(verts.size());
+      verts.push_back(tri[k]);
+    }
+  m.counts = uint32_t(verts.size()) | (count << 8);
+  glm::vec3 lo(1e30f), hi(-1e30f);
+  for (uint32_t v : verts) {
+    lo = glm::min(lo, mesh.vertices[v].position);
+    hi = glm::max(hi, mesh.vertices[v].position);
+  }
+  m.center = 0.5f * (lo + hi);
+  for (uint32_t v : verts) m.radius = std::max(m.radius, glm::length(mesh.vertices[v].position - m.center));
+  // Cone das normais das faces (pela ordem dos vértices, como o rasterizador decide frente e verso).
+  glm::vec3 sum(0.0f);
+  std::vector<glm::vec3> normals;
+  for (uint32_t t = 0; t < count; ++t) {
+    const glm::vec3 a = mesh.vertices[tri[3 * t]].position, b = mesh.vertices[tri[3 * t + 1]].position,
+                    c = mesh.vertices[tri[3 * t + 2]].position;
+    glm::vec3 n = glm::cross(b - a, c - a);
+    const float l = glm::length(n);
+    if (l > 0.0f) {
+      normals.push_back(n / l);
+      sum += n / l;
+    }
+    const uint32_t i0 = uint32_t(local[tri[3 * t]]), i1 = uint32_t(local[tri[3 * t + 1]]), i2 = uint32_t(local[tri[3 * t + 2]]);
+    out.triangles.push_back(i0 | (i1 << 8) | (i2 << 16));
+  }
+  m.coneCutoff = 1.0f;
+  const float sl = glm::length(sum);
+  if (sl > 1e-6f && !normals.empty()) {
+    m.coneAxis = sum / sl;
+    float minDot = 1.0f;
+    for (const glm::vec3& n : normals) minDot = std::min(minDot, glm::dot(n, m.coneAxis));
+    // Cone aberto demais (mais de ~84° de meio-ângulo): nunca fica todo de costas.
+    if (minDot > 0.1f) m.coneCutoff = std::sqrt(1.0f - minDot * minDot);
+  }
+  out.vertices.insert(out.vertices.end(), verts.begin(), verts.end());
+  for (uint32_t v : verts) local[v] = -1;
+  out.meshlets.push_back(m);
+}
+}  // namespace
+
 MeshletData buildMeshlets(const MeshData& mesh) {
   MeshletData out;
   const uint32_t triCount = uint32_t(mesh.indices.size() / 3);
   std::vector<int32_t> local(mesh.vertices.size(), -1);
-  std::vector<uint32_t> verts;
+  std::unordered_set<uint32_t> verts;
   uint32_t first = 0;
-  auto close = [&](uint32_t end) {  // triângulos [first, end)
-    if (end == first) return;
-    Meshlet m{};
-    m.vertexOffset = uint32_t(out.vertices.size());
-    m.triangleOffset = uint32_t(out.triangles.size());
-    m.counts = uint32_t(verts.size()) | ((end - first) << 8);
-    m.firstTriangle = first;
-    glm::vec3 lo(1e30f), hi(-1e30f);
-    for (uint32_t v : verts) {
-      lo = glm::min(lo, mesh.vertices[v].position);
-      hi = glm::max(hi, mesh.vertices[v].position);
-    }
-    m.center = 0.5f * (lo + hi);
-    for (uint32_t v : verts) m.radius = std::max(m.radius, glm::length(mesh.vertices[v].position - m.center));
-    // Cone das normais das faces (pela ordem dos vértices, como o rasterizador decide frente e verso).
-    glm::vec3 sum(0.0f);
-    std::vector<glm::vec3> normals;
-    for (uint32_t t = first; t < end; ++t) {
-      const glm::vec3 a = mesh.vertices[mesh.indices[3 * t]].position, b = mesh.vertices[mesh.indices[3 * t + 1]].position,
-                      c = mesh.vertices[mesh.indices[3 * t + 2]].position;
-      glm::vec3 n = glm::cross(b - a, c - a);
-      const float l = glm::length(n);
-      if (l > 0.0f) {
-        normals.push_back(n / l);
-        sum += n / l;
-      }
-      const uint32_t i0 = uint32_t(local[mesh.indices[3 * t]]), i1 = uint32_t(local[mesh.indices[3 * t + 1]]),
-                     i2 = uint32_t(local[mesh.indices[3 * t + 2]]);
-      out.triangles.push_back(i0 | (i1 << 8) | (i2 << 16));
-    }
-    m.coneCutoff = 1.0f;
-    const float sl = glm::length(sum);
-    if (sl > 1e-6f && !normals.empty()) {
-      m.coneAxis = sum / sl;
-      float minDot = 1.0f;
-      for (const glm::vec3& n : normals) minDot = std::min(minDot, glm::dot(n, m.coneAxis));
-      // Cone aberto demais (mais de ~84° de meio-ângulo): nunca fica todo de costas.
-      if (minDot > 0.1f) m.coneCutoff = std::sqrt(1.0f - minDot * minDot);
-    }
-    out.vertices.insert(out.vertices.end(), verts.begin(), verts.end());
-    for (uint32_t v : verts) local[v] = -1;
-    verts.clear();
-    out.meshlets.push_back(m);
-    first = end;
-  };
   for (uint32_t t = 0; t < triCount; ++t) {
     uint32_t extra = 0;
     for (int k = 0; k < 3; ++k) {
       const uint32_t v = mesh.indices[3 * t + k];
-      bool repeated = local[v] >= 0;
+      bool repeated = verts.count(v) > 0;
       for (int j = 0; j < k; ++j) repeated = repeated || mesh.indices[3 * t + j] == v;
       extra += repeated ? 0 : 1;
     }
-    if (verts.size() + extra > kMeshletMaxVertices || t - first + 1 > kMeshletMaxTriangles) close(t);
-    for (int k = 0; k < 3; ++k) {
-      const uint32_t v = mesh.indices[3 * t + k];
-      if (local[v] < 0) {
-        local[v] = int32_t(verts.size());
-        verts.push_back(v);
+    if (verts.size() + extra > kMeshletMaxVertices || t - first + 1 > kMeshletMaxTriangles) {
+      appendMeshlet(out, mesh, &mesh.indices[3 * first], t - first, first, local);
+      first = t;
+      verts.clear();
+    }
+    for (int k = 0; k < 3; ++k) verts.insert(mesh.indices[3 * t + k]);
+  }
+  appendMeshlet(out, mesh, mesh.indices.data() + 3 * first, triCount - first, first, local);
+  return out;
+}
+
+namespace {
+struct LodSphere {
+  glm::vec3 center{0.0f};
+  float radius = 0.0f;
+  float error = 0.0f;
+};
+struct LodCluster {
+  std::vector<uint32_t> indices;  // 3 por triângulo
+  LodSphere self, parent;
+  bool base = false;              // nível 0 (o meshlet já existe em `out`)
+  uint32_t baseMeshlet = 0;
+};
+
+// Esfera de um grupo: contém as esferas de todos os membros; erro = o maior deles (monotonia do grafo).
+LodSphere mergeSpheres(const std::vector<LodCluster>& cl, const std::vector<uint32_t>& group) {
+  LodSphere r;
+  float w = 0.0f;
+  for (uint32_t c : group) {
+    r.center += cl[c].self.center * std::max(cl[c].self.radius, 1e-6f);
+    w += std::max(cl[c].self.radius, 1e-6f);
+  }
+  r.center /= w;
+  for (uint32_t c : group) {
+    r.radius = std::max(r.radius, cl[c].self.radius + glm::length(cl[c].self.center - r.center));
+    r.error = std::max(r.error, cl[c].self.error);
+  }
+  return r;
+}
+
+// Grupos de até `size` meshlets vizinhos (que dividem vértices, pela posição): começa por um meshlet ainda sem grupo e
+// vai puxando o vizinho que mais divide vértices com o grupo. Sem vizinho livre, o grupo fica menor.
+std::vector<std::vector<uint32_t>> groupClusters(const std::vector<LodCluster>& cl, const std::vector<uint32_t>& pending,
+                                                 const std::vector<uint32_t>& remap, size_t size) {
+  std::unordered_map<uint32_t, std::vector<uint32_t>> byVertex;  // vértice (pela posição) -> posições em `pending`
+  for (uint32_t p = 0; p < pending.size(); ++p)
+    for (uint32_t v : cl[pending[p]].indices) {
+      std::vector<uint32_t>& l = byVertex[remap[v]];
+      if (l.empty() || l.back() != p) l.push_back(p);
+    }
+  std::vector<std::unordered_map<uint32_t, uint32_t>> adj(pending.size());  // vizinho -> vértices em comum
+  for (const auto& [v, l] : byVertex)
+    for (size_t a = 0; a < l.size(); ++a)
+      for (size_t b = a + 1; b < l.size(); ++b) {
+        ++adj[l[a]][l[b]];
+        ++adj[l[b]][l[a]];
       }
+  std::vector<int32_t> groupOf(pending.size(), -1);
+  std::vector<std::vector<uint32_t>> groups;
+  for (uint32_t seed = 0; seed < pending.size(); ++seed) {
+    if (groupOf[seed] >= 0) continue;
+    const int32_t g = int32_t(groups.size());
+    groups.push_back({seed});
+    groupOf[seed] = g;
+    std::unordered_map<uint32_t, uint32_t> frontier;  // candidato -> vértices em comum com o grupo
+    for (const auto& [n, w] : adj[seed])
+      if (groupOf[n] < 0) frontier[n] += w;
+    while (groups[size_t(g)].size() < size && !frontier.empty()) {
+      auto best = frontier.begin();
+      for (auto it = frontier.begin(); it != frontier.end(); ++it)
+        if (it->second > best->second || (it->second == best->second && it->first < best->first)) best = it;
+      const uint32_t pick = best->first;
+      frontier.erase(best);
+      groupOf[pick] = g;
+      groups[size_t(g)].push_back(pick);
+      for (const auto& [n, w] : adj[pick])
+        if (groupOf[n] < 0) frontier[n] += w;
     }
   }
-  close(triCount);
+  // Pedaços que ficaram sozinhos (sem vizinho livre: ilhas, ou cercados por grupos já cheios) se juntam aos sozinhos
+  // mais próximos no espaço; sozinhos eles nunca simplificariam e a raiz do grafo ficaria grande.
+  std::vector<uint32_t> alone;
+  std::vector<std::vector<uint32_t>> kept;
+  for (auto& gr : groups) {
+    if (gr.size() == 1) alone.push_back(gr[0]);
+    else kept.push_back(std::move(gr));
+  }
+  std::vector<uint8_t> used(alone.size(), 0);
+  for (size_t a = 0; a < alone.size(); ++a) {
+    if (used[a]) continue;
+    used[a] = 1;
+    std::vector<uint32_t> g{alone[a]};
+    const glm::vec3 c = cl[pending[alone[a]]].self.center;
+    std::vector<std::pair<float, size_t>> near;
+    for (size_t b = a + 1; b < alone.size(); ++b)
+      if (!used[b]) near.push_back({glm::length(cl[pending[alone[b]]].self.center - c), b});
+    std::sort(near.begin(), near.end());
+    for (size_t k = 0; k < near.size() && g.size() < size; ++k) {
+      used[near[k].second] = 1;
+      g.push_back(alone[near[k].second]);
+    }
+    kept.push_back(std::move(g));
+  }
+  groups = std::move(kept);
+  for (auto& gr : groups)
+    for (uint32_t& p : gr) p = pending[p];
+  return groups;
+}
+
+// Meshlets (≤ 64 vértices, ≤ 124 triângulos) de uma lista de triângulos qualquer, pela meshoptimizer.
+std::vector<std::vector<uint32_t>> splitClusters(const MeshData& mesh, const std::vector<uint32_t>& indices) {
+  const size_t maxM = meshopt_buildMeshletsBound(indices.size(), kMeshletMaxVertices, kMeshletMaxTriangles);
+  std::vector<meshopt_Meshlet> ms(maxM);
+  std::vector<unsigned int> mv(maxM * kMeshletMaxVertices);
+  std::vector<unsigned char> mt(maxM * kMeshletMaxTriangles * 3);
+  ms.resize(meshopt_buildMeshlets(ms.data(), mv.data(), mt.data(), indices.data(), indices.size(),
+                                  &mesh.vertices[0].position.x, mesh.vertices.size(), sizeof(Vertex), kMeshletMaxVertices,
+                                  kMeshletMaxTriangles, 0.0f));
+  std::vector<std::vector<uint32_t>> out(ms.size());
+  for (size_t i = 0; i < ms.size(); ++i) {
+    out[i].resize(ms[i].triangle_count * 3);
+    for (size_t k = 0; k < ms[i].triangle_count * 3; ++k)
+      out[i][k] = mv[ms[i].vertex_offset + mt[ms[i].triangle_offset + k]];
+  }
+  return out;
+}
+}  // namespace
+
+void reorderForClusters(MeshData& mesh) {
+  if (mesh.indices.size() < 3) return;
+  const std::vector<std::vector<uint32_t>> parts = splitClusters(mesh, mesh.indices);
+  std::vector<uint32_t> reordered;
+  reordered.reserve(mesh.indices.size());
+  mesh.clusterStarts.clear();
+  for (const std::vector<uint32_t>& p : parts) {
+    mesh.clusterStarts.push_back(uint32_t(reordered.size() / 3));
+    reordered.insert(reordered.end(), p.begin(), p.end());
+  }
+  if (reordered.size() != mesh.indices.size()) {  // não deveria acontecer: fica a ordem original
+    mesh.clusterStarts.clear();
+    return;
+  }
+  mesh.indices = std::move(reordered);
+}
+
+MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods, ClusterLodStats* stats) {
+  constexpr size_t kGroup = 8;
+  // Nível 0: os pedaços compactos de reorderForClusters (contínuos na lista de índices; os triângulos mantêm o número)
+  // ou, sem eles, os trechos contínuos de buildMeshlets (finos em malhas em faixas: simplificam mal).
+  MeshletData out;
+  if (!mesh.clusterStarts.empty()) {
+    std::vector<int32_t> scratch(mesh.vertices.size(), -1);
+    const uint32_t triCount = uint32_t(mesh.indices.size() / 3);
+    for (size_t k = 0; k < mesh.clusterStarts.size(); ++k) {
+      const uint32_t a = mesh.clusterStarts[k], b = k + 1 < mesh.clusterStarts.size() ? mesh.clusterStarts[k + 1] : triCount;
+      appendMeshlet(out, mesh, &mesh.indices[3 * size_t(a)], b - a, a, scratch);
+    }
+  } else {
+    out = buildMeshlets(mesh);
+  }
+  std::vector<LodCluster> cl(out.meshlets.size());
+  for (size_t i = 0; i < cl.size(); ++i) {
+    const Meshlet& m = out.meshlets[i];
+    const uint32_t n = m.counts >> 8;
+    cl[i].indices.assign(mesh.indices.begin() + 3 * m.firstTriangle, mesh.indices.begin() + 3 * (m.firstTriangle + n));
+    cl[i].self = {m.center, m.radius, 0.0f};
+    cl[i].parent.error = std::numeric_limits<float>::infinity();
+    cl[i].base = true;
+    cl[i].baseMeshlet = uint32_t(i);
+  }
+  // Vértices na mesma posição contam como o mesmo (costuras de UV e normal): travados juntos, sem abrir buracos.
+  std::vector<uint32_t> remap(mesh.vertices.size());
+  const meshopt_Stream pos = {&mesh.vertices[0].position.x, sizeof(float) * 3, sizeof(Vertex)};
+  meshopt_generateVertexRemapMulti(remap.data(), nullptr, mesh.vertices.size(), mesh.vertices.size(), &pos, 1);
+  std::vector<uint32_t> pending(cl.size());
+  for (uint32_t i = 0; i < pending.size(); ++i) pending[i] = i;
+  std::vector<unsigned char> locks(mesh.vertices.size());
+  uint32_t levels = 1;
+  while (pending.size() > 1) {
+    // No fim (até 4 grupos de pedaços), todos num grupo só: sem borda entre grupos, nada fica travado e a raiz encolhe.
+    const std::vector<std::vector<uint32_t>> groups =
+        pending.size() <= 4 * kGroup ? std::vector<std::vector<uint32_t>>{pending} : groupClusters(cl, pending, remap, kGroup);
+    // Trava os vértices na borda entre grupos (o mesmo vértice em dois grupos): os vizinhos continuam encaixando.
+    std::vector<int32_t> groupOfVertex(mesh.vertices.size(), -1);
+    for (size_t g = 0; g < groups.size(); ++g)
+      for (uint32_t c : groups[g])
+        for (uint32_t v : cl[c].indices) {
+          int32_t& o = groupOfVertex[remap[v]];
+          o = (o == -1 || o == int32_t(g)) ? int32_t(g) : -2;
+        }
+    for (size_t v = 0; v < locks.size(); ++v) locks[v] = groupOfVertex[remap[v]] == -2;
+    pending.clear();
+    std::vector<uint32_t> retry;
+    size_t made = 0, stuck = 0;
+    for (const std::vector<uint32_t>& group : groups) {
+      if (group.size() == 1) {  // sem vizinho livre: tenta de novo no próximo nível
+        retry.push_back(group[0]);
+        stuck += cl[group[0]].indices.size() / 3;
+        continue;
+      }
+      std::vector<uint32_t> merged;
+      for (uint32_t c : group) merged.insert(merged.end(), cl[c].indices.begin(), cl[c].indices.end());
+      const size_t target = (merged.size() / 6) * 3;  // metade dos triângulos (os pedaços nem sempre estão cheios)
+      std::vector<uint32_t> simplified(merged.size());
+      float error = 0.0f;
+      const float weights[5] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f};  // normal xyz e uv
+      simplified.resize(meshopt_simplifyWithAttributes(
+          simplified.data(), merged.data(), merged.size(), &mesh.vertices[0].position.x, mesh.vertices.size(),
+          sizeof(Vertex), &mesh.vertices[0].normal.x, sizeof(Vertex), weights, 5, locks.data(), target, FLT_MAX,
+          meshopt_SimplifySparse | meshopt_SimplifyErrorAbsolute, &error));
+      // Sem reduzir o bastante (borda travada demais): o grupo fica para o próximo nível.
+      if (simplified.size() > merged.size() * 0.85f ||
+          simplified.size() / (kMeshletMaxTriangles * 3) >= merged.size() / (kMeshletMaxTriangles * 3)) {
+        for (uint32_t c : group) retry.push_back(c);
+        stuck += merged.size() / 3;
+        continue;
+      }
+      LodSphere g = mergeSpheres(cl, group);
+      g.error += error;  // conservador: o erro da simplificação soma ao dos filhos
+      for (uint32_t c : group) cl[c].parent = g;
+      for (std::vector<uint32_t>& part : splitClusters(mesh, simplified)) {
+        LodCluster n;
+        n.indices = std::move(part);
+        n.self = g;
+        n.parent.error = std::numeric_limits<float>::infinity();
+        made += n.indices.size() / 3;
+        pending.push_back(uint32_t(cl.size()));
+        cl.push_back(std::move(n));
+      }
+    }
+    if (std::getenv("LEGACY_DEBUG_LOD"))  // diagnóstico: um resumo por nível
+      std::fprintf(stderr, "nivel %u: %zu grupos, feitos %zu tri, travados %zu tri, pendentes %zu, retry %zu\n", levels,
+                   groups.size(), made, stuck, pending.size(), retry.size());
+    if (made == 0) break;
+    ++levels;
+    if (made < stuck / 3) break;  // quase tudo travado: parar aqui
+    pending.insert(pending.end(), retry.begin(), retry.end());
+  }
+  // Saída: o nível 0 já está em `out`; os outros viram meshlets novos (sem triângulo na lista original).
+  std::vector<int32_t> local(mesh.vertices.size(), -1);
+  lods.assign(out.meshlets.size(), MeshletLod{});
+  ClusterLodStats st;
+  st.baseMeshlets = uint32_t(out.meshlets.size());
+  for (const LodCluster& c : cl) {
+    MeshletLod l{};
+    l.self = glm::vec4(c.self.center, c.self.radius);
+    l.parent = glm::vec4(c.parent.center, c.parent.radius);
+    l.selfError = c.self.error;
+    l.parentError = std::isinf(c.parent.error) ? FLT_MAX : c.parent.error;
+    if (c.base) {
+      lods[c.baseMeshlet] = l;
+      st.baseTriangles += c.indices.size() / 3;
+    } else {
+      appendMeshlet(out, mesh, c.indices.data(), uint32_t(c.indices.size() / 3), kNoTriangle, local);
+      lods.push_back(l);
+    }
+    if (std::isinf(c.parent.error)) st.rootTriangles += c.indices.size() / 3;
+  }
+  st.levels = levels;
+  st.totalMeshlets = uint32_t(out.meshlets.size());
+  if (stats) *stats = st;
   return out;
 }
 

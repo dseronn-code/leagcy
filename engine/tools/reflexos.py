@@ -58,12 +58,16 @@ def main():
     ap.add_argument('--frames', type=int, default=64, help='frames do motor (parado)')
     ap.add_argument('--cenas', default=','.join(CENAS))
     ap.add_argument('--extra', default='', help='argumentos extras só para o motor')
+    ap.add_argument('--tamanho', help='LxA (padrão 480x270; menor = teste rápido sem GPU)')
     a = ap.parse_args()
+    global W, H
+    if a.tamanho:
+        W, H = (int(x) for x in a.tamanho.lower().split('x'))
     pasta = a.out or tempfile.mkdtemp()
     os.makedirs(pasta, exist_ok=True)
     for cena in a.cenas.split(','):
         args = CENAS[cena]
-        npy = os.path.join(pasta, f'ref_{cena}_{a.ref_frames}.npy')
+        npy = os.path.join(pasta, f'ref_{cena}_{a.ref_frames}_{W}x{H}.npy')
         if not os.path.exists(npy):
             np.save(npy, rodar(a.bin, args + ['--reference-pt', '--frames', str(a.ref_frames)], os.path.join(pasta, f'ref_{cena}.png')))
         R = np.load(npy)

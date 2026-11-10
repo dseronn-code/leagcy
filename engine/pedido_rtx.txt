@@ -1,9 +1,18 @@
-# Rodada 19 (3/11): por que o Bistro sai ~10% mais escuro que a referência em todos os presets? Variações do Ultra
-# contra a mesma referência; e a Sponza na janela com uma trajetória que fica dentro do prédio.
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --frames 256
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-radiance-cache"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-mesh-lights"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-lens-flare"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro-ev13
+# Rodada 21 (10/11). A 20b rodou: Sponza Alto na janela 23,2 ms (meta cumprida), Bistro 1080p com DLSS-RR -5,6%.
+# Falhas da 20b eram dos testes no Windows (GPU rápida demais: rede e recarga; caminho com \ no Lua; legenda curta;
+# pasta temporária presa pelo antivírus). Repetidos aqui com --tempo-real e os acertos. Mais o Bistro no Médio de
+# novo (headless e janela andando), depois do TAA novo e das mudanças da semana. E a geometria virtualizada (tipo
+# Nanite): o campo de 151 milhões de triângulos em 1080p, com e sem, e os testes.
+python tools\fisica.py --bin build\Release\legacy.exe
+python tools\jogo.py --bin build\Release\legacy.exe
+python tools\rede.py --bin build\Release\legacy.exe
+python tools\sequencia.py --bin build\Release\legacy.exe
+python tools\idiomas.py --bin build\Release\legacy.exe
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio --night
+build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf --no-vsync
 build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt
+python tools\nanite.py --bin build\Release\legacy.exe
+build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite.png
+build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_sem.png --no-nanite
+build\Release\legacy.exe --scene nanite --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --no-vsync

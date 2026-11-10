@@ -121,8 +121,125 @@ void PenaltiGame::init(Scene& s, renderer::Renderer& r, bool autoplay, bool rayT
   resetPoses(s);
 }
 
+// ------------------------------------------------------------------------------------------------- captura de movimento
+
+namespace {
+constexpr float kKickerYaw = glm::pi<float>() - 0.22f;
+glm::vec2 rot2(glm::vec2 v, float yaw) { return {v.x * std::cos(yaw) + v.y * std::sin(yaw), -v.x * std::sin(yaw) + v.y * std::cos(yaw)}; }
+glm::vec2 rootAt(const PenaltiWorld& W, const std::string& name, float t) {
+  const auto it = W.clips.find(name);
+  if (it == W.clips.end() || it->second.root.empty()) return glm::vec2(0.0f);
+  const auto& r = it->second.root;
+  const float f = glm::clamp(t * W.clipFps, 0.0f, float(r.size() - 1));
+  const size_t i = size_t(f), j = std::min(i + 1, r.size() - 1);
+  return glm::mix(r[i], r[j], f - float(i));
+}
+float smooth01(float v) { v = glm::clamp(v, 0.0f, 1.0f); return v * v * (3.0f - 2.0f * v); }
+}  // namespace
+
+glm::vec3 PenaltiGame::kickerBase() const {
+  // o bico do pé encontra a bola no instante do contato
+  const ClipMeta& k = world().clips.at("k_kick");
+  const glm::vec2 f = rot2({k.foot.x, k.foot.z}, kKickerYaw);
+  return {kSpot.x - f.x + 0.02f, 0.0f, kSpot.z + 0.1f - f.y};
+}
+
+void PenaltiGame::animPlay(Player& p, const std::string& name, bool once, float time, float fade) {
+  Player::Anim& a = p.anim;
+  if (!a.cur.empty()) {  // o deslocamento do clipe que sai passa para a base
+    const glm::vec2 r = rot2(rootAt(world(), a.cur, a.tCur), a.yaw);
+    a.base.x += r.x; a.base.z += r.y;
+  }
+  a.prev = fade > 0.0f ? a.cur : std::string();
+  a.tPrev = a.tCur;
+  a.cur = name; a.tCur = time; a.once = once;
+  a.fadeDur = fade; a.fade = fade > 0.0f ? 0.0f : 1.0f;
+}
+
+void PenaltiGame::animApply(Scene& s, Player& p, float dt) {
+  PenaltiWorld& W = world();
+  Model& m = s.models[size_t(p.model)];
+  Player::Anim& a = p.anim;
+  a.tCur += dt; a.tPrev += dt;
+  if (a.fade < 1.0f) a.fade = std::min(1.0f, a.fade + dt / std::max(a.fadeDur, 1e-3f));
+  auto clipTime = [&](const std::string& n, float t, bool once) {
+    const auto it = W.clips.find(n);
+    const float d = it != W.clips.end() ? it->second.dur : 0.0f;
+    if (d <= 0.0f) return t;
+    return once ? std::min(t, d - 1e-3f) : std::fmod(t, d);
+  };
+  m.layers.clear();
+  if (a.fade < 1.0f && !a.prev.empty()) m.layers.push_back({m.findAnimation(a.prev), clipTime(a.prev, a.tPrev, true), 1.0f - a.fade});
+  m.layers.push_back({m.findAnimation(a.cur), clipTime(a.cur, a.tCur, a.once), a.fade});
+  const glm::vec2 r = rot2(rootAt(W, a.cur, a.once ? a.tCur : 0.0f), a.yaw);
+  m.root = glm::rotate(glm::translate(glm::mat4(1.0f), a.base + glm::vec3(r.x + a.off, a.lift, r.y)), a.yaw, glm::vec3(0, 1, 0)) * p.fix;
+}
+
+// Escolhe e sincroniza os clipes do lance: chute no instante do contato, defesa com as mãos chegando junto da bola.
+void PenaltiGame::animShot(Scene& s) {
+  PenaltiWorld& W = world();
+  Shot& sh = shot_;
+  Player& K = W.kicker;
+  Player& G = W.keeper;
+  const float t = sh.t;
+  // batedor
+  if (!sh.kStarted) { sh.kStarted = true; animPlay(K, "k_kick", true, 0.0f, 0.2f); }
+  if (K.anim.cur == "k_kick") {
+    K.anim.tCur = t;
+    if (t > W.clips.at("k_kick").dur && sh.outcomeAt >= 0.0f) animPlay(K, outcome_.goal ? "k_comemora" : "k_idle", false, 0.0f, 0.4f);
+  }
+  // goleiro
+  const glm::vec3 T = sh.diveT;
+  if (sh.gkClip.empty()) {
+    const float ax = std::abs(T.x);
+    const std::string side = T.x >= 0.0f ? "_d" : "_e";
+    const std::string name = ax < 0.9f ? "gk_pega" : (T.y < 0.9f && ax < 2.6f) ? "gk_bloqueio" + side : "gk_mergulho" + side;
+    const ClipMeta& c = W.clips.at(name);
+    const float t0 = sh.diveStart + sh.D - c.reachT;
+    if (t >= t0) {
+      sh.gkClip = name; sh.gkT0 = t0;
+      animPlay(G, name, true, t - t0, 0.15f);
+      G.anim.offT = glm::clamp(T.x - c.reach.x, -1.1f, 1.1f);
+      G.anim.liftT = glm::clamp(T.y - c.reach.y, 0.0f, 1.5f);
+    }
+  }
+  const bool saved = outcome_.type == kDefesa || outcome_.type == kCavadinhaPega;
+  G.anim.reachW = 0.0f;
+  if (!sh.gkClip.empty()) {
+    const ClipMeta& c = W.clips.at(sh.gkClip);
+    const float ct = t - sh.gkT0;
+    if (G.anim.cur == sh.gkClip) {
+      G.anim.tCur = ct;
+      G.anim.off = G.anim.offT * smooth01(ct / std::max(0.2f, c.reachT * 0.8f));
+      G.anim.lift = G.anim.liftT * std::sin(glm::pi<float>() * glm::clamp((ct - (c.reachT - 0.45f)) / 0.95f, 0.0f, 1.0f));
+      if (saved) {
+        G.anim.reachW = 0.85f * std::max(0.0f, 1.0f - std::abs(ct - c.reachT) / 0.32f);
+        G.anim.reach = sh.free ? sh.ballPos : T;
+      }
+      if (ct > c.dur + 0.1f) {
+        G.anim.base.x += G.anim.off; G.anim.off = G.anim.offT = 0.0f; G.anim.lift = G.anim.liftT = 0.0f;
+        animPlay(G, saved ? "gk_punho" : "gk_idle", false, 0.0f, 0.35f);
+      }
+    }
+  }
+  (void)s;
+}
+
 void PenaltiGame::resetPoses(Scene& s) {
-  World& W = world();
+  PenaltiWorld& W = world();
+  if (W.kicker.real) {
+    for (Player* p : {&W.kicker, &W.keeper}) p->anim = Player::Anim{};
+    W.kicker.anim.yaw = kKickerYaw; W.kicker.anim.base = kickerBase();
+    W.keeper.anim.base = kKeeperHome;
+    animPlay(W.kicker, "k_idle", false, 0.0f, 0.0f);
+    animPlay(W.keeper, "gk_idle", false, 0.0f, 0.0f);
+    animApply(s, W.kicker, 0.0f); animApply(s, W.keeper, 0.0f);
+    shot_ = Shot{};
+    shot_.ballPos = kSpot;
+    s.setTransform(W.ball, glm::scale(glm::translate(glm::mat4(1.0f), kSpot), glm::vec3(kBallRadius)));
+    s.meshes[W.netMesh].clothColliders[0] = glm::vec4(0.0f);
+    return;
+  }
   Model& kk = s.models[size_t(W.kicker.model)];
   kk.root = glm::rotate(glm::translate(glm::mat4(1.0f), kKickerStart), glm::pi<float>() - 0.45f, glm::vec3(0, 1, 0));
   kk.animation = W.kicker.idle;
@@ -141,6 +258,7 @@ void PenaltiGame::resetPoses(Scene& s) {
 
 void PenaltiGame::poseKeeperReady(float t) {
   Player& k = world().keeper;
+  if (k.real) return;
   const float b = std::sin(t * 3.2f) * 0.08f;
   for (int i = 0; i < 2; ++i) {
     const float sx = i == 0 ? -1.0f : 1.0f;  // o goleiro olha para +z: a direita dele fica em -x
@@ -229,9 +347,10 @@ void PenaltiGame::startShot(Scene& s) {
     sh.diveT.x -= (sh.target.x >= 0 ? 1.0f : -1.0f) * 0.35f;
   }
   const float delay = reflex_ == "perfeito" ? 0.04f : reflex_ == "bom" ? 0.13f : sh.F * 0.72f;
-  sh.diveStart = kKickTime + delay;
-  if (catches) sh.diveStart = std::min(sh.diveStart, kKickTime + sh.F * sh.contactS - sh.D);
-  if (outcome_.type == kCavadinha) sh.diveStart = kKickTime + 0.05f;
+  sh.kickT = world().kicker.real ? world().clips.at("k_kick").contact : kKickTime;
+  sh.diveStart = sh.kickT + delay;
+  if (catches) sh.diveStart = std::min(sh.diveStart, sh.kickT + sh.F * sh.contactS - sh.D);
+  if (outcome_.type == kCavadinha) sh.diveStart = sh.kickT + 0.05f;
   camAim_ = false;
   camPosT_ = {2.0f, 1.25f, 15.4f};
   camLookT_ = {0.0f, 1.0f, 3.0f};
@@ -249,14 +368,16 @@ void PenaltiGame::outcomeFx() {
 }
 
 void PenaltiGame::updateShot(float dt, Scene& s) {
-  World& W = world();
+  PenaltiWorld& W = world();
   Shot& sh = shot_;
   sh.t += dt;
   const float t = sh.t;
   Player& K = W.kicker;
   Model& km = s.models[size_t(K.model)];
-  // corrida e chute
-  if (t < kKickTime) {
+  const bool real = K.real;
+  if (real) {
+    if (t >= sh.kickT && !sh.kicked) { sh.kicked = true; shake_ = 0.03f; }
+  } else if (t < kKickTime) {
     const float p = t / kKickTime;
     const glm::vec3 pos = glm::mix(kKickerStart, kKickerBall, easeInOut(p));
     const glm::vec3 d = kKickerBall - kKickerStart;
@@ -292,7 +413,7 @@ void PenaltiGame::updateShot(float dt, Scene& s) {
   }
   // bola
   if (sh.kicked && !sh.free) {
-    const float sn = (t - kKickTime) / sh.F, stopAt = sh.contactS > 0 ? sh.contactS : 1.0f;
+    const float sn = (t - sh.kickT) / sh.F, stopAt = sh.contactS > 0 ? sh.contactS : 1.0f;
     if (sn >= 0.55f) tsTarget_ = 0.22f;
     if (sn >= stopAt) {
       sh.ballPos = bez(kSpot, sh.ctrl, sh.target, stopAt);
@@ -336,7 +457,9 @@ void PenaltiGame::updateShot(float dt, Scene& s) {
   Player& G = W.keeper;
   Model& gm = s.models[size_t(G.model)];
   const float dp = (t - sh.diveStart) / sh.D;
-  if (dp < 0.0f) {
+  if (real) {
+    animShot(s);
+  } else if (dp < 0.0f) {
     gm.root = glm::translate(glm::mat4(1.0f), kKeeperHome + glm::vec3(std::sin(t * 1.6f) * 0.3f, 0.0f, 0.0f));
     poseKeeperReady(t);
   } else {
@@ -505,6 +628,7 @@ float PenaltiGame::update(float realDt, const Pointer& p, Scene& s, Camera& cam,
   }
   if (state_ == State::Pass || state_ == State::ChooseKick || state_ == State::ChooseSave || state_ == State::Menu || state_ == State::End)
     poseKeeperReady(simTime_);
+  if (world().kicker.real) { animApply(s, world().kicker, dt); animApply(s, world().keeper, dt); }
   cameraUpdate(realDt, cam, screen);
   ui_.begin(&r.ui, screen);
   drawHud(cam, screen);

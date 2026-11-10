@@ -1,0 +1,29 @@
+// Cena de teste da física: chão, uma torre de 12 caixas, uma parede de 60 tijolos, uma rampa com esferas
+// rolando e uma bola pesada atirada contra a parede. --scene cenas/fisica.json
+{
+  "sol": {"elevacao": 38, "azimute": 140, "iluminancia": 100000},
+  "camera": {"posicao": [0, 4.5, 16], "alvo": [0, 1.5, 0], "fov": 55},
+  "materiais": {
+    "concreto": {"cor": [0.45, 0.45, 0.43], "rugosidade": 0.85},
+    "madeira": {"cor": [0.55, 0.35, 0.18], "rugosidade": 0.6},
+    "tijolo": {"cor": [0.6, 0.22, 0.14], "rugosidade": 0.75},
+    "metal": {"cor": [0.9, 0.9, 0.92], "rugosidade": 0.25, "metalico": 1},
+    "vermelho": {"cor": [0.75, 0.06, 0.05], "rugosidade": 0.35}
+  },
+  "entidades": [
+    {"nome": "chao", "forma": "caixa", "meia_extensao": [20, 0.25, 20], "posicao": [0, -0.25, 0], "material": "concreto",
+     "fisica": {"tipo": "estatico", "atrito": 0.8}},
+    {"nome": "torre", "forma": "caixa", "meia_extensao": [0.3, 0.3, 0.3], "posicao": [-5, 0.3, 0], "material": "madeira",
+     "fisica": {"tipo": "dinamico", "massa": 8}, "repetir": {"quantidade": [1, 12, 1], "passo": [0, 0.6, 0]}},
+    {"nome": "parede", "forma": "caixa", "meia_extensao": [0.4, 0.2, 0.2], "posicao": [-1.6, 0.2, -2], "material": "tijolo",
+     "fisica": {"tipo": "dinamico", "massa": 4}, "repetir": {"quantidade": [6, 10, 1], "passo": [0.8, 0.4, 0]}},
+    {"nome": "rampa", "forma": "caixa", "meia_extensao": [3, 0.15, 1.2], "posicao": [5, 1.6, 2], "rotacao_graus": [0, 0, 22],
+     "material": "concreto", "fisica": {"tipo": "estatico"}},
+    {"nome": "bolinha", "forma": "esfera", "raio": 0.25, "posicao": [6.5, 3.2, 1.4], "material": "metal",
+     "fisica": {"tipo": "dinamico", "quique": 0.3}, "repetir": {"quantidade": [1, 1, 4], "passo": [0, 0, 0.4]}},
+    {"nome": "bola", "forma": "esfera", "raio": 0.6, "posicao": [-0.0, 1.2, 9], "material": "vermelho", "velocidade": [0, 2, -14],
+     "fisica": {"tipo": "dinamico", "massa": 120}},
+    {"nome": "pilula", "forma": "capsula", "raio": 0.3, "meia_altura": 0.5, "posicao": [3, 3, -3], "rotacao_graus": [0, 0, 70],
+     "material": "vermelho", "fisica": {"tipo": "dinamico", "massa": 20}}
+  ]
+}

@@ -1,0 +1,230 @@
+// Pista de testes do carro: W acelera, S freia/ré, A/D viram, espaço = freio de mão.
+// Cones dos dois lados, uma rampa a 40 m e uma pilha de caixas a 70 m. --scene cenas/carro.json
+{
+ "sol": {
+  "elevacao": 30,
+  "azimute": 150,
+  "iluminancia": 100000
+ },
+ "camera": {
+  "posicao": [
+   0,
+   3.7,
+   -7
+  ],
+  "alvo": [
+   0,
+   1,
+   0
+  ],
+  "fov": 60
+ },
+ "materiais": {
+  "asfalto": {
+   "cor": [
+    0.12,
+    0.12,
+    0.12
+   ],
+   "rugosidade": 0.9
+  },
+  "concreto": {
+   "cor": [
+    0.5,
+    0.5,
+    0.48
+   ],
+   "rugosidade": 0.85
+  },
+  "vermelho": {
+   "cor": [
+    0.7,
+    0.03,
+    0.03
+   ],
+   "rugosidade": 0.25,
+   "metalico": 0.3
+  },
+  "pneu": {
+   "cor": [
+    0.03,
+    0.03,
+    0.03
+   ],
+   "rugosidade": 0.9
+  },
+  "laranja": {
+   "cor": [
+    0.9,
+    0.35,
+    0.05
+   ],
+   "rugosidade": 0.6
+  },
+  "madeira": {
+   "cor": [
+    0.55,
+    0.35,
+    0.18
+   ],
+   "rugosidade": 0.6
+  }
+ },
+ "entidades": [
+  {
+   "nome": "chao",
+   "forma": "caixa",
+   "meia_extensao": [
+    150,
+    0.25,
+    150
+   ],
+   "posicao": [
+    0,
+    -0.25,
+    0
+   ],
+   "material": "asfalto",
+   "fisica": {
+    "tipo": "estatico",
+    "atrito": 1.0
+   }
+  },
+  {
+   "nome": "carro",
+   "veiculo": {
+    "comprimento": 4.2,
+    "largura": 1.8,
+    "altura": 0.9,
+    "massa": 1300,
+    "torque": 500,
+    "tracao": "traseira",
+    "controle": "jogador",
+    "material_roda": "pneu"
+   },
+   "script": "scripts/velocimetro.lua",
+   "posicao": [
+    0,
+    1.2,
+    0
+   ],
+   "material": "vermelho"
+  },
+  {
+   "nome": "rampa",
+   "forma": "caixa",
+   "meia_extensao": [
+    3,
+    0.2,
+    6
+   ],
+   "posicao": [
+    0,
+    1.0,
+    40
+   ],
+   "rotacao_graus": [
+    -12,
+    0,
+    0
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "cone",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.2,
+    0.4,
+    0.2
+   ],
+   "posicao": [
+    -6,
+    0.4,
+    15
+   ],
+   "material": "laranja",
+   "fisica": {
+    "tipo": "dinamico",
+    "massa": 3
+   },
+   "repetir": {
+    "quantidade": [
+     1,
+     1,
+     8
+    ],
+    "passo": [
+     0,
+     0,
+     6
+    ]
+   }
+  },
+  {
+   "nome": "cone_b",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.2,
+    0.4,
+    0.2
+   ],
+   "posicao": [
+    6,
+    0.4,
+    15
+   ],
+   "material": "laranja",
+   "fisica": {
+    "tipo": "dinamico",
+    "massa": 3
+   },
+   "repetir": {
+    "quantidade": [
+     1,
+     1,
+     8
+    ],
+    "passo": [
+     0,
+     0,
+     6
+    ]
+   }
+  },
+  {
+   "nome": "caixas",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "posicao": [
+    -1.5,
+    0.5,
+    70
+   ],
+   "material": "madeira",
+   "fisica": {
+    "tipo": "dinamico",
+    "massa": 20
+   },
+   "repetir": {
+    "quantidade": [
+     4,
+     4,
+     1
+    ],
+    "passo": [
+     1.0,
+     1.0,
+     0
+    ]
+   }
+  }
+ ]
+}

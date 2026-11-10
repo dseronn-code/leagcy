@@ -1,0 +1,505 @@
+// Parque de testes jogável: WASD anda, espaço pula, Shift corre, botão direito + mouse gira a câmera.
+// Scripts (scripts/*.lua): elevador sobe e desce, carrossel gira, bola azul pula sozinha.
+// --scene cenas/parque.json
+{
+ "sol": {
+  "elevacao": 42,
+  "azimute": 125,
+  "iluminancia": 100000
+ },
+ "camera": {
+  "posicao": [
+   0,
+   3,
+   14
+  ],
+  "alvo": [
+   0,
+   1.5,
+   0
+  ],
+  "fov": 60
+ },
+ "materiais": {
+  "grama": {
+   "cor": [
+    0.22,
+    0.32,
+    0.12
+   ],
+   "rugosidade": 0.9
+  },
+  "concreto": {
+   "cor": [
+    0.5,
+    0.5,
+    0.48
+   ],
+   "rugosidade": 0.85
+  },
+  "madeira": {
+   "cor": [
+    0.55,
+    0.35,
+    0.18
+   ],
+   "rugosidade": 0.6
+  },
+  "vermelho": {
+   "cor": [
+    0.75,
+    0.06,
+    0.05
+   ],
+   "rugosidade": 0.35
+  },
+  "azul": {
+   "cor": [
+    0.1,
+    0.25,
+    0.8
+   ],
+   "rugosidade": 0.4
+  },
+  "amarelo": {
+   "cor": [
+    0.85,
+    0.65,
+    0.1
+   ],
+   "rugosidade": 0.5
+  }
+ },
+ "entidades": [
+  {
+   "nome": "chao",
+   "forma": "caixa",
+   "meia_extensao": [
+    30,
+    0.25,
+    30
+   ],
+   "posicao": [
+    0,
+    -0.25,
+    0
+   ],
+   "material": "grama",
+   "fisica": {
+    "tipo": "estatico",
+    "atrito": 0.8
+   }
+  },
+  {
+   "nome": "jogador",
+   "personagem": {
+    "altura": 1.8,
+    "raio": 0.3,
+    "velocidade": 4.5,
+    "velocidade_correndo": 8,
+    "pulo": 5.5,
+    "controle": "jogador"
+   },
+   "posicao": [
+    0,
+    0,
+    8
+   ],
+   "material": "azul"
+  },
+  {
+   "nome": "degrau0",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.1,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.1,
+    2.0
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau1",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.2,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.2,
+    1.6
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau2",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.30000000000000004,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.30000000000000004,
+    1.2
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau3",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.4,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.4,
+    0.7999999999999998
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau4",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.5,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.5,
+    0.3999999999999999
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau5",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.6000000000000001,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.6000000000000001,
+    0.0
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau6",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.7000000000000001,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.7000000000000001,
+    -0.40000000000000036
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau7",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.8,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.8,
+    -0.8000000000000003
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau8",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    0.9,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    0.9,
+    -1.2000000000000002
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "degrau9",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.5,
+    1.0,
+    0.2
+   ],
+   "posicao": [
+    -8,
+    1.0,
+    -1.6
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "patamar",
+   "forma": "caixa",
+   "meia_extensao": [
+    3,
+    1.0,
+    3
+   ],
+   "posicao": [
+    -8,
+    1.0,
+    -5.2
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "rampa",
+   "forma": "caixa",
+   "meia_extensao": [
+    4,
+    0.15,
+    1.5
+   ],
+   "posicao": [
+    8,
+    1.4,
+    0
+   ],
+   "rotacao_graus": [
+    0,
+    0,
+    20
+   ],
+   "material": "concreto",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "caixa",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "posicao": [
+    2,
+    0.4,
+    2
+   ],
+   "material": "madeira",
+   "fisica": {
+    "tipo": "dinamico",
+    "massa": 15
+   },
+   "repetir": {
+    "quantidade": [
+     3,
+     3,
+     1
+    ],
+    "passo": [
+     0.85,
+     0.8,
+     0
+    ]
+   }
+  },
+  {
+   "nome": "torre",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.3,
+    0.3,
+    0.3
+   ],
+   "posicao": [
+    0,
+    0.3,
+    -6
+   ],
+   "material": "madeira",
+   "fisica": {
+    "tipo": "dinamico",
+    "massa": 6
+   },
+   "repetir": {
+    "quantidade": [
+     1,
+     10,
+     1
+    ],
+    "passo": [
+     0,
+     0.6,
+     0
+    ]
+   }
+  },
+  {
+   "nome": "bola",
+   "forma": "esfera",
+   "raio": 0.4,
+   "posicao": [
+    4,
+    0.4,
+    6
+   ],
+   "material": "vermelho",
+   "fisica": {
+    "tipo": "dinamico",
+    "massa": 5,
+    "quique": 0.5
+   },
+   "repetir": {
+    "quantidade": [
+     3,
+     1,
+     1
+    ],
+    "passo": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "nome": "elevador",
+   "forma": "caixa",
+   "meia_extensao": [
+    1.2,
+    0.15,
+    1.2
+   ],
+   "posicao": [
+    -3,
+    0.15,
+    6
+   ],
+   "material": "amarelo",
+   "script": "scripts/elevador.lua",
+   "fisica": {
+    "tipo": "cinematico"
+   }
+  },
+  {
+   "nome": "carrossel",
+   "forma": "caixa",
+   "meia_extensao": [
+    2.0,
+    0.1,
+    0.4
+   ],
+   "posicao": [
+    6,
+    0.6,
+    -6
+   ],
+   "material": "amarelo",
+   "script": "scripts/girar.lua",
+   "fisica": {
+    "tipo": "cinematico"
+   }
+  },
+  {
+   "nome": "pulador",
+   "forma": "esfera",
+   "raio": 0.4,
+   "posicao": [
+    -4,
+    0.4,
+    -2
+   ],
+   "material": "azul",
+   "script": "scripts/pulador.lua",
+   "fisica": {
+    "tipo": "dinamico",
+    "quique": 0.3
+   }
+  },
+  // Guarda: patrulha entre dois pontos e conversa (E perto dele): diálogo com escolhas, missão e inventário.
+  {
+   "nome": "guarda",
+   "posicao": [-2, 0, 7],
+   "material": "azul",
+   "personagem": {
+    "velocidade": 1.5, "controle": "ia",
+    "ia": {"patrulha": [[-2, 0, 7], [-5, 0, 10]]}
+   },
+   "script": "scripts/guarda.lua"
+  },
+  // Raposa animada (modelo glTF CC-BY 4.0): segue o jogador pela navegação; parada/andando/correndo misturados pela
+  // velocidade e as patas pousadas no chão de verdade (IK) nos degraus e na rampa.
+  {
+   "nome": "raposa",
+   "posicao": [2, 0, 6],
+   "personagem": {
+    "altura": 0.8, "raio": 0.2, "velocidade": 1.5, "velocidade_correndo": 2.7, "degrau_maximo": 0.3,
+    "controle": "ia", "ia": {"seguir": "jogador", "parar_a": 1.5},
+    "visual": {
+     "modelo": "assets/Fox/Fox.gltf", "escala": 0.01,
+     "parado": "Survey", "andar": "Walk", "correr": "Run", "velocidade_andar": 1.5, "velocidade_correr": 2.7,
+     "pernas": [["b_LeftLeg01_015", "b_LeftLeg02_016", "b_LeftFoot01_017"],
+                ["b_RightLeg01_019", "b_RightLeg02_020", "b_RightFoot01_021"],
+                ["b_LeftUpperArm_09", "b_LeftForeArm_010", "b_LeftHand_011"],
+                ["b_RightUpperArm_06", "b_RightForeArm_07", "b_RightHand_08"]]
+    }
+   }
+  }
+ ]
+}

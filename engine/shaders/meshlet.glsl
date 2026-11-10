@@ -20,6 +20,12 @@ struct Meshlet {  // == scene::Meshlet
   float coneCutoff;
   uint vertexOffset, triangleOffset, counts, firstTriangle;
 };
+struct MeshletLod {  // == scene::MeshletLod
+  vec4 self;    // centro xyz, raio
+  vec4 parent;
+  float selfError, parentError, pad0, pad1;
+};
+layout(buffer_reference, scalar) readonly buffer MeshletLodList { MeshletLod l[]; };
 struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
 
 layout(buffer_reference, scalar) readonly buffer MeshletList { Meshlet m[]; };
@@ -34,6 +40,8 @@ layout(push_constant) uniform Push {
   uint64_t vertices;  // vértices da malha (scene::Vertex, 12 floats)
   uint batch, meshletCount, vertexBase, triangleBase;
   uint flags;  // 1 = culling ligado, 2 = dos dois lados (sem teste de costas)
+  uint lodBase;     // MeshletLod de cada meshlet, em uints a partir de `meshlets` (0 = malha sem níveis)
+  float lodPixels;  // erro máximo na tela, em pixels
 } pc;
 
 // O que o task shader passa a cada grupo do mesh shader: a entrada da lista (objeto | nível << 30) e os meshlets que
@@ -71,6 +79,23 @@ bool meshletVisible(Meshlet ml, mat4 model) {
     if (uniformScale && dot(toC, axis) >= ml.coneCutoff * dist + r) return false;
   }
   return true;
+}
+
+// Geometria virtualizada: erro geométrico `err` (unidades da malha) de uma esfera, projetado na tela em pixels, pela
+// distância até a borda da esfera (conservador e igual para todos os pedaços que dividem a esfera). Infinito na raiz.
+float lodErrorPixels(vec4 sphere, float err, mat4 model, float scale) {
+  if (err > 1.0e37) return 1.0e30;
+  vec3 c = (model * vec4(sphere.xyz, 1.0)).xyz;
+  float d = max(length(c - frame.cameraPos.xyz) - sphere.w * scale, 0.01);
+  return err * scale / d * abs(frame.proj[1][1]) * 0.5 * frame.renderSize.y;
+}
+// O meshlet `m` está no corte do grafo: o próprio erro cabe no limite e o do grupo que o substitui, não.
+bool meshletInLodCut(uint m, mat4 model) {
+  if (pc.lodBase == 0u) return true;
+  MeshletLod l = MeshletLodList(pc.meshlets + uint64_t(pc.lodBase) * 4ul).l[m];
+  float scale = max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz)));
+  return lodErrorPixels(l.self, l.selfError, model, scale) <= pc.lodPixels &&
+         lodErrorPixels(l.parent, l.parentError, model, scale) > pc.lodPixels;
 }
 
 #endif
