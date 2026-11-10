@@ -1387,6 +1387,9 @@ MeshData makeRock(uint32_t segments, uint32_t seed) {
       freq *= 2.1f;
     }
     v.position = d * (0.75f + 0.55f * h) * glm::vec3(1.3f, 0.8f, 1.0f);
+    // Grade de 1/65536: o sin/cos da biblioteca de cada sistema difere no último bit; arredondada, a rocha (e o grafo
+    // da geometria virtualizada) sai igual no Windows e no Linux — as medições dos dois lados comparam a mesma coisa.
+    v.position = glm::round(v.position * 65536.0f) / 65536.0f;
   }
   computeNormals(m);
   computeTangents(m);

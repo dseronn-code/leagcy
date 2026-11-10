@@ -1,10 +1,6 @@
-# Rodada 21g: causa do buraco achada no 21f — no Windows o último grupo da rocha simplificado perdeu 59% da área
-# (dobrou para dentro) e não cobria mais os filhos. Agora grupo que perde mais de 20% da área "para fora" fica para o
-# próximo nível (cache versão 5). Teste e o buraco nos vários limites.
+# Rodada 21h: rocha arredondada numa grade de 1/65536 — o grafo deve sair igual ao do Linux (lá: 713 -> 1642 pedaços,
+# raiz 634 triângulos; grafo 768: 6414 -> 14762, raiz 2364). Se o buraco continuar só aqui, é coisa da GPU.
 set LEGACY_DEBUG_LOD=1 && build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_1px.png
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_025px.png --lod-pixels 0.25
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_05px.png --lod-pixels 0.5
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_2px.png --lod-pixels 2
 build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_4px.png --lod-pixels 4
 build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --debug-view normal --out resultados_pc\c_sem.png --no-nanite
 python tools\nanite.py --bin build\Release\legacy.exe
