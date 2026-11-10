@@ -31,7 +31,7 @@ public class PenaltiActivity extends NativeActivity {
   // Chamado pelo código nativo (android_main.cpp) quando o motor não consegue continuar.
   public void showError(final String message) {
     runOnUiThread(() -> new AlertDialog.Builder(this)
-        .setTitle("Pênalti da Treta")
+        .setTitle("FCLegacy")
         .setMessage(message)
         .setCancelable(false)
         .setPositiveButton("Fechar", (d, w) -> finish())

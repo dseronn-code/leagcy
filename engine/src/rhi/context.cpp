@@ -1,6 +1,8 @@
 #include "rhi/context.h"
 
+#include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace rhi {
 
@@ -151,6 +153,23 @@ void Context::createDevice(VkSurfaceKHR surface) {
   s2.features.robustBufferAccess = VK_FALSE;
   s13.robustImageAccess = VK_FALSE;
 
+  // Ray query: a extensão existir não basta — confere as features (celulares podem anunciar sem suportar tudo).
+  if (rayTracing) {
+    VkPhysicalDeviceRayQueryFeaturesKHR rqS{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR asS{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    asS.pNext = &rqS;
+    VkPhysicalDeviceFeatures2 q{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    q.pNext = &asS;
+    vkGetPhysicalDeviceFeatures2(gpu, &q);
+    if (!rqS.rayQuery || !asS.accelerationStructure) {
+      LOG_WARN("GPU anuncia ray query mas não suporta as features; seguindo sem ray tracing.");
+      rayTracing = false;
+      exts.erase(std::remove_if(exts.begin(), exts.end(), [](const char* e) {
+        return !strcmp(e, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) || !strcmp(e, VK_KHR_RAY_QUERY_EXTENSION_NAME) ||
+               !strcmp(e, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+      }), exts.end());
+    }
+  }
   VkPhysicalDeviceRayQueryFeaturesKHR rq{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
   rq.rayQuery = VK_TRUE;
   VkPhysicalDeviceAccelerationStructureFeaturesKHR as{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
@@ -198,6 +217,38 @@ void Context::createDevice(VkSurfaceKHR surface) {
   f2.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
   f2.pNext = &f11;
 
+  // Só liga o que a GPU realmente tem: pedir uma feature ausente faz o vkCreateDevice falhar com
+  // VK_ERROR_FEATURE_NOT_PRESENT (-8), sem dizer qual. As essenciais param com o nome; as opcionais são desligadas.
+  std::string missingRequired, missingOptional;
+  auto need = [&](VkBool32& want, VkBool32 have, const char* name, bool required) {
+    if (!want || have) return;
+    want = VK_FALSE;
+    std::string& list = required ? missingRequired : missingOptional;
+    if (!list.empty()) list += ", ";
+    list += name;
+  };
+#define NEED(f, s, name, req) need(f.name, s.name, #name, req)
+  NEED(f2.features, supported, shaderInt64, true);
+  NEED(f2.features, supported, samplerAnisotropy, false);
+  NEED(f2.features, supported, shaderStorageImageReadWithoutFormat, false);
+  NEED(f2.features, supported, shaderStorageImageWriteWithoutFormat, false);
+  NEED(f12, s12, bufferDeviceAddress, true);
+  NEED(f12, s12, descriptorIndexing, false);
+  NEED(f12, s12, runtimeDescriptorArray, true);
+  NEED(f12, s12, descriptorBindingPartiallyBound, true);
+  NEED(f12, s12, shaderSampledImageArrayNonUniformIndexing, false);
+  NEED(f12, s12, shaderStorageBufferArrayNonUniformIndexing, false);
+  NEED(f12, s12, scalarBlockLayout, true);
+  NEED(f13, s13, dynamicRendering, true);
+  NEED(f13, s13, synchronization2, true);
+  NEED(f13, s13, maintenance4, false);
+#undef NEED
+  LOG_INFO("GPU: %s (Vulkan %u.%u, driver 0x%x)", properties.deviceName, VK_API_VERSION_MAJOR(properties.apiVersion),
+           VK_API_VERSION_MINOR(properties.apiVersion), properties.driverVersion);
+  if (!missingOptional.empty()) LOG_WARN("Features opcionais ausentes (desligadas): %s", missingOptional.c_str());
+  if (!missingRequired.empty())
+    FATAL("A GPU %s não tem features exigidas pelo motor: %s", properties.deviceName, missingRequired.c_str());
+
   float priority = 1.0f;
   VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
   qci.queueFamilyIndex = queueFamily;
@@ -211,7 +262,9 @@ void Context::createDevice(VkSurfaceKHR surface) {
   dci.enabledExtensionCount = uint32_t(exts.size());
   dci.ppEnabledExtensionNames = exts.data();
   deviceExtensions = exts;
-  VK_CHECK(vkCreateDevice(gpu, &dci, nullptr, &device));
+  if (VkResult res = vkCreateDevice(gpu, &dci, nullptr, &device); res != VK_SUCCESS)
+    FATAL("vkCreateDevice falhou (VkResult %d) na GPU %s; extensões pedidas: %zu, ray tracing %s, mesh shaders %s",
+          int(res), properties.deviceName, exts.size(), rayTracing ? "sim" : "não", meshShaders ? "sim" : "não");
   vkGetDeviceQueue(device, queueFamily, 0, &queue);
   vkCmdPushDescriptorSetKHR = (PFN_vkCmdPushDescriptorSetKHR)vkGetDeviceProcAddr(device, "vkCmdPushDescriptorSetKHR");
 
