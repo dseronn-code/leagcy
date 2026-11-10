@@ -217,6 +217,17 @@ struct ParticleSource {
 
 // Marca entidades do sistema (o menu padrão): ficam fora do arquivo salvo e do editor.
 struct SystemEntity {};
+// Mundo aberto ("mundo_aberto" na cena): entidade de uma célula longe do jogador — sem desenho, física nem script até
+// a célula voltar. "sempre_carregado": true na entidade a deixa fora das células.
+struct Dormant {};
+struct AlwaysLoaded {};
+// Ladrilho do terreno ("terreno" na cena). De perto, a malha detalhada (o Renderable) com colisão (bodyId); com a
+// célula dormindo, só a malha simples (farObject), sem física.
+struct TerrainTile {
+  uint32_t farObject = ~0u;
+  uint32_t bodyId = ~0u;
+  float friction = 0.8f;
+};
 
 // ---- Mundo ----
 
@@ -327,7 +338,26 @@ class World {
   // Ouvinte do áudio (a câmera), a cada quadro antes do update.
   void setListener(glm::vec3 position, glm::vec3 forward) {
     if (audio) audio->setListener(position, forward);
+    listenerPos_ = position;
+    hasListener_ = true;
   }
+  // Mundo aberto (no estilo do World Partition): as entidades paradas com desenho (cenário, adereços, colisões) ficam
+  // em células quadradas de `cellSize` m pela posição; a célula carrega quando o jogador (ou a câmera, sem jogador) chega
+  // a `loadDistance` m dela e descarrega além de `unloadDistance` (folga: não fica piscando na borda). Personagens,
+  // veículos, corpos dinâmicos, entidades só de lógica (sem desenho), o que é maior que uma célula e o que tem
+  // "sempre_carregado" ficam sempre.
+  struct OpenWorldCell {
+    glm::vec2 center{0.0f};
+    std::vector<entt::entity> members;
+    bool loaded = true;
+  };
+  struct OpenWorld {
+    bool enabled = false;
+    float cellSize = 64.0f, loadDistance = 200.0f, unloadDistance = 260.0f;
+    std::vector<OpenWorldCell> cells;
+    uint32_t loaded = 0, entities = 0;
+  } openWorld;
+  void setEntityDormant(scene::Scene& scene, entt::entity e, bool dormant);
   float time = 0.0f;  // segundos de jogo simulados
 
  private:
@@ -344,6 +374,25 @@ class World {
   bool sees(const Character& c, entt::entity other) const;
   entt::entity findByName(const std::string& name) const;
  private:
+  glm::vec3 listenerPos_{0.0f};
+  bool hasListener_ = false;
+  void partitionOpenWorld();
+ public:
+  // Terreno de quilômetros ("terreno" na cena): altura por ruído fractal ou por um mapa de altura (PNG em tons de
+  // cinza, 8 ou 16 bits), dividido em ladrilhos. 0 fora do terreno ou sem terreno.
+  struct Terrain {
+    bool enabled = false;
+    float size = 2048.0f, tile = 64.0f, height = 80.0f, base = 0.0f, noiseScale = 512.0f;
+    int octaves = 6;
+    float seed = 0.0f;
+    glm::vec2 center{0.0f};
+    std::vector<float> map;  // 0..1, mapW x mapH (vazio: ruído)
+    int mapW = 0, mapH = 0;
+  } terrain;
+  float terrainHeight(float x, float z) const;
+
+ private:
+  void updateOpenWorld(scene::Scene& scene);
   std::vector<std::pair<entt::entity, Transform>> snapshot_;
   float snapshotTime_ = 0.0f;
   scene::Scene* loadedScene_ = nullptr;  // para ler os triângulos dos modelos em start() (antes do upload)

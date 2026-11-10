@@ -193,6 +193,8 @@ struct Object {
   // a fusão simplificada, desenhada longe dela (só no raster: o ray tracing e as sombras usam os membros).
   int32_t hlodCell = -1;
   bool hlodProxy = false;
+  // Mundo aberto (game::World): objeto de uma célula descarregada — fora do desenho, das sombras e do ray tracing.
+  bool hidden = false;
 };
 
 // Malha de célula de streaming lida do disco (StreamLoader em scene.cpp), esperando a vez de subir para a GPU.
@@ -457,6 +459,8 @@ class Scene {
   // TLAS compacto: só objetos com malha na memória entram (posição no TLAS por objeto, -1 = fora). O layout muda
   // quando o streaming carrega/descarrega; o renderer então reescreve todas as instâncias.
   int32_t tlasSlotOf(uint32_t object) const { return object < tlasSlot_.size() ? tlasSlot_[object] : -1; }
+  // Mundo aberto: esconde ou mostra um objeto (desenho, sombras e ray tracing). Vale a partir do próximo frame.
+  void setObjectHidden(uint32_t object, bool hidden);
   uint32_t tlasInstanceCount() const { return tlasCount_; }
   uint32_t tlasLayout() const { return tlasLayout_; }
   // Endereços de vértices/índices de uma malha para o buffer de instâncias: a malha vazia (válida) se ela está fora
@@ -606,6 +610,7 @@ class Scene {
   rhi::Buffer emptyVertices_, emptyIndices_;  // malha vazia: endereços válidos para objetos fora da memória
   std::vector<int32_t> tlasSlot_;
   uint32_t tlasCount_ = 0, tlasLayout_ = 0;
+  bool hiddenDirty_ = false;
   void rebuildTlasLayout();
   void makeResident(uint32_t mesh, const MeshData& data, const std::vector<uint32_t>& meshlets);
   void evict(uint32_t mesh);

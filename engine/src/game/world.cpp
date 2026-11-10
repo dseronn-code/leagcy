@@ -9,12 +9,15 @@
 #include <fstream>
 #include <map>
 
+#include <stb_image.h>
+
 #include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
 
 #include "core/log.h"
 #include "core/paths.h"
 #include "scene/camera.h"
+#include "scene/demo_scene.h"
 #include "scene/mesh.h"
 #include "scene/scene.h"
 
@@ -154,6 +157,13 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
     return false;
   }
   scenePath = path;
+  if (doc.contains("mundo_aberto") && doc["mundo_aberto"].is_object()) {
+    const json& ow = doc["mundo_aberto"];
+    openWorld.enabled = true;
+    openWorld.cellSize = std::max(4.0f, ow.value("celula", openWorld.cellSize));
+    openWorld.loadDistance = ow.value("carregar", openWorld.loadDistance);
+    openWorld.unloadDistance = std::max(openWorld.loadDistance + 1.0f, ow.value("descarregar", openWorld.loadDistance * 1.3f));
+  }
   // Geometria virtualizada (tipo Nanite) para a cena inteira: "nanite": true (o --nanite / --no-nanite vale acima).
   if (doc.contains("nanite") && doc["nanite"].is_boolean()) scene.clusterLod = doc["nanite"].get<bool>();
   loadLanguages();
@@ -192,6 +202,10 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         mat.roughness = m.value("rugosidade", 0.5f);
         mat.metallic = m.value("metalico", 0.0f);
         mat.emissive = vec3Of(m.value("emissao", json()), glm::vec3(0.0f));
+        if (m.value("terreno", false)) {  // grama, terra, rocha e cascalho pela inclinação e por ruído (material.glsl)
+          mat.flags |= scene::kMaterialTerrain;
+          if (scene.terrainLayers.albedo[0] < 0) scene::addTerrainLayers(scene);
+        }
         materials[name] = scene.addMaterial(mat);
       }
     }
@@ -479,6 +493,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               registry.emplace<Name>(ent, many ? name + "_" + std::to_string(x) + "_" + std::to_string(y) + "_" + std::to_string(z) : name);
             registry.emplace<Transform>(ent, t);
             registry.emplace<Shape>(ent, shape);
+            if (e.value("sempre_carregado", false)) registry.emplace<AlwaysLoaded>(ent);
             if (character && character->visual.enabled) {
               Character ch = *character;
               CharacterVisual& v = ch.visual;
@@ -545,6 +560,106 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             ++created;
           }
     }
+    // Terreno de quilômetros: ladrilhos de "ladrilho" metros (o padrão é a célula do mundo aberto), cada um uma
+    // entidade parada com a malha detalhada e colisão; no mundo aberto, também a malha simples de longe.
+    if (doc.contains("terreno") && doc["terreno"].is_object()) {
+      const json& tj = doc["terreno"];
+      Terrain& T = terrain;
+      T.enabled = true;
+      T.size = std::max(8.0f, tj.value("tamanho", T.size));
+      T.tile = std::max(4.0f, tj.value("ladrilho", openWorld.enabled ? openWorld.cellSize : T.tile));
+      T.height = tj.value("altura", T.height);
+      T.base = tj.value("base", T.base);
+      T.noiseScale = std::max(1.0f, tj.value("escala", T.noiseScale));
+      T.octaves = std::clamp(tj.value("oitavas", T.octaves), 1, 12);
+      T.seed = float(tj.value("semente", 0)) * 37.17f;
+      if (tj.contains("centro")) T.center = glm::vec2(tj["centro"][0].get<float>(), tj["centro"][1].get<float>());
+      if (tj.contains("mapa")) {
+        std::string mp = tj["mapa"].get<std::string>();
+        if (!std::ifstream(mp) && std::ifstream(sceneDir + mp)) mp = sceneDir + mp;
+        int w = 0, h = 0, n = 0;
+        if (stbi_us* px = stbi_load_16(mp.c_str(), &w, &h, &n, 1)) {
+          T.map.resize(size_t(w) * size_t(h));
+          for (size_t i = 0; i < T.map.size(); ++i) T.map[i] = float(px[i]) / 65535.0f;
+          T.mapW = w;
+          T.mapH = h;
+          stbi_image_free(px);
+        } else {
+          LOG_WARN("Terreno: não li o mapa de altura %s; usando ruído", mp.c_str());
+        }
+      }
+      const uint32_t res = std::clamp(tj.value("resolucao", 64u), 2u, 1024u);  // quadrados por lado do ladrilho
+      const uint32_t farRes = std::max(2u, res / 8u);
+      const std::string tm = tj.value("material", "");
+      auto mit = materials.find(tm);
+      if (mit == materials.end()) mit = materials.find("");
+      const float friction = tj.value("atrito", 0.8f);
+      const int n = std::max(1, int(std::ceil(T.size / T.tile)));
+      const float span = float(n) * T.tile;
+      // Malha de um ladrilho com centro (cx, cz): posições relativas ao centro (precisão), altura absoluta, normais e
+      // UVs em metros do mundo (sem emenda entre ladrilhos) e uma saia vertical na borda que esconde as frestas entre
+      // ladrilhos de resoluções diferentes.
+      auto makeTile = [&](float cx, float cz, uint32_t r, float skirt) {
+        scene::MeshData m;
+        const float step = T.tile / float(r), half = 0.5f * T.tile, e = 0.5f * step;
+        auto vert = [&](float lx, float lz, float dy) {
+          const float x = cx + lx, z = cz + lz;
+          const glm::vec3 nrm = glm::normalize(glm::vec3(terrainHeight(x - e, z) - terrainHeight(x + e, z), 2.0f * e,
+                                                         terrainHeight(x, z - e) - terrainHeight(x, z + e)));
+          m.vertices.push_back({{lx, terrainHeight(x, z) - dy, lz}, nrm, {x, z}, {}});
+        };
+        for (uint32_t j = 0; j <= r; ++j)
+          for (uint32_t i = 0; i <= r; ++i) vert(-half + float(i) * step, -half + float(j) * step, 0.0f);
+        for (uint32_t j = 0; j < r; ++j)
+          for (uint32_t i = 0; i < r; ++i) {
+            const uint32_t a = j * (r + 1) + i, b = a + r + 1;
+            m.indices.insert(m.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+          }
+        // Saia: a borda (no sentido do contorno) e uma cópia mais baixa; os dois lados, para valer de qualquer ângulo.
+        std::vector<uint32_t> ring;
+        for (uint32_t i = 0; i < r; ++i) ring.push_back(i);
+        for (uint32_t j = 0; j < r; ++j) ring.push_back(j * (r + 1) + r);
+        for (uint32_t i = r; i > 0; --i) ring.push_back(r * (r + 1) + i);
+        for (uint32_t j = r; j > 0; --j) ring.push_back(j * (r + 1));
+        const uint32_t base = uint32_t(m.vertices.size());
+        for (uint32_t k : ring) {
+          scene::Vertex v = m.vertices[k];
+          v.position.y -= skirt;
+          m.vertices.push_back(v);
+        }
+        for (size_t k = 0; k < ring.size(); ++k) {
+          const uint32_t a = ring[k], b = ring[(k + 1) % ring.size()];
+          const uint32_t la = base + uint32_t(k), lb = base + uint32_t((k + 1) % ring.size());
+          m.indices.insert(m.indices.end(), {a, la, b, b, la, lb, a, b, la, b, lb, la});
+        }
+        scene::computeTangents(m);
+        return m;
+      };
+      uint32_t tiles = 0, tris = 0;
+      for (int tz = 0; tz < n; ++tz)
+        for (int tx = 0; tx < n; ++tx) {
+          const float cx = T.center.x - 0.5f * span + (float(tx) + 0.5f) * T.tile;
+          const float cz = T.center.y - 0.5f * span + (float(tz) + 0.5f) * T.tile;
+          scene::MeshData nearMesh = makeTile(cx, cz, res, 0.02f * T.tile);
+          tris += uint32_t(nearMesh.indices.size() / 3);
+          const glm::mat4 xf = glm::translate(glm::mat4(1.0f), glm::vec3(cx, 0.0f, cz));
+          const entt::entity ent = registry.create();
+          Transform t;
+          t.position = glm::vec3(cx, terrainHeight(cx, cz), cz);
+          registry.emplace<Transform>(ent, t);
+          registry.emplace<Renderable>(ent, scene.addObject(scene.addMesh(std::move(nearMesh)), xf, mit->second), tm);
+          TerrainTile tt;
+          tt.friction = friction;
+          if (openWorld.enabled) {
+            tt.farObject = scene.addObject(scene.addMesh(makeTile(cx, cz, farRes, 0.08f * T.tile)), xf, mit->second);
+            scene.setObjectHidden(tt.farObject, true);
+          }
+          registry.emplace<TerrainTile>(ent, tt);
+          ++tiles;
+        }
+      LOG_INFO("Terreno: %.0f m de lado em %u ladrilhos de %.0f m (%u triângulos de perto)%s", span, tiles, T.tile, tris,
+               T.mapW ? " pelo mapa de altura" : "");
+    }
     // Menu de pausa (Esc / Start): o padrão do motor, outro script ("menu": "caminho.lua") ou nenhum ("menu": false).
     // Roda numa entidade de sistema (sem forma, fora do arquivo salvo e do editor).
     if (const json menu = doc.contains("menu") ? doc["menu"] : json("scripts/menu_padrao.lua"); menu.is_string()) {
@@ -610,6 +725,17 @@ void World::start() {
       LOG_INFO("Física: colisão de %s com %zu triângulos", m.path.c_str(), idx.size() / 3);
     }
   }
+  // Terreno: a malha detalhada de cada ladrilho, no mundo, vira um corpo parado.
+  for (auto ent : registry.view<TerrainTile, Renderable>()) {
+    TerrainTile& tt = registry.get<TerrainTile>(ent);
+    if (!loadedScene_) break;
+    const scene::Object& obj = loadedScene_->objects[registry.get<Renderable>(ent).sceneObject];
+    const scene::MeshData& mesh = loadedScene_->cpuMesh(obj.mesh);
+    std::vector<glm::vec3> verts;
+    verts.reserve(mesh.vertices.size());
+    for (const scene::Vertex& v : mesh.vertices) verts.push_back(glm::vec3(obj.transform * glm::vec4(v.position, 1.0f)));
+    tt.bodyId = physics->addStaticMesh(verts, mesh.indices, tt.friction);
+  }
   audio = std::make_unique<Audio>(gAudioOffline);
   for (auto ent : registry.view<SoundSource, Transform>()) {
     SoundSource& snd = registry.get<SoundSource>(ent);
@@ -619,6 +745,9 @@ void World::start() {
   if (!registry.view<Script>().empty()) {
     scripting = std::make_unique<Scripting>(*this);
     for (auto ent : registry.view<Script>()) scripting->attach(ent, registry.get<Script>(ent).path);
+  }
+  if (openWorld.enabled) {
+    partitionOpenWorld();
   }
   for (auto ent : registry.view<Transform, Vehicle>()) {
     const Transform& t = registry.get<Transform>(ent);
@@ -656,6 +785,14 @@ void World::start() {
         for (uint32_t i : mesh.indices) idx.push_back(base + i);
       }
     }
+    for (auto ent : registry.view<TerrainTile, Renderable>()) {
+      if (!loadedScene_) break;
+      const scene::Object& obj = loadedScene_->objects[registry.get<Renderable>(ent).sceneObject];
+      const scene::MeshData& mesh = loadedScene_->cpuMesh(obj.mesh);
+      const uint32_t base = uint32_t(verts.size());
+      for (const scene::Vertex& v : mesh.vertices) verts.push_back(glm::vec3(obj.transform * glm::vec4(v.position, 1.0f)));
+      for (uint32_t i : mesh.indices) idx.push_back(base + i);
+    }
     navigation = std::make_unique<Navigation>();
     NavSettings ns;
     for (auto ent : registry.view<Character>())
@@ -688,6 +825,7 @@ void World::update(scene::Scene& scene, float dt) {
     return;
   }
   time += dt;
+  if (!netClient) updateOpenWorld(scene);
   if (scripting) scripting->update(scene, dt);
   if (paused) return;  // um script pausou agora: a pausa já vale neste quadro (nada se move)
   if (netClient) {  // cliente de rede: as poses vêm do anfitrião (game/network); aqui só a animação dos "visual"
@@ -1357,8 +1495,29 @@ std::vector<std::pair<std::string, std::string>> World::languages() const {
   return out;
 }
 
+float World::terrainHeight(float x, float z) const {
+  if (!terrain.enabled) return 0.0f;
+  const Terrain& T = terrain;
+  if (!T.map.empty()) {  // mapa de altura cobrindo o lado do terreno, bilinear
+    const float u = std::clamp((x - T.center.x) / T.size + 0.5f, 0.0f, 1.0f) * float(T.mapW - 1);
+    const float v = std::clamp((z - T.center.y) / T.size + 0.5f, 0.0f, 1.0f) * float(T.mapH - 1);
+    const int i = std::min(int(u), T.mapW - 2 < 0 ? 0 : T.mapW - 2), j = std::min(int(v), T.mapH - 2 < 0 ? 0 : T.mapH - 2);
+    const int i1 = std::min(i + 1, T.mapW - 1), j1 = std::min(j + 1, T.mapH - 1);
+    const float fu = u - float(i), fv = v - float(j);
+    auto at = [&](int a, int b) { return T.map[size_t(b) * size_t(T.mapW) + size_t(a)]; };
+    const float hgt = (at(i, j) * (1 - fu) + at(i1, j) * fu) * (1 - fv) + (at(i, j1) * (1 - fu) + at(i1, j1) * fu) * fv;
+    return T.base + T.height * hgt;
+  }
+  // Ruído fractal: colinas grandes (escala em metros) com detalhe por oitava.
+  // Relativo ao centro: o mesmo terreno em qualquer lugar do mundo.
+  return T.base + T.height * scene::fbm((x - T.center.x) / T.noiseScale + T.seed, (z - T.center.y) / T.noiseScale - T.seed,
+                                        T.octaves);
+}
+
 entt::entity World::entityOfBody(uint32_t body) const {
   if (body == ~0u) return entt::null;
+  for (auto ent : registry.view<TerrainTile>())
+    if (registry.get<TerrainTile>(ent).bodyId == body) return ent;
   for (auto ent : registry.view<RigidBody>())
     if (registry.get<RigidBody>(ent).bodyId == body) return ent;
   for (auto ent : registry.view<Model>())
@@ -1498,6 +1657,72 @@ void World::stopAction(entt::entity e, float fade) {
     c->visual.actionOn = false;
     c->visual.actionFade = std::max(fade, 0.0f);
   }
+}
+
+void World::partitionOpenWorld() {
+  openWorld.cells.clear();
+  std::map<std::pair<int, int>, size_t> index;
+  const float cs = openWorld.cellSize;
+  openWorld.entities = 0;
+  for (auto ent : registry.view<Transform, Renderable>()) {
+    if (registry.any_of<Character, Vehicle, SystemEntity, AlwaysLoaded, ParticleSource>(ent)) continue;
+    if (const RigidBody* b = registry.try_get<RigidBody>(ent); b && b->desc.motion == Motion::Dynamic) continue;
+    if (const Shape* sh = registry.try_get<Shape>(ent)) {  // maior que uma célula (chão, terreno): sempre
+      const float extent = sh->type == ShapeType::Box ? 2.0f * std::max(sh->halfExtents.x, sh->halfExtents.z)
+                                                      : 2.0f * sh->radius;
+      if (extent > cs) continue;
+    }
+    const glm::vec3 p = registry.get<Transform>(ent).position;
+    const std::pair<int, int> key{int(std::floor(p.x / cs)), int(std::floor(p.z / cs))};
+    auto it = index.find(key);
+    if (it == index.end()) {
+      it = index.emplace(key, openWorld.cells.size()).first;
+      OpenWorldCell c;
+      c.center = glm::vec2((float(key.first) + 0.5f) * cs, (float(key.second) + 0.5f) * cs);
+      openWorld.cells.push_back(c);
+    }
+    openWorld.cells[it->second].members.push_back(ent);
+    ++openWorld.entities;
+  }
+  openWorld.loaded = uint32_t(openWorld.cells.size());
+  LOG_INFO("Mundo aberto: %u entidades em %zu células de %.0f m (carrega a %.0f m, descarrega a %.0f m)",
+           openWorld.entities, openWorld.cells.size(), cs, openWorld.loadDistance, openWorld.unloadDistance);
+}
+
+void World::setEntityDormant(scene::Scene& scene, entt::entity e, bool dormant) {
+  if (!registry.valid(e) || registry.all_of<Dormant>(e) == dormant) return;
+  if (dormant) registry.emplace<Dormant>(e);
+  else registry.remove<Dormant>(e);
+  if (const Renderable* r = registry.try_get<Renderable>(e)) scene.setObjectHidden(r->sceneObject, dormant);
+  if (const RigidBody* b = registry.try_get<RigidBody>(e); b && b->bodyId != ~0u) physics->setBodyInWorld(b->bodyId, !dormant);
+  if (const TerrainTile* tt = registry.try_get<TerrainTile>(e)) {  // de longe: a malha simples, sem física
+    if (tt->farObject != ~0u) scene.setObjectHidden(tt->farObject, !dormant);
+    if (tt->bodyId != ~0u) physics->setBodyInWorld(tt->bodyId, !dormant);
+  }
+  if (const SoundSource* snd = registry.try_get<SoundSource>(e); snd && snd->handle != ~0u && audio)
+    audio->setPosition(snd->handle, dormant ? glm::vec3(0.0f, -1.0e6f, 0.0f) : registry.get<Transform>(e).position);
+}
+
+void World::updateOpenWorld(scene::Scene& scene) {
+  if (!openWorld.enabled || openWorld.cells.empty()) return;
+  glm::vec3 focus;
+  if (!playerFeet(focus)) {
+    if (!hasListener_) return;  // nem jogador nem câmera ainda: fica tudo carregado
+    focus = listenerPos_;
+  }
+  const float half = 0.5f * openWorld.cellSize;
+  uint32_t loaded = 0;
+  for (OpenWorldCell& c : openWorld.cells) {
+    const glm::vec2 d = glm::max(glm::abs(glm::vec2(focus.x, focus.z) - c.center) - half, glm::vec2(0.0f));
+    const float dist = glm::length(d);  // até a borda do quadrado da célula
+    const bool want = c.loaded ? dist <= openWorld.unloadDistance : dist < openWorld.loadDistance;
+    if (want != c.loaded) {
+      c.loaded = want;
+      for (entt::entity e : c.members) setEntityDormant(scene, e, !want);
+    }
+    loaded += c.loaded ? 1 : 0;
+  }
+  openWorld.loaded = loaded;
 }
 
 bool World::startRagdoll(entt::entity e, glm::vec3 impulse) {
@@ -1665,6 +1890,9 @@ void World::setEntityPose(scene::Scene& scene, entt::entity e, glm::vec3 positio
   t.position = position;
   t.rotation = glm::normalize(rotation);
   if (RigidBody* b = registry.try_get<RigidBody>(e); b && b->bodyId != ~0u) physics->setPose(b->bodyId, t.position, t.rotation);
+  // Personagem: a posição é a do centro da cápsula (como no arquivo de cena); teletransporta os pés.
+  if (const Character* c = registry.try_get<Character>(e); c && c->id != ~0u)
+    physics->setCharacterFeet(c->id, position - glm::vec3(0.0f, 0.5f * c->desc.height, 0.0f));
   if (const Renderable* r = registry.try_get<Renderable>(e); r && registry.all_of<Shape>(e))
     scene.setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(e)));
   // Modelos glTF e personagens: mover no editor fica para depois (o modelo tem vários objetos e colisão por malha).

@@ -255,7 +255,10 @@ Physics::~Physics() {
     JPH::BodyIDVector ids;
     p_->system->GetBodies(ids);
     if (!ids.empty()) {
-      p_->bodies().RemoveBodies(ids.data(), int(ids.size()));
+      JPH::BodyIDVector added;  // os do mundo aberto em célula descarregada já estão fora: só destruir
+      for (const JPH::BodyID& id : ids)
+        if (p_->bodies().IsAdded(id)) added.push_back(id);
+      if (!added.empty()) p_->bodies().RemoveBodies(added.data(), int(added.size()));
       p_->bodies().DestroyBodies(ids.data(), int(ids.size()));
     }
   }
@@ -650,6 +653,18 @@ bool Physics::castRayIgnoringCharacter(glm::vec3 origin, glm::vec3 direction, fl
 }
 
 bool Physics::isActive(uint32_t body) const { return p_->bodies().IsActive(bodyId(body)); }
+void Physics::setBodyInWorld(uint32_t body, bool inWorld) {
+  JPH::BodyInterface& bi = p_->bodies();
+  const JPH::BodyID id = bodyId(body);
+  if (bi.IsAdded(id) == inWorld) return;
+  if (inWorld) {
+    const bool moving = bi.GetMotionType(id) != JPH::EMotionType::Static;
+    bi.AddBody(id, moving ? JPH::EActivation::Activate : JPH::EActivation::DontActivate);
+  } else {
+    bi.RemoveBody(id);
+  }
+}
+bool Physics::bodyInWorld(uint32_t body) const { return p_->bodies().IsAdded(bodyId(body)); }
 uint32_t Physics::bodyCount() const { return p_->system->GetNumBodies(); }
 uint32_t Physics::activeBodyCount() const { return p_->system->GetNumActiveBodies(JPH::EBodyType::RigidBody); }
 uint64_t Physics::steps() const { return p_->steps; }

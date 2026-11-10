@@ -22,4 +22,7 @@ struct DemoOptions {
 // Monta a cena de demonstração escolhida. Retorna false se os assets não existirem.
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt);
 
+// Texturas das 4 camadas do terreno (material com kMaterialTerrain): grama, terra, rocha e cascalho.
+void addTerrainLayers(Scene& s);
+
 }  // namespace scene

@@ -85,6 +85,10 @@ class Physics {
   // Corpo cinemático: chega em `position`/`rotation` ao fim do próximo passo (empurra os dinâmicos no caminho).
   void moveKinematic(uint32_t body, glm::vec3 position, glm::quat rotation);
   bool isActive(uint32_t body) const;
+  // Mundo aberto: tira o corpo da simulação (continua existindo, com a mesma pose) ou devolve. Corpos dinâmicos e
+  // cinemáticos voltam ativos; parados, dormindo.
+  void setBodyInWorld(uint32_t body, bool inWorld);
+  bool bodyInWorld(uint32_t body) const;
   // Editor: põe o corpo numa pose (teletransporte) e zera a velocidade.
   void setPose(uint32_t body, glm::vec3 position, glm::quat rotation);
   // Primeiro corpo atingido pelo raio (origem + direção normalizada × até maxDistance); ~0u = nenhum.

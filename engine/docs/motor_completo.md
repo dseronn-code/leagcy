@@ -412,6 +412,58 @@ Testes (`tools/nanite.py`, sem GPU: os tempos servem para comparar entre si, nã
 Outras medidas: o campo de 151 milhões de triângulos foi de 5.248 ms (primeira versão) para ~1.930 ms no G-buffer; a
 carga com o cache, de 19,4 s para 11,2 s; os blocos e a oclusão não mudam a imagem (comparação pixel a pixel).
 
+## Mundo aberto (células por distância, no estilo do World Partition)
+
+Com `"mundo_aberto": {"celula": 64, "carregar": 192, "descarregar": 256}` na cena, as entidades paradas com visual são
+divididas numa grade de células (no plano x-z, pelo lado `celula` em metros). A cada quadro, o motor mede a distância do
+jogador (ou do ouvinte/câmera, sem jogador) até cada célula: abaixo de `carregar`, a célula acorda; acima de
+`descarregar`, dorme (a folga entre os dois evita liga-desliga na borda).
+
+Uma entidade dormindo:
+- some do desenho e da cena de ray tracing (sai do TLAS e o culling a descarta);
+- sai da física (o corpo é tirado do mundo do Jolt e volta igual ao acordar);
+- não roda o script (`atualizar` pula) e o som dela fica mudo.
+
+Ficam fora da grade (sempre carregados): personagens, veículos, corpos dinâmicos, partículas, entidades de sistema, formas
+maiores que uma célula (o chão) e as marcadas com `"sempre_carregado": true`. Um script só de lógica precisa dessa marca
+(sem `"forma"`, a entidade ganha a caixa padrão e dormiria com a célula dela).
+
+Lua: `celulas()` devolve `carregadas, total`; `e:dormindo()` diz se a entidade está dormindo. `e:mover_para()` agora
+também teletransporta personagens (o centro da cápsula, como `e:posicao()`).
+
+Testes (`tools/mundo.py`, 40 caixas a cada 50 m, células de 50 m): com o jogador em x = 0, 5 de 40 células carregadas;
+teletransportado para x = 1000, a caixa de x = 0 dorme e a de x = 1000 acorda; uma bola solta sobre a caixa acordada para
+em cima (y = 1,25) e outra sobre a dormindo cai até o chão (0,25); de volta a 0, tudo volta; e a câmera só vê a caixa
+de x = 500 com a célula dela carregada.
+
+### Terreno de quilômetros
+
+```json
+"terreno": {"tamanho": 4096, "altura": 120, "escala": 600, "oitavas": 6, "semente": 3, "resolucao": 64,
+            "material": "chao", "atrito": 0.8},
+"materiais": {"chao": {"cor": [0.3, 0.4, 0.2], "terreno": true}}
+```
+
+A altura vem de ruído fractal (`escala` = tamanho das colinas em metros, `altura` = variação, `base` = deslocamento) ou
+de um mapa de altura (`"mapa": "altura.png"`, tons de cinza de 8 ou 16 bits, cobrindo o `tamanho` em volta de
+`"centro": [x, z]`). O terreno é dividido em ladrilhos (`ladrilho`, o padrão é a célula do mundo aberto) de
+`resolucao` x `resolucao` quadrados; cada ladrilho é uma entidade parada com a malha detalhada e colisão (malha no
+Jolt). Com o mundo aberto ligado, cada ladrilho tem também uma malha simples (1/8 da resolução): quando a célula dorme,
+o ladrilho troca para ela e sai da física, então o horizonte continua inteiro sem pagar pelo detalhe. Uma saia vertical
+na borda de cada ladrilho esconde as frestas entre ladrilhos de resoluções diferentes. Normais e UVs são calculadas em
+coordenadas do mundo (sem emenda). `"terreno": true` no material liga as camadas texturizadas (grama, terra, rocha e
+cascalho, pela inclinação e por ruído). A navegação dos NPCs inclui o terreno. Lua: `altura_terreno(x, z)`.
+
+Testes (`tools/mundo.py`, terreno de 1024 m em 256 ladrilhos de 64 m): o jogador teletransportado para x = 0 e para
+x = 400 fica em pé no chão (centro da cápsula a 0,90 m acima da altura do terreno); uma bola num ladrilho dormindo
+atravessa (sem física longe do jogador); 40 de 256 células carregadas; do alto, olhando o horizonte, nenhum buraco
+entre os ladrilhos de perto e de longe.
+
+![Terreno de 1 km visto do alto](screenshots/terreno_km.png)
+
+Ainda não: origem flutuante (para mundos acima de ~10 km, onde o float perde precisão) e carregar células de arquivos
+separados do disco (hoje a cena inteira é lida no início; a célula só liga e desliga).
+
 ## Malhas comprimidas (meshopt, Draco) e texturas KTX2
 
 - **meshopt** (`EXT_meshopt_compression`, o formato do gltfpack) e **malha quantizada** (`KHR_mesh_quantization`):

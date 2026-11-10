@@ -183,6 +183,7 @@ struct Scripting::Impl {
           return h.valid() && h.world->startRagdoll(h.e, glm::vec3(ix.value_or(0.0f), iy.value_or(0.0f), iz.value_or(0.0f)));
         },
         "levantar", [](const Entidade& h) { return h.valid() && h.world->stopRagdoll(h.e); },
+        "dormindo", [](const Entidade& h) { return h.valid() && h.world->registry.all_of<Dormant>(h.e); },
         "caido", [](const Entidade& h) {
           const Character* c = h.valid() ? h.world->registry.try_get<Character>(h.e) : nullptr;
           return c && c->ragdoll.active;
@@ -470,6 +471,14 @@ struct Scripting::Impl {
       for (const auto& [code, name] : world.languages()) out[i++] = L.create_table_with(1, code, 2, name);
       return out;
     });
+    // Mundo aberto: células carregadas e total (e entidades nas células).
+    lua.set_function("celulas", [this](sol::this_state st) {
+      sol::variadic_results r;
+      r.push_back({st, sol::in_place, world.openWorld.loaded});
+      r.push_back({st, sol::in_place, uint32_t(world.openWorld.cells.size())});
+      return r;
+    });
+    lua.set_function("altura_terreno", [this](float x, float z) { return world.terrainHeight(x, z); });
     lua.set_function("controle_jogador", [this](sol::optional<bool> on) {
       if (on) world.playerControl = *on;
       return world.playerControl;
@@ -612,6 +621,7 @@ void Scripting::update(scene::Scene& scene, float dt) {
   }
   for (auto& inst : p_->instances) {
     if (inst.failed || !p_->world.registry.valid(inst.e)) continue;
+    if (p_->world.registry.all_of<Dormant>(inst.e)) continue;  // mundo aberto: célula descarregada
     const Entidade h{&p_->world, inst.e};
     if (!inst.started) {
       inst.started = true;

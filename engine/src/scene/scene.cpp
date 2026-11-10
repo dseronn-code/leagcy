@@ -279,6 +279,10 @@ void Scene::update(float dt) {
     if (!movedMark_[i]) changed_.push_back(i);  // os que não voltaram a se mexer dentro deste update
   for (uint32_t i : movedNow_) movedMark_[i] = 0;
   movedLast_.swap(movedNow_);
+  if (hiddenDirty_ && ctx_) {  // mundo aberto: objetos entraram ou saíram do ray tracing
+    rebuildTlasLayout();
+    hiddenDirty_ = false;
+  }
 }
 
 void Scene::setTransform(uint32_t object, const glm::mat4& transform) {
@@ -304,11 +308,23 @@ rhi::TlasInstance Scene::tlasInstance(uint32_t i) const {
 
 // Objetos com malha fora da memória (streaming) ficam fora do TLAS: nem como instância inativa (o llvmpipe trava
 // com uma mistura de ativas e inativas; outros drivers também podem tratar mal), nem pagando espaço na hierarquia.
+void Scene::setObjectHidden(uint32_t object, bool hidden) {
+  if (object >= objects.size() || objects[object].hidden == hidden) return;
+  objects[object].hidden = hidden;
+  hiddenDirty_ = true;
+  // Reescreve o objeto na GPU (o bit de oculto vai junto com a transformação); parado: sem movimento a mostrar.
+  if (object >= movedMark_.size()) movedMark_.resize(objects.size(), 0);
+  if (!movedMark_[object]) {
+    movedMark_[object] = 1;
+    movedNow_.push_back(object);
+  }
+}
+
 void Scene::rebuildTlasLayout() {
   tlasSlot_.assign(objects.size(), -1);
   tlasCount_ = 0;
   for (uint32_t i = 0; i < objects.size(); ++i)
-    if (meshes[objects[i].mesh].resident && !objects[i].hlodProxy) tlasSlot_[i] = int32_t(tlasCount_++);
+    if (meshes[objects[i].mesh].resident && !objects[i].hlodProxy && !objects[i].hidden) tlasSlot_[i] = int32_t(tlasCount_++);
   ++tlasLayout_;
 }
 

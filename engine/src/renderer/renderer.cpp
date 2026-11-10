@@ -1727,7 +1727,7 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
                           ? glm::uvec4(crowdFrameBase_[ob.crowdClip], ob.animFrame, historyValid_ ? ob.prevAnimFrame : ob.animFrame, 0)
                           : glm::uvec4(~0u, 0, 0, 0);
     // Bit 0: streaming (malha fora da memória = objeto oculto no culling); acima: poses do clipe (passo entre níveis).
-    anim.w = (s.meshes[ob.mesh].resident ? 0u : 1u) | (ob.crowdClip != ~0u ? s.crowdClips[ob.crowdClip].frames << 1 : 0u);
+    anim.w = (s.meshes[ob.mesh].resident && !ob.hidden ? 0u : 1u) | (ob.crowdClip != ~0u ? s.crowdClips[ob.crowdClip].frames << 1 : 0u);
     objs[i] = {ob.transform, historyValid_ ? ob.prevTransform : ob.transform, anim};
     if (ctx.rayTracing && s.tlasSlotOf(i) >= 0) s.tlas.writeInstance(slot, uint32_t(s.tlasSlotOf(i)), s.tlasInstance(i));
   };
