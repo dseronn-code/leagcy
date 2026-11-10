@@ -368,30 +368,49 @@ Os scripts rodam nos dois lados (no cliente servem para a interface).
 `--nanite` (ou `"nanite": true` na cena) troca os LODs inteiros das malhas rígidas grandes por uma hierarquia de
 pedaços que a GPU escolhe um a um, com erro de até `--lod-pixels` (1) na tela:
 
-- **Na carga** (em paralelo, uma malha por núcleo): os triângulos são reordenados em pedaços compactos de até 124
-  triângulos (o nível 0; a numeração nova vale para tudo: luzes de malha, ray tracing, visibility buffer). Grupos de
-  ~8 pedaços vizinhos são juntados, simplificados pela metade com a borda do grupo travada (meshoptimizer, guardando
-  normais e UV) e divididos de novo, nível após nível, até a raiz. Cada pedaço guarda a esfera e o erro do grupo que o
-  formou e do que o substitui.
-- **Na GPU** (task shader): um pedaço é desenhado quando o próprio erro projetado cabe no limite e o do grupo
-  seguinte não; irmãos usam a mesma esfera, então o corte nunca abre buracos e não há troca brusca de LOD.
+- **Na carga** (em paralelo, uma malha por núcleo; guardada em `texcache/<hash>.lod`, a segunda carga só lê): os
+  triângulos são reordenados em pedaços compactos de até 124 triângulos (o nível 0; a numeração nova vale para tudo:
+  luzes de malha, ray tracing, visibility buffer). Grupos de ~8 pedaços vizinhos são juntados, simplificados pela
+  metade com a borda do grupo travada (meshoptimizer; o erro é a distância geométrica — com peso em normais e UV ele
+  inflava e a GPU nunca escolhia os níveis grossos) e divididos de novo, nível após nível, até a raiz. Cada pedaço
+  guarda a esfera e o erro do grupo que o formou e do que o substitui. Os pedaços ficam em ordem de nível e posição
+  (Morton) e cada bloco de 32 guarda limites conservadores.
+- **Na GPU** (task shader): o bloco inteiro é descartado quando é fino demais, grosso demais ou está fora da tela;
+  depois cada pedaço é desenhado quando o próprio erro projetado cabe no limite e o do grupo seguinte não. Irmãos
+  usam a mesma esfera: o corte nunca abre buracos e não há troca brusca de LOD.
+- **Oclusão por pedaço em duas fases**: na fase 0 cada pedaço testa a pirâmide de profundidade do frame anterior
+  (com as matrizes anteriores); depois da pirâmide nova, um repasse desenha o que ela escondia e a nova mostra; os
+  objetos novos testam a nova. Conservadora: imagem idêntica com e sem.
+- **Rasterização por software** (`--sw-raster`, pedaços com menos de `--sw-raster-px` 16 pixels): em compute, cada
+  triângulo grava profundidade + triângulo por pixel com atomicMax de 64 bits; uma passada de tela cheia transforma o
+  vencedor em G-buffer com o mesmo material (gradientes de UV analíticos) e a profundidade decide contra o
+  rasterizador fixo. Imagem igual à do rasterizador fixo (0,11/255). Desligada até medir na RTX.
 - **Com o ray tracing**: o pixel de um pedaço simplificado guarda o pedaço e o triângulo no visibility buffer, e os
   passes de raios reconstroem a superfície exata dele pelos meshlets; os raios saem além do erro daquele pedaço (a
   malha do ray tracing é a completa), sem manchas de sombra, e o ReSTIR mantém o reuso temporal.
-- Desligada por padrão: no Sponza (480x270, contra a referência por path tracing) o erro vai de 0,0655 para 0,0734 —
-  essas cenas já batem a meta de desempenho sem ela. Ela é para cenas que sem ela não cabem.
+- **Streaming dos pedaços (ainda não)**: no Nanite ele poupa memória porque o ray tracing da UE5 usa uma malha
+  substituta grosseira. Aqui sombras, reflexos e a superfície exata usam a malha completa, então vértices e BLAS
+  ficam inteiros de qualquer jeito e o streaming pouparia só as listas de índices. O ganho de verdade pede ray tracing
+  numa versão grossa da malha — troca qualidade por memória, decisão para medir na RTX.
+- Desligada por padrão nas cenas das metas: no Sponza (480x270, contra a referência por path tracing) o erro vai de
+  0,0655 para 0,0734 com ela — essas cenas já batem a meta de desempenho sem ela. Ela é para as cenas que sem ela não
+  cabem.
 
 ![campo de rochas](screenshots/nanite_campo.png)
 
-Cena `nanite`: um campo de 16 x 16 rochas procedurais de 589.824 triângulos cada — **151 milhões de triângulos** —
-com o detalhe de perto e cada rocha distante reduzida a poucos pedaços. Testes (`tools/nanite.py`):
+Cena `nanite`: um campo de 16 x 16 rochas procedurais de 589.824 triângulos cada — **151 milhões de triângulos**.
+Testes (`tools/nanite.py`, sem GPU: os tempos servem para comparar entre si, não para a RTX):
 
 | Teste | Critério | Resultado |
 |---|---|---|
 | nivel0 | erro de 0,01 pixel: igual à malha inteira | diferença 0,000/255 |
-| grafo | rocha de 589.824 triângulos | 14 níveis; 6.423 → 14.767 pedaços (2,3x); raiz com 1.545 (0,26%) |
-| qualidade | 1 pixel, contra a malha inteira | diferença média 0,48/255 |
-| desempenho | G-buffer, 4 x 4 rochas (9,4 milhões de triângulos), sem GPU | 950 ms com, 4.954 ms sem (5,2x) |
+| grafo | rocha de 589.824 triângulos | 12 níveis; 6.423 → 14.726 pedaços (2,3x); raiz com 1.731 (0,29%) |
+| qualidade | 1 pixel, contra a malha inteira | diferença média 0,65/255 |
+| desempenho | G-buffer, 4 x 4 rochas (9,4 milhões de triângulos) | 435 ms com, 4.713 ms sem (10,8x) |
+| software | rasterização por software x fixa | 0,11/255; 0,04% dos pixels acima de 8 |
+
+Outras medidas: o campo de 151 milhões de triângulos foi de 5.248 ms (primeira versão) para ~1.930 ms no G-buffer; a
+carga com o cache, de 19,4 s para 11,2 s; os blocos e a oclusão não mudam a imagem (comparação pixel a pixel).
 
 ## Malhas comprimidas (meshopt, Draco) e texturas KTX2
 
