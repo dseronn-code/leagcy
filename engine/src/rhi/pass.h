@@ -50,6 +50,7 @@ class ComputePass {
   void dispatchGroups(VkCommandBuffer cmd, VkDescriptorSet globalSet, std::initializer_list<Binding> bindings,
                       uint32_t groupsX, uint32_t groupsY, const void* push = nullptr) const;
   void destroy(Context& ctx);
+  bool ok() const { return pipeline_ != VK_NULL_HANDLE; }  // falso se o driver recusou o shader
 
   PassLayout layout;
 

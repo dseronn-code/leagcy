@@ -14,7 +14,7 @@ layout(set = 1, binding = 4) uniform sampler2D gDepthPrev;
 layout(set = 1, binding = 5) uniform sampler2D gNormalPrev;
 layout(set = 1, binding = 6) uniform sampler2D gMotion;
 layout(set = 1, binding = 7, std430) readonly buffer PrevReservoirs { Reservoir prevReservoirs[]; };
-layout(set = 1, binding = 8, std430) writeonly buffer OutReservoirs { Reservoir outReservoirs[]; };
+layout(set = 1, binding = 8, std430) buffer OutReservoirs { Reservoir outReservoirs[]; };
 
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);

@@ -11,7 +11,7 @@
 
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 1, binding = 4, std430) readonly buffer InReservoirs { Reservoir inReservoirs[]; };
-layout(set = 1, binding = 5, std430) writeonly buffer OutReservoirs { Reservoir outReservoirs[]; };
+layout(set = 1, binding = 5, std430) buffer OutReservoirs { Reservoir outReservoirs[]; };
 
 const float RADIUS = 30.0;      // pixels
 const uint MAX_NEIGHBORS = 16u;

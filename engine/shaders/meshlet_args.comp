@@ -6,7 +6,7 @@ layout(local_size_x = 64) in;
 struct DrawCommand { uint indexCount, instanceCount, firstIndex; int vertexOffset; uint firstInstance; };
 layout(set = 1, binding = 0, std430) readonly buffer Commands { DrawCommand commands[]; };
 layout(set = 1, binding = 1, std430) readonly buffer Groups { uint groupsPerInstance[]; };
-layout(set = 1, binding = 2, std430) writeonly buffer Args { uint args[]; };
+layout(set = 1, binding = 2, std430) buffer Args { uint args[]; };
 layout(push_constant) uniform Push { uint batchCount; uint maxGroups; } pc;
 
 void main() {

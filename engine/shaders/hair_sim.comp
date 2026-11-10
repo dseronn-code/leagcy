@@ -10,7 +10,7 @@
 
 layout(local_size_x = 64) in;
 layout(buffer_reference, scalar) buffer Points { vec4 p[]; };
-layout(buffer_reference, scalar) writeonly buffer Verts { float v[]; };
+layout(buffer_reference, scalar) buffer Verts { float v[]; };
 layout(push_constant) uniform Push {
   uvec2 rest;      // centro do fio em repouso (espaço do objeto), w = meia largura da fita
   uvec2 pos;       // posição atual (mundo)

@@ -1,6 +1,7 @@
 #include "renderer/renderer.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstddef>
 #include <cmath>
 #include <cstring>
@@ -565,6 +566,14 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   }
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS}, 0, spec, 3);
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS}, 0, spec, 3);
+  // Sem ReSTIR (driver recusou o shader): segue só com o sol e o céu; os reservatórios ficam vazios (NO_LIGHT).
+  restirOff_ = !restirTemporalPass_.ok() || !restirSpatialPass_.ok() || std::getenv("LEGACY_NO_RESTIR");
+  if (restirOff_) {
+    auto& errs = ctx.pipelineErrors;
+    errs.erase(std::remove_if(errs.begin(), errs.end(), [](const std::string& e) { return e.rfind("restir_", 0) == 0; }),
+               errs.end());
+    LOG_WARN("ReSTIR indisponível nesta GPU: luzes locais desligadas");
+  }
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI}, 0, spec, 3);
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
@@ -849,7 +858,9 @@ void Renderer::createTargets() {
     t_.moments[i] = rhi::createImage2D(ctx, R, VK_FORMAT_R32G32B32A32_SFLOAT, storage);  // luminância² precisa de float32
     t_.historyLength[i] = rhi::createImage2D(ctx, R, kHdrFormat, storage);
     t_.taa[i] = rhi::createImage2D(ctx, O, kHdrFormat, storage | upscalerIo);
-    t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 32, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+    reservoirsCleared_ = false;
+    t_.reservoirs[i] = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 32,
+                                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                          rhi::MemoryUsage::GpuOnly);
   }
   t_.diffuse = rhi::createImage2D(ctx, R, kAlbedoFormat, attach);
@@ -1348,6 +1359,11 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   }
 
   // ---- 3. ReSTIR DI ----
+  if (restirOff_ && !reservoirsCleared_) {
+    for (auto& b : t_.reservoirs) vkCmdFillBuffer(cmd, b.handle, 0, VK_WHOLE_SIZE, 0xFFFFFFFFu);
+    reservoirsCleared_ = true;
+    barrier();
+  }
   restirTemporalPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, gDepthPrev, gNormalPrev, gMotion,
                                          Binding::storageBuffer(t_.reservoirs[1]), Binding::storageBuffer(t_.reservoirs[0]),
                                          tex(t_.visibility[cur]), tex(t_.visibility[prev])}, R);

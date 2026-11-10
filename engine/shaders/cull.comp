@@ -21,7 +21,7 @@ layout(set = 1, binding = 0, std430) readonly buffer DrawList { uint drawList[];
 layout(set = 1, binding = 1, std430) readonly buffer EntryBatch { uint entryBatch[]; };
 layout(set = 1, binding = 2, std430) readonly buffer Batches { CullBatch batches[]; };
 layout(set = 1, binding = 3, std430) buffer Commands { DrawCommand commands[]; };
-layout(set = 1, binding = 4, std430) writeonly buffer Culled { uint culled[]; };
+layout(set = 1, binding = 4, std430) buffer Culled { uint culled[]; };
 // Oclusão em duas fases: fase 0 desenha o que estava visível no frame anterior; a fase 1 testa todos contra a
 // pirâmide de profundidade dessa primeira passada, desenha os que apareceram e atualiza a visibilidade.
 layout(set = 1, binding = 5, std430) buffer VisibleLast { uint visibleLast[]; };

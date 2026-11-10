@@ -7,11 +7,11 @@
 
 layout(local_size_x = 64) in;
 
-layout(buffer_reference, scalar) readonly buffer RestVertices { float v[]; };  // 12 floats por vértice
-layout(buffer_reference, scalar) writeonly buffer OutVertices { float v[]; };
+layout(buffer_reference, std430) readonly buffer RestVertices { float v[]; };  // 12 floats por vértice
+layout(buffer_reference, std430) buffer OutVertices { float v[]; };
 struct SkinVertex { uvec4 joints; vec4 weights; };
-layout(buffer_reference, scalar) readonly buffer SkinData { SkinVertex s[]; };
-layout(buffer_reference, scalar) readonly buffer Joints { mat4 m[]; };
+layout(buffer_reference, std430) readonly buffer SkinData { SkinVertex s[]; };
+layout(buffer_reference, std430) readonly buffer Joints { vec4 c[]; };  // mat4 por junta, 4 colunas
 
 layout(push_constant) uniform Push {
   uvec2 rest;
@@ -28,8 +28,16 @@ void main() {
   OutVertices ov = OutVertices(pc.out_);
   SkinVertex sv = SkinData(pc.skin).s[i];
   Joints J = Joints(pc.joints);
-  mat4 M = J.m[sv.joints.x] * sv.weights.x + J.m[sv.joints.y] * sv.weights.y +
-           J.m[sv.joints.z] * sv.weights.z + J.m[sv.joints.w] * sv.weights.w;
+  // Colunas lidas como vec4 (evita mat4 vindo de buffer_reference, que o Adreno 740 recusou).
+  mat4 M = mat4(0.0);
+  for (int k = 0; k < 4; ++k) {
+    uint j = sv.joints[k] * 4u;
+    float w = sv.weights[k];
+    M[0] += J.c[j] * w;
+    M[1] += J.c[j + 1u] * w;
+    M[2] += J.c[j + 2u] * w;
+    M[3] += J.c[j + 3u] * w;
+  }
 
   uint b = i * 12u;
   vec3 p = vec3(rv.v[b], rv.v[b + 1u], rv.v[b + 2u]);
