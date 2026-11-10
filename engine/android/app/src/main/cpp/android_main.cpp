@@ -24,6 +24,8 @@
 #include "rhi/swapchain.h"
 #include "scene/demo_scene.h"
 
+void legacyVk13SetInstance(VkInstance instance);  // vk13_shim.cpp
+
 namespace {
 
 // Copia uma pasta de dentro do APK para `dest` (só os arquivos que faltam ou mudaram de tamanho).
@@ -85,6 +87,7 @@ struct Engine {
   void init(ANativeWindow* w, const std::string& cacheDir) {
     window = w;
     ctx.createInstance({false, true, {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME}});
+    legacyVk13SetInstance(ctx.instance);
     VkAndroidSurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
     si.window = window;
     VK_CHECK(vkCreateAndroidSurfaceKHR(ctx.instance, &si, nullptr, &surface));

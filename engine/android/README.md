@@ -6,9 +6,9 @@ bibliotecas da NVIDIA (`LEGACY_NRD=OFF`: denoiser SVGF e TAAU do próprio motor)
 
 ## Estado
 
-- **Ainda não foi compilado.** O ambiente onde foi escrito não tinha acesso ao SDK/NDK do Android (`dl.google.com`
-  bloqueado). O motor e o jogo foram compilados e testados no Linux, inclusive na configuração de celular
-  (`cmake -DLEGACY_NRD=OFF`, com e sem ray tracing); o código específico do Android (este diretório) não.
+- **Compilado em 10/11/2026** (NDK 27.2, SDK 35, Gradle 8.11): `app-release.apk` de 7,8 MB. Correções do primeiro
+  build: `glslc -O` do NDK trava no `lighting_rt.comp` (vai sem otimização); o `libvulkan.so` da API 30 não exporta as
+  funções do Vulkan 1.2/1.3 (`vk13_shim.cpp` busca na instância); nlohmann_json para os dados das animações.
 - **Nunca rodou num celular.** A primeira instalação é o primeiro teste. Se o motor não conseguir iniciar, o app mostra
   uma caixa de diálogo com o motivo (em vez de fechar sem explicação) — tire um print e mande.
 
