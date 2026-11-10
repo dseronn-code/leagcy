@@ -825,8 +825,8 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
         return sum;
       };
       const double areaBefore = outwardArea(merged), areaAfter = outwardArea(simplified);
-      if (std::getenv("LEGACY_DEBUG_LOD"))
-        std::fprintf(stderr, "nivel %u: grupo de %zu pedaços: %zu -> %zu tri, área para fora %.4f -> %.4f (%.3f), erro %.5f\n",
+      if (std::getenv("LEGACY_DEBUG_LOD") && (error < 1e-5f || areaAfter < kMinAreaKept * areaBefore))
+        std::fprintf(stderr, "nivel %u: grupo de %zu pedaços: %zu -> %zu tri, área para fora %.4f -> %.4f (%.3f), erro %.7f\n",
                      levels, group.size(), merged.size() / 3, simplified.size() / 3, areaBefore, areaAfter,
                      areaBefore > 0.0 ? areaAfter / areaBefore : 0.0, error);
       if (simplified.empty() || areaAfter < kMinAreaKept * areaBefore) {
