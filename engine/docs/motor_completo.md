@@ -66,6 +66,35 @@ console uma vez e só aquele script para (teste `script`).
 Exemplos: `scripts/elevador.lua` (sobe e desce), `scripts/girar.lua` (gira), `scripts/pulador.lua` (pula sozinho),
 todos em `cenas/parque.json`.
 
+## Script visual (nós no estilo do Blueprint)
+
+Sem escrever código: um grafo de nós em JSON (`"script_visual": "porta.vs.json"` na entidade, ou o grafo direto ali)
+vira Lua e roda no mesmo motor de scripts. Editar o `.json` com o jogo rodando gera o Lua de novo (recarga a quente).
+
+```json
+{"nos": [{"id": 1, "tipo": "ao_chegar_perto", "alvo": "jogador", "distancia": 2},
+         {"id": 2, "tipo": "mover", "relativo": true, "y": 2, "duracao": 1},
+         {"id": 3, "tipo": "esperar", "segundos": 0.5},
+         {"id": 4, "tipo": "som", "arquivo": "porta.wav"}],
+ "ligacoes": [[1, 2], [2, 3], [3, 4]]}
+```
+
+- **Eventos:** `ao_iniciar`, `ao_atualizar`, `ao_tecla` (`tecla`), `a_cada` (`segundos`), `ao_chegar_perto` /
+  `ao_sair_de_perto` (`alvo`, `distancia`), `quando` (`a`, `op`, `b`: dispara quando a condição passa a valer).
+- **Ações:** `log`, `texto` (na tela por `segundos`), `mover` (`x y z`, `relativo`, `duracao`), `girar` (graus,
+  `duracao`), `esperar`, `som`, `impulso`, `particulas`, `animar`, `explosao`, `definir` / `somar` (`variavel`,
+  `valor`), `se` (saídas `sim` e `nao`), `repetir` (`vezes`; saídas `corpo` e `depois`; `$indice` dentro), `parar` e
+  `lua` (`codigo`: escape para o Lua).
+- **Valores:** número, texto, `$variavel`, `#tempo`, `@entidade.x|y|z|distancia` (`@eu` é a própria) ou
+  `["+", a, b]` (e `- * /`, comparações, `e`, `ou`). Textos aceitam `{expressão}`: `"Moedas: {$moedas}"`.
+- **Ligações:** `[de, para]` ou `[de, para, "saida"]`. Ações que levam tempo (`esperar`, `mover`/`girar` com duração)
+  rodam numa corrotina por disparo (o jogo segue); um disparo novo do mesmo evento espera o anterior terminar. Ciclo
+  fora de `repetir` é recusado com mensagem.
+
+Testes (`tools/visual.py`): eventos (início 1x, repetir 1-3, `a_cada` + `se` chega a 3 em 1,50 s, `quando` dispara
+1x), chegar perto do jogador (2,03 s) e subir 2 m em 1 s + esperar 0,5 s (y = 2,5 em 3,53 s), recarga do `.json`
+com o jogo rodando e o grafo com ciclo recusado sem derrubar o motor.
+
 ## Áudio 3D (miniaudio)
 
 Na entidade: `"som": {"arquivo": "sons/motor.wav", "volume": 1, "laco": true, "espacial": true, "dist_min": 1,

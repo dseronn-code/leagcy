@@ -110,7 +110,7 @@ struct Scripting::Impl {
   float sinceCheck = 0.0f;
 
   explicit Impl(World& w) : world(w) {
-    lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string, sol::lib::table);
+    lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string, sol::lib::table, sol::lib::coroutine);
     bindApi();
   }
 
@@ -591,6 +591,7 @@ void Scripting::update(scene::Scene& scene, float dt) {
   p_->sinceCheck += dt;
   if (p_->sinceCheck >= 0.5f) {
     p_->sinceCheck = 0.0f;
+    p_->world.refreshVisualScripts();
     for (auto& [path, stamp] : p_->stamps) {
       const auto now = modified(path);
       if (now == stamp) continue;

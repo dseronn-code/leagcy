@@ -1,6 +1,7 @@
 #include "game/world.h"
 #include "game/navigation.h"
 #include "game/scripting.h"
+#include "game/visual_script.h"
 
 #include <algorithm>
 #include <cctype>
@@ -472,6 +473,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       }
       std::string script = e.value("script", "");
       if (!script.empty() && !std::ifstream(script) && std::ifstream(sceneDir + script)) script = sceneDir + script;
+      if (script.empty() && e.contains("script_visual")) script = compileVisualSource(e["script_visual"], sceneDir);
 
       // "repetir": {"quantidade": [nx, ny, nz], "passo": [dx, dy, dz]} cria uma grade de cópias.
       glm::ivec3 count(1);
@@ -1914,6 +1916,68 @@ bool World::playerFeet(glm::vec3& feet) const {
     }
   }
   return false;
+}
+
+// Script visual: arquivo .json (recarregado quando muda) ou o grafo direto na entidade. O Lua gerado vai para uma
+// pasta temporária com nome fixo pelo arquivo de origem (a recarga a quente do Lua pega a mudança).
+std::string World::compileVisualSource(const nlohmann::json& src, const std::string& sceneDir) {
+  nlohmann::json graph;
+  std::string from = "(na cena)";
+  if (src.is_string()) {
+    from = src.get<std::string>();
+    if (!std::ifstream(from) && std::ifstream(sceneDir + from)) from = sceneDir + from;
+    std::ifstream f(from);
+    try {
+      graph = nlohmann::json::parse(f);
+    } catch (const nlohmann::json::exception& ex) {
+      LOG_ERROR("Script visual %s: JSON inválido (%s)", from.c_str(), ex.what());
+      return {};
+    }
+  } else {
+    graph = src;
+  }
+  std::string error;
+  const std::string lua = compileVisualScript(graph, error);
+  if (lua.empty()) {
+    LOG_ERROR("Script visual %s: %s", from.c_str(), error.c_str());
+    return {};
+  }
+  std::error_code ec;
+  const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "legacy_script_visual";
+  std::filesystem::create_directories(dir, ec);
+  const size_t key = std::hash<std::string>{}(src.is_string() ? std::filesystem::absolute(from, ec).string() : graph.dump());
+  const std::filesystem::path out = dir / (std::to_string(key) + ".lua");
+  std::ofstream(out, std::ios::binary) << lua;
+  if (src.is_string()) {
+    VisualSource vs;
+    vs.source = from;
+    vs.lua = out.string();
+    vs.stamp = std::filesystem::last_write_time(from, ec);
+    visualSources_.push_back(vs);
+  }
+  return out.string();
+}
+
+void World::refreshVisualScripts() {
+  for (VisualSource& vs : visualSources_) {
+    std::error_code ec;
+    const auto now = std::filesystem::last_write_time(vs.source, ec);
+    if (ec || now == vs.stamp) continue;
+    vs.stamp = now;
+    std::ifstream f(vs.source);
+    std::string error, lua;
+    try {
+      lua = compileVisualScript(nlohmann::json::parse(f), error);
+    } catch (const nlohmann::json::exception& ex) {
+      error = ex.what();
+    }
+    if (lua.empty()) {
+      LOG_ERROR("Script visual %s: %s (fica a versão anterior)", vs.source.c_str(), error.c_str());
+      continue;
+    }
+    std::ofstream(vs.lua, std::ios::binary) << lua;
+    LOG_INFO("Script visual %s mudou: Lua gerado de novo", vs.source.c_str());
+  }
 }
 
 }  // namespace game

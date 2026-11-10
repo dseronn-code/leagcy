@@ -1,4 +1,7 @@
 #pragma once
+#include <filesystem>
+
+#include <nlohmann/json_fwd.hpp>
 #include <array>
 #include <functional>
 #include <memory>
@@ -364,6 +367,16 @@ class World {
   std::unordered_map<std::string, std::unordered_map<std::string, std::string>> texts_;  // idioma -> chave -> texto
   std::unordered_map<std::string, std::string> languageNames_;
   void loadLanguages();
+ public:
+  // Script visual (visual_script.h): gera o Lua e devolve o caminho dele (vazio se o grafo é inválido).
+  std::string compileVisualSource(const nlohmann::json& src, const std::string& sceneDir);
+  void refreshVisualScripts();  // chamado pela recarga a quente dos scripts: .json mudou = Lua novo
+ private:
+  struct VisualSource {
+    std::string source, lua;
+    std::filesystem::file_time_type stamp;
+  };
+  std::vector<VisualSource> visualSources_;
   struct FileData;
   std::unique_ptr<FileData> file_;  // materiais, sol e câmera lidos (para salvar de volta)
   PlayerInput input_;
