@@ -553,6 +553,21 @@ entre os ladrilhos de perto e de longe.
 
 ![Terreno de 1 km visto do alto](screenshots/terreno_km.png)
 
+### Esculpir o terreno (editor e Lua)
+
+No editor (`--editor`), o painel **Terreno** liga o pincel: arrastando com o botão esquerdo na cena, `subir` /
+`descer` (metros por segundo), `aplanar` (até a altura alvo) ou `suavizar`, com raio ajustável e o contorno do pincel
+desenhado no chão. **Salvar mapa** grava um `.altura` (alturas em metros, tamanho e centro), que vira o `"mapa"` do
+terreno na cena. Na primeira pincelada a altura (ruído ou PNG) vira uma grade editável com um ponto por vértice dos
+ladrilhos; cada pincelada refaz só os ladrilhos tocados (malha de perto e de longe, BLAS do ray tracing e colisão).
+Lua: `terreno_pincel(x, z, raio, forca, modo)` e `salvar_terreno(arquivo)`.
+
+Testes (`tools/terreno.py`): subir 3 m com raio 5 (altura 3,0 no centro, 0,0 a 5,5 m; uma bola para em y = 3,25 — a
+colisão foi refeita), aplanar a 1,0 m, suavizar baixa um pico de 4,0 para 0,92, salvar e abrir o `.altura` numa cena
+nova (3,0 no morro, 0,0 longe), a imagem muda só onde o morro subiu (31,7 x 0,2/255) e o pincel do editor (Xvfb).
+
+![Editor: painel Terreno e o pincel](screenshots/editor_terreno.png)
+
 Ainda não: origem flutuante (para mundos acima de ~10 km, onde o float perde precisão) e carregar células de arquivos
 separados do disco (hoje a cena inteira é lida no início; a célula só liga e desliga).
 

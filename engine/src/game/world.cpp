@@ -11,6 +11,7 @@
 #include <cmath>
 #include <fstream>
 #include <functional>
+#include <cstring>
 #include <map>
 
 #include <stb_image.h>
@@ -605,7 +606,21 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         std::string mp = tj["mapa"].get<std::string>();
         if (!std::ifstream(mp) && std::ifstream(sceneDir + mp)) mp = sceneDir + mp;
         int w = 0, h = 0, n = 0;
-        if (stbi_us* px = stbi_load_16(mp.c_str(), &w, &h, &n, 1)) {
+        std::ifstream raw(mp, std::ios::binary);
+        char magic[4] = {};
+        float hdr[5] = {};
+        if (mp.size() > 7 && mp.substr(mp.size() - 7) == ".altura" && raw.read(magic, 4) && std::memcmp(magic, "LGAL", 4) == 0 &&
+            raw.read(reinterpret_cast<char*>(hdr), sizeof(hdr))) {
+          // Salvo pelo pincel do editor (salvar_terreno): alturas em metros, tamanho e centro exatos.
+          T.mapW = int(hdr[0]);
+          T.mapH = int(hdr[1]);
+          T.size = hdr[2];
+          T.center = glm::vec2(hdr[3], hdr[4]);
+          T.base = 0.0f;
+          T.height = 1.0f;
+          T.map.resize(size_t(T.mapW) * size_t(T.mapH));
+          raw.read(reinterpret_cast<char*>(T.map.data()), std::streamsize(T.map.size() * sizeof(float)));
+        } else if (stbi_us* px = stbi_load_16(mp.c_str(), &w, &h, &n, 1)) {
           T.map.resize(size_t(w) * size_t(h));
           for (size_t i = 0; i < T.map.size(); ++i) T.map[i] = float(px[i]) / 65535.0f;
           T.mapW = w;
@@ -617,57 +632,20 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       }
       const uint32_t res = std::clamp(tj.value("resolucao", 64u), 2u, 1024u);  // quadrados por lado do ladrilho
       const uint32_t farRes = std::max(2u, res / 8u);
+      T.res = res;
+      T.farRes = farRes;
       const std::string tm = tj.value("material", "");
       auto mit = materials.find(tm);
       if (mit == materials.end()) mit = materials.find("");
       const float friction = tj.value("atrito", 0.8f);
       const int n = std::max(1, int(std::ceil(T.size / T.tile)));
       const float span = float(n) * T.tile;
-      // Malha de um ladrilho com centro (cx, cz): posições relativas ao centro (precisão), altura absoluta, normais e
-      // UVs em metros do mundo (sem emenda entre ladrilhos) e uma saia vertical na borda que esconde as frestas entre
-      // ladrilhos de resoluções diferentes.
-      auto makeTile = [&](float cx, float cz, uint32_t r, float skirt) {
-        scene::MeshData m;
-        const float step = T.tile / float(r), half = 0.5f * T.tile, e = 0.5f * step;
-        auto vert = [&](float lx, float lz, float dy) {
-          const float x = cx + lx, z = cz + lz;
-          const glm::vec3 nrm = glm::normalize(glm::vec3(terrainHeight(x - e, z) - terrainHeight(x + e, z), 2.0f * e,
-                                                         terrainHeight(x, z - e) - terrainHeight(x, z + e)));
-          m.vertices.push_back({{lx, terrainHeight(x, z) - dy, lz}, nrm, {x, z}, {}});
-        };
-        for (uint32_t j = 0; j <= r; ++j)
-          for (uint32_t i = 0; i <= r; ++i) vert(-half + float(i) * step, -half + float(j) * step, 0.0f);
-        for (uint32_t j = 0; j < r; ++j)
-          for (uint32_t i = 0; i < r; ++i) {
-            const uint32_t a = j * (r + 1) + i, b = a + r + 1;
-            m.indices.insert(m.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
-          }
-        // Saia: a borda (no sentido do contorno) e uma cópia mais baixa; os dois lados, para valer de qualquer ângulo.
-        std::vector<uint32_t> ring;
-        for (uint32_t i = 0; i < r; ++i) ring.push_back(i);
-        for (uint32_t j = 0; j < r; ++j) ring.push_back(j * (r + 1) + r);
-        for (uint32_t i = r; i > 0; --i) ring.push_back(r * (r + 1) + i);
-        for (uint32_t j = r; j > 0; --j) ring.push_back(j * (r + 1));
-        const uint32_t base = uint32_t(m.vertices.size());
-        for (uint32_t k : ring) {
-          scene::Vertex v = m.vertices[k];
-          v.position.y -= skirt;
-          m.vertices.push_back(v);
-        }
-        for (size_t k = 0; k < ring.size(); ++k) {
-          const uint32_t a = ring[k], b = ring[(k + 1) % ring.size()];
-          const uint32_t la = base + uint32_t(k), lb = base + uint32_t((k + 1) % ring.size());
-          m.indices.insert(m.indices.end(), {a, la, b, b, la, lb, a, b, la, b, lb, la});
-        }
-        scene::computeTangents(m);
-        return m;
-      };
       uint32_t tiles = 0, tris = 0;
       for (int tz = 0; tz < n; ++tz)
         for (int tx = 0; tx < n; ++tx) {
           const float cx = T.center.x - 0.5f * span + (float(tx) + 0.5f) * T.tile;
           const float cz = T.center.y - 0.5f * span + (float(tz) + 0.5f) * T.tile;
-          scene::MeshData nearMesh = makeTile(cx, cz, res, 0.02f * T.tile);
+          scene::MeshData nearMesh = terrainTileMesh(cx, cz, res, 0.02f * T.tile);
           tris += uint32_t(nearMesh.indices.size() / 3);
           const glm::mat4 xf = glm::translate(glm::mat4(1.0f), glm::vec3(cx, 0.0f, cz));
           const entt::entity ent = registry.create();
@@ -677,8 +655,9 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           registry.emplace<Renderable>(ent, scene.addObject(scene.addMesh(std::move(nearMesh)), xf, mit->second), tm);
           TerrainTile tt;
           tt.friction = friction;
+          tt.center = glm::vec2(cx, cz);
           if (openWorld.enabled) {
-            tt.farObject = scene.addObject(scene.addMesh(makeTile(cx, cz, farRes, 0.08f * T.tile)), xf, mit->second);
+            tt.farObject = scene.addObject(scene.addMesh(terrainTileMesh(cx, cz, farRes, 0.08f * T.tile)), xf, mit->second);
             scene.setObjectHidden(tt.farObject, true);
           }
           registry.emplace<TerrainTile>(ent, tt);
@@ -2047,6 +2026,144 @@ void World::refreshVisualScripts() {
     std::ofstream(vs.lua, std::ios::binary) << lua;
     LOG_INFO("Script visual %s mudou: Lua gerado de novo", vs.source.c_str());
   }
+}
+
+// Malha de um ladrilho do terreno com centro (cx, cz): posições relativas ao centro (precisão), altura absoluta,
+// normais e UVs em metros do mundo (sem emenda entre ladrilhos) e uma saia vertical na borda que esconde as frestas entre
+// ladrilhos de resoluções diferentes.
+scene::MeshData World::terrainTileMesh(float cx, float cz, uint32_t r, float skirt) const {
+  const Terrain& T = terrain;
+  scene::MeshData m;
+  const float step = T.tile / float(r), half = 0.5f * T.tile, e = 0.5f * step;
+  auto vert = [&](float lx, float lz, float dy) {
+    const float x = cx + lx, z = cz + lz;
+    const glm::vec3 nrm = glm::normalize(glm::vec3(terrainHeight(x - e, z) - terrainHeight(x + e, z), 2.0f * e,
+                                                   terrainHeight(x, z - e) - terrainHeight(x, z + e)));
+    m.vertices.push_back({{lx, terrainHeight(x, z) - dy, lz}, nrm, {x, z}, {}});
+  };
+  for (uint32_t j = 0; j <= r; ++j)
+    for (uint32_t i = 0; i <= r; ++i) vert(-half + float(i) * step, -half + float(j) * step, 0.0f);
+  for (uint32_t j = 0; j < r; ++j)
+    for (uint32_t i = 0; i < r; ++i) {
+      const uint32_t a = j * (r + 1) + i, b = a + r + 1;
+      m.indices.insert(m.indices.end(), {a, b, a + 1, a + 1, b, b + 1});
+    }
+  // Saia: a borda (no sentido do contorno) e uma cópia mais baixa; os dois lados, para valer de qualquer ângulo.
+  std::vector<uint32_t> ring;
+  for (uint32_t i = 0; i < r; ++i) ring.push_back(i);
+  for (uint32_t j = 0; j < r; ++j) ring.push_back(j * (r + 1) + r);
+  for (uint32_t i = r; i > 0; --i) ring.push_back(r * (r + 1) + i);
+  for (uint32_t j = r; j > 0; --j) ring.push_back(j * (r + 1));
+  const uint32_t base = uint32_t(m.vertices.size());
+  for (uint32_t k : ring) {
+    scene::Vertex v = m.vertices[k];
+    v.position.y -= skirt;
+    m.vertices.push_back(v);
+  }
+  for (size_t k = 0; k < ring.size(); ++k) {
+    const uint32_t a = ring[k], b = ring[(k + 1) % ring.size()];
+    const uint32_t la = base + uint32_t(k), lb = base + uint32_t((k + 1) % ring.size());
+    m.indices.insert(m.indices.end(), {a, la, b, b, la, lb, a, b, la, b, lb, la});
+  }
+  scene::computeTangents(m);
+  return m;
+}
+
+// Pincel do terreno (editor e Lua). Na primeira pincelada, a altura (ruído ou mapa) vira uma grade editável com um ponto
+// por vértice dos ladrilhos de perto; depois, os ladrilhos tocados são refeitos (malha de perto e de longe, colisão).
+bool World::terrainBrush(scene::Scene& scene, glm::vec2 at, float radius, float strength, const std::string& mode) {
+  Terrain& T = terrain;
+  if (!T.enabled || radius <= 0.0f) return false;
+  const int n = std::max(1, int(std::ceil(T.size / T.tile)));
+  const float span = float(n) * T.tile;
+  if (!T.editable) {  // amostra a altura atual numa grade alinhada aos vértices dos ladrilhos
+    const int w = n * int(T.res) + 1;
+    std::vector<float> grid(size_t(w) * size_t(w));
+    const float step = span / float(w - 1);
+    for (int j = 0; j < w; ++j)
+      for (int i = 0; i < w; ++i)
+        grid[size_t(j) * size_t(w) + size_t(i)] =
+            terrainHeight(T.center.x - 0.5f * span + float(i) * step, T.center.y - 0.5f * span + float(j) * step);
+    T.map = std::move(grid);
+    T.mapW = T.mapH = w;
+    T.size = span;
+    T.base = 0.0f;
+    T.height = 1.0f;
+    T.editable = true;
+  }
+  const float step = T.size / float(T.mapW - 1);
+  const glm::vec2 origin = T.center - glm::vec2(0.5f * T.size);
+  const int i0 = std::max(0, int(std::floor((at.x - radius - origin.x) / step))),
+            i1 = std::min(T.mapW - 1, int(std::ceil((at.x + radius - origin.x) / step)));
+  const int j0 = std::max(0, int(std::floor((at.y - radius - origin.y) / step))),
+            j1 = std::min(T.mapH - 1, int(std::ceil((at.y + radius - origin.y) / step)));
+  if (i0 > i1 || j0 > j1) return false;
+  std::vector<float> before = T.map;  // suavizar lê os vizinhos de antes
+  auto at0 = [&](int i, int j) { return before[size_t(std::clamp(j, 0, T.mapH - 1)) * size_t(T.mapW) + size_t(std::clamp(i, 0, T.mapW - 1))]; };
+  for (int j = j0; j <= j1; ++j)
+    for (int i = i0; i <= i1; ++i) {
+      const glm::vec2 p = origin + glm::vec2(float(i), float(j)) * step;
+      const float d = glm::length(p - at) / radius;
+      if (d >= 1.0f) continue;
+      const float w = 0.5f + 0.5f * std::cos(3.14159265f * d);  // queda suave até a borda do pincel
+      float& h = T.map[size_t(j) * size_t(T.mapW) + size_t(i)];
+      if (mode == "subir") h += strength * w;
+      else if (mode == "descer") h -= strength * w;
+      else if (mode == "aplanar") h += (strength - h) * w;  // strength = altura alvo
+      else if (mode == "suavizar") {
+        const float avg = (at0(i - 1, j) + at0(i + 1, j) + at0(i, j - 1) + at0(i, j + 1) + at0(i, j)) / 5.0f;
+        h += (avg - h) * std::clamp(strength, 0.0f, 1.0f) * w;
+      } else {
+        LOG_WARN("Pincel do terreno: modo '%s' desconhecido (subir, descer, aplanar, suavizar)", mode.c_str());
+        return false;
+      }
+    }
+  // Ladrilhos tocados (a borda do pincel + a margem da normal): malha nova, colisão nova.
+  uint32_t rebuilt = 0;
+  for (auto ent : registry.view<TerrainTile, Renderable, Transform>()) {
+    TerrainTile& tt = registry.get<TerrainTile>(ent);
+    const glm::vec2 lo = tt.center - glm::vec2(0.5f * T.tile + step), hi = tt.center + glm::vec2(0.5f * T.tile + step);
+    const glm::vec2 c = glm::clamp(at, lo, hi);
+    if (glm::length(c - at) > radius) continue;
+    scene::MeshData nearMesh = terrainTileMesh(tt.center.x, tt.center.y, T.res, 0.02f * T.tile);
+    const uint32_t obj = registry.get<Renderable>(ent).sceneObject;
+    std::vector<glm::vec3> verts;
+    verts.reserve(nearMesh.vertices.size());
+    for (const scene::Vertex& v : nearMesh.vertices) verts.push_back(v.position + glm::vec3(tt.center.x, 0.0f, tt.center.y));
+    if (tt.bodyId != ~0u) {
+      const bool inWorld = physics->bodyInWorld(tt.bodyId);
+      physics->removeBody(tt.bodyId);
+      tt.bodyId = physics->addStaticMesh(verts, nearMesh.indices, tt.friction);
+      if (!inWorld) physics->setBodyInWorld(tt.bodyId, false);
+    }
+    scene.replaceMesh(scene.objects[obj].mesh, nearMesh);
+    if (tt.farObject != ~0u)
+      scene.replaceMesh(scene.objects[tt.farObject].mesh, terrainTileMesh(tt.center.x, tt.center.y, T.farRes, 0.08f * T.tile));
+    registry.get<Transform>(ent).position.y = terrainHeight(tt.center.x, tt.center.y);
+    ++rebuilt;
+  }
+  if (std::getenv("LEGACY_DEBUG_TERRENO")) LOG_INFO("Pincel %s em (%.1f, %.1f): %u ladrilhos refeitos", mode.c_str(), at.x, at.y, rebuilt);
+  return rebuilt > 0;
+}
+
+// Grava a grade de alturas (".altura": "LGAL", largura, altura, lado em m, centro x, z e as alturas em float) para
+// usar como "mapa" do terreno.
+bool World::saveTerrainMap(const std::string& path) const {
+  const Terrain& T = terrain;
+  if (!T.enabled || T.map.empty()) return false;
+  std::ofstream f(path, std::ios::binary);
+  const float hdr[5] = {float(T.mapW), float(T.mapH), T.size, T.center.x, T.center.y};
+  f.write("LGAL", 4);
+  f.write(reinterpret_cast<const char*>(hdr), sizeof(hdr));
+  if (T.editable) {
+    f.write(reinterpret_cast<const char*>(T.map.data()), std::streamsize(T.map.size() * sizeof(float)));
+  } else {  // mapa PNG (0..1): grava em metros
+    for (float v : T.map) {
+      const float m = T.base + T.height * v;
+      f.write(reinterpret_cast<const char*>(&m), sizeof(m));
+    }
+  }
+  return bool(f);
 }
 
 }  // namespace game

@@ -492,6 +492,11 @@ struct Scripting::Impl {
     // Linhas do tempo da cena ("linhas_do_tempo"): qualquer script pede, a linha toca no quadro seguinte.
     lua.set_function("tocar_linha", [this](const std::string& n) { world.timelineRequests.insert(n); });
     lua.set_function("linha_pedida", [this](const std::string& n) { return world.timelineRequests.erase(n) > 0; });
+    // Pincel do terreno (o mesmo do editor): "subir", "descer", "aplanar" (forca = altura alvo) ou "suavizar" (0..1).
+    lua.set_function("terreno_pincel", [this](float x, float z, float raio, float forca, sol::optional<std::string> modo) {
+      return scene && world.terrainBrush(*scene, glm::vec2(x, z), raio, forca, modo.value_or("subir"));
+    });
+    lua.set_function("salvar_terreno", [this](const std::string& arq) { return world.saveTerrainMap(arq); });
     lua.set_function("altura_terreno", [this](float x, float z) { return world.terrainHeight(x, z); });
     lua.set_function("controle_jogador", [this](sol::optional<bool> on) {
       if (on) world.playerControl = *on;

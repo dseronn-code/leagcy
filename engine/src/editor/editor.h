@@ -2,6 +2,7 @@
 #include <string>
 
 #include <entt/entt.hpp>
+#include <glm/glm.hpp>
 
 #include "rhi/vk_common.h"
 
@@ -51,6 +52,9 @@ class Editor {
   void properties(game::World& world, scene::Scene& scene);
   void gizmo(game::World& world, scene::Scene& scene, const scene::Camera& camera, VkExtent2D extent);
   void picking(game::World& world, const scene::Camera& camera, VkExtent2D extent);
+  // Pincel de terreno: painel (modo, raio, força, salvar o mapa) e pinceladas com o botão esquerdo arrastado na cena.
+  void terrainPanel(game::World& world, scene::Scene& scene, const scene::Camera& camera, VkExtent2D extent, float dt);
+  bool brushRay(game::World& world, const scene::Camera& camera, VkExtent2D extent, glm::vec2 pixel, glm::vec3& hit);
 
   void drawHud(const game::World& world, VkExtent2D extent);
 
@@ -62,6 +66,10 @@ class Editor {
   bool playing_ = false;    // Jogar apertado (as poses de antes ficam guardadas para o Parar)
   bool editModeSet_ = false;
   char savePath_[256] = "cena_salva.json";
+  bool brushOn_ = false;
+  int brushMode_ = 0;  // subir, descer, aplanar, suavizar
+  float brushRadius_ = 6.0f, brushStrength_ = 2.0f, brushLevel_ = 0.0f;
+  char terrainPath_[256] = "terreno.altura";
   std::string status_;
   std::string reload_;
   void requestReload(game::World& world);

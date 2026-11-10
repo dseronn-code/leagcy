@@ -89,6 +89,7 @@ class Physics {
   // cinemáticos voltam ativos; parados, dormindo.
   void setBodyInWorld(uint32_t body, bool inWorld);
   bool bodyInWorld(uint32_t body) const;
+  void removeBody(uint32_t body);  // tira do mundo e destrói (o id não vale mais)
   // Editor: põe o corpo numa pose (teletransporte) e zera a velocidade.
   void setPose(uint32_t body, glm::vec3 position, glm::quat rotation);
   // Primeiro corpo atingido pelo raio (origem + direção normalizada × até maxDistance); ~0u = nenhum.

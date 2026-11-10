@@ -665,6 +665,13 @@ void Physics::setBodyInWorld(uint32_t body, bool inWorld) {
   }
 }
 bool Physics::bodyInWorld(uint32_t body) const { return p_->bodies().IsAdded(bodyId(body)); }
+void Physics::removeBody(uint32_t body) {
+  if (body == ~0u) return;
+  JPH::BodyInterface& bi = p_->bodies();
+  const JPH::BodyID id = bodyId(body);
+  if (bi.IsAdded(id)) bi.RemoveBody(id);
+  bi.DestroyBody(id);
+}
 uint32_t Physics::bodyCount() const { return p_->system->GetNumBodies(); }
 uint32_t Physics::activeBodyCount() const { return p_->system->GetNumActiveBodies(JPH::EBodyType::RigidBody); }
 uint64_t Physics::steps() const { return p_->steps; }

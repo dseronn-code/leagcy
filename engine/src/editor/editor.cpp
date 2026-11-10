@@ -106,7 +106,7 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
   // Teste sem mouse (LEGACY_EDITOR_TESTE=caixa): no 3º quadro, aperta "+ Caixa" uma vez.
   static int frameNo = 0;
   static const char* autoTest = std::getenv("LEGACY_EDITOR_TESTE");
-  if (world && autoTest && ++frameNo == 3) {
+  if (world && autoTest && std::string(autoTest) == "caixa" && ++frameNo == 3) {
     world->addPrimitive(game::ShapeType::Box, camera.position + camera.forward() * 4.0f, game::Motion::Dynamic);
     requestReload(*world);
   }
@@ -173,8 +173,69 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
     entityList(*world);
     properties(*world, scene);
     gizmo(*world, scene, camera, extent);
-    picking(*world, camera, extent);
+    if (world->terrain.enabled) terrainPanel(*world, scene, camera, extent, frameMs / 1000.0f);
+    if (!brushOn_) picking(*world, camera, extent);
   }
+}
+
+bool Editor::brushRay(game::World& world, const scene::Camera& camera, VkExtent2D extent, glm::vec2 pixel, glm::vec3& hit) {
+  const float aspect = float(extent.width) / float(std::max(extent.height, 1u));
+  const float x = 2.0f * pixel.x / float(extent.width) - 1.0f;
+  const float y = 1.0f - 2.0f * pixel.y / float(extent.height);
+  const float tanHalf = std::tan(0.5f * camera.fovY);
+  const glm::vec3 fwd = camera.forward(), right = camera.right(), up = glm::cross(right, fwd);
+  const glm::vec3 dir = glm::normalize(fwd + right * (x * tanHalf * aspect) + up * (y * tanHalf));
+  float dist = 0.0f;
+  if (world.physics->castRay(camera.position, dir, 5000.0f, &dist) == ~0u) return false;
+  hit = camera.position + dir * dist;
+  return true;
+}
+
+void Editor::terrainPanel(game::World& world, scene::Scene& scene, const scene::Camera& camera, VkExtent2D extent, float dt) {
+  static const char* modes[] = {"subir", "descer", "aplanar", "suavizar"};
+  ImGui::SetNextWindowPos(ImVec2(float(extent.width) - 310.0f, 10.0f), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
+  ImGui::Begin("Terreno");
+  ImGui::Checkbox("Esculpir (arraste com o botão esquerdo)", &brushOn_);
+  ImGui::Combo("Modo", &brushMode_, modes, 4);
+  ImGui::SliderFloat("Raio (m)", &brushRadius_, 0.5f, 100.0f, "%.1f", ImGuiSliderFlags_Logarithmic);
+  if (brushMode_ == 2) ImGui::DragFloat("Altura alvo (m)", &brushLevel_, 0.1f);
+  else ImGui::SliderFloat(brushMode_ == 3 ? "Força" : "Força (m/s)", &brushStrength_, 0.05f, brushMode_ == 3 ? 1.0f : 20.0f);
+  ImGui::InputText("##mapa", terrainPath_, sizeof(terrainPath_));
+  ImGui::SameLine();
+  if (ImGui::Button("Salvar mapa"))
+    status_ = world.saveTerrainMap(terrainPath_) ? std::string("Mapa salvo em ") + terrainPath_ + " (use em \"mapa\")"
+                                                   : "Falha ao salvar o mapa";
+  ImGui::End();
+  // Teste sem mouse (LEGACY_EDITOR_TESTE=terreno): pinceladas no centro da tela nos quadros 3 a 32.
+  static int frameNo = 0;
+  static const char* autoTest = std::getenv("LEGACY_EDITOR_TESTE");
+  const bool testStroke = autoTest && std::string(autoTest) == "terreno" && ++frameNo >= 3 && frameNo <= 32;
+  const ImGuiIO& io = ImGui::GetIO();
+  const bool stroke = testStroke || (brushOn_ && ImGui::IsMouseDown(ImGuiMouseButton_Left) && !io.WantCaptureMouse);
+  glm::vec3 hit;
+  const glm::vec2 pixel = testStroke ? glm::vec2(float(extent.width), float(extent.height)) * 0.5f
+                                     : glm::vec2(io.MousePos.x, io.MousePos.y);
+  if (!(brushOn_ || testStroke) || !brushRay(world, camera, extent, pixel, hit)) return;
+  // Contorno do pincel na tela: um círculo no chão (32 pontos projetados).
+  {
+    const glm::mat4 vp = glm::perspective(camera.fovY, float(extent.width) / float(std::max(extent.height, 1u)), 0.05f, 5000.0f) * camera.view();
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    ImVec2 prev;
+    for (int k = 0; k <= 32; ++k) {
+      const float a = 6.2831853f * float(k) / 32.0f;
+      const glm::vec3 p(hit.x + brushRadius_ * std::cos(a), 0.0f, hit.z + brushRadius_ * std::sin(a));
+      const glm::vec4 c = vp * glm::vec4(p.x, world.terrainHeight(p.x, p.z), p.z, 1.0f);
+      if (c.w <= 0.0f) continue;
+      const ImVec2 s((c.x / c.w * 0.5f + 0.5f) * float(extent.width), (0.5f - c.y / c.w * 0.5f) * float(extent.height));
+      if (k > 0) dl->AddLine(prev, s, IM_COL32(255, 200, 60, 255), 2.0f);
+      prev = s;
+    }
+  }
+  if (!stroke) return;
+  float amount = brushMode_ == 2 ? brushLevel_ : brushMode_ == 3 ? brushStrength_ : brushStrength_ * std::max(dt, 1.0f / 60.0f);
+  if (testStroke) amount = 2.0f;  // teste: 2 m por quadro (a GPU de software desenha ~1 quadro por segundo)
+  world.terrainBrush(scene, glm::vec2(hit.x, hit.z), brushRadius_, amount, modes[brushMode_]);
 }
 
 void Editor::entityList(game::World& world) {
@@ -182,7 +243,8 @@ void Editor::entityList(game::World& world) {
   ImGui::SetNextWindowSize(ImVec2(300, 360), ImGuiCond_FirstUseEver);
   ImGui::Begin("Entidades");
   std::vector<entt::entity> list;
-  for (auto e : world.registry.view<game::Transform>()) list.push_back(e);
+  for (auto e : world.registry.view<game::Transform>())
+    if (!world.registry.all_of<game::TerrainTile>(e)) list.push_back(e);  // ladrilhos: painel Terreno
   std::sort(list.begin(), list.end(), [](entt::entity a, entt::entity b) { return entt::to_integral(a) < entt::to_integral(b); });
   ImGui::Text("%zu entidades", list.size());
   ImGui::Separator();

@@ -17,6 +17,7 @@
 #include "game/audio.h"
 #include "game/input.h"
 #include "game/physics.h"
+#include "scene/mesh.h"
 
 namespace scene {
 class Scene;
@@ -228,6 +229,7 @@ struct AlwaysLoaded {};
 // Ladrilho do terreno ("terreno" na cena). De perto, a malha detalhada (o Renderable) com colisão (bodyId); com a
 // célula dormindo, só a malha simples (farObject), sem física.
 struct TerrainTile {
+  glm::vec2 center{0.0f};  // centro do ladrilho (x, z)
   uint32_t farObject = ~0u;
   uint32_t bodyId = ~0u;
   float friction = 0.8f;
@@ -400,10 +402,16 @@ class World {
     int octaves = 6;
     float seed = 0.0f;
     glm::vec2 center{0.0f};
-    std::vector<float> map;  // 0..1, mapW x mapH (vazio: ruído)
+    std::vector<float> map;  // 0..1, mapW x mapH (vazio: ruído); editável: altura em metros (base 0, altura 1)
     int mapW = 0, mapH = 0;
+    uint32_t res = 64, farRes = 8;
+    bool editable = false;  // o pincel já converteu a altura numa grade
   } terrain;
   float terrainHeight(float x, float z) const;
+  scene::MeshData terrainTileMesh(float cx, float cz, uint32_t res, float skirt) const;
+  // Pincel: "subir" / "descer" (strength em m no centro), "aplanar" (strength = altura alvo), "suavizar" (0..1).
+  bool terrainBrush(scene::Scene& scene, glm::vec2 at, float radius, float strength, const std::string& mode);
+  bool saveTerrainMap(const std::string& path) const;
   std::set<std::string> timelineRequests;  // tocar_linha() pede, o script da linha (linha_pedida) atende
 
  private:

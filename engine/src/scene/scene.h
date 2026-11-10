@@ -461,6 +461,8 @@ class Scene {
   int32_t tlasSlotOf(uint32_t object) const { return object < tlasSlot_.size() ? tlasSlot_[object] : -1; }
   // Mundo aberto: esconde ou mostra um objeto (desenho, sombras e ray tracing). Vale a partir do próximo frame.
   void setObjectHidden(uint32_t object, bool hidden);
+  // Troca a geometria de uma malha já na GPU (mesma malha, objetos e materiais): pincel do terreno no editor.
+  void replaceMesh(uint32_t mesh, const MeshData& data);
   uint32_t tlasInstanceCount() const { return tlasCount_; }
   uint32_t tlasLayout() const { return tlasLayout_; }
   // Endereços de vértices/índices de uma malha para o buffer de instâncias: a malha vazia (válida) se ela está fora

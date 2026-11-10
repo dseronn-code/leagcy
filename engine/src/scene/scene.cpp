@@ -793,6 +793,31 @@ void Scene::makeResident(uint32_t mi, const MeshData& data, const std::vector<ui
   }
 }
 
+void Scene::replaceMesh(uint32_t mi, const MeshData& data) {
+  rhi::Context& ctx = *ctx_;
+  vkDeviceWaitIdle(ctx.device);  // edição (pincel do terreno): a GPU termina com a malha antiga antes de destruir
+  GpuMesh& gm = meshes[mi];
+  if (gm.resident) {
+    residentBytes_ -= gm.vertices.size + gm.indices.size + (ctx.rayTracing ? gm.blas.storage.size : 0) + gm.meshlets.size +
+                      gm.colors.size;
+    rhi::destroyBuffer(ctx, gm.vertices);
+    rhi::destroyBuffer(ctx, gm.indices);
+    if (gm.meshlets.handle != VK_NULL_HANDLE) rhi::destroyBuffer(ctx, gm.meshlets);
+    if (gm.colors.handle != VK_NULL_HANDLE) rhi::destroyBuffer(ctx, gm.colors);
+    if (ctx.rayTracing) rhi::destroyAccel(ctx, gm.blas);
+  }
+  gm.vertexCount = uint32_t(data.vertices.size());
+  gm.indexCount = uint32_t(data.indices.size());
+  gm.boundsMin = glm::vec3(1e30f);
+  gm.boundsMax = glm::vec3(-1e30f);
+  for (const Vertex& v : data.vertices) {
+    gm.boundsMin = glm::min(gm.boundsMin, v.position);
+    gm.boundsMax = glm::max(gm.boundsMax, v.position);
+  }
+  const std::vector<uint32_t> blob = meshletBlob(ctx, gm, data, false, std::string());
+  makeResident(mi, data, blob);
+}
+
 void Scene::evict(uint32_t mi) {
   GpuMesh& gm = meshes[mi];
   gm.resident = false;
