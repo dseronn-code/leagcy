@@ -845,7 +845,18 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
       lods[c.baseMeshlet] = l;
       st.baseTriangles += c.indices.size() / 3;
     } else {
-      appendMeshlet(out, mesh, c.indices.data(), uint32_t(c.indices.size() / 3), kNoTriangle, local);
+      // A simplificação às vezes vira um triângulo do avesso (dobra; ~1% nos níveis grossos da rocha): com o descarte
+      // de faces de trás ele some e abre um buraco (visto na RTX). Virado para o lado das normais da superfície, ele
+      // volta a aparecer; a forma é a mesma (o ray tracing e a interseção exata não dependem da ordem).
+      std::vector<uint32_t> idx = c.indices;
+      for (size_t t = 0; t + 2 < idx.size(); t += 3) {
+        const Vertex &a = mesh.vertices[idx[t]], &b = mesh.vertices[idx[t + 1]], &d = mesh.vertices[idx[t + 2]];
+        if (glm::dot(glm::cross(b.position - a.position, d.position - a.position), a.normal + b.normal + d.normal) < 0.0f) {
+          std::swap(idx[t + 1], idx[t + 2]);
+          ++st.flippedTriangles;
+        }
+      }
+      appendMeshlet(out, mesh, idx.data(), uint32_t(idx.size() / 3), kNoTriangle, local);
       lods.push_back(l);
     }
     if (std::isinf(c.parent.error)) st.rootTriangles += c.indices.size() / 3;
@@ -927,7 +938,7 @@ std::vector<MeshletBlock> buildMeshletBlocks(const std::vector<MeshletLod>& lods
 }
 
 namespace {
-constexpr uint32_t kClusterLodCacheVersion = 3;  // mude quando o algoritmo do grafo mudar
+constexpr uint32_t kClusterLodCacheVersion = 4;  // mude quando o algoritmo do grafo mudar
 uint64_t fnv1aBytes(const void* data, size_t n, uint64_t h) {
   const uint8_t* b = static_cast<const uint8_t*>(data);
   for (size_t i = 0; i < n; ++i) h = (h ^ b[i]) * 1099511628211ull;

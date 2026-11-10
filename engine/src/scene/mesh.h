@@ -101,6 +101,7 @@ std::vector<MeshletBlock> buildMeshletBlocks(const std::vector<MeshletLod>& lods
 struct ClusterLodStats {
   uint32_t levels = 0, baseMeshlets = 0, totalMeshlets = 0;
   uint64_t baseTriangles = 0, rootTriangles = 0;
+  uint64_t flippedTriangles = 0;  // triângulos simplificados virados para o lado das normais (ver buildClusterLod)
 };
 // Devolve os meshlets de todos os níveis (o nível 0 primeiro, na ordem de buildMeshlets) e `lods` paralelo a eles.
 MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods, ClusterLodStats* stats = nullptr);

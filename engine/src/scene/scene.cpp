@@ -341,9 +341,10 @@ std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const Me
   ClusterLodStats st;
   const MeshletData md = virtualized ? buildClusterLodCached(data, lods, &st, cacheDir) : buildMeshlets(data);
   if (virtualized)
-    LOG_INFO("Geometria virtualizada: %llu triângulos em %u níveis (%u -> %u pedaços; a raiz tem %llu triângulos)",
+    LOG_INFO("Geometria virtualizada: %llu triângulos em %u níveis (%u -> %u pedaços; a raiz tem %llu triângulos; %llu "
+             "simplificados desvirados)",
              (unsigned long long)st.baseTriangles, st.levels, st.baseMeshlets, st.totalMeshlets,
-             (unsigned long long)st.rootTriangles);
+             (unsigned long long)st.rootTriangles, (unsigned long long)st.flippedTriangles);
   std::vector<uint32_t> blob(md.meshlets.size() * (sizeof(Meshlet) / 4));
   std::memcpy(blob.data(), md.meshlets.data(), md.meshlets.size() * sizeof(Meshlet));
   gm.meshletCount = uint32_t(md.meshlets.size());
