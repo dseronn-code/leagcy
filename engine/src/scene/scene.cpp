@@ -355,10 +355,15 @@ std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const Me
   gm.meshletLodBase = 0;
   gm.meshletBlockBase = 0;
   if (virtualized && lods.size() == md.meshlets.size()) {
+    // As listas de MeshletLod / MeshletBlock (vec4) são lidas por ponteiro da GPU (buffer_reference), que supõe
+    // alinhamento de 16 bytes: começam num múltiplo de 4 palavras. Desalinhadas, a NVIDIA lia o endereço arredondado
+    // (erros trocados: buracos nas rochas e níveis grossos mesmo a 0,01 px); o lavapipe lia certo e escondia o erro.
+    blob.resize((blob.size() + 3) / 4 * 4, 0u);
     gm.meshletLodBase = uint32_t(blob.size());
     const uint32_t* w = reinterpret_cast<const uint32_t*>(lods.data());
     blob.insert(blob.end(), w, w + lods.size() * (sizeof(MeshletLod) / 4));
     const std::vector<MeshletBlock> blocks = buildMeshletBlocks(lods);
+    blob.resize((blob.size() + 3) / 4 * 4, 0u);
     gm.meshletBlockBase = uint32_t(blob.size());
     const uint32_t* b = reinterpret_cast<const uint32_t*>(blocks.data());
     blob.insert(blob.end(), b, b + blocks.size() * (sizeof(MeshletBlock) / 4));
