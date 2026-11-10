@@ -1,7 +1,3 @@
-# Rodada 22b: a 22 passou toda a fase 4 (visual 5/5, materiais 6/6, linha 3/3, terreno 5/5 com o editor). sondas/sponza
-# falhou porque o arquivo automático texcache/gi_sponza.gi (gravado na 21) entrava também no caso "sem sondas": agora
-# --sem-sondas-gi. E a fase 5: ragdoll ativo e retargeting.
-python tools\sondas.py --bin build\Release\legacy.exe
-python tools\ragdoll.py --bin build\Release\legacy.exe
-python tools\retarget.py --bin build\Release\legacy.exe
-python tools\rede.py --bin build\Release\legacy.exe
+# Rodada 23: o jogo de demonstração (cenas/vale) — teste que joga sozinho e o jogo na janela por 20 s em 1080p.
+python tools\demo.py --bin build\Release\legacy.exe
+build\Release\legacy.exe --scene cenas\vale\vale.json --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --screenshot resultados_pc\vale.png

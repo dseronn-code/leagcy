@@ -631,6 +631,23 @@ as sondas (0,4 com RT; 84,5 só com o céu); a segunda execução lê o arquivo 
 
 ![Sponza: com RT, sem RT só com o céu, sem RT com as sondas](screenshots/sondas_gi_sponza.png)
 
+## Jogo de demonstração: Vale dos Cristais (`cenas/vale`)
+
+`--scene cenas/vale/vale.json` (ou `python tools/empacotar.py --cena cenas/vale/vale.json --saida dist/Vale`). Junta as
+fases novas num jogo pequeno: terreno de 256 m no mundo aberto (células de 32 m), ruínas e cristais com materiais por
+nós, 5 cristais com script visual (`cristal.vs.json`: giram, soltam faíscas e, com o jogador perto, explodem e somem —
+uma trava no grafo conta cada um uma vez), o guarda (a raposa com IA) que patrulha as ruínas e persegue o jogador
+(alcançou = volta ao começo), **F** perto dele o derruba com o ragdoll ativo (levanta 3 s depois), cenas de abertura e
+de vitória como linhas do tempo em JSON, HUD com o contador e o menu de pausa padrão. O controlador (`vale.lua`) põe as
+ruínas e os personagens no chão do terreno ao começar.
+
+Teste (`tools/demo.py`, joga sozinho): a abertura toca e termina; o jogador coletando os 5 cristais dispara a vitória
+(que também termina); F derruba o guarda e ele levanta; o guarda vê o jogador, persegue e o alcança (nesse teste a
+prova é o "pego pelo guarda"; com o jogador posto 6 m à frente, a amostra seguinte ainda viu "patrulhando"); a imagem
+tem céu, terreno e os cristais.
+
+![Vale dos Cristais](screenshots/vale_dos_cristais.png)
+
 ## Malhas comprimidas (meshopt, Draco) e texturas KTX2
 
 - **meshopt** (`EXT_meshopt_compression`, o formato do gltfpack) e **malha quantizada** (`KHR_mesh_quantization`):
