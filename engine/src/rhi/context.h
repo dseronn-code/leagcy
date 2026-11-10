@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <string>
 #include <vector>
 
 #include "rhi/vk_common.h"
@@ -48,6 +49,9 @@ class Context {
   VmaAllocator allocator = VK_NULL_HANDLE;
 
   VkPhysicalDeviceProperties properties{};
+  // Pipelines que o driver recusou (shader + VkResult): o motor junta todos e para uma vez só com a lista.
+  std::vector<std::string> pipelineErrors;
+  void checkPipelineErrors() const;
   bool rayTracing = false;  // VK_KHR_ray_query + acceleration_structure ativos
   RayTracingFns rt;
   PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR = nullptr;

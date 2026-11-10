@@ -86,7 +86,9 @@ struct Engine {
 
   void init(ANativeWindow* w, const std::string& cacheDir) {
     window = w;
-    ctx.createInstance({false, true, {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME}});
+    // Ray tracing desligado no celular por enquanto: o compilador de shaders do Adreno recusa os shaders grandes de
+    // ray query (ReSTIR); o caminho sem RT (sombras em cascata + SSAO) é o testado para o preset de celular.
+    ctx.createInstance({false, false, {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME}});
     legacyVk13SetInstance(ctx.instance);
     VkAndroidSurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
     si.window = window;
@@ -105,7 +107,7 @@ struct Engine {
     swapchain.create(ctx, surface, {uint32_t(ANativeWindow_getWidth(window)), uint32_t(ANativeWindow_getHeight(window))}, true);
     swapchainReady = true;
     // Preset de celular: resolução interna de 50% reconstruída pelo TAAU, 1 amostra, ReSTIR enxuto, sem motion blur
-    // pesado; o ray tracing liga sozinho nos celulares que têm (Adreno 740+, Immortalis, Xclipse).
+    // pesado; sem ray tracing por enquanto.
     renderer::Settings rs;
     rs.quality = renderer::qualityPreset(renderer::QualityPreset::Low);
     rs.quality.renderScale = 0.5f;
@@ -114,6 +116,7 @@ struct Engine {
     r.init(ctx, scene, swapchain.extent, swapchain.format, rs);
     rendererReady = true;
     game.init(scene, r, false, ctx.rayTracing);
+    ctx.checkPipelineErrors();
 
     for (auto& f : frames) {
       VkCommandPoolCreateInfo pci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};

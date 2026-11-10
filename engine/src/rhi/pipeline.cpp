@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <string>
 #include <vector>
 
 #ifdef _WIN32
@@ -116,7 +117,13 @@ VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
   pi.pDynamicState = &dy;
   pi.layout = d.layout;
   VkPipeline p;
-  VK_CHECK(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pi, nullptr, &p));
+  if (VkResult res = vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pi, nullptr, &p); res != VK_SUCCESS) {
+    std::string name = mesh ? d.meshShader : d.vertexShader;
+    name += "+" + d.fragmentShader;
+    LOG_ERROR("Pipeline gráfico recusado: %s (VkResult %d)", name.c_str(), int(res));
+    ctx.pipelineErrors.push_back(name + " (" + std::to_string(int(res)) + ")");
+    p = VK_NULL_HANDLE;
+  }
   for (const auto& st : stages) vkDestroyShaderModule(ctx.device, st.module, nullptr);
   return p;
 }

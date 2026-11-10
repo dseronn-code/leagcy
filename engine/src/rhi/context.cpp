@@ -417,4 +417,11 @@ void Context::destroy() {
   device = VK_NULL_HANDLE;
 }
 
+void Context::checkPipelineErrors() const {
+  if (pipelineErrors.empty()) return;
+  std::string all;
+  for (const auto& e : pipelineErrors) all += (all.empty() ? "" : ", ") + e;
+  FATAL("A GPU %s recusou %zu shader(s): %s", properties.deviceName, pipelineErrors.size(), all.c_str());
+}
+
 }  // namespace rhi

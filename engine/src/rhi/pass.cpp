@@ -1,6 +1,7 @@
 #include "rhi/pass.h"
 
 #include <algorithm>
+#include <string>
 
 #include "rhi/pipeline.h"
 
@@ -69,7 +70,11 @@ void ComputePass::init(Context& ctx, const char* shader, VkDescriptorSetLayout g
   const VkSpecializationInfo spec{specCount, entries, specCount * sizeof(uint32_t), specConstants};
   if (specConstants && specCount) ci.stage.pSpecializationInfo = &spec;
   ci.layout = layout.pipelineLayout;
-  VK_CHECK(vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline_));
+  if (VkResult res = vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline_); res != VK_SUCCESS) {
+    LOG_ERROR("Pipeline de compute recusado: %s (VkResult %d)", shader, int(res));
+    ctx.pipelineErrors.push_back(std::string(shader) + " (" + std::to_string(int(res)) + ")");
+    pipeline_ = VK_NULL_HANDLE;
+  }
   vkDestroyShaderModule(ctx.device, m, nullptr);
 }
 

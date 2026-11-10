@@ -558,6 +558,7 @@ int runHeadless(const Options& opt) {
   const VkFormat outFormat = VK_FORMAT_R8G8B8A8_SRGB;
   renderer::Renderer r;
   r.init(ctx, scene, extent, outFormat, opt.render);
+  ctx.checkPipelineErrors();
   game::PenaltiGame penalti;
   const bool playing = opt.scene.name == "penalti";
   if (playing) penalti.init(scene, r, opt.autoplay, ctx.rayTracing);
@@ -750,6 +751,7 @@ int runWindowed(const Options& opt) {
   swapchain.create(ctx, surface, {uint32_t(fbw), uint32_t(fbh)}, opt.vsync);
   renderer::Renderer r;
   r.init(ctx, scene, swapchain.extent, swapchain.format, opt.render);
+  ctx.checkPipelineErrors();
   game::PenaltiGame penalti;
   const bool playing = opt.scene.name == "penalti";
   if (playing) penalti.init(scene, r, opt.autoplay, ctx.rayTracing);
