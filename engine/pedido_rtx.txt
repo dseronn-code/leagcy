@@ -1,5 +1,10 @@
-# Rodada 21b (10/11). A 21 passou quase tudo (física, jogo, sequência, idiomas, mundo aberto 8/8, sondas 3/3; Nanite
-# 6,6x mais rápido no G-buffer). Falharam: rede (o cliente não conectou: agora tenta por até 60 s e o teste espera o
-# anfitrião atender a rede) e nanite/qualidade (a RTX usava o DLSS-RR, que varia de imagem para imagem: agora TAAU).
-python tools\rede.py --bin build\Release\legacy.exe
-python tools\nanite.py --bin build\Release\legacy.exe
+# Rodada 21c: origem da diferença do Nanite na RTX (1,23/255 contra 0,65 no lavapipe). Imagens com e sem, na
+# imagem final e nas visões de depuração (normal = geometria; sol = sombra do sol; luzes = luz direta).
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_final_sem.png --no-nanite
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_final_com.png
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_normal_sem.png --no-nanite --debug-view normal
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_normal_com.png --debug-view normal
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_sol_sem.png --no-nanite --debug-view sol
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_sol_com.png --debug-view sol
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_nl_sem.png --no-nanite --debug-view nl
+build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\n_nl_com.png --debug-view nl
