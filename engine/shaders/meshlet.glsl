@@ -5,8 +5,8 @@
 #define MESHLET_GLSL
 
 #extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
 #extension GL_EXT_scalar_block_layout : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 #include "frame.glsl"
 #include "scene.glsl"
@@ -34,10 +34,10 @@ layout(buffer_reference, scalar) readonly buffer DrawCommands { DrawCommand c[];
 layout(buffer_reference, scalar) readonly buffer DrawList { uint objects[]; };
 
 layout(push_constant) uniform Push {
-  uint64_t drawList;  // lista visível compactada (cull.comp)
-  uint64_t commands;  // comandos indiretos do culling (instanceCount, firstInstance) deste conjunto
-  uint64_t meshlets;  // GpuMesh::meshlets
-  uint64_t vertices;  // vértices da malha (scene::Vertex, 12 floats)
+  uvec2 drawList;  // lista visível compactada (cull.comp)
+  uvec2 commands;  // comandos indiretos do culling (instanceCount, firstInstance) deste conjunto
+  uvec2 meshlets;  // GpuMesh::meshlets
+  uvec2 vertices;  // vértices da malha (scene::Vertex, 12 floats)
   uint batch, meshletCount, vertexBase, triangleBase;
   uint flags;  // 1 = culling ligado, 2 = dos dois lados (sem teste de costas)
   uint lodBase;     // MeshletLod de cada meshlet, em uints a partir de `meshlets` (0 = malha sem níveis)
@@ -92,7 +92,7 @@ float lodErrorPixels(vec4 sphere, float err, mat4 model, float scale) {
 // O meshlet `m` está no corte do grafo: o próprio erro cabe no limite e o do grupo que o substitui, não.
 bool meshletInLodCut(uint m, mat4 model) {
   if (pc.lodBase == 0u) return true;
-  MeshletLod l = MeshletLodList(pc.meshlets + uint64_t(pc.lodBase) * 4ul).l[m];
+  MeshletLod l = MeshletLodList(addrAdd(pc.meshlets, pc.lodBase * 4u)).l[m];
   float scale = max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz)));
   return lodErrorPixels(l.self, l.selfError, model, scale) <= pc.lodPixels &&
          lodErrorPixels(l.parent, l.parentError, model, scale) > pc.lodPixels;

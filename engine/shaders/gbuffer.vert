@@ -12,7 +12,7 @@ layout(location = 4) in vec3 aPrevPosition;  // posição do frame anterior (mal
 // Desenho instanciado: uma chamada por malha; a instância (gl_InstanceIndex, já somado ao firstInstance do lote)
 // indexa a lista de objetos ordenada por malha.
 layout(buffer_reference, scalar) readonly buffer DrawList { uint objects[]; };
-layout(push_constant) uniform Push { uint64_t drawList; } pc;
+layout(push_constant) uniform Push { uvec2 drawList; } pc;
 
 layout(location = 0) out vec3 vWorldPos;
 layout(location = 1) out vec3 vNormal;

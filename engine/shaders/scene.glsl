@@ -5,9 +5,17 @@
 #extension GL_EXT_nonuniform_qualifier : require
 #extension GL_EXT_scalar_block_layout : require
 #extension GL_EXT_buffer_reference : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_buffer_reference_uvec2 : require
 
 #include "common.glsl"
+
+// Endereços de GPU em uvec2 (x = 32 bits baixos, y = altos): GPUs de celular (Adreno) não têm shaderInt64.
+bool addrNull(uvec2 a) { return (a.x | a.y) == 0u; }
+uvec2 addrAdd(uvec2 a, uint bytes) {
+  uint carry;
+  uint lo = uaddCarry(a.x, bytes, carry);
+  return uvec2(lo, a.y + carry);
+}
 
 const uint MATERIAL_ALPHA_MASK = 1u;
 const uint MATERIAL_TERRAIN = 2u;
@@ -48,7 +56,7 @@ bool qualityHas(uint f) { return (QUALITY_FEATURES & f) != 0u; }
 // Simulação do oceano: oceanDisplacement / oceanSlope / OCEAN_PATCH ficam em frame.glsl (o sol debaixo d'água usa).
 
 // Multidões: endereço dos vértices de cada pose assada (Scene::bakeCrowdClip).
-layout(set = 0, binding = 22, std430) readonly buffer CrowdFrames { uint64_t crowdFrames[]; };
+layout(set = 0, binding = 22, std430) readonly buffer CrowdFrames { uvec2 crowdFrames[]; };
 
 struct Material {  // == scene::Material (192 bytes)
   vec4 baseColor;      // metálico/rugosidade: cor base | especular/glossiness: cor difusa
@@ -88,12 +96,12 @@ struct Material {  // == scene::Material (192 bytes)
 };
 
 struct InstanceData {  // == Scene::InstanceGpu
-  uint64_t vertices;
-  uint64_t indices;
+  uvec2 vertices;
+  uvec2 indices;
   uint material;
   uint meshletLodBase;  // geometria virtualizada: MeshletLod de cada meshlet (uints a partir de `meshlets`); 0 = sem
-  uint64_t colors;  // cor por vértice (glTF COLOR_0, vec4 linear) ou 0
-  uint64_t meshlets;  // bloco dos meshlets da malha (só com geometria virtualizada)
+  uvec2 colors;  // cor por vértice (glTF COLOR_0, vec4 linear) ou 0
+  uvec2 meshlets;  // bloco dos meshlets da malha (só com geometria virtualizada)
   uint meshletVertexBase, meshletTriangleBase;
 };
 
@@ -141,9 +149,9 @@ vec2 fetchVertexUV(VertexData vb, uint i) { return vec2(vb.v[i * 12u + 6u], vb.v
 
 layout(buffer_reference, scalar) readonly buffer ColorData { vec4 c[]; };
 // Cor por vértice (multiplica a cor base e o alfa): branco se a malha não tem.
-vec4 fetchVertexColor(InstanceData d, uint i) { return d.colors != 0ul ? ColorData(d.colors).c[i] : vec4(1.0); }
+vec4 fetchVertexColor(InstanceData d, uint i) { return !addrNull(d.colors) ? ColorData(d.colors).c[i] : vec4(1.0); }
 vec4 interpolateVertexColor(InstanceData d, uint i0, uint i1, uint i2, vec3 b) {
-  if (d.colors == 0ul) return vec4(1.0);
+  if (addrNull(d.colors)) return vec4(1.0);
   ColorData c = ColorData(d.colors);
   return c.c[i0] * b.x + c.c[i1] * b.y + c.c[i2] * b.z;
 }

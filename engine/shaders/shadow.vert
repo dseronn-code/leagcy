@@ -12,7 +12,7 @@ layout(location = 3) in vec4 aTangent;
 layout(location = 4) in vec3 aPrevPosition;
 
 layout(buffer_reference, scalar) readonly buffer DrawList { uint objects[]; };
-layout(push_constant) uniform Push { uint64_t drawList; uint cascade; uint pad; } pc;
+layout(push_constant) uniform Push { uvec2 drawList; uint cascade; uint pad; } pc;
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) flat out uint vMaterial;

@@ -6,14 +6,14 @@
 // sombras e os reflexos — refit da BLAS — veem o pano mexendo).
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference_uvec2 : require
 #extension GL_EXT_scalar_block_layout : require
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 layout(local_size_x = 256) in;
 layout(buffer_reference, scalar) buffer Points { vec4 p[]; };
 layout(buffer_reference, scalar) buffer Vertices { float v[]; };  // 12 floats por vértice (scene::Vertex)
 layout(push_constant) uniform Push {
-  uint64_t pos, prev, vertices;
+  uvec2 pos, prev, vertices;
   uint width, height;
   float spacing, dt, time;
   uint pinned;          // 1 = coluna 0 presa (bit 0); bit 1 = sem colisão consigo mesmo (medição); bit 2 = borda presa (rede)

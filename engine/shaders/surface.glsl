@@ -44,7 +44,7 @@ bool intersectTriangle(uint obj, uint prim, mat4 model, vec3 C, vec3 dir, inout 
   if ((prim & 0x80000000u) != 0u) {
     // Pedaço simplificado da geometria virtualizada: meshlet (bits 7..30) e triângulo dentro dele (bits 0..6). O
     // Meshlet tem 12 uints (vertexOffset no 9º, triangleOffset no 10º) e o MeshletLod 12 floats (erro no 9º).
-    if (d.meshlets == 0ul) return false;
+    if (addrNull(d.meshlets)) return false;
     uint m = (prim >> 7) & 0xFFFFFFu, t = prim & 127u;
     SurfaceMeshletWords w = SurfaceMeshletWords(d.meshlets);
     uint vOff = w.w[m * 12u + 8u], tOff = w.w[m * 12u + 9u];

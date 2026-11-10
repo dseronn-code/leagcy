@@ -228,7 +228,7 @@ void Context::createDevice(VkSurfaceKHR surface) {
     list += name;
   };
 #define NEED(f, s, name, req) need(f.name, s.name, #name, req)
-  NEED(f2.features, supported, shaderInt64, true);
+  NEED(f2.features, supported, shaderInt64, false);  // endereços em uvec2 nos shaders
   NEED(f2.features, supported, samplerAnisotropy, false);
   NEED(f2.features, supported, shaderStorageImageReadWithoutFormat, false);
   NEED(f2.features, supported, shaderStorageImageWriteWithoutFormat, false);
