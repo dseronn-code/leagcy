@@ -228,7 +228,7 @@ def main():
     a = ap.parse_args()
     nomes = a.so.split(',') if a.so else list(TESTES)
     oks = []
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         for n in nomes:
             try:
                 ok, info = TESTES[n](a.bin, pasta)

@@ -252,7 +252,7 @@ LIB = os.path.join(AQUI, 'scripts', 'lib')
 
 def teste_dialogo(b, pasta):
     lua = f'''
-incluir("{os.path.join(LIB, 'dialogo.lua')}")
+incluir("{os.path.join(LIB, 'dialogo.lua').replace(os.sep, '/')}")
 local conversa = {{
   inicio = {{quem = "Guarda", fala = "Parado! Quem vem lá?", proximo = "pergunta"}},
   pergunta = {{quem = "Guarda", fala = "Amigo ou inimigo?", opcoes = {{
@@ -285,7 +285,7 @@ end
 
 def teste_inventario(b, pasta):
     lua = f'''
-incluir("{os.path.join(LIB, 'inventario.lua')}")
+incluir("{os.path.join(LIB, 'inventario.lua').replace(os.sep, '/')}")
 function iniciar(e)
   inventario.adicionar("moeda", 10)
   inventario.adicionar("chave")
@@ -330,7 +330,7 @@ def main():
     a = ap.parse_args()
     binario = os.path.abspath(a.bin)
     oks = []
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         for n in (a.so.split(',') if a.so else TESTES):
             try:
                 ok, info = TESTES[n](binario, pasta)

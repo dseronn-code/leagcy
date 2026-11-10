@@ -150,7 +150,7 @@ def main():
     a = ap.parse_args()
     b = os.path.abspath(a.bin)
     oks = []
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         for n in (a.so.split(',') if a.so else TESTES):
             try:
                 ok, info = TESTES[n](b, pasta)

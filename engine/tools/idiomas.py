@@ -131,7 +131,7 @@ def main():
     a.bin = os.path.abspath(a.bin)
     nomes = [n for n in a.so.split(',') if n] or list(TESTES)
     falhas = 0
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         for n in nomes:
             try:
                 ok, msg = TESTES[n](a.bin, pasta)

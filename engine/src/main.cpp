@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <thread>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -166,6 +167,7 @@ struct Options {
   float move = 0.0f;       // headless: velocidade da câmera (m/s), para testar estabilidade temporal
   std::string cameraPath;  // headless: trajetória de câmera de cinema (arquivo de quadros-chave; ver loadCameraPath)
   float fps = 30.0f;       // headless: quadros por segundo do tempo simulado (vídeo)
+  bool realTime = false;   // headless: cada quadro espera o relógio (rede e recarga de script em GPUs rápidas)
   uint32_t warmup = 0;     // headless: frames iniciais parados e não salvos (TAA, denoiser e caches se assentam)
   float quitAfter = 0.0f;  // janela: fecha sozinha depois de N segundos e imprime as estatísticas do tempo de quadro
   std::string saveWorld;   // cena .json: grava o estado do mundo (poses depois da física) ao terminar
@@ -215,6 +217,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--move") o.move = float(std::atof(next()));
     else if (a == "--camera-path") o.cameraPath = next();
     else if (a == "--fps") o.fps = std::max(1.0f, float(std::atof(next())));
+    else if (a == "--tempo-real") o.realTime = true;
     else if (a == "--warmup") o.warmup = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--quit-after") o.quitAfter = std::max(0.0f, float(std::atof(next())));
     else if (a == "--save-world") o.saveWorld = next();
@@ -393,6 +396,7 @@ Options parseArgs(int argc, char** argv) {
           "  --audio-wav saida.wav    sem janela: grava o áudio 3D da cena .json (ouvinte = câmera)\n"
           "  --simular \"t:evento;...\"  entradas simuladas para testes (tecla, segurar, clique, mouse, eixo)\n"
           "  --idioma en         idioma dos textos do jogo (idiomas/<codigo>.json)\n"
+          "  --tempo-real        sem janela: cada quadro espera o relógio (testes de rede e recarga)\n"
           "  --host [porta]           multijogador: anfitrião (padrão 7777; cena com \"multijogador\")\n"
           "  --conectar ip[:porta]    multijogador: entra no jogo de outro computador\n"
           "  --editor                 editor visual na janela (entidades, propriedades, alças, jogar/pausar, salvar)\n"
@@ -574,7 +578,13 @@ int runHeadless(const Options& opt) {
   // Medição: com 20 frames ou mais, os tempos (GPU, CPU e o total) contam só a segunda metade; a primeira inclui a
   // placa subindo o clock depois do carregamento (na RTX, a mesma configuração variava até 30% entre execuções).
   const uint32_t timedFrom = opt.frames >= 20 ? opt.frames / 2 : 0;
+  const auto realStart = std::chrono::steady_clock::now();
   for (uint32_t f = 0; f < opt.frames; ++f) {
+    // --tempo-real: o quadro f começa em f·dt segundos de relógio (numa GPU rápida, sem isso 900 quadros passam em
+    // 1 s e um cliente de rede nem chega a conectar).
+    if (opt.realTime)
+      std::this_thread::sleep_until(realStart + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                                    std::chrono::duration<double>(double(f) * dt)));
     if (f == timedFrom && timedFrom > 0) {
       (void)r.gpuTimings();
       (void)r.cpuTimings();

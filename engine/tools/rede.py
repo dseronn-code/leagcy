@@ -45,7 +45,7 @@ end
 
 def sessao(binario, pasta, arq, porta, simular, env_cliente=None):
     """Roda anfitrião e cliente; devolve (linhas do anfitrião, linhas do cliente)."""
-    base = [binario, '--headless', '--scene', arq, '--width', '32', '--height', '18']
+    base = [binario, '--headless', '--scene', arq, '--width', '32', '--height', '18', '--tempo-real']
     anfitriao = subprocess.Popen(base + ['--host', str(porta), '--frames', '900', '--out', os.path.join(pasta, 'h.png')],
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8',
                                  errors='replace')
@@ -97,7 +97,7 @@ def main():
     a = ap.parse_args()
     binario = os.path.abspath(a.bin)
     oks = []
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         lua = os.path.join(pasta, 'pos.lua')
         with open(lua, 'w', encoding='utf-8') as f:
             f.write(LUA)
@@ -166,7 +166,7 @@ def main():
         arq2 = os.path.join(pasta, 'carro.json')
         with open(arq2, 'w', encoding='utf-8') as f:
             json.dump(carro, f)
-        base = [binario, '--headless', '--scene', arq2, '--width', '320', '--height', '180']
+        base = [binario, '--headless', '--scene', arq2, '--width', '320', '--height', '180', '--tempo-real']
         h = subprocess.Popen(base + ['--host', str(a.porta + 1), '--frames', '1500', '--out', os.path.join(pasta, 'ch.png')],
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
         for l in h.stdout:

@@ -34,7 +34,7 @@ def main():
     ap.add_argument('--bin', default=os.path.join('build', 'legacy'))
     a = ap.parse_args()
     W, H = 800, 450
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         script = os.path.join(pasta, 'hud.lua')
         with open(script, 'w', encoding='utf-8') as f:
             f.write(LUA)

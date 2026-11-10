@@ -263,7 +263,7 @@ def teste_recarga(b, pasta):
         json.dump(cena, f)
     saida = os.path.join(pasta, 'recarga_fim.json')
     p = subprocess.Popen([b, '--headless', '--scene', caminho, '--width', '32', '--height', '18', '--frames', '400',
-                          '--out', os.path.join(pasta, 'recarga.png'), '--save-world', saida],
+                          '--out', os.path.join(pasta, 'recarga.png'), '--save-world', saida, '--tempo-real'],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     time.sleep(3)  # o motor já está rodando a primeira versão
     with open(scr, 'w', encoding='utf-8') as f:
@@ -360,7 +360,7 @@ def main():
     a = ap.parse_args()
     nomes = a.so.split(',') if a.so else list(TESTES)
     resultados = []
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         for n in nomes:
             try:
                 ok, info = TESTES[n](a.bin, pasta)

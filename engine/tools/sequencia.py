@@ -34,7 +34,7 @@ local s = sequencia.nova{
   },
   eventos = {
     {t = 0.5, chamar = function() log("EVENTO a", s_tempo()) end},
-    {t = %(fala)s, fala = "Guarda: quem vem lá?", duracao = 2},
+    {t = %(fala)s, fala = "Guarda: quem vem lá?", duracao = %(fala_dur)s},
     {t = 2.0, chamar = function() log("EVENTO b", s_tempo()) end},
     {t = 3.5, chamar = function() log("EVENTO c", s_tempo()) end},
   },
@@ -52,10 +52,10 @@ end
 '''
 
 
-def cena(pasta, nome, duracao=4, fala=1.0):
+def cena(pasta, nome, duracao=4, fala=1.0, fala_dur=2):
     lua = os.path.join(pasta, f'{nome}.lua')
     with open(lua, 'w', encoding='utf-8') as f:
-        f.write(LUA % {'lib': LIB.replace('\\', '/'), 'duracao': duracao, 'fala': fala})
+        f.write(LUA % {'lib': LIB.replace('\\', '/'), 'duracao': duracao, 'fala': fala, 'fala_dur': fala_dur})
     return {
         'camera': {'posicao': [0, 2, 12], 'alvo': [0, 1, 0]},
         'materiais': {'verm': {'cor': [0.9, 0.02, 0.02], 'rugosidade': 0.9},
@@ -179,7 +179,7 @@ def teste_tarjas(b, pasta):
     from PIL import Image
     arq = os.path.join(pasta, 'tarjas.json')
     with open(arq, 'w', encoding='utf-8') as f:
-        json.dump(cena(pasta, 'tarjas', duracao=60, fala=0.0), f, ensure_ascii=False)
+        json.dump(cena(pasta, 'tarjas', duracao=60, fala=0.0, fala_dur=60), f, ensure_ascii=False)
     tela = os.path.join(pasta, 'tarjas.png')
     cmd = [b, '--scene', arq, '--width', '640', '--height', '360', '--quit-after', '3', '--screenshot', tela]
     if sys.platform.startswith('linux') and not os.environ.get('DISPLAY'):
@@ -211,7 +211,7 @@ def main():
     a.bin = os.path.abspath(a.bin)
     nomes = [n for n in a.so.split(',') if n] or list(TESTES)
     falhas = 0
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         for n in nomes:
             try:
                 ok, msg = TESTES[n](a.bin, pasta)

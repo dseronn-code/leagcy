@@ -58,7 +58,7 @@ def main():
     ap.add_argument('--bin', default=os.path.join('build', 'legacy'))
     a = ap.parse_args()
     ok_todos = True
-    with tempfile.TemporaryDirectory() as pasta:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as pasta:
         som = os.path.join(pasta, 'tom.wav')
         tom(som)
         l2, r2 = gravar(a.bin, pasta, 'perto', [fonte(som, [0, 1, -2])])

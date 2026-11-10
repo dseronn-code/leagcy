@@ -1,33 +1,13 @@
-# Rodada 20b (10/11): a 20 parou na compilação (CMake 4 recusava a Recast); corrigido no CMakeLists.
-# Rodada 20 (6/11). Parte A: o motor completo no Windows (física, veículos, NPCs, áudio, animação, HUD, menus,
-# salvar, partículas, multijogador, exportar). Parte B: o Bistro ~10% mais escuro que a referência. Achado aqui:
-# a luz do motor está certa (acumulação: +1%); escurecia no TAA (corte e pesos de Karis em imagem com ruído) e no
-# denoiser. TAA revisto (-22,8% -> -11,5% em 240x136). Na RTX: quanto disso existe com DLSS-RR, e em 1080p.
+# Rodada 21 (10/11). A 20b rodou: Sponza Alto na janela 23,2 ms (meta cumprida), Bistro 1080p com DLSS-RR -5,6%.
+# Falhas da 20b eram dos testes no Windows (GPU rápida demais: rede e recarga; caminho com \ no Lua; legenda curta;
+# pasta temporária presa pelo antivírus). Repetidos aqui com --tempo-real e os acertos. Mais o Bistro no Médio de
+# novo (headless e janela andando), depois do TAA novo e das mudanças da semana.
 python tools\fisica.py --bin build\Release\legacy.exe
-python tools\audio.py --bin build\Release\legacy.exe
-python tools\animacao.py --bin build\Release\legacy.exe
-python tools\hud.py --bin build\Release\legacy.exe
 python tools\jogo.py --bin build\Release\legacy.exe
 python tools\rede.py --bin build\Release\legacy.exe
-python tools\ia.py --bin build\Release\legacy.exe
-python tools\ragdoll.py --bin build\Release\legacy.exe
 python tools\sequencia.py --bin build\Release\legacy.exe
 python tools\idiomas.py --bin build\Release\legacy.exe
-python tools\empacotar.py --cena cenas\parque.json --cena cenas\carro.json --saida %TEMP%\legacy_pacote --janela --testar
-build\Release\legacy.exe --scene cenas\parque.json --width 1920 --height 1080 --quit-after 12 --screenshot resultados_pc\parque.png
-build\Release\legacy.exe --scene cenas\parque.json --editor --select raposa --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\editor.png
-build\Release\legacy.exe --scene cenas\carro.json --width 1920 --height 1080 --quit-after 8 --screenshot resultados_pc\carro.png
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--reference"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--denoiser relax --upscaler taau"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-antigo"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--denoiser relax --upscaler dlss"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro --extra="--no-denoiser --upscaler taau"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas sponza,reflections
-python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos svgf,relax,dlss-rr --cena sponza-noite-animada
-python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos svgf,relax --cena sponza-noite-animada --extra="--perf-skip diag-taa-antigo"
-python tools\taa.py --bin build\Release\legacy.exe --out resultados_pc\taa --scale 0.67 --extra="--upscaler taau"
-python tools\taa.py --bin build\Release\legacy.exe --out resultados_pc\taa --scale 0.67 --extra="--upscaler taau --perf-skip diag-taa-antigo"
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\p.png --scene assets\Bistro\bistro.gltf --quality medio --night
+build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --quality medio --scene assets\Bistro\bistro.gltf --no-vsync
 build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt
