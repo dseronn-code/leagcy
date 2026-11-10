@@ -733,6 +733,8 @@ void reorderForClusters(MeshData& mesh) {
   mesh.indices = std::move(reordered);
 }
 
+constexpr double kMinAreaKept = 0.8;  // fração mínima da área "para fora" que um grupo simplificado mantém
+
 MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods, ClusterLodStats* stats) {
   constexpr size_t kGroup = 8;
   // Nível 0: os pedaços compactos de reorderForClusters (contínuos na lista de índices; os triângulos mantêm o número)
@@ -781,7 +783,7 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
     for (size_t v = 0; v < locks.size(); ++v) locks[v] = groupOfVertex[remap[v]] == -2;
     pending.clear();
     std::vector<uint32_t> retry;
-    size_t made = 0, stuck = 0;
+    size_t made = 0, stuck = 0, shrunk = 0;
     for (const std::vector<uint32_t>& group : groups) {
       if (group.size() == 1) {  // sem vizinho livre: tenta de novo no próximo nível
         retry.push_back(group[0]);
@@ -808,18 +810,30 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
         stuck += merged.size() / 3;
         continue;
       }
-      if (std::getenv("LEGACY_DEBUG_LOD")) {  // diagnóstico: área antes e depois (um grupo que encolhe deixa buraco)
-        auto area = [&](const std::vector<uint32_t>& ix) {
-          double a = 0.0;
-          for (size_t t = 0; t + 2 < ix.size(); t += 3)
-            a += 0.5 * glm::length(glm::cross(mesh.vertices[ix[t + 1]].position - mesh.vertices[ix[t]].position,
-                                              mesh.vertices[ix[t + 2]].position - mesh.vertices[ix[t]].position));
-          return a;
-        };
-        const double a0 = area(merged), a1 = area(simplified);
-        if (simplified.empty() || a1 < 0.8 * a0)
-          std::fprintf(stderr, "nivel %u: grupo de %zu pedaços encolheu: %zu -> %zu tri, área %.4f -> %.4f, erro %.5f\n",
-                       levels, group.size(), merged.size() / 3, simplified.size() / 3, a0, a1, error);
+      // Cobertura: a área "virada para fora" (cada triângulo projetado na normal da superfície; dobras se cancelam)
+      // tem que continuar quase a mesma. A simplificação às vezes dobra a superfície para dentro com um erro que parece
+      // pequeno (visto no Windows: o último grupo da rocha perdeu 59% da área); o pai não cobriria mais os filhos e o
+      // corte do grafo abriria um buraco. Nesse caso o grupo fica para o próximo nível, como um travado.
+      auto outwardArea = [&](const std::vector<uint32_t>& ix) {
+        double sum = 0.0;
+        for (size_t t = 0; t + 2 < ix.size(); t += 3) {
+          const Vertex &va = mesh.vertices[ix[t]], &vb = mesh.vertices[ix[t + 1]], &vc = mesh.vertices[ix[t + 2]];
+          const glm::vec3 n = va.normal + vb.normal + vc.normal;
+          const float nl = glm::length(n);
+          if (nl > 0.0f) sum += 0.5 * glm::dot(glm::cross(vb.position - va.position, vc.position - va.position), n / nl);
+        }
+        return sum;
+      };
+      const double areaBefore = outwardArea(merged), areaAfter = outwardArea(simplified);
+      if (std::getenv("LEGACY_DEBUG_LOD"))
+        std::fprintf(stderr, "nivel %u: grupo de %zu pedaços: %zu -> %zu tri, área para fora %.4f -> %.4f (%.3f), erro %.5f\n",
+                     levels, group.size(), merged.size() / 3, simplified.size() / 3, areaBefore, areaAfter,
+                     areaBefore > 0.0 ? areaAfter / areaBefore : 0.0, error);
+      if (simplified.empty() || areaAfter < kMinAreaKept * areaBefore) {
+        for (uint32_t c : group) retry.push_back(c);
+        stuck += merged.size() / 3;
+        ++shrunk;
+        continue;
       }
       LodSphere g = mergeSpheres(cl, group);
       g.error += error;  // conservador: o erro da simplificação soma ao dos filhos
@@ -836,8 +850,8 @@ MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods,
       }
     }
     if (std::getenv("LEGACY_DEBUG_LOD"))  // diagnóstico: um resumo por nível
-      std::fprintf(stderr, "nivel %u: %zu grupos, feitos %zu tri, travados %zu tri, pendentes %zu, retry %zu\n", levels,
-                   groups.size(), made, stuck, pending.size(), retry.size());
+      std::fprintf(stderr, "nivel %u: %zu grupos, feitos %zu tri, travados %zu tri (%zu grupos encolheram), pendentes %zu, retry %zu\n",
+                   levels, groups.size(), made, stuck, shrunk, pending.size(), retry.size());
     if (made == 0) break;
     ++levels;
     if (made < stuck / 3) break;  // quase tudo travado: parar aqui
@@ -951,7 +965,7 @@ std::vector<MeshletBlock> buildMeshletBlocks(const std::vector<MeshletLod>& lods
 }
 
 namespace {
-constexpr uint32_t kClusterLodCacheVersion = 4;  // mude quando o algoritmo do grafo mudar
+constexpr uint32_t kClusterLodCacheVersion = 5;  // mude quando o algoritmo do grafo mudar
 uint64_t fnv1aBytes(const void* data, size_t n, uint64_t h) {
   const uint8_t* b = static_cast<const uint8_t*>(data);
   for (size_t i = 0; i < n; ++i) h = (h ^ b[i]) * 1099511628211ull;
