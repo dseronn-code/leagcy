@@ -9,6 +9,7 @@
 #include <thread>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -202,6 +203,7 @@ struct Options {
 
 Options parseArgs(int argc, char** argv) {
   bool noGiProbes = false;
+  bool qualityGiven = false;
   Options o;
   bool noFireflyClamp = false;
   int sppOverride = 0, candOverride = 0, neighOverride = -1;  // medição: substituem o preset (--spp, --restir-*)
@@ -281,6 +283,7 @@ Options parseArgs(int argc, char** argv) {
       const char* name = next();
       if (!renderer::parseQualityPreset(name, p)) FATAL("--quality: use baixo, medio, alto, ultra ou cinema (recebido '%s')", name);
       o.render.quality = renderer::qualityPreset(p);
+      qualityGiven = true;
     }
     else if (a == "--exposure") o.render.manualEV100 = float(std::atof(next()));
     else if (a == "--ev") o.render.exposureCompensation = float(std::atof(next()));
@@ -454,6 +457,24 @@ Options parseArgs(int argc, char** argv) {
     std::error_code ec;
     if (o.render.giRebake || std::filesystem::exists(path, ec)) o.render.giProbes = path;
     if (o.render.giRebake && !file) std::filesystem::create_directories("texcache", ec);
+  }
+  // A cena pode pedir um preset ("qualidade": "alto" no .json); --quality na linha de comando vale mais.
+  if (!qualityGiven && o.scene.name.size() > 5 && o.scene.name.substr(o.scene.name.size() - 5) == ".json") {
+    std::ifstream f(o.scene.name);
+    std::string line, text;
+    while (std::getline(f, line)) {
+      const size_t c = line.find_first_not_of(" \t");
+      if (c == std::string::npos || line.compare(c, 2, "//") != 0) text += line + "\n";
+    }
+    const size_t k = text.find("\"qualidade\"");
+    if (k != std::string::npos) {
+      const size_t a = text.find('"', text.find(':', k) + 1), b = a == std::string::npos ? a : text.find('"', a + 1);
+      renderer::QualityPreset p;
+      if (b != std::string::npos && renderer::parseQualityPreset(text.substr(a + 1, b - a - 1).c_str(), p)) {
+        o.render.quality = renderer::qualityPreset(p);
+        LOG_INFO("Qualidade da cena: %s", text.substr(a + 1, b - a - 1).c_str());
+      }
+    }
   }
   return o;
 }

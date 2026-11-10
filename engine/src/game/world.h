@@ -235,6 +235,8 @@ struct SystemEntity {};
 // a célula voltar. "sempre_carregado": true na entidade a deixa fora das células.
 struct Dormant {};
 struct AlwaysLoaded {};
+// "no_chao": a altura da entidade (e da patrulha da IA) conta a partir do terreno, posta no começo do jogo.
+struct OnGround {};
 // Ladrilho do terreno ("terreno" na cena). De perto, a malha detalhada (o Renderable) com colisão (bodyId); com a
 // célula dormindo, só a malha simples (farObject), sem física.
 struct TerrainTile {

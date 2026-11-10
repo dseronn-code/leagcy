@@ -5,11 +5,6 @@
       "tipo": "ao_iniciar"
     },
     {
-      "id": 2,
-      "tipo": "lua",
-      "codigo": "local x, _, z = E:posicao(); E:mover_para(x, altura_terreno(x, z) + 1.2, z)"
-    },
-    {
       "id": 3,
       "tipo": "particulas",
       "ligado": true
@@ -76,24 +71,18 @@
       "tipo": "definir",
       "variavel": "pego",
       "valor": 1
+    },
+    {
+      "id": 26,
+      "tipo": "som",
+      "arquivo": "cenas/vale/sons/cristal.wav",
+      "volume": 1.0
     }
   ],
   "ligacoes": [
     [
-      1,
-      2
-    ],
-    [
-      2,
-      3
-    ],
-    [
       10,
       11
-    ],
-    [
-      21,
-      22
     ],
     [
       22,
@@ -124,6 +113,18 @@
     [
       32,
       21
+    ],
+    [
+      1,
+      3
+    ],
+    [
+      21,
+      26
+    ],
+    [
+      26,
+      22
     ]
   ]
 }

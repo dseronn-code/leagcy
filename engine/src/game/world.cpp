@@ -547,6 +547,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             registry.emplace<Transform>(ent, t);
             registry.emplace<Shape>(ent, shape);
             if (e.value("sempre_carregado", false)) registry.emplace<AlwaysLoaded>(ent);
+            if (e.value("no_chao", false)) registry.emplace<OnGround>(ent);
             if (character && character->visual.enabled) {
               Character ch = *character;
               CharacterVisual& v = ch.visual;
@@ -771,6 +772,19 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
 }
 
 void World::start() {
+  // "no_chao": antes de criar corpos, personagens e a navegação, a altura passa a contar do chão do terreno.
+  if (terrain.enabled) {
+    for (auto ent : registry.view<OnGround, Transform>()) {
+      Transform& t = registry.get<Transform>(ent);
+      t.position.y += terrainHeight(t.position.x, t.position.z);
+      if (const Renderable* r = registry.try_get<Renderable>(ent); r && loadedScene_ && registry.all_of<Shape>(ent))
+        loadedScene_->setTransform(r->sceneObject, drawMatrix(t, registry.get<Shape>(ent)));
+      if (Character* c = registry.try_get<Character>(ent)) {
+        for (glm::vec3& p : c->aiPatrol) p.y += terrainHeight(p.x, p.z);
+        c->aiTarget.y += terrainHeight(c->aiTarget.x, c->aiTarget.z);
+      }
+    }
+  }
   auto view = registry.view<Transform, Shape, RigidBody>();
   for (auto ent : view) {
     auto [t, s, b] = view.get<Transform, Shape, RigidBody>(ent);

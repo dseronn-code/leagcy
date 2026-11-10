@@ -150,7 +150,7 @@
    "nome": "jogador",
    "posicao": [
     0,
-    5,
+    0.0,
     30
    ],
    "personagem": {
@@ -168,13 +168,14 @@
      "velocidade_correr": 2.6,
      "girar_graus": 0
     }
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "guarda",
    "posicao": [
     6,
-    5,
+    0.0,
     -18
    ],
    "personagem": {
@@ -220,7 +221,8 @@
      "velocidade_andar": 1.5,
      "velocidade_correr": 2.7
     }
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "ruina_1",
@@ -232,13 +234,14 @@
    ],
    "posicao": [
     0,
-    0,
+    1.0,
     -12
    ],
    "material": "pedra",
    "fisica": {
     "tipo": "estatico"
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "ruina_2",
@@ -250,13 +253,14 @@
    ],
    "posicao": [
     -4,
-    0,
+    1.0,
     -15
    ],
    "material": "pedra",
    "fisica": {
     "tipo": "estatico"
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "ruina_3",
@@ -268,13 +272,14 @@
    ],
    "posicao": [
     4,
-    0,
+    1.0,
     -15
    ],
    "material": "pedra",
    "fisica": {
     "tipo": "estatico"
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "ruina_4",
@@ -286,13 +291,14 @@
    ],
    "posicao": [
     -1.5,
-    0,
+    1.0,
     -32
    ],
    "material": "pedra",
    "fisica": {
     "tipo": "estatico"
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "pilar_1",
@@ -304,13 +310,14 @@
    ],
    "posicao": [
     -10,
-    0,
+    2.0,
     -22
    ],
    "material": "pedra",
    "fisica": {
     "tipo": "estatico"
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "pilar_2",
@@ -322,21 +329,21 @@
    ],
    "posicao": [
     10,
-    0,
+    2.0,
     -22
    ],
    "material": "pedra",
    "fisica": {
     "tipo": "estatico"
-   }
+   },
+   "no_chao": true
   },
   {
    "nome": "cristal_1",
-   "forma": "esfera",
-   "raio": 0.45,
+   "forma": "caixa",
    "posicao": [
     0,
-    5,
+    1.2,
     -15
    ],
    "material": "cristal",
@@ -345,15 +352,25 @@
     "tipo": "faiscas",
     "raio": 0.3,
     "quantidade": 60
-   }
+   },
+   "meia_extensao": [
+    0.28,
+    0.45,
+    0.28
+   ],
+   "rotacao_graus": [
+    35,
+    0,
+    35
+   ],
+   "no_chao": true
   },
   {
    "nome": "cristal_2",
-   "forma": "esfera",
-   "raio": 0.45,
+   "forma": "caixa",
    "posicao": [
     -25,
-    5,
+    1.2,
     10
    ],
    "material": "cristal",
@@ -362,15 +379,25 @@
     "tipo": "faiscas",
     "raio": 0.3,
     "quantidade": 60
-   }
+   },
+   "meia_extensao": [
+    0.28,
+    0.45,
+    0.28
+   ],
+   "rotacao_graus": [
+    35,
+    0,
+    35
+   ],
+   "no_chao": true
   },
   {
    "nome": "cristal_3",
-   "forma": "esfera",
-   "raio": 0.45,
+   "forma": "caixa",
    "posicao": [
     30,
-    5,
+    1.2,
     -5
    ],
    "material": "cristal",
@@ -379,15 +406,25 @@
     "tipo": "faiscas",
     "raio": 0.3,
     "quantidade": 60
-   }
+   },
+   "meia_extensao": [
+    0.28,
+    0.45,
+    0.28
+   ],
+   "rotacao_graus": [
+    35,
+    0,
+    35
+   ],
+   "no_chao": true
   },
   {
    "nome": "cristal_4",
-   "forma": "esfera",
-   "raio": 0.45,
+   "forma": "caixa",
    "posicao": [
     -12,
-    5,
+    1.2,
     -45
    ],
    "material": "cristal",
@@ -396,15 +433,25 @@
     "tipo": "faiscas",
     "raio": 0.3,
     "quantidade": 60
-   }
+   },
+   "meia_extensao": [
+    0.28,
+    0.45,
+    0.28
+   ],
+   "rotacao_graus": [
+    35,
+    0,
+    35
+   ],
+   "no_chao": true
   },
   {
    "nome": "cristal_5",
-   "forma": "esfera",
-   "raio": 0.45,
+   "forma": "caixa",
    "posicao": [
     22,
-    5,
+    1.2,
     40
    ],
    "material": "cristal",
@@ -413,12 +460,29 @@
     "tipo": "faiscas",
     "raio": 0.3,
     "quantidade": 60
-   }
+   },
+   "meia_extensao": [
+    0.28,
+    0.45,
+    0.28
+   ],
+   "rotacao_graus": [
+    35,
+    0,
+    35
+   ],
+   "no_chao": true
   },
   {
    "nome": "controle",
    "script": "vale.lua",
-   "sempre_carregado": true
+   "sempre_carregado": true,
+   "som": {
+    "arquivo": "sons/vento.wav",
+    "laco": true,
+    "espacial": false,
+    "volume": 0.35
+   }
   }
  ],
  "linhas_do_tempo": {
@@ -523,5 +587,6 @@
     }
    ]
   }
- }
+ },
+ "qualidade": "alto"
 }

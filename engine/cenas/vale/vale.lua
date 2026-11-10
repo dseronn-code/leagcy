@@ -1,22 +1,11 @@
--- Vale dos Cristais: o controlador do jogo. Coloca as ruínas e o jogador no chão do terreno, conta os cristais
+-- Vale dos Cristais: o controlador do jogo (as ruínas e os personagens vão para o chão pelo "no_chao"). Conta os cristais
 -- coletados (os scripts visuais dos cristais os mandam para baixo do mundo), mostra o HUD, toca a cena de vitória e
 -- deixa o jogador derrubar o guarda (F, perto dele): o guarda cai com o ragdoll ativo e levanta 3 s depois.
--- Altura de cada coisa acima do chão (centro): o terreno é feito na hora, então tudo é posto no chão ao começar.
-local NIVELAR = {ruina_1 = 1.0, ruina_2 = 1.0, ruina_3 = 1.0, ruina_4 = 1.0, pilar_1 = 2.0, pilar_2 = 2.0,
-                 jogador = 0.95, guarda = 0.45}
 local CRISTAIS = {"cristal_1", "cristal_2", "cristal_3", "cristal_4", "cristal_5"}
 local venceu, derrubado = false, nil
+local estado_guarda = nil
+local SONS = "cenas/vale/sons/"
 local pego_ate = 0
-
-function iniciar(e)
-  for nome, acima in pairs(NIVELAR) do
-    local ent = achar(nome)
-    if ent then
-      local x, _, z = ent:posicao()
-      ent:mover_para(x, altura_terreno(x, z) + acima, z)
-    end
-  end
-end
 
 local function coletados()
   local n = 0
@@ -37,6 +26,8 @@ function atualizar(e, dt)
     venceu = true
     log("VALE", "vitoria")
     tocar_linha("vitoria")
+    local jx, jy, jz = achar("jogador"):posicao()
+    som(SONS .. "vitoria.wav", jx, jy, jz, 1.0)
   end
   -- O guarda: perto dele, F derruba (ragdoll ativo); se ele alcança o jogador, o jogador volta ao começo.
   local jog, guarda = achar("jogador"), achar("guarda")
@@ -49,6 +40,7 @@ function atualizar(e, dt)
       guarda:ragdoll_ativo(0.6)
       derrubado = tempo()
       log("VALE", "guarda derrubado")
+      som(SONS .. "derrubar.wav", gx, gy, gz, 1.0)
     elseif derrubado and tempo() - derrubado > 3 then
       guarda:levantar()
       derrubado = nil
@@ -58,6 +50,13 @@ function atualizar(e, dt)
       pego_ate = tempo() + 2
       log("VALE", "pego pelo guarda")
     end
+    -- Alerta: o guarda começou a perseguir (um latido onde ele está).
+    local estado = guarda:estado_ia()
+    if estado == "perseguindo" and estado_guarda ~= "perseguindo" then
+      som(SONS .. "alerta.wav", gx, gy, gz, 1.0)
+      log("VALE", "alerta")
+    end
+    estado_guarda = estado
     if not derrubado and d < 2.5 then
       hud.texto(t("F: derrubar o guarda"), 0.5, 0.82, {tamanho = 0.035, alinhar = "centro"})
     end

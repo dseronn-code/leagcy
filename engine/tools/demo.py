@@ -130,8 +130,8 @@ def teste_guarda(b, pasta):
 def teste_persegue(b, pasta):
     log, _ = sessao(b, pasta)
     estados = [l.split('[script] IA ', 1)[1].split()[-1] for l in log.splitlines() if '[script] IA ' in l]
-    ok = 'perseguindo' in estados or 'pego pelo guarda' in log
-    return ok, f'estados do guarda com o jogador na frente: {sorted(set(estados))}'
+    ok = 'perseguindo' in estados and 'VALE alerta' in log
+    return ok, f'estados do guarda com o jogador na frente: {sorted(set(estados))}; alerta (som): {"VALE alerta" in log}'
 
 
 def teste_imagem(b, pasta):
