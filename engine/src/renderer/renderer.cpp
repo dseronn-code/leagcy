@@ -586,7 +586,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   bloomDownPass_.init(ctx, "bloom_down.comp", g, {CIS, SI}, sizeof(BloomPush));
   bloomUpPass_.init(ctx, "bloom_up.comp", g, {CIS, SI}, sizeof(BloomPush));
 
-  gbufferLayout_.init(ctx, g, {}, sizeof(GBufferPush));
+  gbufferLayout_.init(ctx, g, {CIS}, sizeof(GBufferPush));  // set 1: a pirâmide de profundidade (oclusão por meshlet)
   rhi::GraphicsPipelineDesc gb;
   gb.vertexShader = "gbuffer.vert";
   gb.fragmentShader = "gbuffer.frag";
@@ -1203,7 +1203,15 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
         barrier();
       }
     };
-    auto draw = [&](bool first, const rhi::Buffer& commands, const rhi::Buffer& culled, const rhi::Buffer& meshArgs) {
+    // Oclusão por meshlet (gbuffer.task): na fase 0 contra a pirâmide do frame anterior, depois o repasse do que ela
+    // escondia e a nova mostra, e na fase 1 contra a nova. Só com a oclusão por objeto ligada (pirâmide válida).
+    const bool clusterOcclusion = occlusion && settings.clusterOcclusion;
+    bool anyVirtualized = false;
+    for (const DrawBatch& b : drawBatches_) anyVirtualized = anyVirtualized || (b.meshlets && scene_->meshes[b.mesh].meshletLodBase != 0);
+    // occl: 4 = fase 0, 8 = repasse (só os lotes por meshlets da fase 0), 16 = fase 1.
+    auto draw = [&](bool first, const rhi::Buffer& commands, const rhi::Buffer& culled, const rhi::Buffer& meshArgs,
+                    uint32_t occl) {
+      const bool recheck = occl == 8u;
       const VkAttachmentLoadOp op = first ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
       VkRenderingAttachmentInfo colors[6] = {
           attachment(t_.diffuse.view, VK_IMAGE_LAYOUT_GENERAL, op),
@@ -1224,7 +1232,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       vkCmdBeginRendering(cmd, &ri);
       setViewport(cmd, R);
       vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferPipeline_);
-      vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gbufferLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
+      gbufferLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs, {Binding::sampled(hiZ_.view, nearest_)}, nullptr);
       // Uma chamada por malha com todas as suas instâncias (medido na cidade: 98 mil chamadas, uma por objeto, custavam
       // ~25 ms de CPU por frame).
       VkPipeline bound = gbufferPipeline_;
@@ -1238,6 +1246,10 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
           const DrawBatch& b = drawBatches_[bi];
           if (b.blend != (pass == 2)) continue;
           if (pass < 2 && (pass == 1) != (meshlets && b.meshlets)) continue;
+          // O repasse é só dos lotes da geometria virtualizada (os únicos com oclusão por meshlet; nas malhas comuns, como
+          // as do Sponza, o teste custou mais do que poupou no llvmpipe — medir na RTX com --cluster-occlusion-all).
+          const bool clusterOccl = scene_->meshes[b.mesh].meshletLodBase != 0 || settings.clusterOcclusionAll;
+          if (recheck && !(pass == 1 && meshlets && b.meshlets && clusterOccl)) continue;
           if (!scene_->meshes[b.mesh].resident) continue;  // streaming: fora da memória (o culling já não pôs ninguém)
           const bool byMeshlets = meshlets && b.meshlets;
           const VkPipeline want = pass == 2 ? gbufferBlendPipeline_ : byMeshlets ? gbufferMeshPipeline_ : gbufferPipeline_;
@@ -1255,7 +1267,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
             p.meshletCount = m.meshletCount;
             p.vertexBase = m.meshletVertexBase;
             p.triangleBase = m.meshletTriangleBase;
-            p.flags = (settings.gpuCulling ? 1u : 0u) | (b.doubleSided ? 2u : 0u);
+            p.flags = (settings.gpuCulling ? 1u : 0u) | (b.doubleSided ? 2u : 0u) | (clusterOcclusion && clusterOccl ? occl : 0u);
             p.lodBase = m.meshletLodBase;
             p.lodPixels = settings.lodPixels;
             p.blockBase = settings.lodBlocks ? m.meshletBlockBase : 0u;
@@ -1275,7 +1287,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     };
     cull(0, drawCommands_, culledList_);
     profiler_.mark(cmd, "culling");
-    draw(true, drawCommands_, culledList_, meshletArgs_[0]);
+    draw(true, drawCommands_, culledList_, meshletArgs_[0], 4u);
     barrier();
     if (occlusion) {
       // Pirâmide da profundidade da fase 0 (nível 0 = cópia; depois o mais distante de cada 2x2).
@@ -1286,8 +1298,10 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                                          Binding::storageImage(hiZMips_[m])}, e, m == 0 ? &fromDepth : &fromLevel);
         barrier();
       }
+      if (clusterOcclusion && meshlets && (anyVirtualized || settings.clusterOcclusionAll))
+        draw(false, drawCommands_, culledList_, meshletArgs_[0], 8u);
       cull(1, drawCommands2_, culledList2_);
-      draw(false, drawCommands2_, culledList2_, meshletArgs_[1]);
+      draw(false, drawCommands2_, culledList2_, meshletArgs_[1], 16u);
     }
   }
   cpuMark("desenho");

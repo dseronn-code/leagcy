@@ -96,6 +96,53 @@ float lodErrorPixels(vec4 sphere, float err, mat4 model, float scale) {
   float d = max(length(c - frame.cameraPos.xyz) - sphere.w * scale, 0.01);
   return err * scale / d * abs(frame.proj[1][1]) * 0.5 * frame.renderSize.y;
 }
+// Pirâmide de profundidade (o mais distante de cada região; reverse-Z: mínimo). Na fase 0 ela ainda tem a profundidade
+// da fase 0 do frame anterior; depois, a deste frame.
+layout(set = 1, binding = 0) uniform sampler2D hiZ;
+
+// Esfera (mundo) escondida atrás do que já está na pirâmide, vista por `viewProj` (o mesmo teste do culling por objeto
+// em cull.comp, com a caixa da esfera).
+bool sphereOccluded(vec3 c, float r, mat4 viewProj) {
+  vec2 lo = vec2(1e9), hi = vec2(-1e9);
+  float nearest = 0.0;
+  for (int k = 0; k < 8; ++k) {
+    vec3 p = c + r * vec3((k & 1) != 0 ? 1.0 : -1.0, (k & 2) != 0 ? 1.0 : -1.0, (k & 4) != 0 ? 1.0 : -1.0);
+    vec4 q = viewProj * vec4(p, 1.0);
+    if (q.w <= 1e-4) return false;  // cruza o plano da câmera
+    vec3 n = q.xyz / q.w;
+    vec2 uv = n.xy * 0.5 + 0.5;
+    lo = min(lo, uv);
+    hi = max(hi, uv);
+    nearest = max(nearest, n.z);
+  }
+  lo = clamp(lo, 0.0, 1.0);
+  hi = clamp(hi, 0.0, 1.0);
+  vec2 size0 = vec2(textureSize(hiZ, 0));
+  vec2 extent = (hi - lo) * size0 + 2.0;
+  float level = clamp(ceil(log2(max(max(extent.x, extent.y), 1.0))), 0.0, float(textureQueryLevels(hiZ) - 1));
+  ivec2 sz = max(ivec2(size0) >> int(level), ivec2(1));
+  ivec2 a = clamp(ivec2(floor(lo * vec2(sz))) - 1, ivec2(0), sz - 1), z = clamp(ivec2(floor(hi * vec2(sz))) + 1, ivec2(0), sz - 1);
+  float farthest = 1.0;
+  for (int y = a.y; y <= z.y; ++y)
+    for (int x = a.x; x <= z.x; ++x) farthest = min(farthest, texelFetch(hiZ, ivec2(x, y), int(level)).r);
+  return nearest < farthest;
+}
+
+// Oclusão por meshlet em duas fases (flags): 4 = fase 0, descarta o que a pirâmide do frame anterior esconde (com as
+// matrizes anteriores); 8 = repasse depois da pirâmide nova, desenha só o que a anterior escondia e a nova mostra;
+// 16 = fase 1 (objetos novos), descarta o que a pirâmide nova esconde.
+bool meshletPassesOcclusion(Meshlet ml, uint object) {
+  uint mode = pc.flags & 28u;
+  if (mode == 0u) return true;
+  ObjectData o = objects[object];
+  float scale = max(length(o.model[0].xyz), max(length(o.model[1].xyz), length(o.model[2].xyz)));
+  float r = ml.radius * scale;
+  if (mode == 16u) return !sphereOccluded((o.model * vec4(ml.center, 1.0)).xyz, r, frame.viewProjNoJitter);
+  bool before = sphereOccluded((o.prevModel * vec4(ml.center, 1.0)).xyz, r, frame.prevViewProjNoJitter);
+  if (mode == 4u) return !before;
+  return before && !sphereOccluded((o.model * vec4(ml.center, 1.0)).xyz, r, frame.viewProjNoJitter);
+}
+
 // Esfera fora da tela (4 planos laterais).
 bool sphereOutside(vec3 c, float r) {
   mat4 vp = frame.viewProjNoJitter;
