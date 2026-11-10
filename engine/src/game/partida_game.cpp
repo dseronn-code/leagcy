@@ -145,6 +145,12 @@ void PartidaGame::readTouches(const std::vector<Touch>& touches, glm::vec2 scree
   // botões do canto (pausa, jogo automático): só no toque novo
   for (const glm::vec2& p : newTouches) {
     if (screen_ != Screen::Playing) continue;
+    // toque no contador de FPS (topo, no meio): troca a visualização de depuração (diagnóstico no celular)
+    if (std::abs(p.x - screen.x * 0.5f) < 14.0f * (screen.y / 100.0f) && p.y < 9.0f * (screen.y / 100.0f)) {
+      debugTap_ = true;
+      tapped_ = false;
+      continue;
+    }
     if (glm::length(p - pauseBtn_) < topBtnR_ * 1.4f) { paused_ = !paused_; tapped_ = false; }
     else if (glm::length(p - autoBtn_) < topBtnR_ * 1.4f) {
       autoTeam_ = !autoTeam_;
@@ -362,9 +368,26 @@ void PartidaGame::drawMinimap(glm::vec2 screen) {
 void PartidaGame::drawHud(const Camera& cam, glm::vec2 screen) {
   const float u = screen.y / 100.0f;
   if (fps_ > 0.0f) {  // desempenho (discreto, no topo)
-    char f[16];
-    std::snprintf(f, sizeof(f), "%.0f fps", fps_);
+    char f[48];
+    static const char* kNames[] = {"", " | normal", " | sombra do sol", " | N.L", " | luz do sol", " | tempos (ms)"};
+    std::snprintf(f, sizeof(f), "%.0f fps%s", fps_, kNames[debugIndex_ % 6]);
     ui_.text(f, {screen.x * 0.5f, 4.0f * u}, 3.2f * u, rgb(0xffffff, 0.7f), Font::Body, Align::Center);
+    if (debugIndex_ == 5 && !perfText_.empty()) {  // uma etapa por linha, numa caixa escura no meio
+      std::vector<std::string> lines;
+      size_t a = 0;
+      while (a < perfText_.size()) {
+        size_t b = perfText_.find_first_of(":|", a);
+        if (b == std::string::npos) b = perfText_.size();
+        std::string l = perfText_.substr(a, b - a);
+        while (!l.empty() && l.front() == ' ') l.erase(l.begin());
+        if (!l.empty()) lines.push_back(l);
+        a = b + 1;
+      }
+      const float lh = 3.4f * u, top = 12.0f * u;
+      ui_.rect({screen.x * 0.5f - 30.0f * u, top - lh}, {60.0f * u, lh * float(lines.size()) + lh * 0.6f}, rgb(0x000000, 0.75f));
+      for (size_t i = 0; i < lines.size(); ++i)
+        ui_.text(lines[i], {screen.x * 0.5f, top + lh * float(i)}, 2.8f * u, kInk, Font::Body, Align::Center);
+    }
   }
   // ---- placar no estilo de transmissão ----
   {
@@ -475,6 +498,22 @@ float PartidaGame::update(float realDt, const std::vector<Touch>& touches, Scene
   const float dt = std::min(realDt, 0.1f);
   screenTime_ += dt;
   if (realDt > 0.0f) fps_ = fps_ <= 0.0f ? 1.0f / realDt : fps_ + (1.0f / realDt - fps_) * 0.05f;
+  if (debugTap_) {  // normal -> sombra do sol -> N·L -> sol (sombreado) -> imagem normal
+    debugTap_ = false;
+    static const uint32_t kViews[] = {renderer::kDebugNone, renderer::kDebugGeometricNormal, renderer::kDebugSunVisibility,
+                                      renderer::kDebugSunCosine, renderer::kDebugSunShading};
+    debugIndex_ = (debugIndex_ + 1) % 6;  // 5 = tempos de GPU por etapa, com a imagem normal
+    r.settings.debugView = debugIndex_ < 5 ? kViews[debugIndex_] : renderer::kDebugNone;
+    perfTimer_ = 0.0f;
+  }
+  if (debugIndex_ == 5) {  // média de ~1 s de cada etapa da GPU (o relatório zera o acumulado)
+    perfTimer_ += realDt;
+    if (perfTimer_ > 1.0f) {
+      perfTimer_ = 0.0f;
+      std::string t = r.gpuTimings();
+      if (!t.empty()) perfText_ = t;
+    }
+  }
   const bool wasPaused = paused_;
   readTouches(touches, screen);
   if (screen_ == Screen::Menu && (tapped_ || ((autoplay_ || std::getenv("FCLEGACY_HUMANO")) && screenTime_ > 0.3f))) { screen_ = Screen::Playing; startMatch(s); }

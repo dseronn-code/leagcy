@@ -95,7 +95,11 @@ class PartidaGame {
   TeamInfo teams_[2];
   int lastScore_[2] = {0, 0};
   bool cheering_ = false;
-  float fps_ = 0.0f;  // média móvel dos quadros por segundo (mostrada no HUD)
+  float fps_ = 0.0f;
+  bool debugTap_ = false;  // toque no FPS: próxima visualização de depuração
+  int debugIndex_ = 0;
+  float perfTimer_ = 0.0f;
+  std::string perfText_;  // último relatório de tempos da GPU (modo "tempos")  // média móvel dos quadros por segundo (mostrada no HUD)
 };
 
 }  // namespace game
