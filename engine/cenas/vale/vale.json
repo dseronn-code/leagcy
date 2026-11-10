@@ -1,0 +1,527 @@
+// Vale dos Cristais: jogo de demonstração do Legacy Engine. WASD anda, Shift corre, espaço pula, F derruba o
+// guarda quando ele está perto, Esc pausa. Junte os 5 cristais (scripts visuais) sem ser pego pelo guarda.
+// --scene cenas/vale/vale.json
+{
+ "sol": {
+  "elevacao": 28,
+  "azimute": 140,
+  "iluminancia": 100000
+ },
+ "camera": {
+  "posicao": [
+   0,
+   6,
+   40
+  ],
+  "alvo": [
+   0,
+   2,
+   0
+  ],
+  "fov": 60
+ },
+ "mundo_aberto": {
+  "celula": 32,
+  "carregar": 110,
+  "descarregar": 140
+ },
+ "terreno": {
+  "tamanho": 256,
+  "ladrilho": 32,
+  "altura": 9,
+  "escala": 140,
+  "oitavas": 5,
+  "semente": 7,
+  "resolucao": 32,
+  "material": "chao"
+ },
+ "materiais": {
+  "chao": {
+   "cor": [
+    0.3,
+    0.4,
+    0.18
+   ],
+   "rugosidade": 0.9,
+   "terreno": true
+  },
+  "cristal": {
+   "emissao": [
+    40,
+    120,
+    400
+   ],
+   "resolucao": 128,
+   "nos": [
+    {
+     "id": 1,
+     "tipo": "voronoi",
+     "escala": 5,
+     "saida": "borda"
+    },
+    {
+     "id": 2,
+     "tipo": "rampa",
+     "entrada": {
+      "no": 1
+     },
+     "cores": [
+      [
+       0,
+       "#1b4dff"
+      ],
+      [
+       1,
+       "#bfe6ff"
+      ]
+     ]
+    }
+   ],
+   "saida": {
+    "cor": {
+     "no": 2
+    },
+    "rugosidade": 0.08,
+    "altura": {
+     "no": 1
+    }
+   }
+  },
+  "pedra": {
+   "resolucao": 256,
+   "nos": [
+    {
+     "id": 1,
+     "tipo": "tijolos",
+     "linhas": 6,
+     "colunas": 3,
+     "argamassa": 0.07
+    },
+    {
+     "id": 2,
+     "tipo": "ruido",
+     "escala": 12,
+     "oitavas": 4,
+     "semente": 2
+    },
+    {
+     "id": 3,
+     "tipo": "rampa",
+     "entrada": {
+      "no": 2
+     },
+     "cores": [
+      [
+       0,
+       "#6e6a62"
+      ],
+      [
+       1,
+       "#a39d90"
+      ]
+     ]
+    },
+    {
+     "id": 4,
+     "tipo": "misturar",
+     "a": "#3f3b35",
+     "b": {
+      "no": 3
+     },
+     "t": {
+      "no": 1
+     }
+    }
+   ],
+   "saida": {
+    "cor": {
+     "no": 4
+    },
+    "rugosidade": 0.85,
+    "altura": {
+     "no": 1
+    },
+    "forca_relevo": 0.012
+   }
+  }
+ },
+ "entidades": [
+  {
+   "nome": "jogador",
+   "posicao": [
+    0,
+    5,
+    30
+   ],
+   "personagem": {
+    "altura": 1.8,
+    "raio": 0.3,
+    "velocidade": 4.5,
+    "velocidade_correndo": 8,
+    "pulo": 5.5,
+    "controle": "jogador",
+    "visual": {
+     "modelo": "../../assets/CesiumMan/CesiumMan.gltf",
+     "andar": "anim0",
+     "correr": "anim0",
+     "velocidade_andar": 1.3,
+     "velocidade_correr": 2.6,
+     "girar_graus": 0
+    }
+   }
+  },
+  {
+   "nome": "guarda",
+   "posicao": [
+    6,
+    5,
+    -18
+   ],
+   "personagem": {
+    "altura": 0.8,
+    "raio": 0.15,
+    "massa": 20,
+    "velocidade": 2.2,
+    "velocidade_correndo": 4.0,
+    "controle": "ia",
+    "ia": {
+     "patrulha": [
+      [
+       8,
+       0,
+       -14
+      ],
+      [
+       -8,
+       0,
+       -14
+      ],
+      [
+       -8,
+       0,
+       -30
+      ],
+      [
+       8,
+       0,
+       -30
+      ]
+     ],
+     "perseguir": "jogador",
+     "visao": 14,
+     "campo_visao": 120
+    },
+    "visual": {
+     "modelo": "../../assets/Fox/Fox.gltf",
+     "escala": 0.01,
+     "parado": "Survey",
+     "andar": "Walk",
+     "correr": "Run",
+     "velocidade_andar": 1.5,
+     "velocidade_correr": 2.7
+    }
+   }
+  },
+  {
+   "nome": "ruina_1",
+   "forma": "caixa",
+   "meia_extensao": [
+    4,
+    1,
+    0.4
+   ],
+   "posicao": [
+    0,
+    0,
+    -12
+   ],
+   "material": "pedra",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "ruina_2",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.4,
+    1,
+    3
+   ],
+   "posicao": [
+    -4,
+    0,
+    -15
+   ],
+   "material": "pedra",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "ruina_3",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.4,
+    1,
+    3
+   ],
+   "posicao": [
+    4,
+    0,
+    -15
+   ],
+   "material": "pedra",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "ruina_4",
+   "forma": "caixa",
+   "meia_extensao": [
+    2.5,
+    1,
+    0.4
+   ],
+   "posicao": [
+    -1.5,
+    0,
+    -32
+   ],
+   "material": "pedra",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "pilar_1",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.6,
+    2,
+    0.6
+   ],
+   "posicao": [
+    -10,
+    0,
+    -22
+   ],
+   "material": "pedra",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "pilar_2",
+   "forma": "caixa",
+   "meia_extensao": [
+    0.6,
+    2,
+    0.6
+   ],
+   "posicao": [
+    10,
+    0,
+    -22
+   ],
+   "material": "pedra",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "cristal_1",
+   "forma": "esfera",
+   "raio": 0.45,
+   "posicao": [
+    0,
+    5,
+    -15
+   ],
+   "material": "cristal",
+   "script_visual": "cristal.vs.json",
+   "particulas": {
+    "tipo": "faiscas",
+    "raio": 0.3,
+    "quantidade": 60
+   }
+  },
+  {
+   "nome": "cristal_2",
+   "forma": "esfera",
+   "raio": 0.45,
+   "posicao": [
+    -25,
+    5,
+    10
+   ],
+   "material": "cristal",
+   "script_visual": "cristal.vs.json",
+   "particulas": {
+    "tipo": "faiscas",
+    "raio": 0.3,
+    "quantidade": 60
+   }
+  },
+  {
+   "nome": "cristal_3",
+   "forma": "esfera",
+   "raio": 0.45,
+   "posicao": [
+    30,
+    5,
+    -5
+   ],
+   "material": "cristal",
+   "script_visual": "cristal.vs.json",
+   "particulas": {
+    "tipo": "faiscas",
+    "raio": 0.3,
+    "quantidade": 60
+   }
+  },
+  {
+   "nome": "cristal_4",
+   "forma": "esfera",
+   "raio": 0.45,
+   "posicao": [
+    -12,
+    5,
+    -45
+   ],
+   "material": "cristal",
+   "script_visual": "cristal.vs.json",
+   "particulas": {
+    "tipo": "faiscas",
+    "raio": 0.3,
+    "quantidade": 60
+   }
+  },
+  {
+   "nome": "cristal_5",
+   "forma": "esfera",
+   "raio": 0.45,
+   "posicao": [
+    22,
+    5,
+    40
+   ],
+   "material": "cristal",
+   "script_visual": "cristal.vs.json",
+   "particulas": {
+    "tipo": "faiscas",
+    "raio": 0.3,
+    "quantidade": 60
+   }
+  },
+  {
+   "nome": "controle",
+   "script": "vale.lua",
+   "sempre_carregado": true
+  }
+ ],
+ "linhas_do_tempo": {
+  "abertura": {
+   "tocar_ao_iniciar": true,
+   "barras": true,
+   "pular": true,
+   "travar": true,
+   "camera": [
+    {
+     "t": 0,
+     "pos": [
+      -60,
+      25,
+      60
+     ],
+     "alvo": [
+      0,
+      2,
+      0
+     ],
+     "fov": 55
+    },
+    {
+     "t": 4,
+     "pos": [
+      0,
+      14,
+      50
+     ],
+     "alvo": [
+      0,
+      2,
+      -15
+     ]
+    },
+    {
+     "t": 7,
+     "pos": [
+      0,
+      4,
+      36
+     ],
+     "alvo": [
+      0,
+      1.5,
+      28
+     ],
+     "fov": 60
+    }
+   ],
+   "eventos": [
+    {
+     "t": 0.5,
+     "fala": "O Vale dos Cristais...",
+     "duracao": 3
+    },
+    {
+     "t": 3.8,
+     "fala": "Junte os cinco cristais. Cuidado com o guarda!",
+     "duracao": 3
+    }
+   ]
+  },
+  "vitoria": {
+   "barras": true,
+   "pular": true,
+   "travar": true,
+   "camera": [
+    {
+     "t": 0,
+     "pos": [
+      0,
+      30,
+      60
+     ],
+     "alvo": [
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "t": 5,
+     "pos": [
+      60,
+      30,
+      0
+     ],
+     "alvo": [
+      0,
+      0,
+      0
+     ]
+    }
+   ],
+   "eventos": [
+    {
+     "t": 0.3,
+     "fala": "Vitória! O vale está em paz.",
+     "duracao": 4
+    }
+   ]
+  }
+ }
+}
