@@ -5,6 +5,7 @@
 #include "scene/texture_compress.h"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cmath>
 #include <condition_variable>
@@ -319,9 +320,18 @@ void Scene::rebuildTlasLayout() {
 namespace {
 // Meshlets de uma malha rígida (com mesh shaders), num bloco só: [Meshlet × n][vértices][triângulos]. Preenche os
 // contadores da malha; vazio sem mesh shaders ou para malha deformável.
-std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const MeshData& data) {
+std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const MeshData& data, bool clusterLod) {
   if (!ctx.meshShaders || data.clothWidth > 0 || data.hairStrands > 0 || !data.joints.empty() || data.indices.empty()) return {};
-  const MeshletData md = buildMeshlets(data);
+  // Geometria virtualizada a partir de ~1.000 triângulos (8 meshlets, o mínimo para o desenho por meshlets): [Meshlet ×
+  // n][vértices][triângulos][MeshletLod × n].
+  std::vector<MeshletLod> lods;
+  const bool virtualized = clusterLod && data.indices.size() / 3 >= 8 * kMeshletMaxTriangles;
+  ClusterLodStats st;
+  const MeshletData md = virtualized ? buildClusterLod(data, lods, &st) : buildMeshlets(data);
+  if (virtualized)
+    LOG_INFO("Geometria virtualizada: %llu triângulos em %u níveis (%u -> %u pedaços; a raiz tem %llu triângulos)",
+             (unsigned long long)st.baseTriangles, st.levels, st.baseMeshlets, st.totalMeshlets,
+             (unsigned long long)st.rootTriangles);
   std::vector<uint32_t> blob(md.meshlets.size() * (sizeof(Meshlet) / 4));
   std::memcpy(blob.data(), md.meshlets.data(), md.meshlets.size() * sizeof(Meshlet));
   gm.meshletCount = uint32_t(md.meshlets.size());
@@ -329,6 +339,12 @@ std::vector<uint32_t> meshletBlob(const rhi::Context& ctx, GpuMesh& gm, const Me
   blob.insert(blob.end(), md.vertices.begin(), md.vertices.end());
   gm.meshletTriangleBase = uint32_t(blob.size());
   blob.insert(blob.end(), md.triangles.begin(), md.triangles.end());
+  gm.meshletLodBase = 0;
+  if (virtualized && lods.size() == md.meshlets.size()) {
+    gm.meshletLodBase = uint32_t(blob.size());
+    const uint32_t* w = reinterpret_cast<const uint32_t*>(lods.data());
+    blob.insert(blob.end(), w, w + lods.size() * (sizeof(MeshletLod) / 4));
+  }
   return blob;
 }
 VkDeviceSize uploadColors(rhi::Context& ctx, GpuMesh& gm, const MeshData& data) {
@@ -1190,6 +1206,25 @@ void Scene::modelBounds(int model, glm::vec3& lo, glm::vec3& hi) const {
 void Scene::upload(rhi::Context& ctx) {
   for (auto& m : models) animateModel(m, 0.0f);  // pose inicial
   for (auto& o : objects) o.prevTransform = o.transform;
+  // Geometria virtualizada: triângulos das malhas rígidas grandes reordenados em pedaços compactos (o nível 0), antes
+  // de qualquer coisa guardar números de triângulo (luzes de malha, BLAS, visibility buffer). As poses da multidão
+  // ficam como estão: precisam da mesma numeração entre si.
+  if (clusterLod && ctx.meshShaders) {
+    std::vector<uint8_t> keep(cpuMeshes_.size(), 0);
+    for (const CrowdClip& c : crowdClips) {
+      for (uint32_t f = 0; f < c.frames; ++f) keep[c.firstMesh + f] = 1;
+      for (uint32_t l : c.lodFirstMesh)
+        if (l != ~0u)
+          for (uint32_t f = 0; f < c.frames; ++f) keep[l + f] = 1;
+    }
+    for (size_t i = 0; i < cpuMeshes_.size(); ++i) {
+      MeshData& md = cpuMeshes_[i];
+      if (keep[i] || md.skinModel >= 0 || !md.joints.empty() || md.clothWidth > 0 || md.hairStrands > 0 ||
+          md.indices.size() / 3 < 8 * kMeshletMaxTriangles)
+        continue;
+      reorderForClusters(md);
+    }
+  }
   if (meshLights) buildMeshLights();
   buildHlod();  // depois das luzes de malha: o proxy não é luz (os membros continuam no ray tracing)
   // LODs: malhas estáticas com mais de 3 mil triângulos ganham versões com 1/4 e 1/16 dos triângulos.
@@ -1200,6 +1235,16 @@ void Scene::upload(rhi::Context& ctx) {
     std::vector<uint8_t> excluded(original, 0);
     for (const Object& o : objects)
       if (o.crowdClip != ~0u || (materials[o.material].flags & (kMaterialWater | kMaterialHair))) excluded[o.mesh] = 1;
+    // Com a geometria virtualizada, os LODs inteiros ficam só para as malhas que algum objeto desenha pelo caminho
+    // indexado (folhagem com vento, água, cabelo, multidão): as outras escolhem o nível por pedaço na GPU.
+    if (clusterLod && ctx.meshShaders) {
+      std::vector<uint8_t> indexedUse(original, 0);
+      for (const Object& o : objects)
+        if (o.crowdClip != ~0u || (materials[o.material].flags & (kMaterialWater | kMaterialFoliage | kMaterialHair)))
+          indexedUse[o.mesh] = 1;
+      for (size_t i = 0; i < original; ++i)
+        if (!indexedUse[i] && cpuMeshes_[i].indices.size() / 3 >= 8 * kMeshletMaxTriangles) excluded[i] = 1;
+    }
     for (const CrowdClip& c : crowdClips) {  // poses assadas: o LOD delas é o da multidão (bakeCrowdClip)
       for (uint32_t f = 0; f < c.frames; ++f) excluded[c.firstMesh + f] = 1;
       for (uint32_t l : c.lodFirstMesh)
@@ -1250,6 +1295,31 @@ void Scene::upload(rhi::Context& ctx) {
   meshCellPending_.resize(cpuMeshes_.size(), -1);
   for (int c : meshCellPending_)
     if (c >= 0 && !loader_) loader_ = std::make_shared<StreamLoader>(cpuMeshes_.size());
+  // Meshlets (e a geometria virtualizada, a parte cara) de todas as malhas em paralelo: cada uma é independente.
+  struct PreparedMeshlets {
+    std::vector<uint32_t> blob;
+    GpuMesh fields;  // só os contadores de meshlets
+  };
+  std::vector<PreparedMeshlets> prepared(cpuMeshes_.size());
+  {
+    std::atomic<size_t> next{0};
+    auto work = [&] {
+      for (size_t i = next++; i < cpuMeshes_.size(); i = next++)
+        prepared[i].blob = meshletBlob(ctx, prepared[i].fields, cpuMeshes_[i], clusterLod);
+    };
+    const unsigned n = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+    std::vector<std::thread> pool;
+    for (unsigned t = 1; t < n; ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
+  }
+  auto takeMeshlets = [&](size_t i, GpuMesh& gm) {
+    gm.meshletCount = prepared[i].fields.meshletCount;
+    gm.meshletVertexBase = prepared[i].fields.meshletVertexBase;
+    gm.meshletTriangleBase = prepared[i].fields.meshletTriangleBase;
+    gm.meshletLodBase = prepared[i].fields.meshletLodBase;
+    return std::move(prepared[i].blob);
+  };
   for (auto& data : cpuMeshes_) {
     GpuMesh gm;
     const size_t meshIndex = meshes.size();
@@ -1266,7 +1336,7 @@ void Scene::upload(rhi::Context& ctx) {
         gm.boundsMax = glm::max(gm.boundsMax, v.position);
       }
       triangles += data.indices.size() / 3;
-      loader_->write(uint32_t(meshIndex), data, meshletBlob(ctx, gm, data));
+      loader_->write(uint32_t(meshIndex), data, takeMeshlets(meshIndex, gm));
       data = MeshData{};  // fica só no disco
       meshes.push_back(gm);
       continue;
@@ -1336,7 +1406,7 @@ void Scene::upload(rhi::Context& ctx) {
       }
     }
     triangles += data.indices.size() / 3;
-    uploadMeshlets(ctx, gm, meshletBlob(ctx, gm, data));
+    uploadMeshlets(ctx, gm, takeMeshlets(meshIndex, gm));
     uploadColors(ctx, gm, data);
     gm.boundsMin = glm::vec3(1e30f);
     gm.boundsMax = glm::vec3(-1e30f);

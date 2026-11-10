@@ -24,6 +24,9 @@ struct MeshData {
   std::vector<glm::uvec4> joints;
   std::vector<glm::vec4> weights;
   int skinModel = -1;  // índice em Scene::models
+  // reorderForClusters: a lista de índices foi reordenada em pedaços compactos; cada um começa no triângulo indicado
+  // (o nível 0 da geometria virtualizada usa esses pedaços).
+  std::vector<uint32_t> clusterStarts;
   int skin = -1;       // índice em Model::skins
   // Tecido simulado (shaders/cloth.comp): grade de clothWidth x clothHeight vértices com espaçamento clothSpacing; a
   // coluna 0 fica presa (mastro, varal).
@@ -68,6 +71,30 @@ struct MeshletData {
 };
 constexpr uint32_t kMeshletMaxVertices = 64, kMeshletMaxTriangles = 124;
 MeshletData buildMeshlets(const MeshData& mesh);
+
+// Geometria virtualizada (no estilo do Nanite): além dos meshlets da malha inteira (nível 0, iguais aos de
+// buildMeshlets), grupos de ~8 meshlets vizinhos são juntados, simplificados pela metade com a borda do grupo travada
+// e divididos de novo, nível após nível, formando um grafo. Cada meshlet guarda a esfera e o erro geométrico (em
+// unidades da malha) do grupo que o formou (`self`) e do grupo que o substitui (`parent`; erro infinito na raiz). Na
+// GPU, um meshlet é desenhado quando o erro de `self` na tela fica dentro do limite e o de `parent` não: como irmãos
+// usam a mesma esfera, o corte não abre buracos e cada meshlet decide sozinho (Karis, "Nanite: A Deep Dive", 2021).
+// Os meshlets dos níveis simplificados têm firstTriangle = kNoTriangle (não existem na lista de índices original).
+struct MeshletLod {  // == MeshletLod em shaders/meshlet.glsl (48 bytes)
+  glm::vec4 self;    // centro xyz, raio
+  glm::vec4 parent;  // centro xyz, raio
+  float selfError, parentError, pad0, pad1;
+};
+static_assert(sizeof(MeshletLod) == 48);
+constexpr uint32_t kNoTriangle = 0xFFFFFFFFu;
+struct ClusterLodStats {
+  uint32_t levels = 0, baseMeshlets = 0, totalMeshlets = 0;
+  uint64_t baseTriangles = 0, rootTriangles = 0;
+};
+// Devolve os meshlets de todos os níveis (o nível 0 primeiro, na ordem de buildMeshlets) e `lods` paralelo a eles.
+MeshletData buildClusterLod(const MeshData& mesh, std::vector<MeshletLod>& lods, ClusterLodStats* stats = nullptr);
+// Reordena os triângulos em meshlets compactos da meshoptimizer (cada um contínuo na lista) e preenche clusterStarts.
+// Os vértices não mudam; muda só a numeração dos triângulos (antes do upload e das luzes de malha).
+void reorderForClusters(MeshData& mesh);
 
 // Cabelo por fios: `strands` fios com `segments` segmentos nascendo na calota de cima de uma esfera de raio
 // `scalpRadius` (origem no centro), comprimento `length` (m), curvados pela gravidade. Cada segmento é uma fita: os

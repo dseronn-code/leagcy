@@ -188,6 +188,7 @@ struct Options {
   bool ignoreTangents = false;   // --ignore-tangents  // texturas em BC7 (--no-texture-compression = RGBA8)
   bool meshLights = true;        // triângulos emissivos como luzes (--no-mesh-lights: só pelos raios de GI)
   bool meshLods = true;          // níveis de detalhe das malhas grandes (--no-lod)
+  int clusterLod = -1;           // geometria virtualizada: -1 = a da cena, 1 = --nanite, 0 = --no-nanite
   std::string tangentTest;      // --tangent-test arquivo.gltf: tangentes do arquivo x aproximação x MikkTSpace
   uint32_t atmosphereTest = 0;  // > 0: valida a atmosfera contra path tracing (caminhos por thread)
   float sunElevation = NAN, sunAzimuth = NAN;  // graus; NAN = o da cena
@@ -238,6 +239,9 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-texture-compression") o.compressTextures = false;
     else if (a == "--no-mesh-lights") o.meshLights = false;
     else if (a == "--no-lod") o.meshLods = false;
+    else if (a == "--no-nanite") o.clusterLod = 0;
+    else if (a == "--nanite") o.clusterLod = 1;
+    else if (a == "--lod-pixels") o.render.lodPixels = std::max(0.01f, float(std::atof(next())));
     else if (a == "--no-firefly-clamp") noFireflyClamp = true;
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--sun-elevation") o.sunElevation = float(std::atof(next()));
@@ -259,6 +263,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--rain") o.scene.rain = float(std::atof(next()));
     else if (a == "--lights") o.scene.lightCount = uint32_t(std::max(0, std::atoi(next())));
     else if (a == "--city-blocks") o.scene.cityBlocks = uint32_t(std::max(1, std::atoi(next())));
+    else if (a == "--rochas") o.scene.rocks = uint32_t(std::max(1, std::atoi(next())));
+    else if (a == "--rocha-segmentos") o.scene.rockSegments = uint32_t(std::max(16, std::atoi(next())));
     else if (a == "--scale") o.scaleOverride = glm::clamp(float(std::atof(next())), 0.25f, 1.0f);
     else if (a == "--fullscreen") o.fullscreen = true;
     else if (a == "--quality") {
@@ -382,6 +388,7 @@ Options parseArgs(int argc, char** argv) {
           "  --upscaler auto|taau|dlss|fsr  auto (padrão) = DLSS em RTX, senão o TAA/TAAU do motor; ou AMD FSR 3; com --scale:\n"
           "                             1 = DLAA/nativo, 0,67 = qualidade, 0,58 = equilibrado, 0,5 = desempenho\n"
           "  --no-gpu-culling --no-occlusion --no-meshlets   desligam partes do culling/desenho (medição)\n"
+          "  --nanite            geometria virtualizada (pedaços com erro de até --lod-pixels 1 na tela)\n"
           "  --hlod                   liga os proxies de HLOD (desligados: mais lentos na RTX)\n"
           "  --no-ripples --no-sss --no-texture-streaming --stream-sync  idem (ondulações, pele, texturas, streaming)\n"
           "  --clouds-reference         nuvens por Monte Carlo volumétrico exato (tools/nuvens.py)\n"
@@ -446,6 +453,7 @@ int runAtmosphereTest(const Options& opt) {
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
+  if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
   scene.streamSync = opt.streamSync;
   scene.textureStreaming = opt.textureStreaming;
   scene.upload(ctx);
@@ -536,6 +544,7 @@ int runHeadless(const Options& opt) {
   scene.compressTextures = opt.compressTextures;
   scene.meshLights = opt.meshLights;
   scene.meshLods = opt.meshLods;
+  if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
   scene.streamSync = opt.streamSync;
   scene.textureStreaming = opt.textureStreaming;
   scene.upload(ctx);
@@ -709,6 +718,7 @@ int runWindowed(const Options& opt) {
     scene.compressTextures = opt.compressTextures;
     scene.meshLights = opt.meshLights;
     scene.meshLods = opt.meshLods;
+  if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
     scene.streamSync = opt.streamSync;
     scene.textureStreaming = opt.textureStreaming;
     scene.upload(ctx);

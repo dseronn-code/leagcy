@@ -1354,6 +1354,77 @@ bool buildWorldTest(Scene& s, Camera& camera, const DemoOptions& opt) {
   return true;
 }
 
+// Ruído de valor 3D (trilinear, suavizado) e fbm: o relevo das rochas da cena "nanite".
+float hash3(int x, int y, int z, uint32_t seed) {
+  uint32_t h = uint32_t(x) * 73856093u ^ uint32_t(y) * 19349663u ^ uint32_t(z) * 83492791u ^ seed * 2654435761u;
+  h ^= h >> 13;
+  h *= 0x5bd1e995u;
+  h ^= h >> 15;
+  return float(h & 0xFFFFFFu) / float(0xFFFFFF);
+}
+float valueNoise3(glm::vec3 p, uint32_t seed) {
+  const glm::vec3 f = glm::floor(p), t = p - f, u = t * t * (3.0f - 2.0f * t);
+  const int x = int(f.x), y = int(f.y), z = int(f.z);
+  auto lerp = [](float a, float b, float k) { return a + (b - a) * k; };
+  const float c00 = lerp(hash3(x, y, z, seed), hash3(x + 1, y, z, seed), u.x);
+  const float c10 = lerp(hash3(x, y + 1, z, seed), hash3(x + 1, y + 1, z, seed), u.x);
+  const float c01 = lerp(hash3(x, y, z + 1, seed), hash3(x + 1, y, z + 1, seed), u.x);
+  const float c11 = lerp(hash3(x, y + 1, z + 1, seed), hash3(x + 1, y + 1, z + 1, seed), u.x);
+  return lerp(lerp(c00, c10, u.y), lerp(c01, c11, u.y), u.z);
+}
+
+// Rocha de alta resolução: esfera de `segments` x `segments/2` deformada por fbm 3D com cristas (detalhe fino que só
+// aparece de perto: o teste da geometria virtualizada).
+MeshData makeRock(uint32_t segments, uint32_t seed) {
+  MeshData m = makeSphere(segments, segments / 2);
+  for (Vertex& v : m.vertices) {
+    const glm::vec3 d = glm::normalize(v.position);
+    float h = 0.0f, amp = 0.5f, freq = 1.6f;
+    for (int o = 0; o < 9; ++o) {
+      const float n = valueNoise3(d * freq + glm::vec3(float(o) * 7.1f), seed);
+      h += amp * (o < 3 ? n : 1.0f - std::abs(2.0f * n - 1.0f));  // grandes formas + cristas finas
+      amp *= 0.5f;
+      freq *= 2.1f;
+    }
+    v.position = d * (0.75f + 0.55f * h) * glm::vec3(1.3f, 0.8f, 1.0f);
+  }
+  computeNormals(m);
+  computeTangents(m);
+  return m;
+}
+
+// Geometria virtualizada: um campo de rochas de ~590 mil triângulos cada (16 x 16 = 151 milhões), do pé da câmera até
+// o horizonte. Perto, cada crista aparece; longe, cada rocha vira poucos pedaços, com erro de até ~1 pixel.
+bool buildNaniteTest(Scene& s, Camera& camera, const DemoOptions& opt) {
+  s.clusterLod = true;  // a cena existe para isso (--no-nanite compara)
+  Material ground;
+  ground.baseColor = glm::vec4(0.32f, 0.30f, 0.27f, 1.0f);
+  ground.roughness = 0.9f;
+  const uint32_t groundMat = s.addMaterial(ground);
+  s.addObject(s.addMesh(makeCube()), trs(glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(2000.0f, 1.0f, 2000.0f)), groundMat);
+  Material rock;
+  rock.baseColor = glm::vec4(0.45f, 0.42f, 0.38f, 1.0f);
+  rock.roughness = 0.75f;
+  const uint32_t rockMat = s.addMaterial(rock);
+  const uint32_t mesh = s.addMesh(makeRock(std::max(opt.rockSegments, 16u), 7u));
+  const int n = int(std::max(opt.rocks, 1u));
+  const float spacing = 9.0f;
+  for (int z = 0; z < n; ++z)
+    for (int x = 0; x < n; ++x) {
+      const float j = hash3(x, 0, z, 3u), k = hash3(x, 1, z, 5u);
+      const float scale = 1.6f + 2.4f * j;
+      const glm::vec3 p((float(x) - 0.5f * float(n - 1)) * spacing + (k - 0.5f) * 4.0f, 0.35f * scale,
+                        -float(z) * spacing - 6.0f + (j - 0.5f) * 4.0f);
+      s.addObject(mesh, trs(p, glm::vec3(scale), 360.0f * k), rockMat);
+    }
+  s.sunDirection = sunFrom(opt.night ? -10.0f : 28.0f, 140.0f);
+  s.sunIlluminance = opt.night ? 0.0f : 110000.0f;
+  s.moonIlluminance = opt.night && opt.moon ? 0.25f : 0.0f;
+  camera.position = glm::vec3(0.0f, 2.2f, 4.0f);
+  camera.lookAt(glm::vec3(0.0f, 1.2f, -30.0f));
+  return true;
+}
+
 // Tecido com colisão: uma toalha de 1,6 m cai sobre uma bola e se acomoda no chão.
 bool buildClothTest(Scene& s, Camera& camera) {
   uint32_t sphere = s.addMesh(makeSphere(64, 32)), cube = s.addMesh(makeCube());
@@ -1432,6 +1503,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
   if (opt.name == "stream") return buildStreamTest(scene, camera, opt);
   if (opt.name == "world") return buildWorldTest(scene, camera, opt);
   if (opt.name == "cloth") return buildClothTest(scene, camera);
+  if (opt.name == "nanite") return buildNaniteTest(scene, camera, opt);
   return buildSponza(scene, camera, opt);
 }
 

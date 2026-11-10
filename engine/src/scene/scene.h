@@ -349,6 +349,9 @@ struct GpuMesh {
   rhi::Buffer meshlets;
   rhi::Buffer colors;  // cor por vértice (vec4 linear), só se o glTF tiver COLOR_0
   uint32_t meshletCount = 0, meshletVertexBase = 0, meshletTriangleBase = 0;
+  // Geometria virtualizada (buildClusterLod): meshlets de todos os níveis e, a partir de meshletLodBase (em uints), um
+  // MeshletLod por meshlet. 0 = malha sem níveis (todos os meshlets são da malha inteira).
+  uint32_t meshletLodBase = 0;
   // Níveis de detalhe (só a rasterização; o ray tracing usa a malha completa): malhas simplificadas e a distância
   // (m) a partir da qual cada uma é usada. -1 = sem esse nível.
   int lod[2] = {-1, -1};
@@ -376,6 +379,10 @@ class Scene {
   bool ignoreFileTangents = false;  // --ignore-tangents: recalcula mesmo quando o glTF traz TANGENT (teste das tangentes)
   bool meshLights = true;  // triângulos emissivos viram luzes no upload
   bool meshLods = true;    // gera LODs das malhas grandes no upload
+  // Geometria virtualizada nas malhas rígidas desenhadas por meshlets (no lugar dos LODs inteiros acima): cada pedaço
+  // escolhe na GPU o nível com erro de até ~1 pixel. Desligada por padrão enquanto é validada contra as metas
+  // (--nanite liga; a cena "nanite" liga sozinha).
+  bool clusterLod = false;
   // HLOD (> 0 liga): objetos `hlodCandidate` agrupados em células desse tamanho (m) e por material; cada grupo vira
   // um proxy fundido, trocado pelos membros a partir de hlodDistance (m) da caixa da célula.
   float hlodCellSize = 0.0f, hlodDistance = 0.0f;
