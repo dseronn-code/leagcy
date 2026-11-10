@@ -412,6 +412,20 @@ Testes (`tools/nanite.py`, sem GPU: os tempos servem para comparar entre si, nã
 Outras medidas: o campo de 151 milhões de triângulos foi de 5.248 ms (primeira versão) para ~1.930 ms no G-buffer; a
 carga com o cache, de 19,4 s para 11,2 s; os blocos e a oclusão não mudam a imagem (comparação pixel a pixel).
 
+**Na RTX 3070 Ti (rodada 21j, 1080p, 151 milhões de triângulos):** G-buffer de 4,1 ms com a geometria virtualizada
+contra 24,7 ms sem (6,1x; frame inteiro 35,6 x 56,9 ms); rasterização por software dos pedaços pequenos (`--sw-raster`)
+3,1 ms (-24%); sem a oclusão por pedaço 3,55 ms (nessa cena a oclusão custa mais do que poupa). Os 5 testes passam lá
+com os mesmos números do Linux (qualidade 0,656 x 0,652/255).
+
+Três correções vieram dessas rodadas na RTX:
+- **Alinhamento:** as listas de LOD e de blocos (vec4) começavam em qualquer palavra do buffer; a GPU as lê por ponteiro
+  (buffer_reference), que supõe 16 bytes. A NVIDIA lia o endereço arredondado — erros trocados, buracos nas rochas e
+  níveis grossos mesmo a 0,01 px; o lavapipe lia certo e escondia. Agora começam alinhadas.
+- **Dobra:** um grupo simplificado que perde mais de 20% da área "para fora" (projetada nas normais; dobras se
+  cancelam) não vira pai — fica para o próximo nível (no Windows o último grupo de uma rocha perdia 81%).
+- **Mesma rocha nos dois sistemas:** as posições da rocha são arredondadas numa grade de 1/65536 (o sin/cos de cada
+  biblioteca difere no último bit), e triângulos simplificados virados contra as normais são desvirados.
+
 ## Mundo aberto (células por distância, no estilo do World Partition)
 
 Com `"mundo_aberto": {"celula": 64, "carregar": 192, "descarregar": 256}` na cena, as entidades paradas com visual são
