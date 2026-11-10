@@ -97,6 +97,7 @@ struct HitInfo {
   vec4 color;  // cor por vértice interpolada
   uint material;
   float t;
+  bool backface;  // o raio bateu no verso do triângulo (antes de virar as normais)
 };
 
 bool traceHit(vec3 origin, vec3 dir, float tMax, out HitInfo hit) {
@@ -120,6 +121,7 @@ bool traceHit(vec3 origin, vec3 dir, float tMax, out HitInfo hit) {
   hit.Ng = normalize(normalMatrix * cross(p1 - p0, p2 - p0));
   float side = dot(hit.Ng, dir) > 0.0 ? -1.0 : 1.0;
   hit.Ng *= side;
+  hit.backface = side < 0.0;
   hit.N = normalize(normalMatrix * n);
   if (dot(hit.N, hit.Ng) < 0.0) hit.N = -hit.N;  // mesmo lado da faceta
   hit.uv = fetchVertexUV(vb, i0) * b0 + fetchVertexUV(vb, i1) * bary.x + fetchVertexUV(vb, i2) * bary.y;

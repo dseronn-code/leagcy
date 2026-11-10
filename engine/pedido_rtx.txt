@@ -3,6 +3,8 @@
 # pasta temporária presa pelo antivírus). Repetidos aqui com --tempo-real e os acertos. Mais o Bistro no Médio de
 # novo (headless e janela andando), depois do TAA novo e das mudanças da semana. E a geometria virtualizada (tipo
 # Nanite): o campo de 151 milhões de triângulos em 1080p, com e sem, e os testes.
+# Fase 3: sondas de GI para GPUs sem ray tracing (assadas com RT, usadas com --no-rt) e o palpite do cache de
+# radiância sem vazar luz do céu em lugar fechado (pode mexer no viés do Bistro: as duas linhas do Bistro medem).
 python tools\fisica.py --bin build\Release\legacy.exe
 python tools\jogo.py --bin build\Release\legacy.exe
 python tools\rede.py --bin build\Release\legacy.exe
@@ -14,6 +16,10 @@ build\Release\legacy.exe --width 1920 --height 1080 --move 1.5 --warmup 60 --qui
 build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt
 python tools\nanite.py --bin build\Release\legacy.exe
 python tools\mundo.py --bin build\Release\legacy.exe
+python tools\sondas.py --bin build\Release\legacy.exe
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 5 --out resultados_pc\assar.png --assar-gi --gi-raios 512
+build\Release\legacy.exe --headless --no-rt --width 1920 --height 1080 --frames 300 --out resultados_pc\sponza_sem_rt.png
+build\Release\legacy.exe --no-rt --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --camera-path caminhos\sponza_nave.txt
 build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite.png
 build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_sem.png --no-nanite
 build\Release\legacy.exe --scene nanite --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --no-vsync

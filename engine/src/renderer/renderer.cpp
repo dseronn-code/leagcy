@@ -6,6 +6,7 @@
 #include <cstring>
 #include <tuple>
 #include <cstdio>
+#include <fstream>
 
 #include "rhi/pipeline.h"
 
@@ -450,6 +451,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
       {23, CIS, 1, VK_SHADER_STAGE_ALL, nullptr},
       {24, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
       {25, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
+      {26, SB, 1, VK_SHADER_STAGE_ALL, nullptr},
   };
   if (ctx.rayTracing) bindings.push_back({6, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_ALL, nullptr});
   std::vector<VkDescriptorBindingFlags> flags(bindings.size(), 0);
@@ -466,7 +468,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorPoolSize sizes[] = {
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight},
       {CIS, kFramesInFlight * (12 + kMaxTextures)},
-      {SB, kFramesInFlight * 11},
+      {SB, kFramesInFlight * 12},
       {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
   };
   VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
@@ -505,6 +507,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     }
   });
   terrainLayers_ = rhi::createBufferWithData(ctx, &scene.terrainLayers, sizeof(scene::TerrainLayers), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+  initGiProbes(scene);
   for (rhi::Buffer& b : textureFeedback_) {
     b = rhi::createBuffer(ctx, 3 * kMaxTextures * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::CpuToGpu);
     std::memset(b.mapped, 0, 3 * kMaxTextures * sizeof(uint32_t));
@@ -574,6 +577,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS}, 0, spec, 3);
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS}, 0, spec, 3);
   lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI}, 0, spec, 3);
+  if (giBakePending_) giBakePass_.init(ctx, "gi_bake.comp", g, {SB}, 16, spec, 3);
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
   if (settings.fogReference && !rt) {
@@ -813,6 +817,8 @@ void Renderer::writeGlobalDescriptors() {
     add(24, SB, 1).pBufferInfo = &feedback;
     VkDescriptorBufferInfo terrain{terrainLayers_.handle, 0, VK_WHOLE_SIZE};
     add(25, SB, 1).pBufferInfo = &terrain;
+    VkDescriptorBufferInfo giInfo{giProbes_.handle, 0, VK_WHOLE_SIZE};
+    add(26, SB, 1).pBufferInfo = &giInfo;
     if (!texInfos.empty()) add(5, CIS, uint32_t(texInfos.size())).pImageInfo = texInfos.data();
     VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
     if (ctx_->rayTracing) {
@@ -1119,6 +1125,11 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   u.environment = glm::vec4(scene_->uniformSkyLuminance, float(settings.debugView), std::exp2(-debugEV) / 1.2f,
                             float(settings.restirDisableMask));
   std::memcpy(frameUbo_[slot].mapped, &u, sizeof(u));
+  // Sondas de irradiância: assadas uma vez, quando o céu e o TLAS dos primeiros frames já estão prontos.
+  if (giBakePending_ && frameIndex_ >= 3) {
+    giBakePending_ = false;
+    bakeGiProbes(gs);
+  }
   vmaFlushAllocation(ctx_->allocator, frameUbo_[slot].allocation, 0, VK_WHOLE_SIZE);
 
   barrier();  // ordena contra o frame anterior (mesmos alvos)
@@ -1990,6 +2001,8 @@ void Renderer::destroy() {
   for (rhi::Buffer& b : rippleDisturbers_) rhi::destroyBuffer(ctx, b);
   for (rhi::Buffer& b : textureFeedback_) rhi::destroyBuffer(ctx, b);
   rhi::destroyBuffer(ctx, terrainLayers_);
+  rhi::destroyBuffer(ctx, giProbes_);
+  if (giAccum_.handle != VK_NULL_HANDLE) rhi::destroyBuffer(ctx, giAccum_);
   rhi::destroyImage(ctx, dfgLut_);
   for (rhi::Image* img : {&transmittanceLut_, &multiScatterLut_, &aerialPerspective_}) rhi::destroyImage(ctx, *img);
   for (VkSampler s : {nearest_, linear_, skySampler_, textureSampler_}) vkDestroySampler(ctx.device, s, nullptr);
@@ -2006,7 +2019,7 @@ void Renderer::destroy() {
                          &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1],
                          &hlodInfo_, &hlodCells_})
     rhi::destroyBuffer(ctx, *b);
-  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &cloudReferencePass_, &fogReferencePass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &giBakePass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &cloudReferencePass_, &fogReferencePass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);
@@ -2028,6 +2041,140 @@ void Renderer::destroy() {
   vkDestroyDescriptorPool(ctx.device, pool_, nullptr);
   vkDestroyDescriptorSetLayout(ctx.device, globalLayout_, nullptr);
   ctx_ = nullptr;
+}
+
+// ---- Sondas de irradiância (caminho sem ray tracing) ----
+namespace {
+constexpr char kGiMagic[4] = {'L', 'G', 'I', '2'};
+constexpr size_t kGiStride = 7, kGiAcc = 9;  // vec4 por sonda: gravados (gi_probes.glsl) e somas do passe (gi_bake)
+}
+
+void Renderer::initGiProbes(const scene::Scene& scene) {
+  rhi::Context& ctx = *ctx_;
+  std::vector<glm::vec4> data(2, glm::vec4(0.0f));  // cabeçalho sem sondas
+  const std::string& path = settings.giProbes;
+  bool loaded = false;
+  if (!path.empty() && !(settings.giRebake && ctx.rayTracing)) {
+    std::ifstream f(path, std::ios::binary);
+    char magic[4] = {};
+    glm::vec4 header[2];
+    if (f.read(magic, 4) && std::memcmp(magic, kGiMagic, 4) == 0 && f.read(reinterpret_cast<char*>(header), sizeof(header))) {
+      const size_t count = size_t(header[1].x) * size_t(header[1].y) * size_t(header[1].z);
+      data.assign(2 + kGiStride * count, glm::vec4(0.0f));
+      data[0] = header[0];
+      data[1] = header[1];
+      if (count > 0 && f.read(reinterpret_cast<char*>(data.data() + 2), std::streamsize(kGiStride * count * sizeof(glm::vec4)))) {
+        loaded = true;
+        LOG_INFO("Sondas de GI: %s (%.0f x %.0f x %.0f, %.2f m)%s", path.c_str(), header[1].x, header[1].y, header[1].z,
+                 header[0].w, ctx.rayTracing ? " — com ray tracing elas não são usadas" : "");
+      } else {
+        data.assign(2, glm::vec4(0.0f));
+      }
+    }
+  }
+  if (!loaded && !path.empty() && ctx.rayTracing) {
+    // Grade sobre a caixa da cena.
+    glm::vec3 lo(1e30f), hi(-1e30f);
+    for (const scene::Object& o : scene.objects) {
+      const scene::GpuMesh& gm = scene.meshes[o.mesh];
+      for (int c = 0; c < 8; ++c) {
+        const glm::vec3 p((c & 1) ? gm.boundsMax.x : gm.boundsMin.x, (c & 2) ? gm.boundsMax.y : gm.boundsMin.y,
+                          (c & 4) ? gm.boundsMax.z : gm.boundsMin.z);
+        const glm::vec3 w = glm::vec3(o.transform * glm::vec4(p, 1.0f));
+        lo = glm::min(lo, w);
+        hi = glm::max(hi, w);
+      }
+    }
+    if (lo.x <= hi.x) {
+      const glm::vec3 ext = hi - lo;
+      float sp = settings.giSpacing > 0.0f ? settings.giSpacing
+                                           : std::max(std::max(ext.x, std::max(ext.y, ext.z)) / 48.0f, 0.25f);
+      glm::uvec3 dims = glm::uvec3(glm::ceil(ext / sp)) + 1u;
+      while (size_t(dims.x) * dims.y * dims.z > (size_t(1) << 21)) {  // no máximo ~2 milhões de sondas
+        sp *= 1.25f;
+        dims = glm::uvec3(glm::ceil(ext / sp)) + 1u;
+      }
+      const size_t count = size_t(dims.x) * dims.y * dims.z;
+      data.assign(2 + kGiStride * count, glm::vec4(0.0f));
+      data[0] = glm::vec4(lo, sp);
+      data[1] = glm::vec4(float(dims.x), float(dims.y), float(dims.z), 0.0f);  // w = 0 até o primeiro passe
+      giAccum_ = rhi::createBuffer(ctx, kGiAcc * count * sizeof(glm::vec4),
+                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                   rhi::MemoryUsage::GpuToCpu);
+      giBakePending_ = true;
+      LOG_INFO("Sondas de GI: assando %u x %u x %u (%zu sondas, %.2f m), %u raios, %u passes", dims.x, dims.y, dims.z,
+               count, sp, settings.giRays, settings.giBounces);
+    }
+  } else if (!loaded && !path.empty()) {
+    LOG_WARN("Sondas de GI: %s não existe e sem ray tracing não dá para assar; luz ambiente só do céu", path.c_str());
+  }
+  giProbes_ = rhi::createBuffer(ctx, data.size() * sizeof(glm::vec4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                rhi::MemoryUsage::CpuToGpu);
+  std::memcpy(giProbes_.mapped, data.data(), data.size() * sizeof(glm::vec4));
+  vmaFlushAllocation(ctx.allocator, giProbes_.allocation, 0, VK_WHOLE_SIZE);
+}
+
+void Renderer::bakeGiProbes(VkDescriptorSet gs) {
+  rhi::Context& ctx = *ctx_;
+  const auto start = std::chrono::steady_clock::now();
+  vkDeviceWaitIdle(ctx.device);
+  auto* probes = static_cast<glm::vec4*>(giProbes_.mapped);
+  const glm::uvec3 dims(probes[1]);
+  const uint32_t count = dims.x * dims.y * dims.z;
+  const uint32_t rays = std::max(64u, (settings.giRays + 63u) / 64u * 64u);
+  const uint32_t groupsX = std::min(count, 65535u), groupsY = (count + groupsX - 1) / groupsX;
+  const float pi = 3.14159265f;
+  uint32_t invalid = 0;
+  const uint32_t passes = std::max(settings.giBounces, 1u);
+  for (uint32_t pass = 0; pass < passes; ++pass) {
+    ctx.immediateSubmit([&](VkCommandBuffer cmd) { vkCmdFillBuffer(cmd, giAccum_.handle, 0, VK_WHOLE_SIZE, 0); });
+    for (uint32_t batch = 0; batch < rays / 64u; ++batch)  // um envio por lote (GPUs com limite de tempo por envio)
+      ctx.immediateSubmit([&](VkCommandBuffer cmd) {
+        rhi::memoryBarrier(cmd);
+        const uint32_t push[4] = {0u, groupsX, batch, rays};
+        giBakePass_.dispatchGroups(cmd, gs, {rhi::Binding::storageBuffer(giAccum_)}, groupsX, groupsY, push);
+      });
+    vmaInvalidateAllocation(ctx.allocator, giAccum_.allocation, 0, VK_WHOLE_SIZE);
+    const auto* acc = static_cast<const glm::vec4*>(giAccum_.mapped);
+    // Radiância em SH L1 (Monte Carlo uniforme na esfera: peso 4π/N) -> irradiância convolvida com o cosseno
+    // (Ramamoorthi & Hanrahan 2001): E(n) = π·Y00·L00 + (2π/3)·Y1·(L1 · n).
+    const float w = 4.0f * pi / float(rays);
+    invalid = 0;
+    const float maxD = 2.0f * probes[0].w;
+    for (uint32_t i = 0; i < count; ++i) {
+      const glm::vec4* a = acc + i * kGiAcc;
+      glm::vec4* out = probes + 2 + i * kGiStride;
+      for (int c = 0; c < 3; ++c) {
+        const glm::vec4 l = a[c] * w;
+        out[c] = glm::vec4(pi * 0.282095f * l.x, glm::vec3(l.y, l.z, l.w) * (2.0f * pi / 3.0f * 0.488603f));
+      }
+      const glm::vec4 cnt = a[3];
+      const bool valid = cnt.y > 0.0f && cnt.x / cnt.y < 0.25f;  // mais de 1/4 dos raios no verso: dentro da parede
+      out[3] = glm::vec4(valid ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+      invalid += valid ? 0 : 1;
+      // Visibilidade: média e média do quadrado da distância em cada lado (somas pesadas: peso, d, d²).
+      const float* dv = &a[4].x;
+      float mean[6], mean2[6];
+      for (int b = 0; b < 6; ++b) {
+        const float ws = dv[b * 3];
+        mean[b] = ws > 1e-6f ? dv[b * 3 + 1] / ws : maxD;
+        mean2[b] = ws > 1e-6f ? dv[b * 3 + 2] / ws : maxD * maxD;
+      }
+      out[4] = glm::vec4(mean[0], mean[1], mean[2], mean[3]);
+      out[5] = glm::vec4(mean[4], mean[5], mean2[0], mean2[1]);
+      out[6] = glm::vec4(mean2[2], mean2[3], mean2[4], mean2[5]);
+    }
+    probes[1].w = 1.0f;
+    vmaFlushAllocation(ctx.allocator, giProbes_.allocation, 0, VK_WHOLE_SIZE);
+  }
+  const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  LOG_INFO("Sondas de GI assadas em %.1f s: %u sondas (%u dentro de paredes), %u raios x %u passes", secs, count, invalid,
+           rays, passes);
+  std::ofstream f(settings.giProbes, std::ios::binary);
+  f.write(kGiMagic, 4);
+  f.write(static_cast<const char*>(giProbes_.mapped), std::streamsize((2 + kGiStride * size_t(count)) * sizeof(glm::vec4)));
+  if (!f) LOG_WARN("Sondas de GI: não consegui gravar %s", settings.giProbes.c_str());
+  else LOG_INFO("Sondas de GI gravadas em %s", settings.giProbes.c_str());
 }
 
 }  // namespace renderer

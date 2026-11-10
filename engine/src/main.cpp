@@ -8,6 +8,7 @@
 #include <chrono>
 #include <thread>
 #include <cstdio>
+#include <filesystem>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -308,6 +309,11 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-motion-blur") o.render.motionBlur = false;
     else if (a == "--no-lens-flare") o.render.lensFlare = 0.0f;
     else if (a == "--shadow-maps") o.render.shadowMaps = true;
+    else if (a == "--sondas-gi") o.render.giProbes = next();
+    else if (a == "--assar-gi") o.render.giRebake = true;
+    else if (a == "--gi-espacamento") o.render.giSpacing = float(std::atof(next()));
+    else if (a == "--gi-raios") o.render.giRays = uint32_t(std::max(1, std::atoi(next())));
+    else if (a == "--gi-rebotes") o.render.giBounces = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--no-gpu-culling") o.render.gpuCulling = false;
     else if (a == "--no-occlusion") o.render.occlusionCulling = false;
     else if (a == "--no-meshlets") o.render.meshlets = false;
@@ -435,6 +441,16 @@ Options parseArgs(int argc, char** argv) {
   }
   // Medição: sem o limite de "vagalumes" (o caminho ingênuo sem amostrar luzes perde energia nele).
   if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;
+  // Sondas de GI sem --sondas-gi: ao lado do arquivo da cena (cena.json.gi) ou, nas cenas de demonstração, em
+  // texcache/ (uma por cena e por dia/noite). Usadas se existirem; --assar-gi grava nesse lugar.
+  if (o.render.giProbes.empty()) {
+    const std::string& n = o.scene.name;
+    const bool file = n.find('.') != std::string::npos || n.find('/') != std::string::npos || n.find('\\') != std::string::npos;
+    const std::string path = file ? n + ".gi" : "texcache/gi_" + n + (o.scene.night ? "_noite" : "") + ".gi";
+    std::error_code ec;
+    if (o.render.giRebake || std::filesystem::exists(path, ec)) o.render.giProbes = path;
+    if (o.render.giRebake && !file) std::filesystem::create_directories("texcache", ec);
+  }
   return o;
 }
 

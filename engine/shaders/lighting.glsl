@@ -20,6 +20,7 @@ void rayTextureRequest(int i) {
 #define TERRAIN_SAMPLE(i, uv) textureLod(textures[i], uv, max(frame.quality1.x - float(textureBase(i)), 0.0))
 #define TERRAIN_REQUEST(i, uv)
 #include "material.glsl"
+#include "gi_probes.glsl"
 #ifdef RAY_TRACING
 #define GLASS_SHADOWS 1  // traceTransmittance tinge pela cor do vidro (glassTransmittanceAlong, abaixo)
 #include "raytracing.glsl"
@@ -27,6 +28,7 @@ void rayTextureRequest(int i) {
 #endif
 
 layout(local_size_x = 8, local_size_y = 8) in;
+#ifndef GI_BAKE
 // Escrito também: a visibilidade final volta para o reservatório (o próximo frame não reaproveita amostra oculta).
 layout(set = 1, binding = 4, std430) buffer Reservoirs { Reservoir reservoirs[]; };
 layout(set = 1, binding = 5, rgba16f) uniform writeonly image2D outDiffuse;
@@ -34,6 +36,7 @@ layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D outSpecular;
 // Entradas do NRD: z em espaço de câmera e normal + rugosidade na codificação R10G10B10A2 dele.
 layout(set = 1, binding = 8, r32f) uniform writeonly image2D outViewZ;
 layout(set = 1, binding = 9, rgb10_a2) uniform writeonly image2D outNrdNormalRoughness;
+#endif
 
 // Distância gravada para raios que não acertam nada (céu): "infinito" dentro do float16.
 const float HIT_DIST_MISS = 60000.0;
@@ -296,10 +299,22 @@ bool cacheUpdatePixel() {
   return ((id.x + 2u * id.y + frame.frameInfo.x) & (qualityHas(Q_CACHE_EIGHTH) ? 7u : 3u)) == 0u;
 }
 
-// Luz indireta que um ponto atingido por raio manda de volta: M do cache (ou, sem dados ainda, o céu aproximado).
+// Palpite para a luz indireta num ponto sem dados no cache: a irradiância das sondas assadas, se a cena tem; senão,
+// o céu por um raio de visibilidade numa direção de cosseno (estimativa sem viés da parte do céu; zero dentro de um
+// lugar fechado). Antes era o céu × 0,5 sem teste — numa sala fechada injetava a luz do céu que não chega lá.
+vec3 indirectFallback(vec3 P, vec3 Ng, vec3 N) {
+  if (giProbesAvailable()) return giProbeIrradiance(P, N) * (preExposure() / PI);
+  uint st = pcg3d(uvec3(floatBitsToUint(P.x) ^ floatBitsToUint(P.z), floatBitsToUint(P.y), frame.frameInfo.x)).x | 1u;
+  vec3 d = cosineSampleHemisphere(N, rand2(st));
+  if (dot(d, Ng) <= 0.0) return vec3(0.0);
+  float scale = max(max(abs(P.x), max(abs(P.y), abs(P.z))), 1.0);  // erro do float na posição
+  return traceVisibility(offsetRayOrigin(P, Ng, RAY_BIAS_EXACT * 8.0 * scale), d, 1e4) > 0.0 ? sampleSky(d) : vec3(0.0);
+}
+
+// Luz indireta que um ponto atingido por raio manda de volta: M do cache (ou, sem dados ainda, o palpite acima).
 vec3 cachedIndirect(vec3 P, vec3 Ng, vec3 N) {
   vec3 M;
-  return rcQuery(P, Ng, M) ? M : sampleSky(normalize(N + vec3(0, 1, 0))) * 0.5;
+  return rcQuery(P, Ng, M) ? M : indirectFallback(P, Ng, N);
 }
 
 // Radiância que chega por um raio de 2º rebote: luz direta no ponto atingido + indireta pelo cache (difusa e,
@@ -339,7 +354,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
   // Indireta difusa: cache de radiância (infinitos rebotes acumulados entre frames; auditoria 3.1).
   vec3 M;
   bool cached = rcQuery(hit.P, hit.Ng, M);
-  if (!cached) M = sampleSky(normalize(hit.N + vec3(0, 1, 0))) * 0.5;  // célula nova: céu aproximado
+  if (!cached) M = indirectFallback(hit.P, hit.Ng, hit.N);  // célula nova: palpite (sondas ou céu visível)
   if (perfSkip(PERF_DIAG_CACHE_DIRECT)) {  // diagnóstico: uma amostra nova no lugar do cache (sem reuso espacial)
     vec3 dd = cosineSampleHemisphere(hit.N, rand2(st));
     M = dot(dd, hit.Ng) > 0.0 ? secondaryRadiance(offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t), dd, st) : vec3(0.0);
@@ -413,6 +428,86 @@ vec3 localLightsReference(PixelSurface sf, BrdfContext bc) {
 }
 #endif
 
+#ifdef GI_BAKE
+// Assar as sondas (gi_bake.comp): um grupo de 64 por sonda, um raio por invocação (espiral de Fibonacci na esfera,
+// girada a cada lote). No ponto atingido: luz direta (sol e uma luz local, com sombra) + o difuso da irradiância das
+// sondas do passe anterior (cada passe soma um rebote). O verso de uma face de um lado só conta como parede (a
+// sonda está dentro dela). Acumula em `acc` a radiância projetada em SH L1 e as contagens.
+layout(set = 1, binding = 0, std430) buffer GiAccum { vec4 acc[]; };  // por sonda: R, G, B (L0, L1 xyz), contagens
+layout(push_constant) uniform BakePush {
+  uint firstProbe, groupsX, batch, raysTotal;
+} bake;
+shared vec4 bakeSum[64][4];
+
+void main() {
+  uint local = gl_LocalInvocationIndex;
+  uint probe = bake.firstProbe + gl_WorkGroupID.y * bake.groupsX + gl_WorkGroupID.x;
+  ivec3 dims = ivec3(giHeader[1].xyz);
+  uint count = uint(dims.x * dims.y * dims.z);
+  vec4 r = vec4(0.0), gch = vec4(0.0), bch = vec4(0.0), cnt = vec4(0.0);
+  if (probe < count) {
+    ivec3 q = ivec3(int(probe) % dims.x, (int(probe) / dims.x) % dims.y, int(probe) / (dims.x * dims.y));
+    vec3 origin = giHeader[0].xyz + vec3(q) * giHeader[0].w;
+    uint k = bake.batch * 64u + local;
+    float n = float(bake.raysTotal);
+    // Fibonacci esférico + rotação aleatória por sonda.
+    float z = 1.0 - (2.0 * float(k) + 1.0) / n;
+    float phi = float(k) * 2.39996323 + float(probe) * 0.618034 * 6.2831853;
+    float sz = sqrt(max(1.0 - z * z, 0.0));
+    vec3 dir = vec3(sz * cos(phi), z, sz * sin(phi));
+    uint st = probe * 977u + k * 7919u + 17u;
+    pcg(st);
+    HitInfo hit;
+    vec3 Tg;
+    bool blocked;
+    vec3 L = vec3(0.0);
+    bool back = false;
+    float maxD = 2.0 * giHeader[0].w, t = maxD;  // raio que escapa: "longe" (o dobro do espaçamento)
+    if (!traceHitThroughGlass(origin, dir, 1e4, hit, Tg, blocked)) {
+      L = Tg * sampleSky(dir) / preExposure();
+    } else {
+      t = min(hit.t, maxD);
+      if (!blocked) {
+        back = hit.backface && (materials[hit.material].flags & MATERIAL_DOUBLE_SIDED) == 0u;
+        if (!back) {
+          Surface s = evalMaterial(materials[hit.material], hit.P, hit.N, vec4(0.0), hit.uv, hit.color);
+          BrdfContext bc = makeBrdfContext(hit.N, -dir, s.f0, s.f90, s.roughness, energyCompensationEnabled());
+          vec2 uSun = rand2(st), uLight = rand2(st);
+          L = hitDirectLighting(hit, s, bc, uSun, uLight, pcg(st), false) / preExposure();
+          if (giProbesAvailable()) L += s.diffuseColor * bc.diffuseWeight * giProbeIrradiance(hit.P, hit.N) * (1.0 / PI);
+          L *= Tg;
+        }
+      }
+    }
+    for (int a = 0; a < 3; ++a) {
+      int b = (a * 2 + (dir[a] < 0.0 ? 1 : 0)) * 3;
+      float w = dir[a] * dir[a];
+      dv[b] += w;
+      dv[b + 1] += w * t;
+      dv[b + 2] += w * t * t;
+    }
+    if (any(isnan(L)) || any(isinf(L))) L = vec3(0.0);
+    vec4 basis = vec4(0.282095, 0.488603 * dir);
+    r = L.r * basis;
+    gch = L.g * basis;
+    bch = L.b * basis;
+    cnt = vec4(back ? 1.0 : 0.0, 1.0, 0.0, 0.0);
+  }
+  bakeSum[local][0] = r;
+  bakeSum[local][1] = gch;
+  bakeSum[local][2] = bch;
+  bakeSum[local][3] = cnt;
+  for (int c = 0; c < 5; ++c) bakeSum[local][4 + c] = vec4(dv[c * 4], dv[c * 4 + 1], dv[c * 4 + 2], dv[c * 4 + 3]);
+  barrier();
+  for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+    if (local < stride)
+      for (uint c = 0u; c < GI_ACC; ++c) bakeSum[local][c] += bakeSum[local + stride][c];
+    barrier();
+  }
+  if (local == 0u && probe < count)
+    for (uint c = 0u; c < GI_ACC; ++c) acc[probe * GI_ACC + c] += bakeSum[0][c];
+}
+#else
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
   if (!insideRender(id)) return;
@@ -682,10 +777,19 @@ void main() {
   }
 
 #ifndef RAY_TRACING
-  diffuse += bc.diffuseWeight * sampleSky(normalize(g.N + vec3(0, 1, 0))) * 0.8 * aoDiffuse;
   vec3 R = reflect(-g.V, g.N);
-  specular += specularAlbedo(g.f0, g.f90, bc.dfg) * bc.energyCompensation *
-              sampleSky(normalize(mix(R, g.N, g.roughness * g.roughness))) * aoSpecular;
+  if (giProbesAvailable()) {
+    // Sondas assadas: a irradiância em volta (difuso) e, para o especular, a irradiância vinda do lado do reflexo
+    // (lobo largo; sem reflexos nítidos sem ray tracing).
+    diffuse += bc.diffuseWeight * giProbeIrradiance(g.P, g.N) * (preExposure() / PI) * aoDiffuse;
+    vec3 Rs = normalize(mix(R, g.N, g.roughness * g.roughness));
+    specular += specularAlbedo(g.f0, g.f90, bc.dfg) * bc.energyCompensation * giProbeIrradiance(g.P, Rs) *
+                (preExposure() / PI) * aoSpecular;
+  } else {
+    diffuse += bc.diffuseWeight * sampleSky(normalize(g.N + vec3(0, 1, 0))) * 0.8 * aoDiffuse;
+    specular += specularAlbedo(g.f0, g.f90, bc.dfg) * bc.energyCompensation *
+                sampleSky(normalize(mix(R, g.N, g.roughness * g.roughness))) * aoSpecular;
+  }
 #endif
 
   // Rede de segurança: um único NaN se espalharia pelo denoiser e pelo histórico do TAA.
@@ -711,3 +815,4 @@ void main() {
     imageStore(outSpecular, id, vec4(clampHalf(specular), specHit));
   }
 }
+#endif  // GI_BAKE

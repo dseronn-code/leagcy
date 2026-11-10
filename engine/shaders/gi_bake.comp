@@ -1,0 +1,6 @@
+#version 460
+// Assa as sondas de irradiância (ver gi_probes.glsl e o modo GI_BAKE em lighting.glsl).
+#extension GL_GOOGLE_include_directive : require
+#define RAY_TRACING 1
+#define GI_BAKE 1
+#include "lighting.glsl"

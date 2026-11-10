@@ -67,6 +67,13 @@ struct Settings {
   float dofAperture = 8.0f;         // CoC (px) de um objeto no infinito
   float dofMaxCoc = 14.0f;
   bool motionBlur = true;
+  // Sondas de irradiância (caminho sem ray tracing): arquivo assado. Com ray tracing e o arquivo ausente (ou
+  // giRebake), o motor assa as sondas e grava; sem ray tracing, lê e usa no lugar do céu como luz ambiente.
+  std::string giProbes;
+  bool giRebake = false;
+  float giSpacing = 0.0f;     // m entre sondas (0 = automático: o maior lado da cena / 48, no mínimo 0,25 m)
+  uint32_t giRays = 256;      // raios por sonda em cada passe
+  uint32_t giBounces = 3;     // passes (cada um soma um rebote de luz)
   bool shadowMaps = false;  // shadow maps em cascata mesmo com ray tracing (sem RT eles são sempre usados)
   bool gpuCulling = true;   // culling por frustum na GPU (--no-gpu-culling: desenha tudo, mesma lista indireta)
   bool occlusionCulling = true;  // oclusão em duas fases pela pirâmide de profundidade (--no-occlusion)
@@ -201,6 +208,13 @@ class Renderer {
   // versão das texturas já escrita nos descritores de cada frame em voo.
   rhi::Buffer textureFeedback_[kFramesInFlight];
   rhi::Buffer terrainLayers_;  // scene::TerrainLayers (binding 25)
+  // Sondas de irradiância (binding 26, shaders/gi_probes.glsl): cabeçalho + 4 vec4 por sonda. giAccum_: somas do
+  // passe de assar (gi_bake.comp), lidas pela CPU.
+  rhi::Buffer giProbes_, giAccum_;
+  rhi::ComputePass giBakePass_;
+  bool giBakePending_ = false;
+  void initGiProbes(const scene::Scene& scene);
+  void bakeGiProbes(VkDescriptorSet gs);
   bool textureFeedbackValid_[kFramesInFlight] = {};
   uint32_t texturesVersionWritten_[kFramesInFlight] = {};
   // Transformações, skinning, refit das BLAS e reconstrução do TLAS para este frame.
