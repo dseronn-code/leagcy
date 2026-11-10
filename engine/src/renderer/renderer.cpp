@@ -83,6 +83,13 @@ struct GBufferPush {
   uint32_t flags, lodBase;  // lodBase: MeshletLod de cada meshlet (em uints no bloco dos meshlets; 0 = sem níveis)
   float lodPixels;
   uint32_t blockBase;  // MeshletBlock de cada 32 meshlets (uints; 0 = sem)
+  VkDeviceAddress swList;  // rasterização por software (0 = desligada)
+  float swPixels;
+  uint32_t swMax;
+};
+struct SwRasterPush {  // == Push em sw_raster.comp e gbuffer_sw.frag
+  VkDeviceAddress vis, list;
+  uint32_t maxEntries, pad;
 };
 // Espelha ObjectData em shaders/scene.glsl.
 struct ObjectGpu {
@@ -613,6 +620,22 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
     md.vertexBindings.clear();
     md.vertexAttributes.clear();
     gbufferMeshPipeline_ = rhi::createGraphicsPipeline(ctx, md);
+    if (ctx.int64Atomics) {  // rasterização por software: compute + resolução em tela cheia sobre o G-buffer
+      swRasterPass_.init(ctx, "sw_raster.comp", g, {}, sizeof(SwRasterPush));
+      swResolveLayout_.init(ctx, g, {}, sizeof(SwRasterPush));
+      rhi::GraphicsPipelineDesc sd = gb;
+      sd.vertexShader = "fullscreen.vert";
+      sd.fragmentShader = "gbuffer_sw.frag";
+      sd.layout = swResolveLayout_.pipelineLayout;
+      sd.vertexBindings.clear();
+      sd.vertexAttributes.clear();
+      sd.dynamicCulling = false;
+      swResolvePipeline_ = rhi::createGraphicsPipeline(ctx, sd);
+      swList_ = rhi::createBuffer(ctx, 16 + VkDeviceSize(kSwMaxEntries) * 8,
+                                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                      VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                                  rhi::MemoryUsage::GpuOnly);
+    }
   }
   {  // decals BLEND: sem escrever profundidade; mistura por alfa na cor difusa, normal e f0 (o .a de cada anexo,
      // que guarda outra coisa — oclusão, rugosidade, f90 —, fica como estava); movimento, emissão e visibilidade não
@@ -862,6 +885,11 @@ void Renderer::createTargets() {
   for (auto& f : t_.fogReference)
     f = rhi::createImage2D(ctx, settings.fogReference ? R : VkExtent2D{1, 1}, VK_FORMAT_R32G32B32A32_SFLOAT, storage);
   hiZ_ = rhi::createImage2D(ctx, R, VK_FORMAT_R32_SFLOAT, storage, rhi::mipCount(R));
+  if (swResolvePipeline_ != VK_NULL_HANDLE)
+    swVis_ = rhi::createBuffer(ctx, VkDeviceSize(R.width) * R.height * 8,
+                               VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
+                                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                               rhi::MemoryUsage::GpuOnly);
   for (uint32_t m = 0; m < hiZ_.mipLevels; ++m) hiZMips_.push_back(rhi::createMipView(ctx, hiZ_, m));
   t_.sssA = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.sssB = rhi::createImage2D(ctx, R, kHdrFormat, storage);
@@ -935,6 +963,7 @@ void Renderer::destroyTargets() {
   for (VkImageView v : hiZMips_) vkDestroyImageView(ctx.device, v, nullptr);
   hiZMips_.clear();
   rhi::destroyImage(ctx, hiZ_);
+  if (swVis_.handle != VK_NULL_HANDLE) rhi::destroyBuffer(ctx, swVis_);
 }
 
 void Renderer::resize(VkExtent2D outputExtent) {
@@ -1206,6 +1235,12 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     // Oclusão por meshlet (gbuffer.task): na fase 0 contra a pirâmide do frame anterior, depois o repasse do que ela
     // escondia e a nova mostra, e na fase 1 contra a nova. Só com a oclusão por objeto ligada (pirâmide válida).
     const bool clusterOcclusion = occlusion && settings.clusterOcclusion;
+    const bool swRaster = settings.swRaster && meshlets && swResolvePipeline_ != VK_NULL_HANDLE && swVis_.handle != VK_NULL_HANDLE;
+    if (swRaster) {  // nada rasterizado por software ainda: profundidade 0 (infinito) em todo pixel e lista vazia
+      vkCmdFillBuffer(cmd, swVis_.handle, 0, VK_WHOLE_SIZE, 0);
+      vkCmdFillBuffer(cmd, swList_.handle, 0, 16, 0);
+      barrier();
+    }
     bool anyVirtualized = false;
     for (const DrawBatch& b : drawBatches_) anyVirtualized = anyVirtualized || (b.meshlets && scene_->meshes[b.mesh].meshletLodBase != 0);
     // occl: 4 = fase 0, 8 = repasse (só os lotes por meshlets da fase 0), 16 = fase 1.
@@ -1271,6 +1306,9 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
             p.lodBase = m.meshletLodBase;
             p.lodPixels = settings.lodPixels;
             p.blockBase = settings.lodBlocks ? m.meshletBlockBase : 0u;
+            p.swList = swRaster ? swList_.address : 0;
+            p.swPixels = settings.swRasterPixels;
+            p.swMax = kSwMaxEntries;
             vkCmdPushConstants(cmd, gbufferLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(p), &p);
             ctx_->vkCmdDrawMeshTasksIndirectEXT(cmd, meshArgs.handle, VkDeviceSize(bi) * 3 * sizeof(uint32_t), 1,
                                                 3 * sizeof(uint32_t));
@@ -1302,6 +1340,34 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
         draw(false, drawCommands_, culledList_, meshletArgs_[0], 8u);
       cull(1, drawCommands2_, culledList2_);
       draw(false, drawCommands2_, culledList2_, meshletArgs_[1], 16u);
+    }
+    if (swRaster) {
+      // Os pedaços pequenos que as fases mandaram para a lista: rasterizados em compute e resolvidos sobre o G-buffer.
+      barrier();
+      const SwRasterPush sp{swVis_.address, swList_.address, kSwMaxEntries, 0};
+      swRasterPass_.dispatchGroups(cmd, gs, {}, 2048, 1, &sp);
+      barrier();
+      VkRenderingAttachmentInfo colors[6] = {
+          attachment(t_.diffuse.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD),
+          attachment(t_.normal[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD),
+          attachment(t_.motion.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD),
+          attachment(t_.emissive.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD),
+          attachment(t_.specular.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD),
+          attachment(t_.visibility[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD),
+      };
+      VkRenderingAttachmentInfo depth = attachment(t_.depth[cur].view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_LOAD);
+      VkRenderingInfo ri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+      ri.renderArea = {{0, 0}, R};
+      ri.layerCount = 1;
+      ri.colorAttachmentCount = 6;
+      ri.pColorAttachments = colors;
+      ri.pDepthAttachment = &depth;
+      vkCmdBeginRendering(cmd, &ri);
+      setViewport(cmd, R);
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, swResolvePipeline_);
+      swResolveLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs, {}, &sp);
+      vkCmdDraw(cmd, 3, 1, 0, 0);
+      vkCmdEndRendering(cmd);
     }
   }
   cpuMark("desenho");
@@ -1952,6 +2018,12 @@ void Renderer::destroy() {
   particleLayout_.destroy(ctx);
   vkDestroyPipeline(ctx.device, tonemapPipeline_, nullptr);
   gbufferLayout_.destroy(ctx);
+  if (swResolvePipeline_ != VK_NULL_HANDLE) {
+    vkDestroyPipeline(ctx.device, swResolvePipeline_, nullptr);
+    swResolveLayout_.destroy(ctx);
+    swRasterPass_.destroy(ctx);
+    rhi::destroyBuffer(ctx, swList_);
+  }
   tonemapLayout_.destroy(ctx);
   vkDestroyDescriptorPool(ctx.device, pool_, nullptr);
   vkDestroyDescriptorSetLayout(ctx.device, globalLayout_, nullptr);

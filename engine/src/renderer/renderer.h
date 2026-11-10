@@ -73,6 +73,10 @@ struct Settings {
   bool meshlets = true;          // meshlets por mesh shader nas malhas rígidas, se a GPU tiver (--no-meshlets)
   bool clusterOcclusion = true;  // oclusão por meshlet em duas fases na geometria virtualizada (--no-cluster-occlusion)
   bool clusterOcclusionAll = false;  // ... também nas malhas comuns por meshlets (--cluster-occlusion-all: medição)
+  // Rasterização por software (no estilo do Nanite) dos pedaços pequenos da geometria virtualizada (--sw-raster; em
+  // validação: o ganho só se mede numa GPU de verdade). Diâmetro na tela abaixo de swRasterPixels.
+  bool swRaster = false;
+  float swRasterPixels = 16.0f;
   bool lodBlocks = true;         // geometria virtualizada: descarte de blocos de 32 pedaços (--no-lod-blocks: medição)
   float lodPixels = 1.0f;        // geometria virtualizada: erro máximo de um pedaço na tela, em pixels (--lod-pixels)
   bool subsurface = true;        // espalhamento subsuperficial da pele (--no-sss: medição de energia)
@@ -272,6 +276,12 @@ class Renderer {
   VkPipeline gbufferMeshPipeline_ = VK_NULL_HANDLE;
   uint32_t drawEntries_ = 0;
   rhi::ComputePass cullPass_, cullResetPass_, clothPass_, hairSimPass_;
+  // Rasterização por software: profundidade + triângulo por pixel (64 bits), a lista de pedaços e a resolução.
+  rhi::ComputePass swRasterPass_;
+  rhi::PassLayout swResolveLayout_;
+  VkPipeline swResolvePipeline_ = VK_NULL_HANDLE;
+  rhi::Buffer swVis_, swList_;
+  static constexpr uint32_t kSwMaxEntries = 1u << 20;
   // Multidões: endereços dos vértices de cada pose assada (set 0, binding 22) e onde começa cada clipe.
   rhi::Buffer crowdFrames_;
   std::vector<uint32_t> crowdFrameBase_;

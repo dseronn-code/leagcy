@@ -177,6 +177,9 @@ void Context::createDevice(VkSurfaceKHR surface) {
   f12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
   f12.scalarBlockLayout = VK_TRUE;
   f12.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
+  // Atômicos de 64 bits em buffers: a rasterização por software da geometria virtualizada (profundidade + triângulo).
+  int64Atomics = s12.shaderBufferInt64Atomics == VK_TRUE;
+  f12.shaderBufferInt64Atomics = int64Atomics ? VK_TRUE : VK_FALSE;
   f12.pNext = &f13;
   VkPhysicalDeviceVulkan11Features f11 = s11;
   f11.pNext = &f12;

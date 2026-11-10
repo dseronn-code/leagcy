@@ -1,0 +1,82 @@
+#version 460
+// Rasterização por software da geometria virtualizada (no estilo do Nanite): um grupo por pedaço da lista (os pequenos
+// na tela, escolhidos no gbuffer.task). Cada triângulo grava, por pixel coberto, profundidade (32 bits de cima) e
+// entrada da lista + triângulo (32 de baixo) com atomicMax num buffer de 64 bits: o mais perto vence (reverse-Z: maior
+// = mais perto). gbuffer_sw.frag transforma o vencedor em G-buffer. Mesma projeção (com jitter) do rasterizador fixo.
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+#include "frame.glsl"
+#include "scene.glsl"
+
+layout(local_size_x = 64) in;
+layout(buffer_reference, scalar) buffer SwVis { uint64_t v[]; };
+layout(buffer_reference, scalar) readonly buffer SwListR { uint count, pad0, pad1, pad2; uvec2 entries[]; };
+layout(buffer_reference, scalar) readonly buffer Words { uint w[]; };
+layout(push_constant) uniform Push {
+  uint64_t vis;   // 64 bits por pixel da resolução interna
+  uint64_t list;  // SwList
+  uint maxEntries;
+  uint pad;
+} pc;
+
+shared vec4 sv[64];  // vértice na tela: x, y (pixels), z (profundidade NDC), w (clip)
+
+float edge(vec2 a, vec2 b, vec2 p) { return (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x); }
+
+void main() {
+  SwListR L = SwListR(pc.list);
+  SwVis vis = SwVis(pc.vis);
+  uint count = min(L.count, pc.maxEntries);
+  ivec2 size = ivec2(frame.renderSize.xy);
+  uint lane = gl_LocalInvocationIndex;
+  for (uint e = gl_WorkGroupID.x; e < count; e += gl_NumWorkGroups.x) {
+    uvec2 en = L.entries[e];
+    uint object = en.x, mi = en.y;
+    InstanceData d = instances[object];
+    ObjectData o = objects[object];
+    Words w = Words(d.meshlets);
+    // Meshlet: 12 uints (vertexOffset no 9º, triangleOffset no 10º, contagens no 11º).
+    // Malha fora da memória (streaming) ou sem meshlets: nada a desenhar (e sem a guarda o llvmpipe caía aqui).
+    bool valid = d.meshlets != 0ul;
+    uint vOff = valid ? w.w[mi * 12u + 8u] : 0u, tOff = valid ? w.w[mi * 12u + 9u] : 0u, counts = valid ? w.w[mi * 12u + 10u] : 0u;
+    uint vc = counts & 0xFFu, tc = counts >> 8;
+    if (lane < vc) {
+      uint vi = w.w[d.meshletVertexBase + vOff + lane];
+      vec3 pos = fetchVertexPosition(VertexData(d.vertices), vi);
+      vec3 rel = mat3(o.model) * pos + (o.model[3].xyz - frame.cameraPos.xyz);  // como gbuffer.mesh
+      vec4 clip = frame.proj * vec4(mat3(frame.view) * rel, 1.0);
+      vec2 ndc = clip.xy / clip.w;
+      sv[lane] = vec4((ndc * 0.5 + 0.5) * frame.renderSize.xy, clip.z / clip.w, clip.w);
+    }
+    barrier();
+    // Frente anti-horária no Vulkan (horária em objetos espelhados), como o rasterizador fixo: área < 0 aqui.
+    bool mirrored = determinant(mat3(o.model)) < 0.0;
+    bool twoSided = (materials[d.material].flags & MATERIAL_DOUBLE_SIDED) != 0u;
+    for (uint t = lane; t < tc; t += 64u) {
+      uint packed = w.w[d.meshletTriangleBase + tOff + t];
+      vec4 a = sv[packed & 0xFFu], b = sv[(packed >> 8) & 0xFFu], c = sv[(packed >> 16) & 0xFFu];
+      if (a.w <= 1e-4 || b.w <= 1e-4 || c.w <= 1e-4) continue;
+      float area = edge(a.xy, b.xy, c.xy);
+      if (area == 0.0) continue;
+      bool front = mirrored ? area > 0.0 : area < 0.0;
+      if (!front && !twoSided) continue;
+      ivec2 lo = max(ivec2(ceil(min(a.xy, min(b.xy, c.xy)) - 0.5)), ivec2(0));
+      ivec2 hi = min(ivec2(floor(max(a.xy, max(b.xy, c.xy)) - 0.5)), size - 1);
+      float inv = 1.0 / area;
+      uint payload = (e << 7) | t;
+      for (int y = lo.y; y <= hi.y; ++y)
+        for (int x = lo.x; x <= hi.x; ++x) {
+          vec2 p = vec2(x, y) + 0.5;
+          vec3 l = vec3(edge(b.xy, c.xy, p), edge(c.xy, a.xy, p), edge(a.xy, b.xy, p)) * inv;  // baricêntricas na tela
+          if (l.x < 0.0 || l.y < 0.0 || l.z < 0.0) continue;
+          float z = dot(l, vec3(a.z, b.z, c.z));  // z/w é afim na tela
+          if (z <= 0.0) continue;
+          atomicMax(vis.v[uint(y) * uint(size.x) + uint(x)], (uint64_t(floatBitsToUint(z)) << 32) | uint64_t(payload));
+        }
+    }
+    barrier();
+  }
+}

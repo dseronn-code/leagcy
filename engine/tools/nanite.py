@@ -11,6 +11,8 @@ Cena "nanite": rochas procedurais (esfera de 768 segmentos deformada por ruído 
   - qualidade:  com 1 pixel (o padrão), a imagem fica perto da malha inteira (2 x 2 rochas de 65 mil triângulos).
   - desempenho: 4 x 4 rochas de 590 mil triângulos (9,4 milhões): o G-buffer com a geometria virtualizada leva menos da
                 metade do tempo de --no-nanite.
+  - software:   rasterização por software dos pedaços pequenos (--sw-raster, limite de 64 pixels para mandar quase tudo
+                por ela): a imagem bate com a do rasterizador fixo (média < 0,5/255; < 0,5% dos pixels acima de 8).
 """
 import argparse
 import os
@@ -78,7 +80,17 @@ def teste_desempenho(b, pasta):
     return n < 0.5 * c, f'G-buffer de 9,4 milhões de triângulos: {n:.0f} ms com, {c:.0f} ms sem ({c / n:.1f}x)'
 
 
-TESTES = {'nivel0': teste_nivel0, 'grafo': teste_grafo, 'qualidade': teste_qualidade, 'desempenho': teste_desempenho}
+def teste_software(b, pasta):
+    hw, log_h = rodar(b, pasta, 's_hw', [], rochas=4, segmentos=768, quadros=6)
+    sw, log_s = rodar(b, pasta, 's_sw', ['--sw-raster', '--sw-raster-px', '64'], rochas=4, segmentos=768, quadros=6)
+    media, fora = diferenca(hw, sw)
+    return media < 0.5 and fora < 0.5, (f'diferença média {media:.3f}/255, {fora:.2f}% dos pixels acima de 8; G-buffer '
+                                        f'{gbuffer_ms(log_h):.0f} ms (fixo) e {gbuffer_ms(log_s):.0f} ms (software, '
+                                        f'sem GPU: só a correção vale aqui)')
+
+
+TESTES = {'nivel0': teste_nivel0, 'grafo': teste_grafo, 'qualidade': teste_qualidade, 'desempenho': teste_desempenho,
+          'software': teste_software}
 
 
 def main():

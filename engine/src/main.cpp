@@ -244,6 +244,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--no-lod-blocks") o.render.lodBlocks = false;
     else if (a == "--no-cluster-occlusion") o.render.clusterOcclusion = false;
     else if (a == "--cluster-occlusion-all") o.render.clusterOcclusionAll = true;
+    else if (a == "--sw-raster") o.render.swRaster = true;
+    else if (a == "--sw-raster-px") o.render.swRasterPixels = std::max(1.0f, float(std::atof(next())));
     else if (a == "--lod-pixels") o.render.lodPixels = std::max(0.01f, float(std::atof(next())));
     else if (a == "--no-firefly-clamp") noFireflyClamp = true;
     else if (a == "--pause-at") o.pauseAt = uint32_t(std::max(0, std::atoi(next())));

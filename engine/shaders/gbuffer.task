@@ -28,6 +28,26 @@ void main() {
     ml = MeshletList(pc.meshlets).m[m];
     keep = meshletVisible(ml, model) && meshletPassesOcclusion(ml, entry & 0xFFFFFFu);
   }
+  // Rasterização por software (geometria virtualizada): pedaço pequeno na tela (triângulos de ~1 pixel, caros para o
+  // rasterizador fixo) vai para a lista de sw_raster.comp em vez do mesh shader. Materiais com recorte, mistura,
+  // cabelo, água ou vento ficam no caminho normal (a passada por software guarda uma camada só).
+  if (keep && pc.swList != 0ul && pc.lodBase != 0u) {
+    uint object = entry & 0xFFFFFFu;
+    float scale = max(length(model[0].xyz), max(length(model[1].xyz), length(model[2].xyz)));
+    float r = ml.radius * scale, d = length((model * vec4(ml.center, 1.0)).xyz - frame.cameraPos.xyz);
+    float diameter = 2.0 * r / max(d, 0.01) * abs(frame.proj[1][1]) * 0.5 * frame.renderSize.y;
+    uint mflags = materials[instances[object].material].flags;
+    const uint special = MATERIAL_ALPHA_MASK | MATERIAL_BLEND | MATERIAL_HAIR | MATERIAL_WATER | MATERIAL_FOLIAGE |
+                         MATERIAL_RIVER;
+    if ((mflags & special) == 0u && diameter < pc.swPixels && d > r + 0.1) {
+      SwList list = SwList(pc.swList);
+      uint i = atomicAdd(list.count, 1u);
+      if (i < pc.swMax) {
+        list.entries[i] = uvec2(object, m);
+        keep = false;
+      }
+    }
+  }
   if (keep) atomicOr(keepMask, 1u << lane);
   barrier();
   // Compactação na ordem original (posição = quantos antes dele sobreviveram).

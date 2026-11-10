@@ -49,7 +49,13 @@ layout(push_constant) uniform Push {
   uint lodBase;     // MeshletLod de cada meshlet, em uints a partir de `meshlets` (0 = malha sem níveis)
   float lodPixels;  // erro máximo na tela, em pixels
   uint blockBase;   // MeshletBlock de cada MESHLET_GROUP meshlets (uints; 0 = sem)
+  uint64_t swList;  // rasterização por software: lista (objeto, meshlet) dos pedaços pequenos; 0 = desligada
+  float swPixels;   // pedaços com diâmetro na tela abaixo disto vão para a rasterização por software
+  uint swMax;       // capacidade da lista
 } pc;
+
+// Lista da rasterização por software (sw_raster.comp / gbuffer_sw.frag): contador e as entradas (objeto, meshlet).
+layout(buffer_reference, scalar) buffer SwList { uint count, pad0, pad1, pad2; uvec2 entries[]; };
 
 // O que o task shader passa a cada grupo do mesh shader: a entrada da lista (objeto | nível << 30) e os meshlets que
 // sobreviveram, na ordem original (a ordem de rasterização fica a mesma do desenho indexado).

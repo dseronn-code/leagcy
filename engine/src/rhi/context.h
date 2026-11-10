@@ -53,6 +53,7 @@ class Context {
   PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSetKHR = nullptr;
   // Mesh shaders (VK_EXT_mesh_shader, task + mesh): meshlets no G-buffer. Sem eles, desenho indexado comum.
   bool meshShaders = false;
+  bool int64Atomics = false;  // shaderBufferInt64Atomics (rasterização por software)
   PFN_vkCmdDrawMeshTasksIndirectEXT vkCmdDrawMeshTasksIndirectEXT = nullptr;
   VkPhysicalDeviceMeshShaderPropertiesEXT meshShaderProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_PROPERTIES_EXT};
   // Extensões habilitadas (bibliotecas que embrulham o nosso dispositivo, como o NRI, precisam saber).

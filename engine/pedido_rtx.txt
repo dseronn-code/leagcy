@@ -16,3 +16,7 @@ python tools\nanite.py --bin build\Release\legacy.exe
 build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite.png
 build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_sem.png --no-nanite
 build\Release\legacy.exe --scene nanite --width 1920 --height 1080 --move 1.5 --warmup 60 --quit-after 20 --no-vsync
+build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_sw16.png --sw-raster
+build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_sw32.png --sw-raster --sw-raster-px 32
+build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_ocl.png --no-cluster-occlusion
+build\Release\legacy.exe --headless --width 1920 --height 1080 --frames 300 --out resultados_pc\sponza_ocl.png --quality alto --cluster-occlusion-all
