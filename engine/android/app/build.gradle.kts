@@ -59,7 +59,10 @@ val prepareAssets by tasks.registering {
         val glslc = android.ndkDirectory.resolve("shader-tools/$host/glslc" + if (OperatingSystem.current().isWindows) ".exe" else "")
         engineDir.resolve("shaders").listFiles { f -> f.extension in setOf("vert", "frag", "comp", "task", "mesh") }!!.forEach { src ->
             exec {
-                commandLine(glslc.absolutePath, "--target-env=vulkan1.3", "-O", src.absolutePath, "-o", shaderOut.resolve(src.name + ".spv").absolutePath)
+                // O otimizador do glslc do NDK 27 trava (segfault) no lighting_rt.comp: esse vai sem -O (o desktop
+                // compila todos sem otimizar, pelo glslangValidator).
+                val opt = if (src.name == "lighting_rt.comp") listOf() else listOf("-O")
+                commandLine(listOf(glslc.absolutePath, "--target-env=vulkan1.3") + opt + listOf(src.absolutePath, "-o", shaderOut.resolve(src.name + ".spv").absolutePath))
             }
         }
         copy {
