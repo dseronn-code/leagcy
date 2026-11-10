@@ -1,16 +1,129 @@
 {
   "nos": [
-    {"id": 1, "tipo": "ao_iniciar"},
-    {"id": 2, "tipo": "lua", "codigo": "local x, _, z = E:posicao(); E:mover_para(x, altura_terreno(x, z) + 1.2, z)"},
-    {"id": 3, "tipo": "particulas", "ligado": true},
-    {"id": 10, "tipo": "ao_atualizar"},
-    {"id": 11, "tipo": "girar", "x": 0, "y": 1.5, "z": 0},
-    {"id": 20, "tipo": "ao_chegar_perto", "alvo": "jogador", "distancia": 1.8},
-    {"id": 21, "tipo": "log", "texto": "cristal coletado: {@eu.x}"},
-    {"id": 22, "tipo": "particulas", "ligado": false},
-    {"id": 23, "tipo": "explosao", "escala": 0.4},
-    {"id": 24, "tipo": "mover", "relativo": true, "y": 3, "duracao": 0.4},
-    {"id": 25, "tipo": "mover", "relativo": true, "y": -500, "duracao": 0}
+    {
+      "id": 1,
+      "tipo": "ao_iniciar"
+    },
+    {
+      "id": 2,
+      "tipo": "lua",
+      "codigo": "local x, _, z = E:posicao(); E:mover_para(x, altura_terreno(x, z) + 1.2, z)"
+    },
+    {
+      "id": 3,
+      "tipo": "particulas",
+      "ligado": true
+    },
+    {
+      "id": 10,
+      "tipo": "ao_atualizar"
+    },
+    {
+      "id": 11,
+      "tipo": "girar",
+      "x": 0,
+      "y": 1.5,
+      "z": 0
+    },
+    {
+      "id": 20,
+      "tipo": "ao_chegar_perto",
+      "alvo": "jogador",
+      "distancia": 1.8
+    },
+    {
+      "id": 21,
+      "tipo": "log",
+      "texto": "cristal coletado: {@eu.x}"
+    },
+    {
+      "id": 22,
+      "tipo": "particulas",
+      "ligado": false
+    },
+    {
+      "id": 23,
+      "tipo": "explosao",
+      "escala": 0.4
+    },
+    {
+      "id": 24,
+      "tipo": "mover",
+      "relativo": true,
+      "y": 3,
+      "duracao": 0.4
+    },
+    {
+      "id": 25,
+      "tipo": "mover",
+      "relativo": true,
+      "y": -500,
+      "duracao": 0
+    },
+    {
+      "id": 30,
+      "tipo": "se",
+      "a": "$pego",
+      "op": "==",
+      "b": 1
+    },
+    {
+      "id": 31,
+      "tipo": "parar"
+    },
+    {
+      "id": 32,
+      "tipo": "definir",
+      "variavel": "pego",
+      "valor": 1
+    }
   ],
-  "ligacoes": [[1, 2], [2, 3], [10, 11], [20, 21], [21, 22], [22, 23], [23, 24], [24, 25]]
+  "ligacoes": [
+    [
+      1,
+      2
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      10,
+      11
+    ],
+    [
+      21,
+      22
+    ],
+    [
+      22,
+      23
+    ],
+    [
+      23,
+      24
+    ],
+    [
+      24,
+      25
+    ],
+    [
+      20,
+      30
+    ],
+    [
+      30,
+      31,
+      "sim"
+    ],
+    [
+      30,
+      32,
+      "nao"
+    ],
+    [
+      32,
+      21
+    ]
+  ]
 }

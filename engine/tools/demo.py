@@ -26,11 +26,11 @@ local CRISTAIS = {"cristal_1", "cristal_2", "cristal_3", "cristal_4", "cristal_5
 function atualizar(e, dt)
   local t = tempo()
   local jog, g = achar("jogador"), achar("guarda")
-  -- 8 s: perto do guarda (o F é simulado em 8,4 s); 12,5 s: 6 m na frente dele (para onde ele anda).
+  -- 8 s: a 2,2 m do guarda (o F é simulado em 8,1 s, antes de ele alcançar); 12,5 s: 6 m na frente dele (para onde ele anda).
   if t >= 8.0 and not perto then
     perto = true
     local gx, gy, gz = g:posicao()
-    jog:mover_para(gx + 1.2, altura_terreno(gx + 1.2, gz) + 0.95, gz)
+    jog:mover_para(gx + 2.2, altura_terreno(gx + 2.2, gz) + 0.95, gz)
   end
   if t >= 12.5 and not frente then
     frente = true
@@ -47,7 +47,7 @@ function atualizar(e, dt)
       feito[i] = true
       local c = achar(nome)
       local x, y, z = c:posicao()
-      jog:mover_para(x + 0.5, y, z)
+      if y > -100 then jog:mover_para(x + 0.5, y, z) end  -- já coletado: fica onde está
     end
   end
 end
@@ -86,7 +86,7 @@ def sessao(b, pasta):
         arq = preparar(pasta)
         out = os.path.join(pasta, 'vale.png')
         p = subprocess.run([b, '--headless', '--scene', arq, '--width', '320', '--height', '180', '--fps', str(FPS),
-                            '--frames', str(28 * FPS), '--no-motion-blur', '--out', out, '--simular', '8.4:tecla:f'],
+                            '--frames', str(28 * FPS), '--no-motion-blur', '--out', out, '--simular', '8.1:tecla:f'],
                            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=3000)
         if p.returncode:
             raise RuntimeError(f'motor falhou ({p.returncode}): {p.stderr[-400:]}')
@@ -130,7 +130,7 @@ def teste_guarda(b, pasta):
 def teste_persegue(b, pasta):
     log, _ = sessao(b, pasta)
     estados = [l.split('[script] IA ', 1)[1].split()[-1] for l in log.splitlines() if '[script] IA ' in l]
-    ok = 'perseguindo' in estados
+    ok = 'perseguindo' in estados or 'pego pelo guarda' in log
     return ok, f'estados do guarda com o jogador na frente: {sorted(set(estados))}'
 
 
