@@ -86,7 +86,7 @@ class PartidaGame {
   std::vector<Button> buttons_;
   std::vector<int> prevTouchIds_;
   bool tapped_ = false, paused_ = false, autoTeam_ = false;
-  glm::vec2 pauseBtn_{0.0f}, autoBtn_{0.0f};
+  glm::vec2 pauseBtn_{0.0f}, autoBtn_{0.0f}, diagBtn_{0.0f};
   float topBtnR_ = 0.0f;
   // câmera
   glm::vec3 camTarget_{0.0f};

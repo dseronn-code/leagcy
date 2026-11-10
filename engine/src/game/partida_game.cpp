@@ -131,6 +131,7 @@ void PartidaGame::layoutButtons(glm::vec2 screen) {
   topBtnR_ = 4.6f * u;
   pauseBtn_ = {W - 9 * u, 6 * u};
   autoBtn_ = {W - 21 * u, 6 * u};
+  diagBtn_ = {W - 33 * u, 6 * u};
 }
 
 void PartidaGame::readTouches(const std::vector<Touch>& touches, glm::vec2 screen) {
@@ -145,8 +146,9 @@ void PartidaGame::readTouches(const std::vector<Touch>& touches, glm::vec2 scree
   // botões do canto (pausa, jogo automático): só no toque novo
   for (const glm::vec2& p : newTouches) {
     if (screen_ != Screen::Playing) continue;
-    // toque no contador de FPS (topo, no meio): troca a visualização de depuração (diagnóstico no celular)
-    if (std::abs(p.x - screen.x * 0.5f) < 14.0f * (screen.y / 100.0f) && p.y < 9.0f * (screen.y / 100.0f)) {
+    // botão DIAG (ou o contador de FPS): troca a visualização de depuração (diagnóstico no celular)
+    if (glm::length(p - diagBtn_) < topBtnR_ * 1.4f ||
+        (std::abs(p.x - screen.x * 0.5f) < 14.0f * (screen.y / 100.0f) && p.y < 9.0f * (screen.y / 100.0f))) {
       debugTap_ = true;
       tapped_ = false;
       continue;
@@ -456,11 +458,12 @@ void PartidaGame::drawHud(const Camera& cam, glm::vec2 screen) {
     }
   }
   if (screen_ == Screen::Playing) {  // jogo automático e pausa
-    for (int k = 0; k < 2; ++k) {
-      const glm::vec2 c = k == 0 ? autoBtn_ : pauseBtn_;
-      const bool on = k == 0 ? autoTeam_ : paused_;
+    for (int k = 0; k < 3; ++k) {
+      const glm::vec2 c = k == 0 ? autoBtn_ : k == 1 ? pauseBtn_ : diagBtn_;
+      const bool on = k == 0 ? autoTeam_ : k == 1 ? paused_ : debugIndex_ != 0;
       ui_.rect(c - glm::vec2(topBtnR_), glm::vec2(topBtnR_ * 2.0f), rgb(on ? 0xffe600 : 0xffffff, on ? 0.85f : 0.55f));
-      ui_.text(k == 0 ? "AUTO" : "II", {c.x, c.y + 1.3f * u}, (k == 0 ? 2.8f : 4.0f) * u, rgb(0x202020), Font::Display, Align::Center);
+      ui_.text(k == 0 ? "AUTO" : k == 1 ? "II" : "DIAG", {c.x, c.y + 1.3f * u}, (k == 1 ? 4.0f : 2.8f) * u, rgb(0x202020),
+               Font::Display, Align::Center);
     }
   }
   // ---- reposição do seu time: o jogo espera o passe ----
