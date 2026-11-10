@@ -1,10 +1,11 @@
-# Rodada 21j: causa real achada — MeshletLod/MeshletBlock (vec4) lidos por ponteiro da GPU em endereço sem alinhamento de
-# 16 bytes: a NVIDIA lia errado (buracos, níveis grossos a 0,01 px); o lavapipe lia certo. Agora alinhados.
-python tools\nanite.py --bin build\Release\legacy.exe
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\z_001.png --lod-pixels 0.01
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\z_1px.png
-build\Release\legacy.exe --headless --scene nanite --rochas 2 --rocha-segmentos 256 --width 480 --height 270 --no-motion-blur --upscaler taau --frames 8 --out resultados_pc\z_sem.png --no-nanite
-build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite.png
-build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_sem.png --no-nanite
-build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_sw16.png --sw-raster
-build\Release\legacy.exe --headless --scene nanite --width 1920 --height 1080 --frames 300 --out resultados_pc\nanite_ocl.png --no-cluster-occlusion
+# Rodada 22 (10/11): fase 4 (ferramentas) — script visual + editor de grafos, materiais por nós, linhas do tempo em
+# JSON e pincel de terreno (os testes "editor" abrem a janela do editor por alguns segundos). E as regressões.
+python tools\visual.py --bin build\Release\legacy.exe
+python tools\materiais.py --bin build\Release\legacy.exe
+python tools\linha.py --bin build\Release\legacy.exe
+python tools\terreno.py --bin build\Release\legacy.exe
+python tools\sequencia.py --bin build\Release\legacy.exe
+python tools\fisica.py --bin build\Release\legacy.exe
+python tools\jogo.py --bin build\Release\legacy.exe
+python tools\mundo.py --bin build\Release\legacy.exe
+python tools\sondas.py --bin build\Release\legacy.exe
