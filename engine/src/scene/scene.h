@@ -377,6 +377,7 @@ struct StreamCell {
 
 class Scene {
  public:
+  std::map<std::string, int32_t> sharedTextures;  // texturas de glTF por "arquivo#textura" (cargas repetidas)
   using Animator = std::function<void(Scene&, float time, float dt)>;
 
   // Texturas em BC7 (4x menos memória de vídeo; ver texture_compress.h). false = RGBA8 com mips na GPU.
@@ -456,6 +457,9 @@ class Scene {
   bool stream(rhi::Context& ctx, glm::vec3 camera);
   // Objetos cujas entradas do buffer de instâncias (endereços da malha) mudaram: o renderer reescreve na GPU.
   std::vector<uint32_t> takeInstanceUpdates() { return std::move(instanceUpdates_); }
+  // Material alterado depois do upload (ex.: cor do uniforme): reenviado à GPU no próximo quadro.
+  void markMaterialDirty(uint32_t m) { materialUpdates_.push_back(m); }
+  std::vector<uint32_t> takeMaterialUpdates() { return std::move(materialUpdates_); }
   rhi::Buffer& instances() { return instanceBuffer; }
   size_t residentStreamBytes() const { return residentBytes_; }
   // TLAS compacto: só objetos com malha na memória entram (posição no TLAS por objeto, -1 = fora). O layout muda
@@ -600,6 +604,7 @@ class Scene {
   std::shared_ptr<struct TextureLoader> textureLoader_;
   void requestTexture(uint32_t texture, uint32_t base);
   std::vector<std::vector<uint32_t>> objectsOfMesh_;
+  std::vector<uint32_t> materialUpdates_;
   std::vector<uint32_t> instanceUpdates_;
   struct PendingDestroy {
     uint32_t mesh;

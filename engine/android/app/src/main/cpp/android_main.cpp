@@ -19,7 +19,7 @@
 
 #include "core/log.h"
 #include "core/paths.h"
-#include "game/penalti_game.h"
+#include "game/partida_game.h"
 #include "renderer/renderer.h"
 #include "rhi/swapchain.h"
 #include "scene/demo_scene.h"
@@ -78,7 +78,7 @@ struct Engine {
   scene::Camera camera;
   rhi::Swapchain swapchain;
   renderer::Renderer r;
-  game::PenaltiGame game;
+  game::PartidaGame game;
   std::array<FrameSync, renderer::Renderer::kFramesInFlight> frames{};
   uint32_t slot = 0;
   ANativeWindow* window = nullptr;
@@ -95,7 +95,7 @@ struct Engine {
     LOG_INFO("GPU: %s | ray tracing: %s", ctx.properties.deviceName, ctx.rayTracing ? "sim" : "não");
 
     scene::DemoOptions opt;
-    opt.name = "penalti";
+    opt.name = "partida";
     if (!scene::buildDemoScene(scene, camera, opt)) FATAL("Não foi possível montar o estádio (arquivos do jogo faltando).");
     scene.textureCacheDir = cacheDir + "/texcache";
     scene.textureStreaming = false;
@@ -138,9 +138,9 @@ struct Engine {
     r.resize(swapchain.extent);
   }
 
-  void frame(float dt, const game::Pointer& p) {
+  void frame(float dt, const std::vector<game::Touch>& touches) {
     const glm::vec2 screen(float(swapchain.extent.width), float(swapchain.extent.height));
-    const float sceneDt = game.update(dt, p, scene, camera, r, screen);
+    const float sceneDt = game.update(dt, touches, scene, camera, r, screen);
     scene.update(sceneDt);
     FrameSync& f = frames[slot];
     VK_CHECK(vkWaitForFences(ctx.device, 1, &f.inFlight, VK_TRUE, UINT64_MAX));
@@ -207,8 +207,7 @@ struct App {
   std::unique_ptr<Engine> engine;
   std::string cacheDir;
   bool focused = false, failed = false;
-  game::Pointer pointer;
-  bool down = false, wasDown = false;
+  std::vector<game::Touch> touches;  // dedos na tela agora (joystick + botões ao mesmo tempo)
 };
 
 void startEngine(App& a) {
@@ -219,7 +218,7 @@ void startEngine(App& a) {
   } catch (const std::exception& e) {
     a.failed = true;
     if (a.engine) { try { a.engine->destroy(); } catch (...) {} a.engine.reset(); }
-    showError(a.app, std::string("O Pênalti da Treta não conseguiu iniciar neste celular:\n\n") + e.what());
+    showError(a.app, std::string("O FCLegacy não conseguiu iniciar neste celular:\n\n") + e.what());
   }
 }
 
@@ -239,10 +238,16 @@ void handleCmd(android_app* app, int32_t cmd) {
 int32_t handleInput(android_app* app, AInputEvent* event) {
   App& a = *static_cast<App*>(app->userData);
   if (AInputEvent_getType(event) != AINPUT_EVENT_TYPE_MOTION) return 0;
-  const int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
-  a.pointer.pos = glm::vec2(AMotionEvent_getX(event, 0), AMotionEvent_getY(event, 0));
-  if (action == AMOTION_EVENT_ACTION_DOWN || action == AMOTION_EVENT_ACTION_POINTER_DOWN) a.down = true;
-  else if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_CANCEL) a.down = false;
+  const int32_t full = AMotionEvent_getAction(event);
+  const int32_t action = full & AMOTION_EVENT_ACTION_MASK;
+  const size_t changed = size_t((full & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >> AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+  a.touches.clear();
+  if (action == AMOTION_EVENT_ACTION_UP || action == AMOTION_EVENT_ACTION_CANCEL) return 1;
+  const size_t n = AMotionEvent_getPointerCount(event);
+  for (size_t i = 0; i < n; ++i) {
+    if (action == AMOTION_EVENT_ACTION_POINTER_UP && i == changed) continue;  // esse dedo saiu
+    a.touches.push_back({int(AMotionEvent_getPointerId(event, i)), glm::vec2(AMotionEvent_getX(event, i), AMotionEvent_getY(event, i))});
+  }
   return 1;
 }
 
@@ -277,13 +282,8 @@ void android_main(android_app* app) {
     const auto now = std::chrono::steady_clock::now();
     const float dt = std::min(std::chrono::duration<float>(now - last).count(), 0.1f);
     last = now;
-    game::Pointer p = a.pointer;
-    p.down = a.down;
-    p.pressed = a.down && !a.wasDown;
-    p.released = !a.down && a.wasDown;
-    a.wasDown = a.down;
     try {
-      a.engine->frame(dt, p);
+      a.engine->frame(dt, a.touches);
     } catch (const std::exception& e) {
       a.failed = true;
       a.engine->destroy();

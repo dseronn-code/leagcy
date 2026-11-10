@@ -48,6 +48,7 @@ struct ClipMeta {
   std::vector<glm::vec2> root;  // x, z por quadro (fps)
   float contact = -1.0f;        // k_kick: pé na bola
   glm::vec3 foot{0.0f};         // k_kick: bico do pé no contato (espaço do jogador)
+  float speed = 0.0f;           // locomoção: velocidade (m/s) em que o clipe foi gravado
   float reachT = -1.0f;         // goleiro: instante e ponto das mãos
   glm::vec2 reach{0.0f};
 };
@@ -72,6 +73,8 @@ PenaltiWorld& world();  // a cena "penalti" preenche; o jogo lê
 bool buildPenaltiScene(scene::Scene& s, scene::Camera& camera, const scene::DemoOptions& opt);
 
 void setKit(scene::Scene& s, const Player& p, glm::vec3 shirt, glm::vec3 shorts);
+// Lê game/jogador_anim.json (eventos e deslocamento dos clipes do jogador realista).
+bool loadClipMetaInto(std::map<std::string, ClipMeta>& clips, float& fps);
 
 // Texto em pixels (fonte do stb_easy_font) numa imagem RGBA: usado nas placas de LED e no HUD.
 void drawText(std::vector<uint8_t>& rgba, int width, int height, const std::string& text, int x, int y, int scale,

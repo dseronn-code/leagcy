@@ -25,6 +25,7 @@
 #include "rhi/swapchain.h"
 #include "scene/demo_scene.h"
 #include "util/png.h"
+#include "game/partida_game.h"
 #include "game/penalti_game.h"
 
 namespace {
@@ -560,6 +561,9 @@ int runHeadless(const Options& opt) {
   game::PenaltiGame penalti;
   const bool playing = opt.scene.name == "penalti";
   if (playing) penalti.init(scene, r, opt.autoplay, ctx.rayTracing);
+  game::PartidaGame partida;
+  const bool playingMatch = opt.scene.name == "partida";
+  if (playingMatch) partida.init(scene, r, opt.autoplay, ctx.rayTracing);
   LOG_INFO("Resolução interna %ux%u -> saída %ux%u", r.renderExtent().width, r.renderExtent().height, extent.width,
            extent.height);
 
@@ -616,6 +620,7 @@ int runHeadless(const Options& opt) {
     const bool frozen = warming || opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
     float sceneDt = dt;
     if (playing && !warming) sceneDt = penalti.update(dt, game::Pointer{}, scene, camera, r, glm::vec2(float(extent.width), float(extent.height)));
+    if (playingMatch && !warming) sceneDt = partida.update(dt, {}, scene, camera, r, glm::vec2(float(extent.width), float(extent.height)));
     if (game::World* w = game::currentWorld()) {
       w->setListener(camera.position, camera.forward());
       // Sem janela não há teclado nem controle: só as entradas simuladas (--simular), no tempo do quadro.
@@ -748,6 +753,9 @@ int runWindowed(const Options& opt) {
   game::PenaltiGame penalti;
   const bool playing = opt.scene.name == "penalti";
   if (playing) penalti.init(scene, r, opt.autoplay, ctx.rayTracing);
+  game::PartidaGame partida;
+  const bool playingMatch = opt.scene.name == "partida";
+  if (playingMatch) partida.init(scene, r, opt.autoplay, ctx.rayTracing);
   bool mouseWasDown = false;
 
   std::array<FrameSync, renderer::Renderer::kFramesInFlight> frames;
@@ -910,6 +918,15 @@ int runWindowed(const Options& opt) {
       p.released = !down && mouseWasDown;
       mouseWasDown = down;
       sceneDt = penalti.update(sceneDt, p, scene, camera, r, glm::vec2(float(swapchain.extent.width), float(swapchain.extent.height)));
+    }
+    if (playingMatch) {  // o mouse faz o papel de um dedo
+      int ww = 1, wh = 1;
+      glfwGetWindowSize(window, &ww, &wh);
+      const glm::vec2 scr(float(swapchain.extent.width), float(swapchain.extent.height));
+      std::vector<game::Touch> touches;
+      if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS)
+        touches.push_back({0, glm::vec2(float(mx) * scr.x / float(std::max(ww, 1)), float(my) * scr.y / float(std::max(wh, 1)))});
+      sceneDt = partida.update(sceneDt, touches, scene, camera, r, scr);
     }
     if (world) world->setListener(camera.position, camera.forward());
     scene.update(opt.pause ? 0.0f : sceneDt);

@@ -1,3 +1,4 @@
+#include <cmath>
 #include "game/ui.h"
 
 #include <algorithm>
@@ -70,6 +71,27 @@ void Ui::quad(glm::vec2 a, glm::vec2 b, glm::vec2 uva, glm::vec2 uvb, glm::vec4 
 }
 
 void Ui::rect(glm::vec2 pos, glm::vec2 size, glm::vec4 color) { quad(pos, pos + size, {-1, -1}, {-1, -1}, color); }
+
+void Ui::disc(glm::vec2 c, float r, glm::vec4 color, int n) {
+  if (!out_) return;
+  using V = renderer::Renderer::UiVertex;
+  for (int i = 0; i < n; ++i) {
+    const float a0 = 6.2831853f * float(i) / float(n), a1 = 6.2831853f * float(i + 1) / float(n);
+    out_->insert(out_->end(), {V{c, {-1, -1}, color}, V{c + r * glm::vec2(std::cos(a0), std::sin(a0)), {-1, -1}, color},
+                               V{c + r * glm::vec2(std::cos(a1), std::sin(a1)), {-1, -1}, color}});
+  }
+}
+
+void Ui::ring(glm::vec2 c, float r, float t, glm::vec4 color, int n) {
+  if (!out_) return;
+  using V = renderer::Renderer::UiVertex;
+  for (int i = 0; i < n; ++i) {
+    const float a0 = 6.2831853f * float(i) / float(n), a1 = 6.2831853f * float(i + 1) / float(n);
+    const glm::vec2 d0(std::cos(a0), std::sin(a0)), d1(std::cos(a1), std::sin(a1));
+    const V o0{c + d0 * r, {-1, -1}, color}, o1{c + d1 * r, {-1, -1}, color}, i0{c + d0 * (r - t), {-1, -1}, color}, i1{c + d1 * (r - t), {-1, -1}, color};
+    out_->insert(out_->end(), {o0, o1, i0, i0, o1, i1});
+  }
+}
 
 void Ui::frame(glm::vec2 pos, glm::vec2 size, float t, glm::vec4 color) {
   rect(pos, {size.x, t}, color);

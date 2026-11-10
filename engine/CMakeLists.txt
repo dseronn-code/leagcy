@@ -305,13 +305,20 @@ endif()
 
 # ---- Motor ----
 file(GLOB_RECURSE ENGINE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
+# FCLegacy: núcleo determinístico da partida (fclegacy/sim). Sem FMA nem matemática rápida nesses arquivos.
+set(FCSIM_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../fclegacy/sim)
+file(GLOB FCSIM_SOURCES CONFIGURE_DEPENDS ${FCSIM_DIR}/src/*.cpp)
+list(APPEND ENGINE_SOURCES ${FCSIM_SOURCES})
+if(NOT MSVC)
+  set_source_files_properties(${FCSIM_SOURCES} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
+endif()
 if(NOT LEGACY_NRD)
   list(REMOVE_ITEM ENGINE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/nrd_denoiser.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/renderer/upscaler.cpp)
   list(APPEND ENGINE_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/sem_nrd/sem_nrd.cpp)
 endif()
 add_executable(legacy ${ENGINE_SOURCES})
 add_dependencies(legacy shaders)
-target_include_directories(legacy PRIVATE src)
+target_include_directories(legacy PRIVATE src ${FCSIM_DIR}/include)
 target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR})
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw bc7enc
                                      EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}

@@ -45,6 +45,7 @@ struct Loader {
   Scene& scene;
   cgltf_data* data;
   std::filesystem::path dir;
+  std::string filePath;
   // (imagem, sRGB, repetição u, repetição v) -> índice
   std::map<std::tuple<const cgltf_image*, bool, int, int>, int32_t> textureCache;
   struct Primitive {
@@ -107,7 +108,17 @@ struct Loader {
     return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
   }
 
+  // Mesmo arquivo carregado de novo (vários jogadores do mesmo modelo): as texturas já enviadas são reaproveitadas.
   int32_t texture(const cgltf_texture_view& view, bool srgb, bool normalMap = false) {
+    if (!view.texture) return -1;
+    const std::string key = filePath + "#" + std::to_string(view.texture - data->textures) + (srgb ? "s" : "l") + (normalMap ? "n" : "");
+    if (auto it = scene.sharedTextures.find(key); it != scene.sharedTextures.end()) return it->second;
+    const int32_t idx = textureUncached(view, srgb, normalMap);
+    if (idx >= 0) scene.sharedTextures[key] = idx;
+    return idx;
+  }
+
+  int32_t textureUncached(const cgltf_texture_view& view, bool srgb, bool normalMap) {
     if (!view.texture) return -1;
     if (view.texture->has_basisu && view.texture->basisu_image) {
       const cgltf_image* img = view.texture->basisu_image;
@@ -713,7 +724,7 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
     cgltf_free(data);
     return false;
   }
-  Loader l{scene, data, std::filesystem::path(path).parent_path(), {}, {}, {}, 0, -1};
+  Loader l{scene, data, std::filesystem::path(path).parent_path(), path, {}, {}, {}, 0, -1};
   l.loadMaterials();
   l.loadMeshes();
   l.loadModel(rootTransform);

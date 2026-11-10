@@ -1672,6 +1672,13 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
     const scene::Scene::InstanceGpu inst = s.instanceData(o);
     vkCmdUpdateBuffer(cmd, s.instances().handle, VkDeviceSize(o) * sizeof(inst), sizeof(inst), &inst);
   }
+  {
+    const std::vector<uint32_t> mats = s.takeMaterialUpdates();
+    for (uint32_t m : mats)
+      if (m < s.materials.size() && s.materialBuffer.handle)
+        vkCmdUpdateBuffer(cmd, s.materialBuffer.handle, VkDeviceSize(m) * sizeof(scene::Material), sizeof(scene::Material), &s.materials[m]);
+    if (!mats.empty()) rhi::memoryBarrier(cmd);
+  }
   const auto& changed = s.changedObjects();
   for (uint32_t k = 0; k < kFramesInFlight; ++k)
     pendingObjects_[k].insert(pendingObjects_[k].end(), changed.begin(), changed.end());

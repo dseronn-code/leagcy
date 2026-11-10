@@ -90,6 +90,10 @@ struct Match {
   int shotTeam = -1, shotTick = 0;
   Vec3 shotCross{};
   Rng rng;
+  // Últimas ações de cada jogador (para a animação): passo em que aconteceu e o tipo.
+  enum Action : uint8_t { ActPass, ActShot, ActHeader, ActSave, ActTackle, ActLob };
+  std::array<int, 2 * kPlayersPerTeam> actionTick{};
+  std::array<uint8_t, 2 * kPlayersPerTeam> actionType{};
   // carga dos botões do humano (passos segurando) e estado anterior
   int charge[2] = {0, 0};
   uint8_t prevButtons[2] = {0, 0};

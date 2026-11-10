@@ -41,8 +41,10 @@ float timeTo(const Player& p, const Vec3& target) { return distXZ(p.pos, target)
 
 void kick(Match& m, int pi, Vec3 vel, Vec3 spin) {
   Player& p = m.players[size_t(pi)];
-  m.ball.pos = p.pos + p.facing * 0.35f;
-  m.ball.pos.y = m.ballParams.radius;
+  if (m.ball.pos.y < 0.7f) {  // de pé: a bola sai do pé; de cabeça, de onde ela está
+    m.ball.pos = p.pos + p.facing * 0.35f;
+    m.ball.pos.y = m.ballParams.radius;
+  }
   m.ball.vel = vel;
   m.ball.spin = spin;
   m.ball.onGround = vel.y <= 0.01f;
@@ -50,6 +52,8 @@ void kick(Match& m, int pi, Vec3 vel, Vec3 spin) {
   m.lastTouch = pi;
   p.cooldown = kKickCooldown;
   p.touchTimer = 0;
+  m.actionTick[size_t(pi)] = m.tick;
+  m.actionType[size_t(pi)] = vel.y > 2.0f ? Match::ActLob : Match::ActPass;
 }
 
 Vec3 rollingSpin(const Vec3& vel, float radius) { return cross(Vec3{0.0f, 1.0f, 0.0f}, flat(vel)) / radius; }
@@ -126,6 +130,7 @@ void shoot(Match& m, int pi, float aimZ, float aimY, float power) {
     m.shotTick = m.tick;
     m.shotCross = probe.pos;
   }
+  m.actionType[size_t(pi)] = Match::ActShot;
   TeamStats& st = m.stats[t];
   st.shots++;
   st.xg += clampf(0.42f / (1.0f + (d / 10.0f) * (d / 10.0f)) * (1.0f - 0.5f * pressure), 0.01f, 0.8f);
@@ -431,6 +436,8 @@ void keeperSaves(Match& m) {
     if (m.rng.uniform() >= pSave) continue;
     m.stats[t].saves++;
     m.lastTouch = gk.index;
+    m.actionTick[size_t(gk.index)] = m.tick;
+    m.actionType[size_t(gk.index)] = Match::ActSave;
     m.shotTeam = -1;
     if (sp < 20.0f && stretch < 0.5f && m.rng.uniform() < gk.attr.keeping) {  // segura
       m.owner = gk.index;
@@ -689,6 +696,8 @@ void stepMatch(Match& m, const Input* inputs) {
         const Player& o = m.players[size_t(m.owner)];
         const float win = clampf(0.35f + 0.6f * (p.attr.defending - o.attr.dribbling), 0.1f, 0.85f);
         p.cooldown = 15;
+        m.actionTick[size_t(p.index)] = m.tick;
+        m.actionType[size_t(p.index)] = Match::ActTackle;
         if (m.rng.uniform() < win) {
           m.stats[t].tackles++;
           m.owner = -1;
@@ -791,6 +800,7 @@ void stepMatch(Match& m, const Input* inputs) {
       if (dGoal < 16.0f) {
         p.facing = normalizeOr(flat(goalCenter(m, p.team) - p.pos), p.facing);
         shoot(m, p.index, m.rng.signedUnit() * 2.5f, 0.4f + m.rng.uniform() * 1.4f, 0.35f);
+        m.actionType[size_t(p.index)] = Match::ActHeader;
       } else {  // corta de cabeça para longe
         p.cooldown = 8;
         m.lastTouch = p.index;

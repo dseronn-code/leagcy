@@ -44,8 +44,11 @@ list(REMOVE_ITEM ENGINE_SOURCES ${ENGINE}/src/main.cpp ${ENGINE}/src/renderer/nr
 # O celular roda só o pênalti: sem editor (ImGui/GLFW) e sem a camada de jogo genérica (Jolt, Lua, ENet, áudio,
 # navegação), que o pênalti não usa. LEGACY_NO_GAMELAYER tira as cenas .json do demo_scene.
 list(FILTER ENGINE_SOURCES EXCLUDE REGEX "/src/editor/|/src/game/(world|physics|scripting|navigation|network|audio|input)\\.cpp$")
-add_library(penalti SHARED ${ENGINE_SOURCES} ${ENGINE}/sem_nrd/sem_nrd.cpp android_main.cpp vk13_shim.cpp)
-target_include_directories(penalti PRIVATE ${ENGINE}/src)
+# FCLegacy: núcleo determinístico da partida (sem FMA nem matemática rápida).
+file(GLOB FCSIM_SOURCES ${ENGINE}/../fclegacy/sim/src/*.cpp)
+set_source_files_properties(${FCSIM_SOURCES} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
+add_library(penalti SHARED ${ENGINE_SOURCES} ${FCSIM_SOURCES} ${ENGINE}/sem_nrd/sem_nrd.cpp android_main.cpp vk13_shim.cpp)
+target_include_directories(penalti PRIVATE ${ENGINE}/src ${ENGINE}/../fclegacy/sim/include)
 target_include_directories(penalti SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURCE_DIR} ${draco_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 target_compile_definitions(penalti PRIVATE
   GLM_FORCE_DEPTH_ZERO_TO_ONE GLM_FORCE_RADIANS VK_USE_PLATFORM_ANDROID_KHR LEGACY_MIKKTSPACE=1 LEGACY_NO_GAMELAYER=1

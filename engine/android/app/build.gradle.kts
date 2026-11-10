@@ -14,7 +14,7 @@ android {
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        applicationId = "com.treta.penalti"
+        applicationId = "com.fclegacy.mobile"
         minSdk = 30          // Android 11+: Vulkan 1.3 nos aparelhos que têm
         targetSdk = 35
         versionCode = 1

@@ -1456,7 +1456,7 @@ bool buildClothTest(Scene& s, Camera& camera) {
 bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt);
 
 }  // namespace scene
-namespace game { bool buildPenaltiScene(scene::Scene&, scene::Camera&, const scene::DemoOptions&); }
+namespace game { bool buildPenaltiScene(scene::Scene&, scene::Camera&, const scene::DemoOptions&); bool buildPartidaScene(scene::Scene&, scene::Camera&, const scene::DemoOptions&); }
 namespace scene {
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
@@ -1488,6 +1488,7 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
 #endif
   if (opt.name == "outdoor") return buildOutdoor(scene, camera, opt);
   if (opt.name == "penalti") return game::buildPenaltiScene(scene, camera, opt);
+  if (opt.name == "partida") return game::buildPartidaScene(scene, camera, opt);
   if (opt.name == "furnace") return buildFurnace(scene, camera);
   if (opt.name == "shadows") return buildShadowTest(scene, camera, glm::vec3(0.0f));
   if (opt.name == "shadows-far") return buildShadowTest(scene, camera, glm::vec3(4000.0f, 0.0f, -3000.0f));

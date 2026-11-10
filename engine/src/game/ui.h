@@ -24,6 +24,8 @@ class Ui {
   // Cores em sRGB (0..1) com alfa.
   void rect(glm::vec2 pos, glm::vec2 size, glm::vec4 color);
   void frame(glm::vec2 pos, glm::vec2 size, float thickness, glm::vec4 color);  // só a borda
+  void disc(glm::vec2 center, float radius, glm::vec4 color, int segments = 40);                // círculo cheio
+  void ring(glm::vec2 center, float radius, float thickness, glm::vec4 color, int segments = 48);  // contorno
   // Texto UTF-8 (acentos do português); `px` = altura da fonte em pixels; y = linha de base. Devolve a largura.
   float text(const std::string& s, glm::vec2 pos, float px, glm::vec4 color, Font font = Font::Body, Align align = Align::Left);
   float measure(const std::string& s, float px, Font font = Font::Body) const;
