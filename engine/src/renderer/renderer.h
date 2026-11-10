@@ -154,6 +154,7 @@ class Renderer {
   VkExtent2D renderExtent() const { return renderExtent_; }
   // Tempo médio de GPU por passe desde a última chamada (vazio se ainda não há medições).
   std::string gpuTimings() { return profiler_.report(); }
+  std::string gpuProgress(uint32_t slot) { return profiler_.progress(slot); }
   // Tempo de CPU por etapa da gravação do frame (média desde o último relatório).
   std::string cpuTimings();
   // --reference: recomeça a média (a cena mudou: objetos animados). A câmera andando já recomeça sozinha.

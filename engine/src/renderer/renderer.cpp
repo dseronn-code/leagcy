@@ -1653,6 +1653,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
 void Renderer::setUiAtlas(const std::vector<uint8_t>& rgba, uint32_t width, uint32_t height) {
   if (rgba.size() < size_t(width) * height * 4) return;
+  LOG_INFO("HUD: enviando o atlas de fontes (%ux%u)", width, height);
   vkDeviceWaitIdle(ctx_->device);
   rhi::destroyImage(*ctx_, uiAtlas_);
   uiAtlas_ = rhi::createTexture(*ctx_, rgba.data(), width, height, false);

@@ -179,19 +179,24 @@ struct Engine {
 
   void frame(float dt, const std::vector<game::Touch>& touches) {
     const glm::vec2 screen(float(swapchain.extent.width), float(swapchain.extent.height));
+    const bool trace = frameCount < 3;  // os primeiros frames deixam rastro no log (diagnóstico de tela preta)
+    if (trace) LOG_INFO("Frame %u: jogo", frameCount);
     const float sceneDt = game.update(dt, touches, scene, camera, r, screen);
+    if (trace) LOG_INFO("Frame %u: cena", frameCount);
     scene.update(sceneDt);
+    if (trace) LOG_INFO("Frame %u: esperando a GPU", frameCount);
     FrameSync& f = frames[slot];
     const uint64_t kTimeout = 8'000'000'000ull;  // 8 s: a GPU travada vira erro com o log, não tela preta
     const VkResult wf = vkWaitForFences(ctx.device, 1, &f.inFlight, VK_TRUE, kTimeout);
-    if (wf == VK_TIMEOUT) FATAL("A GPU não terminou o frame %u em 8 s (travou)", frameCount);
+    if (wf == VK_TIMEOUT)
+      FATAL("A GPU não terminou o frame %u em 8 s (travou); %s", frameCount, r.gpuProgress(slot).c_str());
     if (wf != VK_SUCCESS) FATAL("vkWaitForFences: %d (frame %u)", int(wf), frameCount);
     uint32_t imageIndex = 0;
     VkResult acq = vkAcquireNextImageKHR(ctx.device, swapchain.handle, kTimeout, f.imageAvailable, VK_NULL_HANDLE, &imageIndex);
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapchain(); return; }
     if (acq == VK_TIMEOUT) FATAL("A tela não liberou imagem em 8 s (frame %u)", frameCount);
     if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) FATAL("vkAcquireNextImageKHR: %d", acq);
-    if (frameCount < 3) LOG_INFO("Frame %u: gravando", frameCount);
+    if (trace) LOG_INFO("Frame %u: gravando", frameCount);
     VK_CHECK(vkResetFences(ctx.device, 1, &f.inFlight));
     VK_CHECK(vkResetCommandBuffer(f.cmd, 0));
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -217,7 +222,9 @@ struct Engine {
     si.pCommandBufferInfos = &cbi;
     si.signalSemaphoreInfoCount = 1;
     si.pSignalSemaphoreInfos = &signal;
+    if (trace) LOG_INFO("Frame %u: enviando", frameCount);
     VK_CHECK(vkQueueSubmit2(ctx.queue, 1, &si, f.inFlight));
+    if (trace) LOG_INFO("Frame %u: apresentando", frameCount);
     VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     pi.waitSemaphoreCount = 1;
     pi.pWaitSemaphores = &swapchain.renderFinished[imageIndex];
@@ -228,7 +235,7 @@ struct Engine {
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) recreateSwapchain();
     else if (pres != VK_SUCCESS) FATAL("vkQueuePresentKHR: %d", pres);
     slot = (slot + 1) % renderer::Renderer::kFramesInFlight;
-    if (frameCount < 3) LOG_INFO("Frame %u: apresentado", frameCount);
+    if (trace) LOG_INFO("Frame %u: apresentado", frameCount);
     ++frameCount;
     framesPresented.store(frameCount);
   }
@@ -285,8 +292,9 @@ void startEngine(App& a) {
     a.engine->init(a.app->window, a.cacheDir);
   } catch (const std::exception& e) {
     a.failed = true;
-    if (a.engine) { try { a.engine->destroy(); } catch (...) {} a.engine.reset(); }
-    showError(a.app, std::string("O FCLegacy não conseguiu iniciar neste celular:\n\n") + e.what());
+    showError(a.app, std::string("O FCLegacy não conseguiu iniciar neste celular:\n\n") + e.what() + "\n\nÚltimas linhas:\n" +
+                         recentLog(6));
+    a.engine.release();  // sem desmontar (GPU travada não volta do vkDeviceWaitIdle); o diálogo fecha o app
     return;
   }
 }
@@ -354,11 +362,10 @@ void android_main(android_app* app) {
     try {
       a.engine->frame(dt, a.touches);
     } catch (const std::exception& e) {
-      const bool already = a.failed;
-      a.failed = true;
-      a.engine->destroy();
-      a.engine.reset();
+      // Mostra antes de desmontar: com a GPU travada, desmontar (vkDeviceWaitIdle) pode nunca voltar.
+      const bool already = a.failed.exchange(true);
       if (!already) showError(app, std::string("Erro durante o jogo:\n\n") + e.what() + "\n\nÚltimas linhas:\n" + recentLog(8));
+      a.engine.release();  // não desmonta: o app vai fechar pelo diálogo
     }
   }
   if (a.engine) a.engine->destroy();

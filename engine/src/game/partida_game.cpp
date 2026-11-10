@@ -74,11 +74,15 @@ void PartidaGame::init(Scene& s, renderer::Renderer& r, bool autoplay, bool rayT
     s.sunDirection = glm::normalize(glm::vec3(-30.0f, 40.0f, -25.0f));
     s.sunIlluminance = 1800.0f;
   }
+  LOG_INFO("Partida: carregando fontes do HUD");
   if (ui_.load()) r.setUiAtlas(ui_.atlas(), ui_.atlasSize(), ui_.atlasSize());
+  LOG_INFO("Partida: carregando os times");
   loadTeams();
   screen_ = Screen::Menu;
   screenTime_ = 0.0f;
+  LOG_INFO("Partida: preparando o pontapé inicial");
   startMatch(s);
+  LOG_INFO("Partida: pronta");
 }
 
 void PartidaGame::startMatch(Scene& s) {

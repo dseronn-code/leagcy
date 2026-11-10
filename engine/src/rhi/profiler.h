@@ -20,6 +20,8 @@ class GpuProfiler {
   void mark(VkCommandBuffer cmd, const char* name);
   // Médias por passe desde o último relatório (e zera o acumulado). Vazio se não houver amostras.
   std::string report();
+  // Diagnóstico de GPU travada: quais passes do slot já terminaram (timestamps disponíveis) e qual não.
+  std::string progress(uint32_t slot);
 
  private:
   Context* ctx_ = nullptr;

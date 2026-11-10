@@ -62,6 +62,25 @@ void GpuProfiler::mark(VkCommandBuffer cmd, const char* name) {
   names.push_back(name);
 }
 
+std::string GpuProfiler::progress(uint32_t slot) {
+  if (!enabled_ || slot >= names_.size()) return "(sem timestamps)";
+  const std::vector<const char*>& names = names_[slot];
+  std::string done, stuck;
+  for (size_t i = 1; i < names.size(); ++i) {
+    uint64_t v[2] = {0, 0};
+    VkResult r = vkGetQueryPoolResults(ctx_->device, pool_, slot * kMaxMarks + uint32_t(i), 1, sizeof(v), v, sizeof(v),
+                                       VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT);
+    if ((r == VK_SUCCESS || r == VK_NOT_READY) && v[1]) {
+      done = names[i];
+    } else {
+      stuck = names[i];
+      break;
+    }
+  }
+  return "último passe terminado: " + (done.empty() ? std::string("nenhum") : done) + "; travou antes de: " +
+         (stuck.empty() ? std::string("?") : stuck);
+}
+
 std::string GpuProfiler::report() {
   if (frames_ == 0) return {};
   double sum = 0.0;

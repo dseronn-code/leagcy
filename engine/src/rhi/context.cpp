@@ -395,7 +395,10 @@ void Context::immediateSubmit(const std::function<void(VkCommandBuffer)>& record
   si.commandBufferInfoCount = 1;
   si.pCommandBufferInfos = &cbi;
   VK_CHECK(vkQueueSubmit2(queue, 1, &si, uploadFence_));
-  VK_CHECK(vkWaitForFences(device, 1, &uploadFence_, VK_TRUE, UINT64_MAX));
+  // 10 s: GPU travada num envio imediato vira erro (no celular, tela preta sem fim).
+  const VkResult wr = vkWaitForFences(device, 1, &uploadFence_, VK_TRUE, 10'000'000'000ull);
+  if (wr == VK_TIMEOUT) FATAL("A GPU travou num envio imediato (upload/inicialização)");
+  VK_CHECK(wr);
   VK_CHECK(vkResetFences(device, 1, &uploadFence_));
   vkFreeCommandBuffers(device, uploadPool_, 1, &cmd);
 }
