@@ -15,6 +15,10 @@
 --       {t = 6, ragdoll = {"raposa", 0, 0, 60}},                 -- cai com um impulso
 --       {t = 7, chamar = function() abrir_portao() end},
 --     },
+--     objetos = {                                  -- faixas de objetos: posição e rotação (graus) por chave, mesma curva
+--       {nome = "porta", chaves = {{t = 0, pos = {0, 0, 0}, rot = {0, 0, 0}}, {t = 2, rot = {0, 90, 0}}}},
+--     },
+--     (eventos também: {t = 1, log = "texto"} e {t = 2, lua = "codigo em texto"} — os usados pelas linhas em JSON)
 --     duracao = 9,       -- padrão: a última chave ou evento
 --     barras = true,     -- tarjas pretas de cinema (entram e saem em 0,5 s)
 --     pular = true,      -- Enter ou A pulam para o fim
@@ -36,6 +40,9 @@ local function fim_da_cena(def)
   local d = def.duracao or 0
   for _, k in ipairs(def.camera or {}) do d = math.max(d, k.t) end
   for _, e in ipairs(def.eventos or {}) do d = math.max(d, e.t + (e.duracao or 0)) end
+  for _, o in ipairs(def.objetos or {}) do
+    for _, k in ipairs(o.chaves or {}) do d = math.max(d, k.t) end
+  end
   return d
 end
 
@@ -46,6 +53,13 @@ function sequencia.nova(def)
   s.eventos = {}
   for i, e in ipairs(def.eventos or {}) do s.eventos[i] = e end
   table.sort(s.eventos, function(a, b) return a.t < b.t end)
+  s.objetos = {}
+  for i, o in ipairs(def.objetos or {}) do
+    local ch = {}
+    for j, k in ipairs(o.chaves or {}) do ch[j] = k end
+    table.sort(ch, function(a, b) return a.t < b.t end)
+    s.objetos[i] = {nome = o.nome, chaves = ch}
+  end
   s.duracao = fim_da_cena(def)
   s.barras = def.barras ~= false
   s.pode_pular = def.pular ~= false
@@ -111,6 +125,11 @@ end
 local function executar(e, pulando)
   if e.chamar then
     e.chamar()
+  elseif e.log then
+    log("LINHA", e.log)
+  elseif e.lua then
+    local f, err = load(e.lua, "linha do tempo", "t", _ENV)
+    if f then f() else error(err) end
   elseif e.animar and not pulando then
     local ent = achar(e.animar[1])
     if ent then ent:animar(e.animar[2], e.animar[3] or 0.2, e.animar[4] or false) end
@@ -134,6 +153,7 @@ function Seq:tocar()
   self.ativa = true
   if self.travar then controle_jogador(false) end
   self:aplicar_camera()
+  self:aplicar_objetos()
 end
 
 function Seq:tocando() return self.ativa end
@@ -150,8 +170,23 @@ function Seq:aplicar_camera()
   end
 end
 
+-- Faixas de objetos no tempo atual (posição e rotação pela mesma curva da câmera).
+function Seq:aplicar_objetos()
+  for _, o in ipairs(self.objetos) do
+    local ent = achar(o.nome)
+    if ent and #o.chaves > 0 then
+      local p = curva(o.chaves, "pos", self.t, 3)
+      if p then ent:mover_para(p[1], p[2], p[3]) end
+      local r = curva(o.chaves, "rot", self.t, 3)
+      if r then ent:orientar(r[1], r[2], r[3]) end
+    end
+  end
+end
+
 function Seq:terminar()
   if not self.ativa then return end
+  self.t = math.max(self.t, self.duracao)
+  self:aplicar_objetos()  -- os objetos terminam exatamente na última chave
   self.ativa = false
   camera_jogo()
   if self.travar then controle_jogador(true) end
@@ -187,6 +222,7 @@ function Seq:atualizar(dt)
     return
   end
   self:aplicar_camera()
+  self:aplicar_objetos()
   -- Tarjas e legenda.
   if self.barras then
     local entra = math.min(self.t / 0.5, 1)

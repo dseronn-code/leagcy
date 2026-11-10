@@ -280,6 +280,25 @@ Testes do sequenciador (`tools/sequencia.py`, cena de 4 s com três chaves de c�
 | pular | Enter em 1 s: acaba, roda os `chamar` restantes, o jogador anda | acabou em 1,03 s; a, b, c chamados; andou 6,3 m |
 | tarjas | com janela: tarjas pretas e legenda | preto (0) em cima e embaixo; 315 pixels de legenda |
 
+### Linhas do tempo em JSON (no estilo do Sequencer)
+
+Sem código: `"linhas_do_tempo"` na cena define sequências com as mesmas faixas da biblioteca acima e mais
+**faixas de objetos** (posição `pos` e rotação `rot` em graus por chave, na mesma curva suave da câmera):
+
+```json
+"linhas_do_tempo": {
+  "abrir_portao": {"tocar_ao_iniciar": false, "barras": true,
+    "objetos": [{"nome": "portao", "chaves": [{"t": 0, "rot": [0, 0, 0]}, {"t": 2, "rot": [0, 90, 0]}]}],
+    "camera": [{"t": 0, "pos": [0, 2, 6], "alvo": [0, 1, 0]}, {"t": 2, "pos": [3, 2, 4], "alvo": ["portao"]}],
+    "eventos": [{"t": 0.5, "fala": "O portão abre..."}, {"t": 1.5, "som": ["portao.wav", 0, 1, 0]},
+                {"t": 2, "log": "aberto"}, {"t": 2, "lua": "codigo"}]}}
+```
+
+Qualquer script toca com `tocar_linha("abrir_portao")` (um script visual, pelo nó `lua`). Lua: `e:orientar(x, y, z)`
+(rotação absoluta) e `e:rotacao()`. Testes (`tools/linha.py`): a porta gira 0° → 45,0° no meio → 90,00° no fim; o
+elevador passa pela chave do meio (y = 1,000 em 1,5 s) e para em 3,000; eventos na hora certa contada do início da
+linha (1,5 e 2,5 s); a câmera da linha e a volta para a do jogo.
+
 ## Interface de jogo (HUD)
 
 Desenhada pelos scripts no `atualizar(e, dt)` de cada quadro, por cima da imagem (Dear ImGui, fonte vetorial

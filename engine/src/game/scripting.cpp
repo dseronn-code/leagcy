@@ -128,6 +128,12 @@ struct Scripting::Impl {
           if (h.valid() && h.world->registry.all_of<Transform>(h.e)) p = h.world->registry.get<Transform>(h.e).position;
           return std::make_tuple(p.x, p.y, p.z);
         },
+        "rotacao", [](const Entidade& h) {  // ângulos de Euler em graus (x, y, z), o inverso de orientar()
+          glm::vec3 a(0.0f);
+          if (h.valid() && h.world->registry.all_of<Transform>(h.e))
+            a = glm::degrees(glm::eulerAngles(h.world->registry.get<Transform>(h.e).rotation));
+          return std::make_tuple(a.x, a.y, a.z);
+        },
         "mover_para", [this](const Entidade& h, float x, float y, float z) {
           if (!h.valid() || !scene || !h.world->registry.all_of<Transform>(h.e)) return;
           h.world->setEntityPose(*scene, h.e, glm::vec3(x, y, z), h.world->registry.get<Transform>(h.e).rotation);
@@ -137,6 +143,11 @@ struct Scripting::Impl {
           const Transform& t = h.world->registry.get<Transform>(h.e);
           const glm::quat q = glm::quat(glm::radians(glm::vec3(xDeg, yDeg, zDeg))) * t.rotation;
           h.world->setEntityPose(*scene, h.e, t.position, q);
+        },
+        "orientar", [this](const Entidade& h, float xDeg, float yDeg, float zDeg) {  // rotação absoluta (graus)
+          if (!h.valid() || !scene || !h.world->registry.all_of<Transform>(h.e)) return;
+          h.world->setEntityPose(*scene, h.e, h.world->registry.get<Transform>(h.e).position,
+                                 glm::quat(glm::radians(glm::vec3(xDeg, yDeg, zDeg))));
         },
         "impulso", [](const Entidade& h, float x, float y, float z) {
           if (!h.valid()) return;
@@ -478,6 +489,9 @@ struct Scripting::Impl {
       r.push_back({st, sol::in_place, uint32_t(world.openWorld.cells.size())});
       return r;
     });
+    // Linhas do tempo da cena ("linhas_do_tempo"): qualquer script pede, a linha toca no quadro seguinte.
+    lua.set_function("tocar_linha", [this](const std::string& n) { world.timelineRequests.insert(n); });
+    lua.set_function("linha_pedida", [this](const std::string& n) { return world.timelineRequests.erase(n) > 0; });
     lua.set_function("altura_terreno", [this](float x, float z) { return world.terrainHeight(x, z); });
     lua.set_function("controle_jogador", [this](sol::optional<bool> on) {
       if (on) world.playerControl = *on;

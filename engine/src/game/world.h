@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <set>
 
 #include <nlohmann/json_fwd.hpp>
 #include <array>
@@ -403,6 +404,7 @@ class World {
     int mapW = 0, mapH = 0;
   } terrain;
   float terrainHeight(float x, float z) const;
+  std::set<std::string> timelineRequests;  // tocar_linha() pede, o script da linha (linha_pedida) atende
 
  private:
   void updateOpenWorld(scene::Scene& scene);

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <map>
 
 #include <stb_image.h>
@@ -685,6 +686,50 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         }
       LOG_INFO("Terreno: %.0f m de lado em %u ladrilhos de %.0f m (%u triângulos de perto)%s", span, tiles, T.tile, tris,
                T.mapW ? " pelo mapa de altura" : "");
+    }
+    // Linhas do tempo (no estilo do Sequencer): cada uma vira um script de sistema que monta a sequência (biblioteca
+    // scripts/lib/sequencia.lua) com as faixas do JSON e toca ao iniciar ("tocar_ao_iniciar") ou quando um script
+    // chama tocar_linha("nome").
+    if (doc.contains("linhas_do_tempo") && doc["linhas_do_tempo"].is_object()) {
+      std::function<std::string(const json&)> lua = [&](const json& v) -> std::string {
+        if (v.is_object()) {
+          std::string o = "{";
+          for (auto& [k, x] : v.items()) o += "[" + json(k).dump() + "] = " + lua(x) + ", ";
+          return o + "}";
+        }
+        if (v.is_array()) {
+          std::string o = "{";
+          for (const json& x : v) o += lua(x) + ", ";
+          return o + "}";
+        }
+        if (v.is_null()) return "nil";
+        return v.dump();  // número, booleano e texto (as aspas e escapes do JSON valem no Lua)
+      };
+      std::error_code ec;
+      const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "legacy_linhas_do_tempo";
+      std::filesystem::create_directories(dir, ec);
+      for (auto& [name, def] : doc["linhas_do_tempo"].items()) {
+        json d = def;
+        const bool autoplay = d.value("tocar_ao_iniciar", false);
+        d.erase("tocar_ao_iniciar");
+        const std::filesystem::path out =
+            dir / (std::to_string(std::hash<std::string>{}(path + "/" + name)) + ".lua");
+        std::ofstream(out, std::ios::binary)
+            << "-- Linha do tempo \"" << name << "\" (gerada da cena; não edite)\n"
+            << "incluir(\"lib/sequencia.lua\")\n"
+            << "local s = sequencia.nova(" << lua(d) << ")\n"
+            << "s.ao_terminar = function() log(\"LINHA\", \"fim " << name << "\") end\n"
+            << "function iniciar(e)" << (autoplay ? " s:tocar()" : "") << " end\n"
+            << "function atualizar(e, dt)\n  if linha_pedida(" << json(name).dump() << ") then s:tocar() end\n"
+            << "  s:atualizar(dt)\nend\n";
+        const entt::entity ent = registry.create();
+        registry.emplace<Name>(ent, "_linha_" + name);
+        registry.emplace<SystemEntity>(ent);
+        registry.emplace<Script>(ent, out.string());
+        LOG_INFO("Linha do tempo %s: %zu faixas de objetos, %zu chaves de câmera, %zu eventos", name.c_str(),
+                 d.value("objetos", json::array()).size(), d.value("camera", json::array()).size(),
+                 d.value("eventos", json::array()).size());
+      }
     }
     // Menu de pausa (Esc / Start): o padrão do motor, outro script ("menu": "caminho.lua") ou nenhum ("menu": false).
     // Roda numa entidade de sistema (sem forma, fora do arquivo salvo e do editor).
