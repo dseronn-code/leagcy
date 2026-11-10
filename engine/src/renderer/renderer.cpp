@@ -525,6 +525,13 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   VkDescriptorSetLayout g = globalLayout_;
   const bool rt = ctx.rayTracing;
   skinningPass_.init(ctx, "skinning.comp", g, {}, sizeof(SkinningPush));
+  if (!skinningPass_.ok()) {  // sem skinning na GPU: os personagens ficam na pose de repouso, mas o jogo abre
+    auto& errs = ctx.pipelineErrors;
+    errs.erase(std::remove_if(errs.begin(), errs.end(), [](const std::string& e) { return e.rfind("skinning", 0) == 0; }),
+               errs.end());
+    LOG_WARN("Skinning na GPU indisponível: personagens sem animação");
+    skinningFailed = true;
+  }
   clothPass_.init(ctx, "cloth.comp", g, {}, 112);
   hairSimPass_.init(ctx, "hair_sim.comp", g, {}, 56);
   skyLutPass_.init(ctx, "skyview.comp", g, {SI});

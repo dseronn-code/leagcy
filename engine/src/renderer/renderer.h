@@ -300,6 +300,9 @@ class Renderer {
   rhi::ComputePass skinningPass_, aerialPerspectivePass_, radianceCacheResolvePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
   bool restirOff_ = false, reservoirsCleared_ = false;
+ public:
+  bool skinningFailed = false;  // o driver recusou skinning.comp (personagens na pose de repouso)
+ private:
   uint32_t sceneFeatures_ = 0xFFFFFFFFu;  // constante SCENE_FEATURES dos passes de luz
   rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_, rrGuidesPass_, accumulatePass_;
   rhi::ComputePass histogramPass_, exposurePass_, dofPass_, motionBlurPass_, bloomDownPass_, bloomUpPass_;

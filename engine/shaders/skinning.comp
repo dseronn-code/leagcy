@@ -1,17 +1,16 @@
 #version 460
 // Skinning na GPU (linear blend skinning): deforma a malha de repouso pelas matrizes das juntas.
 // A saída alimenta o G-buffer e o refit da BLAS — sombras e reflexos seguem a animação.
+// Escrito no mesmo padrão do cloth.comp (o compilador do Adreno 740 recusou as versões com structs, mat4,
+// índices dinâmicos de vetor e "readonly" em buffer_reference): só arrays de vec4/float, sem qualificadores.
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_buffer_reference_uvec2 : require
 #extension GL_EXT_scalar_block_layout : require
 
 layout(local_size_x = 64) in;
 
-layout(buffer_reference, std430) readonly buffer RestVertices { float v[]; };  // 12 floats por vértice
-layout(buffer_reference, std430) buffer OutVertices { float v[]; };
-struct SkinVertex { uvec4 joints; vec4 weights; };
-layout(buffer_reference, std430) readonly buffer SkinData { SkinVertex s[]; };
-layout(buffer_reference, std430) readonly buffer Joints { vec4 c[]; };  // mat4 por junta, 4 colunas
+layout(buffer_reference, scalar) buffer Floats { float v[]; };  // vértices: 12 floats cada (scene::Vertex)
+layout(buffer_reference, scalar) buffer Vec4s { vec4 c[]; };    // skin: (juntas uint, pesos) | juntas: mat4 em colunas
 
 layout(push_constant) uniform Push {
   uvec2 rest;
@@ -23,33 +22,31 @@ layout(push_constant) uniform Push {
 
 void main() {
   uint i = gl_GlobalInvocationID.x;
-  if (i >= pc.vertexCount) return;
-  RestVertices rv = RestVertices(pc.rest);
-  OutVertices ov = OutVertices(pc.out_);
-  SkinVertex sv = SkinData(pc.skin).s[i];
-  Joints J = Joints(pc.joints);
-  // Colunas lidas como vec4 (evita mat4 vindo de buffer_reference, que o Adreno 740 recusou).
-  mat4 M = mat4(0.0);
-  for (int k = 0; k < 4; ++k) {
-    uint j = sv.joints[k] * 4u;
-    float w = sv.weights[k];
-    M[0] += J.c[j] * w;
-    M[1] += J.c[j + 1u] * w;
-    M[2] += J.c[j + 2u] * w;
-    M[3] += J.c[j + 3u] * w;
+  if (i < pc.vertexCount) {
+    Floats rv = Floats(pc.rest);
+    Floats ov = Floats(pc.out_);
+    Vec4s skin = Vec4s(pc.skin);
+    Vec4s J = Vec4s(pc.joints);
+    uvec4 jt = floatBitsToUint(skin.c[i * 2u]) * 4u;
+    vec4 wt = skin.c[i * 2u + 1u];
+
+    vec4 c0 = J.c[jt.x] * wt.x + J.c[jt.y] * wt.y + J.c[jt.z] * wt.z + J.c[jt.w] * wt.w;
+    vec4 c1 = J.c[jt.x + 1u] * wt.x + J.c[jt.y + 1u] * wt.y + J.c[jt.z + 1u] * wt.z + J.c[jt.w + 1u] * wt.w;
+    vec4 c2 = J.c[jt.x + 2u] * wt.x + J.c[jt.y + 2u] * wt.y + J.c[jt.z + 2u] * wt.z + J.c[jt.w + 2u] * wt.w;
+    vec4 c3 = J.c[jt.x + 3u] * wt.x + J.c[jt.y + 3u] * wt.y + J.c[jt.z + 3u] * wt.z + J.c[jt.w + 3u] * wt.w;
+
+    uint b = i * 12u;
+    vec3 p = vec3(rv.v[b], rv.v[b + 1u], rv.v[b + 2u]);
+    vec3 n = vec3(rv.v[b + 3u], rv.v[b + 4u], rv.v[b + 5u]);
+    vec4 t = vec4(rv.v[b + 8u], rv.v[b + 9u], rv.v[b + 10u], rv.v[b + 11u]);
+    vec3 pw = (c0 * p.x + c1 * p.y + c2 * p.z + c3).xyz;
+    // juntas sem escala não uniforme: a parte 3x3 serve para normal e tangente
+    vec3 nw = normalize(c0.xyz * n.x + c1.xyz * n.y + c2.xyz * n.z);
+    vec3 tw = normalize(c0.xyz * t.x + c1.xyz * t.y + c2.xyz * t.z);
+
+    ov.v[b] = pw.x; ov.v[b + 1u] = pw.y; ov.v[b + 2u] = pw.z;
+    ov.v[b + 3u] = nw.x; ov.v[b + 4u] = nw.y; ov.v[b + 5u] = nw.z;
+    ov.v[b + 6u] = rv.v[b + 6u]; ov.v[b + 7u] = rv.v[b + 7u];
+    ov.v[b + 8u] = tw.x; ov.v[b + 9u] = tw.y; ov.v[b + 10u] = tw.z; ov.v[b + 11u] = t.w;
   }
-
-  uint b = i * 12u;
-  vec3 p = vec3(rv.v[b], rv.v[b + 1u], rv.v[b + 2u]);
-  vec3 n = vec3(rv.v[b + 3u], rv.v[b + 4u], rv.v[b + 5u]);
-  vec4 t = vec4(rv.v[b + 8u], rv.v[b + 9u], rv.v[b + 10u], rv.v[b + 11u]);
-  p = (M * vec4(p, 1.0)).xyz;
-  mat3 N = mat3(M);  // juntas sem escala não uniforme
-  n = normalize(N * n);
-  t.xyz = normalize(N * t.xyz);
-
-  ov.v[b] = p.x; ov.v[b + 1u] = p.y; ov.v[b + 2u] = p.z;
-  ov.v[b + 3u] = n.x; ov.v[b + 4u] = n.y; ov.v[b + 5u] = n.z;
-  ov.v[b + 6u] = rv.v[b + 6u]; ov.v[b + 7u] = rv.v[b + 7u];
-  ov.v[b + 8u] = t.x; ov.v[b + 9u] = t.y; ov.v[b + 10u] = t.z; ov.v[b + 11u] = t.w;
 }
