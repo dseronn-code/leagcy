@@ -39,8 +39,8 @@ def imagem(png):
 def teste_sponza(b, pasta):
     gi = os.path.join(pasta, 'sponza.gi')
     _, log = rodar(b, pasta, 'assar', ['--sondas-gi', gi, '--assar-gi'], quadros=5)
-    rt, _ = rodar(b, pasta, 'rt', [])
-    sem, _ = rodar(b, pasta, 'sem', ['--no-rt'])
+    rt, _ = rodar(b, pasta, 'rt', ['--sem-sondas-gi'])
+    sem, _ = rodar(b, pasta, 'sem', ['--no-rt', '--sem-sondas-gi'])
     com, _ = rodar(b, pasta, 'com', ['--no-rt', '--sondas-gi', gi])
     ref = imagem(rt)
     e_sem, e_com = abs(imagem(sem) - ref).mean(), abs(imagem(com) - ref).mean()
@@ -73,7 +73,7 @@ def teste_parede(b, pasta):
     rodar(b, pasta, 'sala_assar', ['--sondas-gi', gi, '--assar-gi', '--gi-espacamento', '0.5', '--exposure', '12'],
           quadros=5, cena=arq)
     rt, _ = rodar(b, pasta, 'sala_rt', ['--exposure', '12'], cena=arq)
-    sem, _ = rodar(b, pasta, 'sala_sem', ['--no-rt', '--exposure', '12'], cena=arq)
+    sem, _ = rodar(b, pasta, 'sala_sem', ['--no-rt', '--sem-sondas-gi', '--exposure', '12'], cena=arq)
     com, _ = rodar(b, pasta, 'sala_com', ['--no-rt', '--sondas-gi', gi, '--exposure', '12'], cena=arq)
     l_rt, l_sem, l_com = imagem(rt).mean(), imagem(sem).mean(), imagem(com).mean()
     ok = l_com < 0.25 * l_sem and l_com < l_rt + 8

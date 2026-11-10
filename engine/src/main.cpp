@@ -201,6 +201,7 @@ struct Options {
 };
 
 Options parseArgs(int argc, char** argv) {
+  bool noGiProbes = false;
   Options o;
   bool noFireflyClamp = false;
   int sppOverride = 0, candOverride = 0, neighOverride = -1;  // medição: substituem o preset (--spp, --restir-*)
@@ -313,6 +314,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--shadow-maps") o.render.shadowMaps = true;
     else if (a == "--sondas-gi") o.render.giProbes = next();
     else if (a == "--assar-gi") o.render.giRebake = true;
+    else if (a == "--sem-sondas-gi") noGiProbes = true;  // nem o arquivo automático (comparações)
     else if (a == "--gi-espacamento") o.render.giSpacing = float(std::atof(next()));
     else if (a == "--gi-raios") o.render.giRays = uint32_t(std::max(1, std::atoi(next())));
     else if (a == "--gi-rebotes") o.render.giBounces = uint32_t(std::max(1, std::atoi(next())));
@@ -445,7 +447,7 @@ Options parseArgs(int argc, char** argv) {
   if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;
   // Sondas de GI sem --sondas-gi: ao lado do arquivo da cena (cena.json.gi) ou, nas cenas de demonstração, em
   // texcache/ (uma por cena e por dia/noite). Usadas se existirem; --assar-gi grava nesse lugar.
-  if (o.render.giProbes.empty()) {
+  if (o.render.giProbes.empty() && !noGiProbes) {
     const std::string& n = o.scene.name;
     const bool file = n.find('.') != std::string::npos || n.find('/') != std::string::npos || n.find('\\') != std::string::npos;
     const std::string path = file ? n + ".gi" : "texcache/gi_" + n + (o.scene.night ? "_noite" : "") + ".gi";

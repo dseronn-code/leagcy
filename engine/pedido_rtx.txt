@@ -1,11 +1,7 @@
-# Rodada 22 (10/11): fase 4 (ferramentas) — script visual + editor de grafos, materiais por nós, linhas do tempo em
-# JSON e pincel de terreno (os testes "editor" abrem a janela do editor por alguns segundos). E as regressões.
-python tools\visual.py --bin build\Release\legacy.exe
-python tools\materiais.py --bin build\Release\legacy.exe
-python tools\linha.py --bin build\Release\legacy.exe
-python tools\terreno.py --bin build\Release\legacy.exe
-python tools\sequencia.py --bin build\Release\legacy.exe
-python tools\fisica.py --bin build\Release\legacy.exe
-python tools\jogo.py --bin build\Release\legacy.exe
-python tools\mundo.py --bin build\Release\legacy.exe
+# Rodada 22b: a 22 passou toda a fase 4 (visual 5/5, materiais 6/6, linha 3/3, terreno 5/5 com o editor). sondas/sponza
+# falhou porque o arquivo automático texcache/gi_sponza.gi (gravado na 21) entrava também no caso "sem sondas": agora
+# --sem-sondas-gi. E a fase 5: ragdoll ativo e retargeting.
 python tools\sondas.py --bin build\Release\legacy.exe
+python tools\ragdoll.py --bin build\Release\legacy.exe
+python tools\retarget.py --bin build\Release\legacy.exe
+python tools\rede.py --bin build\Release\legacy.exe
