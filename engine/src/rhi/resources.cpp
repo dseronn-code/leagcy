@@ -6,6 +6,8 @@
 namespace rhi {
 
 Buffer createBuffer(Context& ctx, VkDeviceSize size, VkBufferUsageFlags usage, MemoryUsage mem) {
+  // Vulkan proíbe buffer de tamanho 0 (uma cena sem nenhum item de alguma lista, por exemplo); 16 bytes vazios.
+  if (size == 0) size = 16;
   Buffer b;
   b.size = size;
   VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};

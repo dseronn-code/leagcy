@@ -1,14 +1,5 @@
-# Rodada 32: os presets novos (Médio = 60 q/s no Bistro). Tempo de cada preset, qualidade parada contra a referência,
-# estabilidade em movimento (DLSS-RR, Sponza à noite andando) e o jogo de demonstração (preset Alto pela cena).
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality baixo
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality alto
-build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --camera-path caminhos\sponza_nave.txt
-build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality medio"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality baixo"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality alto"
-python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos dlss-rr --extra="--quality medio"
-python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos dlss-rr --extra="--quality alto"
-build\Release\legacy.exe --scene cenas\vale\vale.json --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync
-python tools\demo.py --bin build\Release\legacy.exe
+# Rodada 33 (parte 3): primeira Times Square (gerada por tools/times_square.py), à noite com chuva, preset Médio.
+# Três pontos de vista na praça e o tempo por quadro.
+build\Release\legacy.exe --scene cenas\times_square\times_square.gltf --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --night --rain 0.8 --quality medio --cam 18,1.7,170 --look 0,25,-120 --screenshot resultados_pc\ts_sul.png
+build\Release\legacy.exe --scene cenas\times_square\times_square.gltf --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --night --rain 0.8 --quality medio --cam -12,1.7,-60 --look 20,20,200 --screenshot resultados_pc\ts_norte.png
+build\Release\legacy.exe --scene cenas\times_square\times_square.gltf --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --night --rain 0.8 --quality medio --cam 6,30,260 --look -10,15,-100 --screenshot resultados_pc\ts_alto.png
