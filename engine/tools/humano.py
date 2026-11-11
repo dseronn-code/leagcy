@@ -229,6 +229,94 @@ class Body:
         return v[ranges(self.groups, cube)].mean(axis=0)
 
 
+def catmull_clark(pos, faces, weights, keep=None):
+    """Uma subdivisão Catmull-Clark (polígonos -> quadriláteros, superfície lisa). faces: (índices de vértice, de UV).
+    UV e pesos do esqueleto seguem a subdivisão linear (média da face, meio da aresta), o que basta para eles.
+    Devolve posições, UVs novas (dicionário índice -> uv é refeito pelo chamador), faces e pesos."""
+    faces = [f for f in faces if keep is None or all(x in keep for x in f[0])]
+    nv = len(pos)
+    edge_faces = {}
+    for fi, (vi, _) in enumerate(faces):
+        for k in range(len(vi)):
+            e = tuple(sorted((vi[k], vi[(k + 1) % len(vi)])))
+            edge_faces.setdefault(e, []).append(fi)
+    fp = np.array([pos[vi].mean(axis=0) for vi, _ in faces])
+    edges = list(edge_faces)
+    eidx = {e: nv + len(faces) + i for i, e in enumerate(edges)}
+    ep = np.empty((len(edges), 3))
+    for i, e in enumerate(edges):
+        fs = edge_faces[e]
+        if len(fs) == 2:
+            ep[i] = (pos[e[0]] + pos[e[1]] + fp[fs[0]] + fp[fs[1]]) / 4.0
+        else:
+            ep[i] = (pos[e[0]] + pos[e[1]]) / 2.0
+    # vértices originais: (F + 2R + (n-3)P) / n no interior; borda: média com as arestas de borda
+    vf = [[] for _ in range(nv)]
+    ve = [[] for _ in range(nv)]
+    for fi, (vi, _) in enumerate(faces):
+        for x in vi:
+            vf[x].append(fi)
+    for e in edges:
+        ve[e[0]].append(e)
+        ve[e[1]].append(e)
+    newv = pos.copy()
+    for x in range(nv):
+        if not vf[x]:
+            continue
+        border = [e for e in ve[x] if len(edge_faces[e]) == 1]
+        if border:
+            mids = [(pos[e[0]] + pos[e[1]]) / 2.0 for e in border[:2]]
+            newv[x] = 0.75 * pos[x] + 0.25 * (sum(mids) / len(mids))
+            continue
+        n = len(vf[x])
+        F = fp[vf[x]].mean(axis=0)
+        R = np.mean([(pos[e[0]] + pos[e[1]]) / 2.0 for e in ve[x]], axis=0)
+        newv[x] = (F + 2 * R + (n - 3) * pos[x]) / n
+    P = np.concatenate([newv, fp, ep])
+    # pesos: originais; face = média; aresta = média dos dois
+    def avg(rows):
+        d = {}
+        for r in rows:
+            for j, w in r.items():
+                d[j] = d.get(j, 0.0) + w / len(rows)
+        return d
+    W = list(weights[:nv]) + [avg([weights[x] for x in vi]) for vi, _ in faces] + \
+        [avg([weights[e[0]], weights[e[1]]]) for e in edges]
+    return P, faces, edges, eidx, W
+
+
+def subdivide_piece(pos, uv, faces, weights, keep=None):
+    """Catmull-Clark numa peça com UV por canto de face: devolve (posições, uvs, faces (vi, ti), pesos)."""
+    P, faces, edges, eidx, W = catmull_clark(pos, faces, weights, keep)
+    nv = len(pos)
+    uvs = [tuple(t) for t in uv]
+    uv_index = {u: i for i, u in enumerate(uvs)}
+
+    def uv_id(t):
+        t = (round(float(t[0]), 6), round(float(t[1]), 6))
+        if t not in uv_index:
+            uv_index[t] = len(uvs)
+            uvs.append(t)
+        return uv_index[t]
+    out = []
+    for fi, (vi, ti) in enumerate(faces):
+        m = len(vi)
+        has_uv = all(t >= 0 for t in ti)
+        cuv = [uv[t] for t in ti] if has_uv else None
+        fuv = uv_id(np.mean(cuv, axis=0)) if has_uv else -1
+        for k in range(m):
+            a, b, c = vi[(k - 1) % m], vi[k], vi[(k + 1) % m]
+            e_prev = eidx[tuple(sorted((a, b)))]
+            e_next = eidx[tuple(sorted((b, c)))]
+            if has_uv:
+                ua, ub, uc = cuv[(k - 1) % m], cuv[k], cuv[(k + 1) % m]
+                tis = [uv_id(ub), uv_id((ub + uc) / 2.0), fuv, uv_id((ua + ub) / 2.0)]
+            else:
+                tis = [-1, -1, -1, -1]
+            out.append(([b, e_next, nv + fi, e_prev], tis))
+    return P, np.array(uvs, np.float64), out, W
+
+
 def triangulate(faces, keep=None):
     tris = []
     for vi, ti in faces:
@@ -339,7 +427,7 @@ def build(args):
     info.update(perfil.get('macros', {}))
     male = info['gender'] >= 0.5
     details = {}
-    for neg, pos in detail_pairs(data):
+    for neg, pos in ([] if args.sem_detalhes else detail_pairs(data)):
         if rng.random() < 0.6:
             x = max(-1.0, min(1.0, rng.gauss(0.0, 0.35)))
             details[pos if x > 0 else neg] = abs(x)
@@ -438,7 +526,7 @@ def build(args):
                                      'WEIGHTS_0': g.accessor(W, 'VEC4', 5126, 34962)},
                       'indices': g.accessor(tri.reshape(-1), 'SCALAR', 5125, 34963), 'material': mat})
 
-    def mat_from(mhmat_path, name, alpha=False, extras=None, rough=0.6, clearcoat=None):
+    def mat_from(mhmat_path, name, alpha=False, extras=None, rough=0.6, clearcoat=None, cutoff=0.35):
         mm = parse_mhmat(mhmat_path)
         folder = os.path.dirname(mhmat_path)
         m = {'name': name, 'pbrMetallicRoughness': {'metallicFactor': 0.0, 'roughnessFactor': rough}}
@@ -450,8 +538,11 @@ def build(args):
             m['normalTexture'] = {'index': g.texture(n)}
         if alpha:
             m['alphaMode'] = 'MASK'
-            m['alphaCutoff'] = 0.35
+            m['alphaCutoff'] = cutoff
             m['doubleSided'] = True
+        elif mm.get('transparent', 'False') == 'True':  # ex.: a córnea do olho (alfa 0 por cima da íris)
+            m['alphaMode'] = 'MASK'
+            m['alphaCutoff'] = 0.5
         if extras:
             m['extras'] = extras
         if clearcoat:
@@ -485,7 +576,7 @@ def build(args):
     hidden = set()
     assets_dir = lambda *p: os.path.join(assets, *p)
 
-    def piece(kind, name, alpha=False, extras=None, rough=0.6, clearcoat=None, mat_override=None):
+    def piece(kind, name, alpha=False, extras=None, rough=0.6, clearcoat=None, mat_override=None, cutoff=0.35):
         folder = assets_dir(kind, name)
         cl = [f for f in os.listdir(folder) if f.endswith('.mhclo')] if os.path.isdir(folder) else []
         if not cl:
@@ -493,8 +584,10 @@ def build(args):
         hdr, pos, pw, dele = fit(os.path.join(folder, cl[0]))
         pv, puv, pf = load_obj(os.path.join(folder, hdr.get('obj_file', name + '.obj')))
         mpath = mat_override or os.path.join(folder, hdr.get('material', name + '.mhmat'))
-        mat = mat_from(mpath, f'{kind}:{name}', alpha, extras, rough, clearcoat)
+        mat = mat_from(mpath, f'{kind}:{name}', alpha, extras, rough, clearcoat, cutoff)
         hidden.update(dele)
+        if args.subdividir and kind in ('clothes',):
+            pos, puv, pf, pw = subdivide_piece(pos, puv, pf, pw)
         pieces.append((pos, puv, triangulate(pf), pw, mat))
 
     skins = sorted(os.listdir(assets_dir('skins')))
@@ -512,9 +605,9 @@ def build(args):
     eye_mat = os.path.join(assets_dir('eyes', 'materials'), (eye + '.mhmat') if eye else choose(rng, eye_mats))
     piece('eyes', 'high-poly', rough=0.1, clearcoat=0.02, mat_override=eye_mat)
     piece('eyebrows', perfil.get('sobrancelha', choose(rng, sorted(os.listdir(assets_dir('eyebrows'))))), alpha=True,
-          rough=0.7)
+          rough=0.7, cutoff=0.55)
     piece('eyelashes', perfil.get('cilios', choose(rng, sorted(os.listdir(assets_dir('eyelashes'))))), alpha=True,
-          rough=0.7)
+          rough=0.7, cutoff=0.7)
     hairs = sorted(os.listdir(assets_dir('hair')))
     male_hair = [h for h in hairs if h.startswith('short') or h == 'afro01']
     hair = perfil.get('cabelo', choose(rng, male_hair if male else hairs))
@@ -527,7 +620,11 @@ def build(args):
 
     # --- corpo (sem os vértices de ajuda e sem o que a roupa cobre)
     keep = body.body_verts - hidden
-    add_prim(v, body.vt, triangulate(body.faces, keep), vw, skin_mat)
+    if args.subdividir:  # corpo liso (4x os polígonos): o contorno deixa de ser facetado
+        bv, buv, bf, bw = subdivide_piece(v, body.vt, body.faces, vw, keep)
+        add_prim(bv, buv, triangulate(bf), bw, skin_mat)
+    else:
+        add_prim(v, body.vt, triangulate(body.faces, keep), vw, skin_mat)
     for pos, puv, tris, pw, mat in pieces:
         add_prim(pos, puv, tris, pw, mat)
 
@@ -566,6 +663,8 @@ def main():
     ap.add_argument('--semente', type=int, default=1)
     ap.add_argument('--perfil')
     ap.add_argument('--tex-max', type=int, default=0, help='reduz as texturas a no máximo N px (multidão)')
+    ap.add_argument('--subdividir', action='store_true', help='Catmull-Clark no corpo e na roupa (protagonista)')
+    ap.add_argument('--sem-detalhes', action='store_true', help='sem os alvos de rosto sorteados (teste)')
     a = ap.parse_args()
     os.makedirs(os.path.dirname(os.path.abspath(a.saida)), exist_ok=True)
     info = build(a)

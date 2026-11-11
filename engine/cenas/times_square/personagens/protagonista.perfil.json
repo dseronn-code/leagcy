@@ -1,4 +1,24 @@
-{"macros": {"gender": 1.0, "age": 0.56, "muscle": 0.68, "weight": 0.47, "proportions": 0.85, "height": 0.62,
-            "race": {"african": 0.25, "asian": 0.15, "caucasian": 0.6}},
- "pele": "young_caucasian_male", "cabelo": "short02", "sobrancelha": "eyebrow002", "olhos": "brown",
- "roupa": ["male_casualsuit05", "shoes02"]}
+{
+ "macros": {
+  "gender": 1.0,
+  "age": 0.56,
+  "muscle": 0.68,
+  "weight": 0.47,
+  "proportions": 0.85,
+  "height": 0.62,
+  "race": {
+   "african": 0.25,
+   "asian": 0.15,
+   "caucasian": 0.6
+  }
+ },
+ "pele": "young_caucasian_male",
+ "cabelo": "short04",
+ "sobrancelha": "eyebrow001",
+ "olhos": "brown",
+ "roupa": [
+  "male_casualsuit05",
+  "shoes02"
+ ],
+ "cilios": "eyelashes01"
+}
