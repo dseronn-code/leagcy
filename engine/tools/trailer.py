@@ -32,6 +32,9 @@ TOMADAS = {
     'multidao': (7, ['--scene', 'crowd'], 'multidao.txt', 0.0),
     'bistro_noite': (8, ['--scene', BISTRO, '--night'], None, 1.0),
     'vfx': (6, ['--scene', 'vfx'], 'vfx.txt', 0.0),
+    # Parte 3: caminhada pela Times Square (cenas/times_square, tools/times_square.py), à noite, com chuva.
+    'times_square': (30, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain',
+                          '0.8', '--fog', '0.004'], 'times_square.txt', 0.0),
 }
 
 
