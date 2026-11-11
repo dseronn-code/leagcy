@@ -518,6 +518,18 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             const json mapa = rj.value("mapa", json::object());  // cópia: items() de um temporário apontaria para nada
             for (auto& [a, b] : mapa.items()) v.retargetMap.push_back({a, b.get<std::string>()});
           }
+          if (vj.contains("cabelo_fios")) {  // fios simulados numa calota presa ao osso da cabeça
+            const json& hj = vj["cabelo_fios"];
+            v.hairBone = hj.value("osso", "head");
+            v.hairStrands = std::clamp(hj.value("fios", 16000u), 100u, 200000u);
+            v.hairSegments = std::clamp(hj.value("segmentos", 12u), 2u, 32u);
+            v.hairSeed = hj.value("semente", 3u);
+            v.hairLength = hj.value("comprimento", v.hairLength);
+            v.hairHalfWidth = hj.value("espessura", v.hairHalfWidth);
+            v.hairCenter = vec3Of(hj.value("centro", json()), v.hairCenter);
+            v.hairRadius = vec3Of(hj.value("raio", json()), v.hairRadius);
+            v.hairColor = vec3Of(hj.value("cor", json()), v.hairColor);
+          }
         }
         shape.type = ShapeType::Capsule;
         shape.radius = c.desc.radius;
@@ -634,6 +646,20 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               if (scene::loadGltf(scene, v.path, glm::mat4(1.0f), &model) && model >= 0) {
                 v.model = model;
                 if (!v.retargetFrom.empty()) retargetCharacter(scene, model, v);
+                if (v.hairStrands > 0) {
+                  v.hairNode = scene.models[size_t(model)].findNode(v.hairBone);
+                  if (v.hairNode < 0) {
+                    LOG_WARN("Personagem %s: osso \"%s\" do cabelo não existe", name.c_str(), v.hairBone.c_str());
+                  } else {
+                    scene::Material hm;
+                    hm.baseColor = glm::vec4(v.hairColor, 1.0f);
+                    hm.roughness = 0.35f;
+                    hm.flags = scene::kMaterialHair | scene::kMaterialDoubleSided;
+                    v.hairObject = int(scene.addObject(
+                        scene.addMesh(scene::makeHair(v.hairStrands, v.hairSegments, 1.0f, v.hairLength, v.hairHalfWidth, v.hairSeed)),
+                        glm::mat4(1.0f), scene.addMaterial(hm)));
+                  }
+                }
                 scene::Model& sm = scene.models[size_t(model)];
                 v.idleA = sm.findAnimation(v.idle);
                 v.walkA = sm.findAnimation(v.walk);
@@ -658,6 +684,13 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
                   placeVisual(sm, v, feet);
                 }
                 scene.poseModel(model);
+                if (v.hairObject >= 0 && v.hairNode >= 0 && size_t(v.hairNode) < sm.nodeWorld.size()) {
+                  // Já na cabeça desde o início: criado na origem, o salto no primeiro quadro viraria um tranco enorme
+                  // na simulação dos fios.
+                  scene.setTransform(uint32_t(v.hairObject), sm.nodeWorld[size_t(v.hairNode)] *
+                                                                 glm::translate(glm::mat4(1.0f), v.hairCenter) *
+                                                                 glm::scale(glm::mat4(1.0f), v.hairRadius));
+                }
                 registry.emplace<Character>(ent, ch);
               } else {
                 LOG_WARN("Personagem %s: não carreguei o modelo %s; fica a cápsula", name.c_str(), v.path.c_str());
@@ -1436,6 +1469,10 @@ void World::ragdollBlendStep(scene::Scene& scene, Character& c, float dt) {
 void World::animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt) {
   CharacterVisual& v = c.visual;
   scene::Model& m = scene.models[size_t(v.model)];
+  // Cabelo por fios: a calota segue o osso da cabeça (pose do quadro anterior; a simulação dos fios cuida da inércia).
+  if (v.hairObject >= 0 && v.hairNode >= 0 && size_t(v.hairNode) < m.nodeWorld.size())
+    scene.setTransform(uint32_t(v.hairObject), m.nodeWorld[size_t(v.hairNode)] * glm::translate(glm::mat4(1.0f), v.hairCenter) *
+                                                   glm::scale(glm::mat4(1.0f), v.hairRadius));
   // No cliente de rede a física não roda: a velocidade vem das poses recebidas e o personagem conta como no chão
   // enquanto não sobe nem desce rápido.
   const glm::vec3 vel = netClient ? c.netVelocity : physics->characterVelocity(c.id);

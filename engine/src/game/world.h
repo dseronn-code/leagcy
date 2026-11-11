@@ -111,6 +111,12 @@ struct CharacterVisual {
   // destino) ou pelos nomes iguais tirando os prefixos de cada lado.
   std::string retargetFrom, retargetSrcPrefix, retargetDstPrefix;
   std::vector<std::pair<std::string, std::string>> retargetMap;
+  // Cabelo por fios ("cabelo_fios"): calota de fios simulados presa a um osso (a cabeça), no lugar das cartelas.
+  std::string hairBone;
+  uint32_t hairStrands = 0, hairSegments = 12, hairSeed = 3;
+  float hairLength = 0.6f, hairHalfWidth = 0.0011f;
+  glm::vec3 hairCenter{0.0f}, hairRadius{0.1f}, hairColor{0.08f, 0.06f, 0.05f};
+  int hairNode = -1, hairObject = -1;
   // Estado.
   int model = -1, idleA = -1, walkA = -1, runA = -1;
   float speed = 0.0f, yaw = 0.0f, phase = 0.0f, idleTime = 0.0f;
