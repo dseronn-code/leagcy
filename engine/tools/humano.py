@@ -383,10 +383,25 @@ def build(args):
     def tex_uri(src):
         if not src or not os.path.exists(src):
             return None
-        dst = os.path.join(texdir, os.path.basename(src))
+        name = os.path.basename(src)
+        if not args.tex_max:
+            dst = os.path.join(texdir, name)
+            if not os.path.exists(dst):
+                shutil.copyfile(src, dst)
+            return 'tex/' + name
+        # Multidão: textura reduzida (no máximo tex_max px); sem transparência vira JPEG (~10x menor).
+        from PIL import Image
+        im = Image.open(src)
+        alpha = im.mode in ('RGBA', 'LA') and im.getchannel('A').getextrema()[0] < 250
+        name = os.path.splitext(name)[0] + ('.png' if alpha else '.jpg')
+        dst = os.path.join(texdir, name)
         if not os.path.exists(dst):
-            shutil.copyfile(src, dst)
-        return 'tex/' + os.path.basename(src)
+            im = im.convert('RGBA' if alpha else 'RGB')
+            if max(im.size) > args.tex_max:
+                k = args.tex_max / max(im.size)
+                im = im.resize((max(1, int(im.width * k)), max(1, int(im.height * k))), Image.LANCZOS)
+            im.save(dst, quality=88) if not alpha else im.save(dst)
+        return 'tex/' + name
 
     prims = []
 
@@ -550,6 +565,7 @@ def main():
     ap.add_argument('--saida', required=True)
     ap.add_argument('--semente', type=int, default=1)
     ap.add_argument('--perfil')
+    ap.add_argument('--tex-max', type=int, default=0, help='reduz as texturas a no máximo N px (multidão)')
     a = ap.parse_args()
     os.makedirs(os.path.dirname(os.path.abspath(a.saida)), exist_ok=True)
     info = build(a)

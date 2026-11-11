@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <cmath>
 #include <fstream>
+#include <random>
 #include <functional>
 #include <cstring>
 #include <map>
@@ -614,6 +615,96 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             }
             ++created;
           }
+    }
+    // Multidão: várias pessoas (glTF com esqueleto, ex.: tools/humano.py), cada uma com a animação de andar copiada
+    // de outro esqueleto (retargeting) e "assada" em poses (Scene::bakeCrowdClip: sem skinning por pessoa); os
+    // agentes andam nos dois sentidos por faixas (segmentos com largura), cada um com pessoa, velocidade, fase e
+    // tamanho sorteados.
+    //   "multidao": {"pessoas": ["a.gltf", ...], "animacoes": "anim.gltf", "clipe": "andar", "mapa": {...},
+    //                "poses": 24, "quantidade": 600, "altura": 0.15, "girar_graus": 0, "semente": 1,
+    //                "velocidade": [1.1, 1.6], "faixas": [{"de": [x, z], "ate": [x, z], "largura": 4}, ...]}
+    if (doc.contains("multidao") && doc["multidao"].is_object()) {
+      const json& mj = doc["multidao"];
+      auto path = [&](std::string f) {
+        if (!f.empty() && !std::ifstream(f) && std::ifstream(sceneDir + f)) f = sceneDir + f;
+        return f;
+      };
+      int src = -1;
+      const std::string animFile = path(mj.value("animacoes", ""));
+      if (!scene::loadGltf(scene, animFile, glm::mat4(1.0f), &src) || src < 0) {
+        LOG_WARN("Multidão: não carreguei as animações %s", animFile.c_str());
+      } else {
+        scene.models[size_t(src)].animation = -1;
+        std::vector<std::pair<std::string, std::string>> map;
+        const json mapJson = mj.value("mapa", json::object());  // cópia: items() de um temporário fica pendurado
+        for (auto& [a, b] : mapJson.items()) map.push_back({a, b.get<std::string>()});
+        const std::string clipName = mj.value("clipe", "andar");
+        const uint32_t poses = std::clamp(mj.value("poses", 24), 4, 128);
+        std::vector<uint32_t> clips;
+        const json people = mj.value("pessoas", json::array());
+        for (const json& pf : people) {
+          int model = -1;
+          const std::string file = path(pf.get<std::string>());
+          if (!scene::loadGltf(scene, file, glm::mat4(1.0f), &model) || model < 0) {
+            LOG_WARN("Multidão: não carreguei %s", file.c_str());
+            continue;
+          }
+          scene::Model& m = scene.models[size_t(model)];
+          int a = -1;
+          for (size_t k = 0; k < scene.models[size_t(src)].animations.size(); ++k)
+            if (scene.models[size_t(src)].animations[k].name == clipName)
+              a = scene::retargetAnimation(m, scene.models[size_t(src)], int(k), map, clipName);
+          if (a < 0) {
+            LOG_WARN("Multidão: sem o clipe \"%s\" para %s", clipName.c_str(), file.c_str());
+            continue;
+          }
+          m.animation = a;
+          clips.push_back(scene.bakeCrowdClip(model, poses));
+          m.root = glm::translate(glm::mat4(1.0f), {0.0f, -1000.0f, 0.0f});  // o original fica escondido
+        }
+        struct Lane { glm::vec2 a, b; float width, length; };
+        std::vector<Lane> lanes;
+        float total = 0.0f;
+        const json lanesJson = mj.value("faixas", json::array());
+        for (const json& fj : lanesJson) {
+          Lane l{{fj["de"][0].get<float>(), fj["de"][1].get<float>()}, {fj["ate"][0].get<float>(), fj["ate"][1].get<float>()},
+                 fj.value("largura", 3.0f), 0.0f};
+          l.length = glm::length(l.b - l.a);
+          if (l.length > 1.0f) {
+            lanes.push_back(l);
+            total += l.length;
+          }
+        }
+        if (!clips.empty() && !lanes.empty()) {
+          std::mt19937 rng(mj.value("semente", 1u));
+          std::uniform_real_distribution<float> u(0.0f, 1.0f);
+          const json vel = mj.value("velocidade", json::array({1.1, 1.6}));
+          const float vmin = vel[0].get<float>(), vmax = vel[1].get<float>();
+          const float y = mj.value("altura", 0.0f), yaw0 = glm::radians(mj.value("girar_graus", 0.0f));
+          const int count = std::max(0, mj.value("quantidade", 300));
+          for (int i = 0; i < count; ++i) {
+            float pick = u(rng) * total;  // faixa sorteada pelo comprimento (gente espalhada por igual)
+            size_t li = 0;
+            while (li + 1 < lanes.size() && pick > lanes[li].length) pick -= lanes[li++].length;
+            const Lane L = lanes[li];
+            const float dir = u(rng) < 0.5f ? 1.0f : -1.0f, side = (u(rng) - 0.5f) * L.width;
+            const float speed = vmin + (vmax - vmin) * u(rng), s0 = u(rng) * L.length, scale = 0.94f + 0.12f * u(rng);
+            const uint32_t clip = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
+            const uint32_t agent = scene.addCrowdAgent(clip, glm::mat4(1.0f), 4.0f * u(rng));
+            const glm::vec2 d = (L.b - L.a) / L.length, n(-d.y, d.x);
+            scene.addAnimator([=](scene::Scene& sc, float t, float) {
+              const float s = std::fmod(s0 + speed * t, L.length);
+              const glm::vec2 p = (dir > 0.0f ? L.a + d * s : L.b - d * s) + n * side;
+              const glm::vec2 f = d * dir;
+              glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
+              m = glm::rotate(m, std::atan2(f.x, f.y) + yaw0, glm::vec3(0, 1, 0));
+              sc.setTransform(agent, glm::scale(m, glm::vec3(scale)));
+            });
+          }
+          LOG_INFO("Multidão: %d pessoas (%zu modelos, %u poses cada) em %zu faixas", count, clips.size(), poses,
+                   lanes.size());
+        }
+      }
     }
     // Terreno de quilômetros: ladrilhos de "ladrilho" metros (o padrão é a célula do mundo aberto), cada um uma
     // entidade parada com a malha detalhada e colisão; no mundo aberto, também a malha simples de longe.

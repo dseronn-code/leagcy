@@ -1,30 +1,396 @@
 // Times Square à noite, com chuva (parte 3). A cidade sai de tools/times_square.py; o protagonista, de
 // tools/humano.py (MakeHuman, CC0); as animações, do 100STYLE (CC BY 4.0, Mason et al. 2022) por tools/mocap.py.
 {
-  "qualidade": "medio",
-  "noite": true,
-  "chuva": 0.8,
-  "nevoa": 0.004,
-  "camera": {"posicao": [14, 2.6, 160], "alvo": [10, 2.0, 140], "fov": 60},
-  "menu": false,
-  "entidades": [
-    {"nome": "cidade", "modelo": "times_square/times_square.gltf", "fisica": {"tipo": "estatico", "colisao": "malha"}},
-    {"nome": "jogador", "posicao": [14, 0.4, 150],
-     "personagem": {"altura": 1.8, "raio": 0.3, "velocidade": 1.6, "velocidade_correndo": 4.2, "pulo": 4.0,
-                    "controle": "jogador",
-                    "visual": {"modelo": "times_square/personagens/protagonista.gltf", "parado": "parado",
-                               "andar": "andar", "correr": "correr", "velocidade_andar": 1.4,
-                               "velocidade_correr": 3.6, "girar_graus": 0,
-                               "retarget": {"de": "times_square/personagens/animacoes.gltf",
-                                            "mapa": {"Hips": "pelvis", "Chest": "spine_01", "Chest2": "spine_02",
-                                                     "Chest3": "spine_03", "Neck": "neck_01", "Head": "head",
-                                                     "RightCollar": "clavicle_r", "RightShoulder": "upperarm_r",
-                                                     "RightElbow": "lowerarm_r", "RightWrist": "hand_r",
-                                                     "LeftCollar": "clavicle_l", "LeftShoulder": "upperarm_l",
-                                                     "LeftElbow": "lowerarm_l", "LeftWrist": "hand_l",
-                                                     "RightHip": "thigh_r", "RightKnee": "calf_r",
-                                                     "RightAnkle": "foot_r", "RightToe": "ball_r",
-                                                     "LeftHip": "thigh_l", "LeftKnee": "calf_l",
-                                                     "LeftAnkle": "foot_l", "LeftToe": "ball_l"}}}}}
+ "qualidade": "medio",
+ "noite": true,
+ "chuva": 0.8,
+ "nevoa": 0.004,
+ "camera": {
+  "posicao": [
+   14,
+   2.6,
+   160
+  ],
+  "alvo": [
+   10,
+   2.0,
+   140
+  ],
+  "fov": 60
+ },
+ "menu": false,
+ "entidades": [
+  {
+   "nome": "cidade",
+   "modelo": "times_square/times_square.gltf",
+   "fisica": {
+    "tipo": "estatico",
+    "colisao": "malha"
+   }
+  },
+  {
+   "nome": "jogador",
+   "posicao": [
+    14,
+    0.4,
+    150
+   ],
+   "personagem": {
+    "altura": 1.8,
+    "raio": 0.3,
+    "velocidade": 1.6,
+    "velocidade_correndo": 4.2,
+    "pulo": 4.0,
+    "controle": "jogador",
+    "visual": {
+     "modelo": "times_square/personagens/protagonista.gltf",
+     "parado": "parado",
+     "andar": "andar",
+     "correr": "correr",
+     "velocidade_andar": 1.4,
+     "velocidade_correr": 3.6,
+     "girar_graus": 0,
+     "retarget": {
+      "de": "times_square/personagens/animacoes.gltf",
+      "mapa": {
+       "Hips": "pelvis",
+       "Chest": "spine_01",
+       "Chest2": "spine_02",
+       "Chest3": "spine_03",
+       "Neck": "neck_01",
+       "Head": "head",
+       "RightCollar": "clavicle_r",
+       "RightShoulder": "upperarm_r",
+       "RightElbow": "lowerarm_r",
+       "RightWrist": "hand_r",
+       "LeftCollar": "clavicle_l",
+       "LeftShoulder": "upperarm_l",
+       "LeftElbow": "lowerarm_l",
+       "LeftWrist": "hand_l",
+       "RightHip": "thigh_r",
+       "RightKnee": "calf_r",
+       "RightAnkle": "foot_r",
+       "RightToe": "ball_r",
+       "LeftHip": "thigh_l",
+       "LeftKnee": "calf_l",
+       "LeftAnkle": "foot_l",
+       "LeftToe": "ball_l"
+      }
+     }
+    }
+   }
+  }
+ ],
+ "multidao": {
+  "pessoas": [
+   "times_square/pessoas/p101.gltf",
+   "times_square/pessoas/p102.gltf",
+   "times_square/pessoas/p103.gltf",
+   "times_square/pessoas/p104.gltf",
+   "times_square/pessoas/p105.gltf",
+   "times_square/pessoas/p106.gltf",
+   "times_square/pessoas/p107.gltf",
+   "times_square/pessoas/p108.gltf",
+   "times_square/pessoas/p109.gltf",
+   "times_square/pessoas/p110.gltf",
+   "times_square/pessoas/p111.gltf",
+   "times_square/pessoas/p112.gltf",
+   "times_square/pessoas/p113.gltf",
+   "times_square/pessoas/p114.gltf",
+   "times_square/pessoas/p115.gltf",
+   "times_square/pessoas/p116.gltf",
+   "times_square/pessoas/p117.gltf",
+   "times_square/pessoas/p118.gltf",
+   "times_square/pessoas/p119.gltf",
+   "times_square/pessoas/p120.gltf",
+   "times_square/pessoas/p121.gltf",
+   "times_square/pessoas/p122.gltf",
+   "times_square/pessoas/p123.gltf",
+   "times_square/pessoas/p124.gltf",
+   "times_square/pessoas/p125.gltf",
+   "times_square/pessoas/p126.gltf",
+   "times_square/pessoas/p127.gltf",
+   "times_square/pessoas/p128.gltf",
+   "times_square/pessoas/p129.gltf",
+   "times_square/pessoas/p130.gltf",
+   "times_square/pessoas/p131.gltf",
+   "times_square/pessoas/p132.gltf",
+   "times_square/pessoas/p133.gltf",
+   "times_square/pessoas/p134.gltf",
+   "times_square/pessoas/p135.gltf",
+   "times_square/pessoas/p136.gltf",
+   "times_square/pessoas/p137.gltf",
+   "times_square/pessoas/p138.gltf",
+   "times_square/pessoas/p139.gltf",
+   "times_square/pessoas/p140.gltf"
+  ],
+  "animacoes": "times_square/personagens/animacoes.gltf",
+  "clipe": "andar",
+  "mapa": {
+   "Hips": "pelvis",
+   "Chest": "spine_01",
+   "Chest2": "spine_02",
+   "Chest3": "spine_03",
+   "Neck": "neck_01",
+   "Head": "head",
+   "RightCollar": "clavicle_r",
+   "RightShoulder": "upperarm_r",
+   "RightElbow": "lowerarm_r",
+   "RightWrist": "hand_r",
+   "LeftCollar": "clavicle_l",
+   "LeftShoulder": "upperarm_l",
+   "LeftElbow": "lowerarm_l",
+   "LeftWrist": "hand_l",
+   "RightHip": "thigh_r",
+   "RightKnee": "calf_r",
+   "RightAnkle": "foot_r",
+   "RightToe": "ball_r",
+   "LeftHip": "thigh_l",
+   "LeftKnee": "calf_l",
+   "LeftAnkle": "foot_l",
+   "LeftToe": "ball_l"
+  },
+  "poses": 24,
+  "quantidade": 800,
+  "altura": 0.15,
+  "girar_graus": 0,
+  "semente": 7,
+  "velocidade": [
+   1.15,
+   1.55
+  ],
+  "faixas": [
+   {
+    "de": [
+     19.36,
+     228
+    ],
+    "ate": [
+     -26.0,
+     -150
+    ],
+    "largura": 6
+   },
+   {
+    "de": [
+     27.36,
+     228
+    ],
+    "ate": [
+     -18.0,
+     -150
+    ],
+    "largura": 6
+   },
+   {
+    "de": [
+     35.36,
+     228
+    ],
+    "ate": [
+     -10.0,
+     -150
+    ],
+    "largura": 6
+   },
+   {
+    "de": [
+     -12.2,
+     300
+    ],
+    "ate": [
+     -12.2,
+     -300
+    ],
+    "largura": 4
+   },
+   {
+    "de": [
+     12.2,
+     300
+    ],
+    "ate": [
+     12.2,
+     -300
+    ],
+    "largura": 4
+   },
+   {
+    "de": [
+     -150,
+     313.0
+    ],
+    "ate": [
+     160,
+     313.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     327.0
+    ],
+    "ate": [
+     160,
+     327.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     228.0
+    ],
+    "ate": [
+     160,
+     228.0
+    ],
+    "largura": 4.199999999999999
+   },
+   {
+    "de": [
+     -150,
+     252.0
+    ],
+    "ate": [
+     160,
+     252.0
+    ],
+    "largura": 4.199999999999999
+   },
+   {
+    "de": [
+     -150,
+     153.0
+    ],
+    "ate": [
+     160,
+     153.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     167.0
+    ],
+    "ate": [
+     160,
+     167.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     73.0
+    ],
+    "ate": [
+     160,
+     73.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     87.0
+    ],
+    "ate": [
+     160,
+     87.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     -7.0
+    ],
+    "ate": [
+     160,
+     -7.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     7.0
+    ],
+    "ate": [
+     160,
+     7.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     -87.0
+    ],
+    "ate": [
+     160,
+     -87.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     -73.0
+    ],
+    "ate": [
+     160,
+     -73.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     -167.0
+    ],
+    "ate": [
+     160,
+     -167.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     -153.0
+    ],
+    "ate": [
+     160,
+     -153.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     -247.0
+    ],
+    "ate": [
+     160,
+     -247.0
+    ],
+    "largura": 2.8
+   },
+   {
+    "de": [
+     -150,
+     -233.0
+    ],
+    "ate": [
+     160,
+     -233.0
+    ],
+    "largura": 2.8
+   }
   ]
+ }
 }
