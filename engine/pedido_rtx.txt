@@ -1,7 +1,6 @@
-# Rodada 33 (parte 3): Times Square com fachadas em geometria, à noite com chuva.
-# 1) O vídeo de 30 s andando pela praça em 1080p, modo cinema (sai em resultados_pc\trailer\times_square.mp4).
-python tools\trailer.py --so times_square
-# 2) Tempo por quadro no preset Médio, em três pontos de vista.
-build\Release\legacy.exe --scene cenas\times_square\times_square.gltf --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --night --rain 0.8 --fog 0.004 --quality medio --cam 16,1.6,130 --look 2,16,-120 --screenshot resultados_pc\ts_praca.png
-build\Release\legacy.exe --scene cenas\times_square\times_square.gltf --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --night --rain 0.8 --fog 0.004 --quality medio --cam -12,1.7,-60 --look 20,20,200 --screenshot resultados_pc\ts_norte.png
-build\Release\legacy.exe --scene cenas\times_square\times_square.gltf --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --night --rain 0.8 --fog 0.004 --quality medio --cam 6,30,260 --look -10,15,-100 --screenshot resultados_pc\ts_alto.png
+# Rodada 33 (parte 3): Times Square com fachadas em geometria, telões animados, mobiliário de rua, vapor nos bueiros
+# e a multidão de 2.000 pessoas, à noite com chuva.
+# 1) Os vídeos em 1080p no modo cinema (resultados_pc\trailer\*.mp4).
+python tools\trailer.py --so times_square,times_square_multidao
+# 2) Tempo por quadro da cena jogável (preset Médio, pedido pela cena).
+build\Release\legacy.exe --scene cenas\times_square.json --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --screenshot resultados_pc\ts_jogo.png

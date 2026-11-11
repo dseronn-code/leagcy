@@ -35,6 +35,8 @@ TOMADAS = {
     # Parte 3: caminhada pela Times Square (cenas/times_square, tools/times_square.py), à noite, com chuva.
     'times_square': (30, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain',
                           '0.8', '--fog', '0.004'], 'times_square.txt', 0.0),
+    # A cena jogável com a multidão (cenas/times_square.json: clima, 2.000 pessoas, vapor nos bueiros).
+    'times_square_multidao': (15, ['--scene', os.path.join('cenas', 'times_square.json')], 'times_square_multidao.txt', 0.0),
 }
 
 
