@@ -678,6 +678,11 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             total += l.length;
           }
         }
+        // Obstáculos ([x, z, raio], ex.: bancas, bancos, entradas do metrô): a pessoa contorna pela lateral.
+        std::vector<glm::vec3> obstacles;
+        const json obsJson = mj.value("obstaculos", json::array());
+        for (const json& o : obsJson)
+          if (o.is_array() && o.size() >= 3) obstacles.push_back({o[0].get<float>(), o[1].get<float>(), o[2].get<float>()});
         if (!clips.empty() && !lanes.empty()) {
           std::mt19937 rng(mj.value("semente", 1u));
           std::uniform_real_distribution<float> u(0.0f, 1.0f);
@@ -721,7 +726,15 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             const glm::vec2 d = (L.b - L.a) / L.length, n(-d.y, d.x);
             scene.addAnimator([=](scene::Scene& sc, float t, float) {
               const float s = std::fmod(s0 + speed * t, L.length);
-              const glm::vec2 p = (dir > 0.0f ? L.a + d * s : L.b - d * s) + n * side;
+              glm::vec2 p = (dir > 0.0f ? L.a + d * s : L.b - d * s) + n * side;
+              for (const glm::vec3& o : obstacles) {  // dentro do raio: empurra para o lado mais perto, pela normal
+                const glm::vec2 c(o.x, o.y), r = p - c;
+                const float dist = glm::length(r);
+                if (dist < o.z) {
+                  const float across = glm::dot(r, n);
+                  p += n * ((across >= 0.0f ? 1.0f : -1.0f) * o.z - across) * (1.0f - dist / o.z * 0.3f);
+                }
+              }
               const glm::vec2 f = d * dir;
               glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
               m = glm::rotate(m, std::atan2(f.x, f.y) + yaw0, glm::vec3(0, 1, 0));

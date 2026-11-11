@@ -942,6 +942,7 @@ def build(out, seed):
                                  'granito', 'globo', 'banco', 'planta', 'banca', 'banca_luz', 'bueiro')}
     pr = props
     steam_points = []
+    obstacles = []  # (x, z, raio): a multidão desvia (cenas/times_square.json, "obstaculos")
     for n in range(41, 49):
         z, w = street_z(n), street_width(n)
         for ax in (AVE_X['7th'], BWAY_K * z):
@@ -951,6 +952,7 @@ def build(out, seed):
                     if abs(ax) < 1e-6 and abs(BWAY_K * z) < 25 and sx < 0:
                         continue
                     pr['escuro'].cylinder((px, pz), 0.11, 0.15, 5.2)
+                    obstacles.append((px, pz, 0.6))
                     arm_dir = -sx
                     pr['escuro'].box((px + arm_dir * 3.2, 5.0, pz), (3.2, 0.08, 0.08))
                     hx = px + arm_dir * 5.8
@@ -986,10 +988,12 @@ def build(out, seed):
         for side in (-1, 1):
             if rng.random() < 0.6:
                 pr['banco'].box((xc + side * 7.5, 0.6, zc), (0.35, 0.05, 1.8), rot=math.atan(BWAY_K))
+                obstacles.append((xc + side * 7.5, zc, 2.1))
                 pr['granito'].box((xc + side * 7.5, 0.37, zc), (0.3, 0.22, 1.7), rot=math.atan(BWAY_K))
             else:
                 pr['granito'].box((xc + side * 7.0, 0.55, zc), (0.9, 0.4, 0.9))
                 pr['planta'].sphere((xc + side * 7.0, 1.25, zc), 0.8, 10)
+                obstacles.append((xc + side * 7.0, zc, 1.4))
     # Entradas de metrô (escada com grade e os dois globos verdes acesos) e bancas de jornal.
     for (x, z) in ((-21.0, street_z(42) + 9), (24.0, street_z(42) - 9), (-21.0, street_z(45) + 9), (21.0, street_z(47) - 9)):
         for sx in (-1, 1):
@@ -998,10 +1002,12 @@ def build(out, seed):
             pr['globo'].sphere((x + sx * 1.3, 2.6, z + 2.6), 0.2, 10)
             g.light((x + sx * 1.3, 2.6, z + 2.6), (0.3, 1.0, 0.45), 60.0, 12.0)
         pr['escuro'].box((x, 0.65, z - 2.6), (1.3, 0.5, 0.04))
+        obstacles.append((x, z, 3.2))
     for (x, z) in ((16.5, street_z(43) - 14), (-17.0, street_z(46) + 20), (-17.5, street_z(44) - 25)):
         pr['banca'].box((x, 1.4, z), (1.2, 1.25, 2.2))
         pr['banca'].box((x + 0.3, 2.8, z), (1.6, 0.06, 2.5))
         pr['banca_luz'].box((x + 1.21, 1.6, z), (0.01, 0.6, 1.9))
+        obstacles.append((x, z, 2.8))
     for key, mat in (('aco', steel), ('escuro', dark), ('semaforo', yellow), ('vermelho', red_l), ('verde', green_l),
                      ('pedestre', walk_l), ('hidrante', hydrant), ('lixeira', bin_mat), ('granito', granite_d),
                      ('globo', globe), ('banco', wood), ('planta', plant), ('banca', stand), ('banca_luz', stand_l),
@@ -1009,6 +1015,8 @@ def build(out, seed):
         g.add_mesh('rua_' + key, props[key], mat)
     with open(os.path.join(out, 'vapor.json'), 'w') as f:
         json.dump(steam_points, f)
+    with open(os.path.join(out, 'obstaculos.json'), 'w') as f:
+        json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles], f)
 
     # Postes: luz de rua (sódio/LED quente) a cada ~30 m nas calçadas; KHR_lights_punctual.
     pole = g.material('poste', color=(0.08, 0.09, 0.1), rough=0.4, metal=1.0)
@@ -1050,7 +1058,8 @@ def main():
         os.makedirs(a.saida, exist_ok=True)
         subprocess.run([a.gltfpack, '-i', os.path.join(tmp, 'times_square.gltf'), '-o',
                         os.path.join(a.saida, 'times_square.gltf'), '-cc', '-kn', '-km', '-ke'], check=True)
-        shutil.copyfile(os.path.join(tmp, 'vapor.json'), os.path.join(a.saida, 'vapor.json'))
+        for extra in ('vapor.json', 'obstaculos.json'):
+            shutil.copyfile(os.path.join(tmp, extra), os.path.join(a.saida, extra))
         # O gltfpack copia as texturas para o lado do .gltf (e aponta para lá): a pasta tex/ antiga sobra.
         shutil.rmtree(os.path.join(a.saida, 'tex'), ignore_errors=True)
 
