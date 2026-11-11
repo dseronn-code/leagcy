@@ -48,6 +48,7 @@ struct Quality {
   bool glossySpecCache = false;  // rugosidade >= 0,3: especular indireto do cache
   bool indirectOpaque = false;   // raios de GI e de reflexo sem teste de alfa
   bool hitMirrorCache = false;   // espelho visto por qualquer raio: cache (sem reflexo de reflexo)
+  bool giTiles = false;          // giHalf/giQuarter sorteados por bloco de 8x4 pixels (warp inteiro)
 };
 
 enum class QualityPreset { Low, Medium, High, Ultra, Cinema };

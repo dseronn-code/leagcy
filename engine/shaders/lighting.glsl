@@ -636,7 +636,10 @@ void main() {
     // Q_GI_HALF: o raio sai em metade dos pixels (sorteio independente por pixel, amostra e frame) com
     // peso 2 — mesma média, metade do custo, mais ruído para o denoiser.
     const bool giQuarter = qualityHas(Q_GI_QUARTER), giHalf = qualityHas(Q_GI_HALF) && !giQuarter;
-    const uint giRoll = pcg3d(uvec3(uvec2(id), frame.frameInfo.x * spp + k)).x;
+    // Sorteio por pixel: o warp (8x4 pixels) quase sempre tem algum pixel com raio e espera por ele — a economia some
+    // (medido no Bistro: 1/4 dos pixels custou quase o mesmo que 1/2). Por bloco de 8x4, o warp inteiro traça ou não.
+    const uvec2 giCell = qualityHas(Q_GI_TILES) ? uvec2(id) / uvec2(8u, 4u) : uvec2(id);
+    const uint giRoll = pcg3d(uvec3(giCell, frame.frameInfo.x * spp + k)).x;
     const bool giTake = giQuarter ? (giRoll & 3u) == 0u : (!giHalf || (giRoll & 1u) != 0u);
     const float giWeight = giQuarter ? 4.0 : giHalf ? 2.0 : 1.0;
     if (qualityHas(Q_INDIRECT_OPAQUE)) gRayFlagsExtra = gl_RayFlagsOpaqueEXT;

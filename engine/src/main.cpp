@@ -341,7 +341,7 @@ Options parseArgs(int argc, char** argv) {
                                                         {"diag-taa-antigo", 65536u},
                                                         {"diag-taa-karis", 131072u}, {"diag-taa-bilinear", 262144u},
                                                         {"gi-quarto", 8192u}, {"especular-brilho", 524288u}, {"indireto-opaco", 1048576u},
-                                                        {"reflexo-duplo-cache", 2097152u}};
+                                                        {"reflexo-duplo-cache", 2097152u}, {"gi-blocos", 4194304u}};
       for (auto& [n, b] : kinds)
         if (v.find(std::string(",") + n + ",") != std::string::npos) o.render.perfSkipMask |= b;
     }
@@ -451,7 +451,8 @@ Options parseArgs(int argc, char** argv) {
     if (m & 524288u) q.glossySpecCache = true;
     if (m & 1048576u) q.indirectOpaque = true;
     if (m & 2097152u) q.hitMirrorCache = true;
-    m &= ~(128u | 512u | 1024u | 2048u | 4096u | 8192u | 524288u | 1048576u | 2097152u);
+    if (m & 4194304u) q.giTiles = true;
+    m &= ~(128u | 512u | 1024u | 2048u | 4096u | 8192u | 524288u | 1048576u | 2097152u | 4194304u);
   }
   // Medição: sem o limite de "vagalumes" (o caminho ingênuo sem amostrar luzes perde energia nele).
   if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;
