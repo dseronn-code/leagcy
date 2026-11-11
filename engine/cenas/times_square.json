@@ -1,0 +1,30 @@
+// Times Square à noite, com chuva (parte 3). A cidade sai de tools/times_square.py; o protagonista, de
+// tools/humano.py (MakeHuman, CC0); as animações, do 100STYLE (CC BY 4.0, Mason et al. 2022) por tools/mocap.py.
+{
+  "qualidade": "medio",
+  "noite": true,
+  "chuva": 0.8,
+  "nevoa": 0.004,
+  "camera": {"posicao": [14, 2.6, 160], "alvo": [10, 2.0, 140], "fov": 60},
+  "menu": false,
+  "entidades": [
+    {"nome": "cidade", "modelo": "times_square/times_square.gltf", "fisica": {"tipo": "estatico", "colisao": "malha"}},
+    {"nome": "jogador", "posicao": [14, 0.4, 150],
+     "personagem": {"altura": 1.8, "raio": 0.3, "velocidade": 1.6, "velocidade_correndo": 4.2, "pulo": 4.0,
+                    "controle": "jogador",
+                    "visual": {"modelo": "times_square/personagens/protagonista.gltf", "parado": "parado",
+                               "andar": "andar", "correr": "correr", "velocidade_andar": 1.4,
+                               "velocidade_correr": 3.6, "girar_graus": 0,
+                               "retarget": {"de": "times_square/personagens/animacoes.gltf",
+                                            "mapa": {"Hips": "pelvis", "Chest": "spine_01", "Chest2": "spine_02",
+                                                     "Chest3": "spine_03", "Neck": "neck_01", "Head": "head",
+                                                     "RightCollar": "clavicle_r", "RightShoulder": "upperarm_r",
+                                                     "RightElbow": "lowerarm_r", "RightWrist": "hand_r",
+                                                     "LeftCollar": "clavicle_l", "LeftShoulder": "upperarm_l",
+                                                     "LeftElbow": "lowerarm_l", "LeftWrist": "hand_l",
+                                                     "RightHip": "thigh_r", "RightKnee": "calf_r",
+                                                     "RightAnkle": "foot_r", "RightToe": "ball_r",
+                                                     "LeftHip": "thigh_l", "LeftKnee": "calf_l",
+                                                     "LeftAnkle": "foot_l", "LeftToe": "ball_l"}}}}}
+  ]
+}

@@ -173,7 +173,40 @@ def convert(args):
     print(f'{args.saida}: {len(joints)} ossos, {len(times)} quadros, {times[-1]:.2f} s')
 
 
+def merge(out, inputs):
+    """Junta as animações de vários glTF do mesmo esqueleto (saídas deste script) num só arquivo."""
+    docs = [(json.load(open(i)), open(os.path.join(os.path.dirname(os.path.abspath(i)),
+                                                   json.load(open(i))['buffers'][0]['uri']), 'rb').read()) for i in inputs]
+    base, binall = docs[0][0], bytearray()
+    res = {k: base[k] for k in ('asset', 'nodes', 'scenes', 'scene')}
+    res.update({'buffers': [], 'bufferViews': [], 'accessors': [], 'animations': []})
+    for doc, data in docs:
+        while len(binall) % 4:
+            binall.append(0)
+        off, v0, a0 = len(binall), len(res['bufferViews']), len(res['accessors'])
+        binall.extend(data)
+        for bv in doc['bufferViews']:
+            res['bufferViews'].append(dict(bv, byteOffset=bv['byteOffset'] + off))
+        for ac in doc['accessors']:
+            res['accessors'].append(dict(ac, bufferView=ac['bufferView'] + v0))
+        for an in doc['animations']:
+            res['animations'].append({'name': an['name'], 'channels': an['channels'],
+                                      'samplers': [dict(s, input=s['input'] + a0, output=s['output'] + a0)
+                                                   for s in an['samplers']]})
+    b = os.path.splitext(os.path.basename(out))[0] + '.bin'
+    res['buffers'] = [{'uri': b, 'byteLength': len(binall)}]
+    with open(os.path.join(os.path.dirname(os.path.abspath(out)), b), 'wb') as f:
+        f.write(binall)
+    with open(out, 'w') as f:
+        json.dump(res, f, separators=(',', ':'))
+    print(f'{out}: {[a["name"] for a in res["animations"]]}')
+
+
 def main():
+    import sys
+    if len(sys.argv) > 2 and sys.argv[1] == '--juntar':  # mocap.py --juntar saida.gltf a.gltf b.gltf ...
+        merge(sys.argv[2], sys.argv[3:])
+        return
     ap = argparse.ArgumentParser()
     ap.add_argument('entrada')
     ap.add_argument('saida')
