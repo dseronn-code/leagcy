@@ -19,6 +19,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -251,6 +252,21 @@ struct Loader {
         m.alphaCutoff = 0.5f;
       }
       if (m.flags & kMaterialAlphaMask) scene.setTextureAlphaCutoff(m.baseColorTex, m.alphaCutoff);
+      // Extras do motor (tools/humano.py): "legacy_pele": [r, g, b] = raio do espalhamento subsuperficial em metros;
+      // "legacy_olho": 1 = olho com córnea; "legacy_cabelo": 1 = fios (BSDF de cabelo).
+      if (src.extras.data) {
+        const char* x = src.extras.data;
+        if (const char* k = std::strstr(x, "\"legacy_pele\"")) {
+          glm::vec3 r(0.0f);
+          if (std::sscanf(std::strchr(k, '[') ? std::strchr(k, '[') : k, "[%f , %f , %f", &r.x, &r.y, &r.z) == 3) {
+            m.flags |= kMaterialSubsurface;
+            m.subsurfaceRadius = r;
+          }
+        }
+        if (std::strstr(x, "\"legacy_olho\"")) m.flags |= kMaterialEye | kMaterialClearcoat, m.clearcoat = 1.0f,
+                                                   m.clearcoatRoughness = 0.02f;
+        if (std::strstr(x, "\"legacy_cabelo\"")) m.flags |= kMaterialHair;
+      }
       // Recorte por alfa + dois lados: folhas, galhos, cortinas — balançam com o vento.
       if ((m.flags & kMaterialAlphaMask) && (m.flags & kMaterialDoubleSided)) m.flags |= kMaterialFoliage;
       materialMap.push_back(scene.addMaterial(m));
