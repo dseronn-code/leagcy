@@ -272,10 +272,10 @@ Vec3 carrierDecision(Match& m, int pi) {
   const Vec3 a = toAttack(m, t, p.pos);
   const float pressure = pressureOn(m, pi);
   // chute
-  if (d < 30.0f && std::fabs(a.z) < 22.0f) {
+  if (d < 32.0f && std::fabs(a.z) < 24.0f) {
     const float open = clampf(laneSafety(m, t, p.pos, goal) / 2.0f, 0.0f, 1.0f);
     const float xg = 0.42f / (1.0f + (d / 10.0f) * (d / 10.0f)) * (0.4f + 0.6f * open);
-    if (xg > 0.014f + 0.02f * m.rng.uniform() || d < 16.0f) {
+    if (xg > 0.012f + 0.018f * m.rng.uniform() || d < 18.0f) {
       const float side = (a.z >= 0.0f ? -1.0f : 1.0f);  // canto oposto
       shoot(m, pi, side * (2.2f + m.rng.uniform() * 1.0f), 0.5f + m.rng.uniform() * 1.3f, 0.55f + 0.4f * m.rng.uniform());
       return {};
@@ -309,7 +309,7 @@ Vec3 carrierDecision(Match& m, int pi) {
     if (rel.x > -1.0f && std::fabs(rel.z) < 4.0f + rel.x * 0.4f) space = std::min(space, length(flat(rel)));
   }
   float dribbleScore = clampf(space, 0.0f, 12.0f) * 0.32f + p.attr.dribbling * 1.5f - pressure * 2.5f +
-                       (a.x > 30.0f ? 1.0f : 0.0f);
+                       (a.x > 30.0f ? 1.0f : 0.0f) + (a.x > 15.0f ? 1.5f : 0.0f);  // no terço final, encara mais
   if (p.touchTimer >= 0 && m.possessionAge < 20 + int(m.rng.uniform() * 25.0f) && pressure < 0.4f) dribbleScore += 3.0f;
   const float noise = m.rng.signedUnit() * 0.4f;
   const float best = std::max(passScore, throughScore);
@@ -335,41 +335,70 @@ Vec3 carrierDecision(Match& m, int pi) {
 
 // ---------------------------------------------------------------------------------------------- movimento
 
-// Aceleração exponencial (eFootball: v(t) = vmax·(1 − e^(−t/τ)), τ ~1 s): arranque forte que vai suavizando até a
-// máxima; frenagem e mudança de direção até ~8 m/s². Sem exp() da libm: o passo k = dt/(τ+dt) é a mesma curva discreta.
+// Seno e cosseno de ângulos pequenos (|x| < 0,6 rad) por série de Taylor: só soma e multiplicação, o mesmo
+// resultado em qualquer aparelho (a libm não garante isso).
+void sinCosSmall(float x, float& s, float& c) {
+  const float x2 = x * x;
+  s = x * (1.0f - x2 / 6.0f * (1.0f - x2 / 20.0f * (1.0f - x2 / 42.0f)));
+  c = 1.0f - x2 / 2.0f * (1.0f - x2 / 12.0f * (1.0f - x2 / 30.0f));
+}
+
+// Gira a direção unitária `a` rumo a `b` no máximo `maxAngle` radianos (no plano xz).
+Vec3 rotateToward(const Vec3& a, const Vec3& b, float maxAngle) {
+  float s, c;
+  sinCosSmall(std::min(maxAngle, 0.6f), s, c);
+  const float d = dot(a, b);
+  if (d >= c) return b;
+  Vec3 perp = b - a * d;
+  if (dot(perp, perp) < 1e-8f) perp = Vec3{-a.z, 0.0f, a.x};  // b oposto: gira para a esquerda
+  perp = normalizeOr(perp, Vec3{-a.z, 0.0f, a.x});
+  return normalizeOr(a * c + perp * s, b);
+}
+
+// Taxa de giro (eFootball: fixa para todos, cai com a velocidade): 720°/s parado, 360°/s a 5 m/s, 180°/s a 8 m/s.
+float turnRate(float speed) {
+  constexpr float kPi = 3.14159265f;
+  if (speed < 5.0f) return 4.0f * kPi - 2.0f * kPi * (speed / 5.0f);
+  return std::max(kPi, 2.0f * kPi - kPi * ((speed - 5.0f) / 3.0f));
+}
+
+// Locomoção do eFootball (efootballexplained, Speed/Acc 80): aceleração em 3 fases — 10 m/s² até 15 km/h, 5 m/s² até
+// 22,5 km/h, 1,3 m/s² até a máxima (~2,6 s de 0 à máxima) —, frenagem de 9 m/s² e a direção da corrida limitada pela
+// taxa de giro (raio de curva; em alta velocidade, mudar de direção força frear).
 void movePlayer(Player& p, const Vec3& desiredVel) {
   const Vec3 v = flat(p.vel);
-  Vec3 dv = desiredVel - v;
-  const bool braking = dot(desiredVel, v) < dot(v, v) * 0.5f;
-  const float tau = 0.85f * 5.5f / std::max(p.attr.accel, 1.0f);
-  const float l = length(dv);
-  if (braking) {
-    const float maxDv = 8.0f * kTick;
-    if (l > maxDv) dv = dv * (maxDv / l);
-  } else {
-    dv = dv * (kTick / (tau + kTick));
-    const float minDv = 1.2f * kTick;  // nunca fica preso a 99% da velocidade pedida
-    if (length(dv) < minDv) dv = l > minDv ? dv * (minDv / std::max(length(dv), 1e-6f)) : desiredVel - v;
-  }
-  p.vel = v + dv;
+  float sp = length(v);
+  const float want = length(desiredVel);
+  const Vec3 wantDir = want > 0.05f ? desiredVel / want : (sp > 0.05f ? v / sp : p.facing);
+  Vec3 dir = sp > 0.05f ? v / sp : wantDir;
+  if (sp < 0.6f) dir = wantDir;  // quase parado: sai na direção pedida
+  else dir = rotateToward(dir, wantDir, turnRate(sp) * kTick);
+  // velocidade-alvo: a pedida, menos o que não está alinhado (virando, freia até apontar para lá)
+  const float align = clampf(dot(dir, wantDir), 0.0f, 1.0f);
+  const float target = want * align;
+  const float k = std::max(p.attr.accel, 1.0f) / 5.5f;
+  const float accel = (sp < 4.17f ? 10.0f : sp < 6.25f ? 5.0f : 1.3f) * k;
+  if (target > sp) sp = std::min(target, sp + accel * kTick);
+  else sp = std::max(target, sp - 9.0f * kTick);
+  p.vel = dir * sp;
   p.pos += p.vel * kTick;
   p.pos.y = 0.0f;
-  const float sp = length(p.vel);
   // cansaço: corrida acima de 75% da velocidade máxima gasta; abaixo, recupera
   const float load = sp / p.attr.topSpeed;
   p.energy = clampf(p.energy + (load > 0.75f ? -0.0009f * (1.3f - p.attr.stamina) : 0.0004f) , 0.3f, 1.0f);
 }
 
 void turnTo(Player& p, const Vec3& dir, float rate) {
+  (void)rate;
   const Vec3 d = normalizeOr(flat(dir), p.facing);
-  p.facing = normalizeOr(p.facing + (d - p.facing) * rate, d);
+  p.facing = rotateToward(p.facing, d, turnRate(length(flat(p.vel))) * kTick);
 }
 
 Vec3 arriveVel(const Player& p, const Vec3& target, bool sprint) {
   const Vec3 to = flat(target - p.pos);
   const float d = length(to);
   if (d < 0.25f) return {};
-  const float top = effectiveTop(p) * (sprint ? 1.0f : 0.62f);
+  const float top = effectiveTop(p) * (sprint ? 1.0f : 0.7f);  // IA sem bola: 70% da máxima (Konami v5.0)
   const float speed = std::min(top, d * 2.2f);  // chega desacelerando
   return to / d * speed;
 }
@@ -461,7 +490,7 @@ void keeperSaves(Match& m) {
     const float vx = m.ball.vel.x * dir;
     if (vx >= -1.0f || ballDepth > 0.6f || ballDepth < -0.9f) continue;  // não vem para o gol ou já passou
     const float lateral = std::fabs(m.ball.pos.z - gk.pos.z);
-    const float reach = 0.7f + 2.4f * gk.attr.keeping;
+    const float reach = 2.6f + 0.5f * gk.attr.keeping;  // mergulho ~2,8 m (×0,94→×1,12 pelo alcance)
     if (lateral > reach || m.ball.pos.y > 2.7f) continue;
     gk.cooldown = 12;
     const float stretch = lateral / reach;
@@ -473,7 +502,9 @@ void keeperSaves(Match& m) {
     m.actionTick[size_t(gk.index)] = m.tick;
     m.actionType[size_t(gk.index)] = Match::ActSave;
     m.shotTeam = -1;
-    if (sp < 20.0f && stretch < 0.5f && m.rng.uniform() < gk.attr.keeping) {  // segura
+    // segura chutes até 92→110 km/h (pegada), não logo depois do chute (0,37→0,22 s); senão espalma
+    const float sinceShot = float(m.tick - m.shotTick) * kTick;
+    if (sp < 25.5f + 5.0f * gk.attr.keeping && stretch < 0.6f && sinceShot > 0.37f - 0.15f * gk.attr.keeping) {  // segura
       m.owner = gk.index;
       m.ball.vel = {};
       m.ball.spin = {};
@@ -503,7 +534,8 @@ void humanShoot(Match& m, int pi, const Vec3& stick, float power, bool finesse) 
 void resolvePossession(Match& m) {
   if (m.phase == Phase::Kickoff && m.owner >= 0) return;  // saída de bola: só o toque do batedor libera a bola
   if (m.owner >= 0) {
-    if (distXZ(m.players[size_t(m.owner)].pos, m.ball.pos) > 2.2f || m.ball.pos.y > 1.2f) m.owner = -1;
+    // em arrancada a bola vai até ~3 m à frente; passou disso (ou subiu), ninguém a domina
+    if (distXZ(m.players[size_t(m.owner)].pos, m.ball.pos) > 4.5f || m.ball.pos.y > 1.2f) m.owner = -1;
   }
   if (m.ball.pos.y > 0.7f) return;
   int best = -1;
@@ -526,7 +558,9 @@ void resolvePossession(Match& m) {
     if (m.owner >= 0) {
       const Player& o = m.players[size_t(m.owner)];
       if (o.team == p.team) continue;
-      if (distXZ(o.pos + o.facing * 0.45f, m.ball.pos) < 0.9f) continue;
+      // roubo (eFootball, desarme geométrico): só com a bola longe do pé do condutor — de 1,2 m (marcador fraco) a
+      // 0,2 m (marcador forte) — e o marcador mais perto dela que o condutor
+      if (distXZ(o.pos + o.facing * 0.45f, m.ball.pos) < 1.2f - 1.0f * p.attr.defending) continue;
       if (d > distXZ(o.pos + o.facing * 0.45f, m.ball.pos)) continue;
     }
     bd = d;
@@ -585,30 +619,60 @@ void resolvePossession(Match& m) {
   }
 }
 
-// Condução: toques na bola na direção do corpo; parado, a bola fica colada no pé.
-void dribble(Match& m, Player& p) {
+// Condução por toques (eFootball): a bola nunca fica presa ao jogador — rola livre entre os toques e o condutor
+// corre atrás dela. Um toque só sai passado o intervalo mínimo E com a bola ao alcance do pé, à frente do quadril;
+// o joystick (ou a IA) só escolhe a direção e a força do próximo toque. Intervalos (efootballexplained): 0,5 s
+// conduzindo reto abaixo de 20 km/h; 0,49→0,40 s em viradas de 45° ou mais; senão 0,23→0,18 s (Tight Possession).
+// O toque empurra a bola o bastante para ela ficar ~0,7 m à frente do pé no próximo toque andando e ~2 m em
+// arrancada (0,6x numa virada forte em velocidade).
+void carrierStep(Match& m, Player& p, Vec3 desiredDir, float desiredSpeed, bool dash) {
+  desiredDir = normalizeOr(flat(desiredDir), p.facing);
   const float sp = length(flat(p.vel));
-  const Vec3 foot = p.pos + p.facing * 0.45f;
-  if (sp < 1.6f) {
-    if (distXZ(foot, m.ball.pos) < 1.0f) {
-      m.ball.pos = {foot.x, m.ballParams.radius, foot.z};
-      m.ball.vel = flat(p.vel);
-      m.ball.spin = rollingSpin(m.ball.vel, m.ballParams.radius);
+  const float drib = p.attr.dribbling;
+  const Vec3 ballFlat = flat(m.ball.pos), bv = flat(m.ball.vel);
+  const Vec3 contact = p.pos + p.facing * 0.45f;
+  const float elapsed = float(m.tick - p.lastTouchTick) * kTick;
+  const float cosTurn = dot(p.facing, desiredDir);
+  float tmin;
+  if (desiredSpeed < 0.3f) tmin = 0.3f;
+  else if (sp < 5.56f && cosTurn > 0.924f) tmin = 0.5f;
+  else if (cosTurn < 0.707f) tmin = 0.49f - 0.09f * drib;
+  else tmin = 0.23f - 0.05f * drib;
+  const Vec3 toBall = ballFlat - p.pos;
+  const bool inFront = dot(normalizeOr(toBall, p.facing), p.facing) > -0.17f;  // até ~100° do corpo
+  const bool canTouch = elapsed >= tmin && distXZ(contact, ballFlat) <= 0.7f && m.ball.pos.y < 0.35f && inFront;
+  if (canTouch) {
+    if (desiredSpeed < 0.3f) {
+      m.ball.vel = flat(p.vel) * 0.25f;  // amortece: a bola fica no pé
+    } else {
+      // a bola sai mais rápida que o condutor o bastante para ficar `lead` à frente no próximo toque
+      const float base = dash ? std::max(sp, desiredSpeed * 0.6f) : desiredSpeed;
+      const float lead = dash ? 1.4f : 0.45f, period = dash ? 0.7f : 0.5f;
+      float push = std::min(base + lead / period, desiredSpeed * 1.6f + 1.0f);
+      if (cosTurn < 0.0f && sp > 5.0f) push *= 0.6f;  // virada forte em velocidade: toque curto
+      const Vec3 noise{m.rng.signedUnit() * 0.035f, 0.0f, m.rng.signedUnit() * 0.035f};  // ~±2°
+      m.ball.vel = normalizeOr(desiredDir + noise, desiredDir) * push;
+      m.actionTick[size_t(p.index)] = m.tick;
+      m.actionType[size_t(p.index)] = Match::ActTouch;
     }
-    return;
+    m.ball.spin = rollingSpin(m.ball.vel, m.ballParams.radius);
+    m.ball.onGround = true;
+    p.lastTouchTick = m.tick;
   }
-  if (p.touchTimer > 0) { --p.touchTimer; return; }
-  if (distXZ(foot, m.ball.pos) > 1.1f) return;
-  // Cadência do eFootball: conduzindo, um toque a cada ~0,42 s com a bola ~0,8 m à frente; em arrancada, a cada
-  // ~0,75 s e ~2,2 m à frente. Bom drible encurta o intervalo (até ~30%).
-  const bool dash = sp > 0.75f * p.attr.topSpeed;
-  const float interval = (dash ? 0.75f : 0.42f) * (1.15f - 0.3f * p.attr.dribbling);
-  const float lead = dash ? 2.2f : 0.8f;
-  const float push = sp + lead / interval;
-  m.ball.vel = p.facing * push;
-  m.ball.spin = rollingSpin(m.ball.vel, m.ballParams.radius);
-  m.ball.onGround = true;
-  p.touchTimer = std::max(3, int(interval * float(kTicksPerSecond)));
+  // persegue o ponto onde a bola vai estar no próximo toque permitido (desaceleração de rolagem ~2 m/s²)
+  const float remaining = std::max(tmin - float(m.tick - p.lastTouchTick) * kTick, 0.15f);
+  const float bs = length(bv);
+  const float travel = std::max(0.0f, bs * remaining - 1.0f * remaining * remaining);
+  const Vec3 pred = ballFlat + normalizeOr(bv, Vec3{}) * std::min(travel, bs * bs / 4.0f);
+  const Vec3 aim = pred - normalizeOr(pred - p.pos, desiredDir) * 0.45f;  // o pé (não o corpo) chega na bola
+  const Vec3 toAim = flat(aim - p.pos);
+  const float dAim = length(toAim);
+  const float cap = dash ? effectiveTop(p) * 0.92f : 6.5f;  // folga para alcançar a bola entre os toques
+  float speed = std::min(dAim / remaining, cap);
+  if (dAim < 0.15f) speed = 0.0f;
+  const Vec3 chase = dAim > 0.05f ? toAim / dAim : desiredDir;
+  movePlayer(p, chase * speed);
+  turnTo(p, dAim > 0.3f ? chase : desiredDir, 1.0f);
 }
 
 }  // namespace
@@ -767,10 +831,8 @@ void stepMatch(Match& m, const Input* inputs) {
       } else {
         it.target = p.pos + normalizeOr(flat(goalCenter(m, t) - p.pos), p.facing) * 5.0f;
       }
-      const Vec3 v = arriveVel(p, it.target, pressureOn(m, p.index) > 0.3f);
-      turnTo(p, v, 0.3f);
-      movePlayer(p, v);
-      dribble(m, p);
+      const bool dash = pressureOn(m, p.index) > 0.3f || toAttack(m, t, p.pos).x > 20.0f;
+      carrierStep(m, p, flat(it.target - p.pos), dash ? effectiveTop(p) * 0.92f : 5.0f, dash);
       continue;
     }
     // sem a bola
@@ -785,13 +847,21 @@ void stepMatch(Match& m, const Input* inputs) {
         it.sprint = true;
       }
       // bola solta perto do gol: o goleiro sai
-      if (m.owner < 0 && distXZ(m.ball.pos, ownGoal(m, t)) < 15.0f && chaser[t] >= 0 && timeTo(p, m.ball.pos) < timeTo(m.players[size_t(chaser[t])], m.ball.pos))
-        it.target = interceptPoint(m, p), it.sprint = true;
+      // bola solta perto do gol: o goleiro sai só se chega 0,65 s antes do atacante mais rápido (eFootball)
+      if (m.owner < 0 && distXZ(m.ball.pos, ownGoal(m, t)) < 17.0f) {
+        float rival = 1e9f;
+        for (const Player& q : m.players) if (q.team != t) rival = std::min(rival, timeTo(q, m.ball.pos));
+        if (timeTo(p, m.ball.pos) + 0.65f < rival) it.target = interceptPoint(m, p), it.sprint = true;
+      }
     } else if (m.phase == Phase::Kickoff && (!live || p.team != m.restartTeam)) {
       it.target = p.pos;  // saída de bola: o adversário espera a bola rolar (sem bote no batedor)
     } else if (m.owner < 0 && p.index == m.passTarget) {
       it.target = receivePoint(m, p);
       it.sprint = true;
+      // marcado (adversário a menos de 3 m): vem ao encontro da bola (eFootball v6.0), sem esperar parado
+      float near = 99.0f;
+      for (const Player& o : m.players) if (o.team != t) near = std::min(near, distXZ(o.pos, p.pos));
+      if (near < 3.0f) it.target = p.pos + normalizeOr(flat(m.ball.pos - p.pos), p.facing) * 2.0f;
     } else if (!weHaveIt && p.index == chaser[t] && !(m.owner < 0 && m.passTarget >= 0 && teamOf(m.passTarget) == t)) {
       it.target = interceptPoint(m, p);
       it.sprint = true;
@@ -911,9 +981,17 @@ void stepMatch(Match& m, const Input* inputs) {
     }
     const Vec3 faceTo = opponentHasBall && (in.buttons & Input::Pass) ? flat(m.players[size_t(m.owner)].pos - p.pos)
                         : length(want) > 0.5f ? want : flat(m.ball.pos - p.pos);
-    turnTo(p, faceTo, 0.35f);
-    movePlayer(p, want);
-    if (p.index == m.owner) dribble(m, p);
+    if (p.index == m.owner && m.phase == Phase::Play) {
+      // condução por toques: o joystick escolhe a direção do próximo toque; o jogador vai atrás da bola
+      const float spd = length(stick) < 0.2f ? 0.0f : sprint ? effectiveTop(p) * 0.92f : 5.0f * std::min(1.0f, length(stick) * 1.3f);
+      carrierStep(m, p, length(stick) > 0.2f ? stick : p.facing, spd, sprint);
+    } else if (p.index == m.owner) {
+      turnTo(p, length(stick) > 0.2f ? stick : p.facing, 1.0f);  // bola parada (reposição): só mira
+      movePlayer(p, {});
+    } else {
+      turnTo(p, faceTo, 0.35f);
+      movePlayer(p, want);
+    }
     m.prevButtons[t] = in.buttons;
   }
 

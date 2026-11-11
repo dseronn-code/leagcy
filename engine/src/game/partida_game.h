@@ -39,7 +39,7 @@ class PartidaGame {
     float phase = 0.0f;           // fase normalizada da locomoção (0..1)
     int lastAction = -1;          // passo da última ação já tocada
     std::string action;           // clipe de ação em andamento ("" = só locomoção)
-    float actionT = 0.0f, actionEnd = 0.0f, actionW = 0.0f;
+    float actionT = 0.0f, actionEnd = 0.0f, actionW = 0.0f, actionMax = 1.0f;  // actionMax: peso máximo da ação
     float yaw = 0.0f;
     glm::vec3 prevPos{0.0f}, pos{0.0f}, vel{0.0f};
     bool celebrate = false;

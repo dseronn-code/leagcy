@@ -43,7 +43,8 @@ struct Player {
   Attributes attr;
   float energy = 1.0f;            // 1 = descansado
   int cooldown = 0;               // passos até poder tocar na bola de novo
-  int touchTimer = 0;             // condução: passos até o próximo toque
+  int touchTimer = 0;             // (não usado desde a condução por toques)
+  int lastTouchTick = -1000;      // condução: passo do último toque na bola
 };
 
 // Entrada de um time num passo (humano ou roteiro). Direção quantizada em 8 bits por eixo (pronta para a rede).
@@ -93,7 +94,7 @@ struct Match {
   Vec3 shotCross{};
   Rng rng;
   // Últimas ações de cada jogador (para a animação): passo em que aconteceu e o tipo.
-  enum Action : uint8_t { ActPass, ActShot, ActHeader, ActSave, ActTackle, ActLob };
+  enum Action : uint8_t { ActPass, ActShot, ActHeader, ActSave, ActTackle, ActLob, ActTouch };
   std::array<int, 2 * kPlayersPerTeam> actionTick{};
   std::array<uint8_t, 2 * kPlayersPerTeam> actionType{};
   // Barra de força do humano (eFootball): enche em 1 s segurando Passe/Lançamento/Chute; dispara ao soltar ou cheia.

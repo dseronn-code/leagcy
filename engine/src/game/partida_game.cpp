@@ -226,7 +226,7 @@ void PartidaGame::animateBody(Scene& s, Player& P, Anim& a, glm::vec3 pos, glm::
   a.yaw = wrapAngle(a.yaw + wrapAngle(targetYaw - a.yaw) * std::min(1.0f, dt * 12.0f));
   if (!a.action.empty()) {
     a.actionT += dt;
-    a.actionW = std::min(1.0f, a.actionW + dt / 0.08f);
+    a.actionW = std::min(a.actionMax, a.actionW + dt / 0.08f);
     if (a.actionT > a.actionEnd) { a.actionW -= dt / 0.08f + dt / 0.2f; if (a.actionW <= 0.0f) { a.action.clear(); a.actionW = 0.0f; } }
   }
   m.layers.clear();
@@ -273,7 +273,9 @@ void PartidaGame::animatePlayers(Scene& s, float dt, float alpha) {
     if (match_.actionTick[size_t(i)] != a.lastAction && match_.actionTick[size_t(i)] > 0) {
       a.lastAction = match_.actionTick[size_t(i)];
       const uint8_t type = match_.actionType[size_t(i)];
-      auto play = [&](const char* clip, float from, float until) { a.action = clip; a.actionT = std::max(0.0f, from); a.actionEnd = until; };
+      auto play = [&](const char* clip, float from, float until, float weight = 1.0f) {
+        a.action = clip; a.actionT = std::max(0.0f, from); a.actionEnd = until; a.actionMax = weight;
+      };
       if (type == fcsim::Match::ActSave) {
         const glm::vec3 right(std::cos(a.yaw), 0.0f, -std::sin(a.yaw));
         const float lateral = glm::dot(g(match_.ball.pos) - pos, right);
@@ -285,6 +287,9 @@ void PartidaGame::animatePlayers(Scene& s, float dt, float alpha) {
         if (const ClipMeta* c = meta("a_header")) play("a_header", c->contact - 0.2f, c->contact + 0.5f);
       } else if (type == fcsim::Match::ActPass || type == fcsim::Match::ActLob) {
         if (const ClipMeta* c = meta("a_pass")) play("a_pass", c->contact - 0.12f, c->contact + 0.45f);
+      } else if (type == fcsim::Match::ActTouch && a.action.empty()) {
+        // toque da condução: só o trecho do contato do passe, por cima da corrida (a perna vai na bola)
+        if (const ClipMeta* c = meta("a_pass")) play("a_pass", c->contact - 0.1f, c->contact + 0.12f, 0.55f);
       }
     }
     animateBody(s, W.players[size_t(i)], a, pos, g(sp.vel), std::atan2(sp.facing.x, sp.facing.z), sp.role == fcsim::Role::Goalkeeper, dt);
