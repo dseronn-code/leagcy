@@ -892,6 +892,102 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         LOG_INFO("Multidão: %d pessoas paradas (%zu modelos)", made, idle.size());
       }
     }
+    // Trânsito: carros (glTF parados, ex.: tools/carros.py) andando por faixas de rua num sentido, cada um mantendo
+    // distância do da frente na mesma faixa; a pintura (material com verniz e sem emissão) ganha cor sorteada, menos
+    // nos modelos com "taxi" no nome.
+    //   "transito": {"carros": ["a.gltf", ...], "quantidade": 120, "semente": 1, "velocidade": [5, 11],
+    //                "faixas": [{"de": [x, z], "ate": [x, z]}, ...], "altura": 0.0}
+    if (doc.contains("transito") && doc["transito"].is_object()) {
+      const json& tj = doc["transito"];
+      struct Template { std::vector<std::pair<uint32_t, uint32_t>> parts; bool taxi; float length; };
+      std::vector<Template> templates;
+      const json carsJson = tj.value("carros", json::array());
+      for (const json& cf : carsJson) {
+        std::string file = cf.get<std::string>();
+        if (!std::ifstream(file) && std::ifstream(sceneDir + file)) file = sceneDir + file;
+        const uint32_t first = uint32_t(scene.objects.size());
+        if (!scene::loadGltf(scene, file, glm::mat4(1.0f))) {
+          LOG_WARN("Trânsito: não carreguei %s", file.c_str());
+          continue;
+        }
+        Template t{{}, file.find("taxi") != std::string::npos, 4.8f};
+        for (uint32_t o = first; o < scene.objects.size(); ++o) {
+          t.parts.push_back({scene.objects[o].mesh, scene.objects[o].material});
+          scene.setObjectHidden(o, true);  // o original fica escondido
+        }
+        if (file.find("van") != std::string::npos) t.length = 5.3f;
+        if (file.find("hatch") != std::string::npos) t.length = 4.1f;
+        templates.push_back(t);
+      }
+      struct Lane { glm::vec2 a, d; float length; };
+      std::vector<Lane> lanes;
+      const json lanesJson = tj.value("faixas", json::array());
+      for (const json& fj : lanesJson) {
+        const glm::vec2 a(fj["de"][0].get<float>(), fj["de"][1].get<float>()), b(fj["ate"][0].get<float>(), fj["ate"][1].get<float>());
+        const float len = glm::length(b - a);
+        if (len > 5.0f) lanes.push_back({a, (b - a) / len, len});
+      }
+      if (!templates.empty() && !lanes.empty()) {
+        std::mt19937 rng(tj.value("semente", 1u));
+        std::uniform_real_distribution<float> u(0.0f, 1.0f);
+        const json vel = tj.value("velocidade", json::array({5.0, 11.0}));
+        const float vmin = vel[0].get<float>(), vmax = vel[1].get<float>(), y = tj.value("altura", 0.0f);
+        static const glm::vec3 paints[] = {{0.02f, 0.02f, 0.022f}, {0.85f, 0.85f, 0.86f}, {0.45f, 0.46f, 0.48f},
+                                           {0.25f, 0.26f, 0.28f}, {0.05f, 0.08f, 0.2f},  {0.45f, 0.04f, 0.04f},
+                                           {0.06f, 0.15f, 0.08f}, {0.6f, 0.58f, 0.52f}};
+        struct Car { uint32_t lane; float s, speed, vmax, len; std::vector<uint32_t> objs; };
+        auto cars = std::make_shared<std::vector<Car>>();
+        const int count = std::max(0, tj.value("quantidade", 60));
+        for (int i = 0; i < count; ++i) {
+          const Template& t = templates[size_t(u(rng) * float(templates.size())) % templates.size()];
+          Car c{uint32_t(u(rng) * float(lanes.size())) % uint32_t(lanes.size()), 0.0f, 0.0f,
+                vmin + (vmax - vmin) * u(rng), t.length, {}};
+          c.s = u(rng) * lanes[c.lane].length;
+          c.speed = c.vmax;
+          const glm::vec3 paint = paints[size_t(u(rng) * 8.0f) % 8];
+          for (auto [mesh, mat] : t.parts) {
+            scene::Material m = scene.materials[mat];
+            const bool body = (m.flags & scene::kMaterialClearcoat) && glm::dot(m.emissive, m.emissive) == 0.0f;
+            uint32_t useMat = mat;
+            if (body && !t.taxi) {
+              m.baseColor = glm::vec4(paint, 1.0f);
+              useMat = scene.addMaterial(m);
+            }
+            c.objs.push_back(scene.addObject(mesh, glm::mat4(1.0f), useMat));
+          }
+          cars->push_back(std::move(c));
+        }
+        const size_t laneCount = lanes.size();
+        scene.addAnimator([cars, lanes, laneCount, y](scene::Scene& sc, float, float dt) {
+          std::vector<Car>& C = *cars;
+          const float step = std::min(dt, 0.1f);
+          // Por faixa, em ordem de posição: cada carro freia se o da frente estiver perto (2 s de distância + 3 m).
+          std::vector<std::vector<uint32_t>> byLane(laneCount);
+          for (uint32_t i = 0; i < C.size(); ++i) byLane[C[i].lane].push_back(i);
+          for (auto& list : byLane) {
+            std::sort(list.begin(), list.end(), [&](uint32_t a, uint32_t b) { return C[a].s < C[b].s; });
+            for (size_t k = 0; k < list.size(); ++k) {
+              Car& c = C[list[k]];
+              const Car& ahead = C[list[(k + 1) % list.size()]];
+              float gap = ahead.s - c.s;
+              if (gap <= 0.0f) gap += lanes[c.lane].length;  // o da frente já deu a volta
+              if (list.size() == 1) gap = 1e9f;
+              const float want = gap < 3.0f + c.len + c.speed * 2.0f ? std::max(0.0f, (gap - c.len - 2.5f) / 2.0f) : c.vmax;
+              c.speed += glm::clamp(want - c.speed, -6.0f * step, 2.5f * step);  // freia forte, acelera devagar
+            }
+          }
+          for (Car& c : C) {
+            const Lane& L = lanes[c.lane];
+            c.s = std::fmod(c.s + c.speed * step, L.length);
+            const glm::vec2 p = L.a + L.d * c.s;
+            glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
+            m = glm::rotate(m, std::atan2(L.d.x, L.d.y), glm::vec3(0, 1, 0));
+            for (uint32_t o : c.objs) sc.setTransform(o, m);
+          }
+        });
+        LOG_INFO("Trânsito: %d carros (%zu modelos) em %zu faixas", count, templates.size(), lanes.size());
+      }
+    }
     // Terreno de quilômetros: ladrilhos de "ladrilho" metros (o padrão é a célula do mundo aberto), cada um uma
     // entidade parada com a malha detalhada e colisão; no mundo aberto, também a malha simples de longe.
     if (doc.contains("terreno") && doc["terreno"].is_object()) {
