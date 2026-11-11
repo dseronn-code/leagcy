@@ -941,10 +941,10 @@ bool Scene::stream(rhi::Context& ctx, glm::vec3 camera) {
   return changed;
 }
 
-uint32_t Scene::bakeCrowdClip(int modelIndex, uint32_t frames) {
+uint32_t Scene::bakeCrowdClip(int modelIndex, uint32_t frames, uint32_t part) {
   Model& m = models[size_t(modelIndex)];
-  if (m.skinnedObjects.empty()) FATAL("bakeCrowdClip: o modelo não tem malha com esqueleto");
-  const uint32_t object = m.skinnedObjects[0];
+  if (part >= m.skinnedObjects.size()) FATAL("bakeCrowdClip: o modelo não tem a malha com esqueleto %u", part);
+  const uint32_t object = m.skinnedObjects[part];
   const MeshData src = cpuMeshes_[objects[object].mesh];
   const Animation* a = (m.animation >= 0 && size_t(m.animation) < m.animations.size()) ? &m.animations[size_t(m.animation)] : nullptr;
   CrowdClip clip;

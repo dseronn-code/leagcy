@@ -509,7 +509,8 @@ class Scene {
   }
   // Assa `frames` poses do clipe ativo da malha com esqueleto do modelo (pele feita na CPU) e devolve o índice do
   // clipe. Chame antes do upload.
-  uint32_t bakeCrowdClip(int model, uint32_t frames);
+  // part: qual malha com esqueleto do modelo (pessoa em peças: corpo, roupa, cabelo, olhos — uma por material).
+  uint32_t bakeCrowdClip(int model, uint32_t frames, uint32_t part = 0);
   // Põe uma pessoa da multidão: objeto com a pose 0 do clipe; o instante da animação vem de `phase` (s).
   uint32_t addCrowdAgent(uint32_t clip, const glm::mat4& transform, float phase);
   std::vector<Decal> decals;

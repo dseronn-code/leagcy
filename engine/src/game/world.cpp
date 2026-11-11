@@ -640,7 +640,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         for (auto& [a, b] : mapJson.items()) map.push_back({a, b.get<std::string>()});
         const std::string clipName = mj.value("clipe", "andar");
         const uint32_t poses = std::clamp(mj.value("poses", 24), 4, 128);
-        std::vector<uint32_t> clips;
+        std::vector<std::vector<uint32_t>> clips;
         const json people = mj.value("pessoas", json::array());
         for (const json& pf : people) {
           int model = -1;
@@ -659,7 +659,10 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             continue;
           }
           m.animation = a;
-          clips.push_back(scene.bakeCrowdClip(model, poses));
+          std::vector<uint32_t> parts;  // uma por peça (material): corpo, roupa, sapatos, cabelo, olhos...
+          for (uint32_t k = 0; k < uint32_t(m.skinnedObjects.size()); ++k)
+            parts.push_back(scene.bakeCrowdClip(model, poses, k));
+          clips.push_back(parts);
           m.root = glm::translate(glm::mat4(1.0f), {0.0f, -1000.0f, 0.0f});  // o original fica escondido
         }
         struct Lane { glm::vec2 a, b; float width, length; };
@@ -689,8 +692,10 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             const Lane L = lanes[li];
             const float dir = u(rng) < 0.5f ? 1.0f : -1.0f, side = (u(rng) - 0.5f) * L.width;
             const float speed = vmin + (vmax - vmin) * u(rng), s0 = u(rng) * L.length, scale = 0.94f + 0.12f * u(rng);
-            const uint32_t clip = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
-            const uint32_t agent = scene.addCrowdAgent(clip, glm::mat4(1.0f), 4.0f * u(rng));
+            const std::vector<uint32_t>& person = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
+            const float phase = 4.0f * u(rng);
+            std::vector<uint32_t> agent;
+            for (uint32_t clip : person) agent.push_back(scene.addCrowdAgent(clip, glm::mat4(1.0f), phase));
             const glm::vec2 d = (L.b - L.a) / L.length, n(-d.y, d.x);
             scene.addAnimator([=](scene::Scene& sc, float t, float) {
               const float s = std::fmod(s0 + speed * t, L.length);
@@ -698,7 +703,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               const glm::vec2 f = d * dir;
               glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
               m = glm::rotate(m, std::atan2(f.x, f.y) + yaw0, glm::vec3(0, 1, 0));
-              sc.setTransform(agent, glm::scale(m, glm::vec3(scale)));
+              for (uint32_t o : agent) sc.setTransform(o, glm::scale(m, glm::vec3(scale)));
             });
           }
           LOG_INFO("Multidão: %d pessoas (%zu modelos, %u poses cada) em %zu faixas", count, clips.size(), poses,
