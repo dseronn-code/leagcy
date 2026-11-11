@@ -21,6 +21,7 @@ vec3 yCoCgToRgb(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.
 
 // Catmull-Rom com 5 leituras bilineares (Jimenez): histórico nítido, sem borrar a cada frame.
 vec3 sampleHistory(vec2 uv) {
+  if (perfSkip(PERF_DIAG_TAA_BILINEAR)) return textureLod(history, uv, 0.0).rgb;
   vec2 size = frame.outputSize.xy;
   vec2 pos = uv * size;
   vec2 tc = floor(pos - 0.5) + 0.5;
@@ -136,8 +137,9 @@ void main() {
     float alpha = mix(0.04, 0.15, wmax);
     // Pesos por luminância (Karis) em movimento: evita que pontos muito brilhantes cintilem. Parada, puxariam a
     // média para baixo (mesmo motivo do corte).
-    float wc = alpha / (1.0 + moving * luminance(current));
-    float wh = (1.0 - alpha) / (1.0 + moving * luminance(hist));
+    float karis = perfSkip(PERF_DIAG_TAA_KARIS) ? 1.0 : moving;
+    float wc = alpha / (1.0 + karis * luminance(current));
+    float wh = (1.0 - alpha) / (1.0 + karis * luminance(hist));
     result = (current * wc + hist * wh) / (wc + wh);
     m2Out = mix(m2h, yCur * yCur, alpha);
     float yRes = rgbToYCoCg(result).x;

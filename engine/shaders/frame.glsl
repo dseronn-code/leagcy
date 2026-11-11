@@ -138,6 +138,7 @@ const uint PERF_SUN = 0x100u, PERF_GI = 0x200u, PERF_SPEC = 0x400u, PERF_HIT_SHA
            // Diagnóstico do viés (tools/reflexos.py --extra "--perf-skip diag-..."): o cache trocado por uma amostra
            // nova / o resto do caminho por path tracing; o TAA de antes (corte e Karis sempre ligados).
            PERF_DIAG_CACHE_DIRECT = 0x400000u, PERF_DIAG_CACHE_REF2 = 0x800000u, PERF_DIAG_TAA_OLD = 0x1000000u,
+           PERF_DIAG_TAA_KARIS = 0x2000000u, PERF_DIAG_TAA_BILINEAR = 0x4000000u,
            PERF_OPAQUE = 0x10000u;  // todos os raios sem teste de alfa (medição do custo das folhas recortadas)
 bool perfSkip(uint b) { return (frame.quality2.w & b) != 0u; }
 

@@ -1,6 +1,19 @@
-# Rodada 24: o jogo depois da otimização (preset Alto pela cena, cristais com 64 luzes em vez de 11.284), a IA do
-# guarda corrigida ("no_chao") e os sons. Antes: 41,5 ms em 1080p.
-python tools\demo.py --bin build\Release\legacy.exe
-build\Release\legacy.exe --scene cenas\vale\vale.json --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --screenshot resultados_pc\vale.png
-python tools\mundo.py --bin build\Release\legacy.exe
-python tools\visual.py --bin build\Release\legacy.exe
+# Rodada 25. Parte A: brilho do TAA do motor (placas sem DLSS). Na rodada 20, ReLAX + TAAU saiu +4,4% (480x270) e
+# +7,1% (1080p) mais claro que a referência por path tracing; o TAA antigo dava -0,1%. Uma variação por linha.
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-karis"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-bilinear"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-antigo"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--no-denoiser --upscaler taau"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser svgf --upscaler taau"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser svgf --upscaler taau --perf-skip diag-taa-antigo"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-karis"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-bilinear"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--no-denoiser --upscaler taau"
+# Parte B: onde vai o tempo da Sponza e do Bistro em 1080p (meta nova: 60 q/s = 16,7 ms).
+build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt
+build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality medio --camera-path caminhos\sponza_nave.txt
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality medio
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality baixo
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality medio --scale 0.5

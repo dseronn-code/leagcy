@@ -338,7 +338,8 @@ Options parseArgs(int argc, char** argv) {
                                                         {"espelho", 16u}, {"cache", 64u}, {"espelho-gi", 128u}, {"opaco", 256u}, {"gi-metade", 512u}, {"especular-fosco", 1024u}, {"cache-oitavo", 2048u},
                                                         {"sombra-acerto-opaca", 4096u},
                                                         {"diag-cache-direto", 16384u}, {"diag-cache-ref2", 32768u},
-                                                        {"diag-taa-antigo", 65536u}};
+                                                        {"diag-taa-antigo", 65536u},
+                                                        {"diag-taa-karis", 131072u}, {"diag-taa-bilinear", 262144u}};
       for (auto& [n, b] : kinds)
         if (v.find(std::string(",") + n + ",") != std::string::npos) o.render.perfSkipMask |= b;
     }
