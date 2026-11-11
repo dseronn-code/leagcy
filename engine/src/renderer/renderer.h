@@ -49,6 +49,7 @@ struct Quality {
   bool indirectOpaque = false;   // raios de GI e de reflexo sem teste de alfa
   bool hitMirrorCache = false;   // espelho visto por qualquer raio: cache (sem reflexo de reflexo)
   bool giTiles = false;          // giHalf/giQuarter sorteados por bloco de 8x4 pixels (warp inteiro)
+  bool giSparse = false;         // raio de GI em 1 pixel de cada 2x2, num passe à parte (warps cheios; peso 4)
 };
 
 enum class QualityPreset { Low, Medium, High, Ultra, Cinema };
@@ -191,6 +192,7 @@ class Renderer {
     rhi::Image rrDiffuseAlbedo, rrSpecularAlbedo, rrHitDistance, rrNormalRoughness;
     rhi::Image accumulation;  // RGBA32F: soma da referência (--reference)
     rhi::Image diffuseRaw, specularRaw, diffuseIntegrated, specularIntegrated;
+    rhi::Image giSparse;  // Q_GI_SPARSE: raio de GI do pixel sorteado de cada 2x2 (rgb = radiância, a = distância)
     std::array<rhi::Image, 2> diffuseHistory, specularHistory, moments, historyLength;
     rhi::Image tmpA, tmpB, tmpC, sceneColor;
     rhi::Image reactive;  // máscara reativa das partículas (o TAA corta o histórico onde elas passam)
@@ -312,7 +314,7 @@ class Renderer {
   VkDescriptorSetLayout globalLayout_ = VK_NULL_HANDLE;
   std::array<VkDescriptorSet, kFramesInFlight> globalSets_{};
 
-  rhi::ComputePass skinningPass_, aerialPerspectivePass_, radianceCacheResolvePass_;
+  rhi::ComputePass skinningPass_, aerialPerspectivePass_, radianceCacheResolvePass_, giSparsePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
   uint32_t sceneFeatures_ = 0xFFFFFFFFu;  // constante SCENE_FEATURES dos passes de luz
   rhi::ComputePass svgfTemporalPass_, svgfAtrousPass_, compositePass_, taaPass_, rrGuidesPass_, accumulatePass_;

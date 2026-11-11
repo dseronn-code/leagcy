@@ -565,7 +565,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   const uint32_t qualityFeatures = (sq.mirrorGiCache ? 1u : 0u) | (sq.giHalf ? 2u : 0u) | (sq.roughSpecCache ? 4u : 0u) |
                                    (sq.cacheEighth ? 8u : 0u) | (sq.hitShadowOpaque ? 16u : 0u) |
                                    (sq.giQuarter ? 32u : 0u) | (sq.glossySpecCache ? 64u : 0u) | (sq.indirectOpaque ? 128u : 0u) |
-                                   (sq.hitMirrorCache ? 256u : 0u) | (sq.giTiles ? 512u : 0u);
+                                   (sq.hitMirrorCache ? 256u : 0u) | (sq.giTiles ? 512u : 0u) |
+                                   (sq.giSparse && rt ? 1024u : 0u);
   const uint32_t spec[3] = {features, qualityFeatures, std::max(sq.samplesPerPixel, 1u)};
   if (features != 0xFFFFFFFFu) {
     const std::pair<uint32_t, const char*> names[] = {{1u << 1, "terreno"}, {1u << 6, "vidro"}, {1u << 7, "verniz"},
@@ -578,7 +579,9 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   }
   restirTemporalPass_.init(ctx, rt ? "restir_temporal_rt.comp" : "restir_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, SB, SB, CIS, CIS}, 0, spec, 3);
   restirSpatialPass_.init(ctx, rt ? "restir_spatial_rt.comp" : "restir_spatial.comp", g, {CIS, CIS, CIS, CIS, SB, SB, CIS}, 0, spec, 3);
-  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI}, 0, spec, 3);
+  lightingPass_.init(ctx, rt ? "lighting_rt.comp" : "lighting.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI, SI}, 0, spec, 3);
+  if (rt && settings.quality.giSparse)
+    giSparsePass_.init(ctx, "lighting_gi_rt.comp", g, {CIS, CIS, CIS, CIS, SB, SI, SI, CIS, SI, SI, SI}, 0, spec, 3);
   if (giBakePending_) giBakePass_.init(ctx, "gi_bake.comp", g, {SB}, 16, spec, 3);
   svgfTemporalPass_.init(ctx, "svgf_temporal.comp", g, {CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, CIS, SI, SI, SI, SI});
   svgfAtrousPass_.init(ctx, "svgf_atrous.comp", g, {CIS, CIS, CIS, CIS, CIS, SI}, sizeof(AtrousPush));
@@ -870,7 +873,7 @@ void Renderer::createTargets() {
   t_.motion = rhi::createImage2D(ctx, R, kMotionFormat, attach | VK_IMAGE_USAGE_STORAGE_BIT | upscalerIo);
   t_.emissive = rhi::createImage2D(ctx, R, kHdrFormat, attach);
   for (rhi::Image* img : {&t_.diffuseRaw, &t_.specularRaw, &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA,
-                          &t_.tmpB, &t_.tmpC})
+                          &t_.tmpB, &t_.tmpC, &t_.giSparse})
     *img = rhi::createImage2D(ctx, R, kHdrFormat, storage);
   t_.sceneColor = rhi::createImage2D(ctx, R, kHdrFormat, storage | upscalerIo | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
   t_.reactive = rhi::createImage2D(ctx, R, VK_FORMAT_R16_SFLOAT,
@@ -919,7 +922,7 @@ void Renderer::createTargets() {
                               &t_.historyLength[i], &t_.taa[i]})
         toGeneral(*img, VK_IMAGE_ASPECT_COLOR_BIT);
     }
-    for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
+    for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.giSparse,
                             &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.reactive, &t_.postA,
                             &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                             &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
@@ -959,7 +962,7 @@ void Renderer::destroyTargets() {
       rhi::destroyImage(ctx, *img);
     rhi::destroyBuffer(ctx, t_.reservoirs[i]);
   }
-  for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw,
+  for (rhi::Image* img : {&t_.diffuse, &t_.specular, &t_.motion, &t_.emissive, &t_.diffuseRaw, &t_.specularRaw, &t_.giSparse,
                           &t_.diffuseIntegrated, &t_.specularIntegrated, &t_.tmpA, &t_.tmpB, &t_.tmpC, &t_.sceneColor, &t_.reactive, &t_.postA,
                           &t_.postB, &t_.bloom, &t_.viewZ, &t_.nrdNormalRoughness, &t_.diffuseDenoised,
                           &t_.specularDenoised, &t_.nrdValidation, &t_.rrDiffuseAlbedo,
@@ -1433,9 +1436,15 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   profiler_.mark(cmd, "restir");
 
   // ---- 4. Iluminação (ray tracing) ----
-  lightingPass_.dispatch(cmd, gs, {gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[1]),
-                                   storage(t_.diffuseRaw), storage(t_.specularRaw), tex(t_.visibility[cur]),
-                                   storage(t_.viewZ), storage(t_.nrdNormalRoughness)}, R);
+  const std::initializer_list<Binding> lightingBindings = {
+      gDepth, gNormal, gDiffuse, gSpecular, Binding::storageBuffer(t_.reservoirs[1]), storage(t_.diffuseRaw),
+      storage(t_.specularRaw), tex(t_.visibility[cur]), storage(t_.viewZ), storage(t_.nrdNormalRoughness),
+      storage(t_.giSparse)};
+  if (ctx_->rayTracing && settings.quality.giSparse) {  // 1 thread por quadrado 2x2
+    giSparsePass_.dispatch(cmd, gs, lightingBindings, {(R.width + 1) / 2, (R.height + 1) / 2});
+    barrier();
+  }
+  lightingPass_.dispatch(cmd, gs, lightingBindings, R);
   barrier();
   if (ctx_->rayTracing) {  // fecha o frame do cache de radiância (média das amostras -> histórico)
     radianceCacheResolvePass_.dispatch(cmd, gs, {}, {1024, kRadianceCacheEntries / 1024});
@@ -2021,7 +2030,7 @@ void Renderer::destroy() {
                          &culledList2_, &visibleLast_, &meshletGroups_, &meshletArgs_[0], &meshletArgs_[1],
                          &hlodInfo_, &hlodCells_})
     rhi::destroyBuffer(ctx, *b);
-  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &giBakePass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &cloudReferencePass_, &fogReferencePass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &svgfTemporalPass_,
+  for (rhi::ComputePass* p : {&meshletArgsPass_, &hiZBuildPass_, &clothPass_, &hairSimPass_, &cullPass_, &cullResetPass_, &sssPass_, &rainOcclusionPass_, &giBakePass_, &cloudSkyPass_, &cloudShadowPass_, &cloudScreenPass_, &cloudReferencePass_, &fogReferencePass_, &fogInjectPass_, &fogIntegratePass_, &skinningPass_, &aerialPerspectivePass_, &radianceCacheResolvePass_, &skyLutPass_, &restirTemporalPass_, &restirSpatialPass_, &lightingPass_, &giSparsePass_, &svgfTemporalPass_,
                               &svgfAtrousPass_, &compositePass_, &taaPass_, &rrGuidesPass_, &accumulatePass_, &histogramPass_, &exposurePass_, &dofPass_,
                               &motionBlurPass_, &bloomDownPass_, &bloomUpPass_})
     p->destroy(ctx);

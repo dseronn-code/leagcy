@@ -1,0 +1,6 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+// Q_GI_SPARSE: raio de GI de 1 pixel em cada 2x2, num passe com 1/4 das threads (ver lighting.glsl).
+#define RAY_TRACING 1
+#define GI_SPARSE 1
+#include "lighting.glsl"

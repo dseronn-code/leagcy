@@ -36,7 +36,15 @@ layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D outSpecular;
 // Entradas do NRD: z em espaço de câmera e normal + rugosidade na codificação R10G10B10A2 dele.
 layout(set = 1, binding = 8, r32f) uniform writeonly image2D outViewZ;
 layout(set = 1, binding = 9, rgb10_a2) uniform writeonly image2D outNrdNormalRoughness;
+// Q_GI_SPARSE: radiância (rgb) e distância (a; < 0 = sem raio) do raio de GI do pixel sorteado de cada 2x2, escrita
+// pelo passe lighting_gi_rt.comp antes deste.
+layout(set = 1, binding = 10, rgba16f) uniform image2D giSparse;
 #endif
+// Pixel do quadrado 2x2 (de canto 2q) que leva o raio de GI neste quadro (Q_GI_SPARSE).
+ivec2 giSparsePixel(ivec2 q) {
+  uint roll = pcg3d(uvec3(uvec2(q), frame.frameInfo.x)).x;
+  return q * 2 + ivec2(int(roll & 1u), int((roll >> 1) & 1u));
+}
 
 // Distância gravada para raios que não acertam nada (céu): "infinito" dentro do float16.
 const float HIT_DIST_MISS = 60000.0;
@@ -296,6 +304,10 @@ const float GLOSSY_HIT_ROUGHNESS = 0.3;
 // 1 em cada 4 pixels (rodando a cada frame) alimenta o cache de radiância.
 bool cacheUpdatePixel() {
   uvec2 id = gl_GlobalInvocationID.xy;
+#ifdef GI_SPARSE
+  // Cada thread do passe esparso é um pixel de 4: alimenta sempre (1 em 4 pixels, como o padrão) ou metade delas.
+  return !qualityHas(Q_CACHE_EIGHTH) || ((id.x + id.y + frame.frameInfo.x) & 1u) == 0u;
+#endif
   return ((id.x + 2u * id.y + frame.frameInfo.x) & (qualityHas(Q_CACHE_EIGHTH) ? 7u : 3u)) == 0u;
 }
 
@@ -511,6 +523,31 @@ void main() {
   if (local == 0u && probe < count)
     for (uint c = 0u; c < GI_ACC; ++c) acc[probe * GI_ACC + c] += bakeSum[0][c];
 }
+#elif defined(GI_SPARSE)
+// Q_GI_SPARSE: o raio de GI de 1 pixel em cada 2x2 (sorteado por quadro), num passe à parte com 1/4 das threads —
+// warps cheios. Sorteado por pixel dentro do passe de luz, o warp esperava o raio de algum pixel e a economia sumia;
+// por bloco de 8x4 o DLSS-RR não limpava o padrão (erro 0,05 -> 0,19 no Bistro).
+void main() {
+  ivec2 id = giSparsePixel(ivec2(gl_GlobalInvocationID.xy));
+  if (!insideRender(id)) return;
+  PixelSurface sf = loadSurface(id);
+  GSample g = sf.g;
+  if (g.depth <= 0.0) return;
+  uint spp = SPP_FIXED != 0u ? SPP_FIXED : max(frame.quality0.x, 1u);
+  SampleGen sg = makeSampleGen(uvec2(id), frame.frameInfo.x * spp);
+  vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
+  vec4 o = vec4(0.0, 0.0, 0.0, -1.0);
+  if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI)) {
+    if (qualityHas(Q_INDIRECT_OPAQUE)) gRayFlagsExtra = gl_RayFlagsOpaqueEXT;
+    float t;
+    vec3 Li = traceRadiance(offsetRayOrigin(g.P, g.Ng, sf.rayBias), dirD, sg, 0u, t, false);
+    gRayFlagsExtra = 0u;
+    if (any(isnan(Li)) || any(isinf(Li))) Li = vec3(0.0);
+    if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
+    o = vec4(Li, t);
+  }
+  imageStore(giSparse, id, o);
+}
 #else
 void main() {
   ivec2 id = ivec2(gl_GlobalInvocationID.xy);
@@ -643,7 +680,17 @@ void main() {
     const bool giTake = giQuarter ? (giRoll & 3u) == 0u : (!giHalf || (giRoll & 1u) != 0u);
     const float giWeight = giQuarter ? 4.0 : giHalf ? 2.0 : 1.0;
     if (qualityHas(Q_INDIRECT_OPAQUE)) gRayFlagsExtra = gl_RayFlagsOpaqueEXT;
-    if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI) && giTake) {
+    if (qualityHas(Q_GI_SPARSE)) {  // o raio já saiu no passe esparso (só a 1ª amostra do pixel sorteado)
+      if (k == 0u && all(equal(id, giSparsePixel(id / 2)))) {
+        vec4 gsp = imageLoad(giSparse, id);
+        if (gsp.a >= 0.0) {
+          diffuse += bc.diffuseWeight * gsp.rgb * aoDiffuse * (4.0 * float(spp));
+          debugGiSample = gsp.rgb;
+          diffHitSum += gsp.a;
+          diffHitCount += 1.0;
+        }
+      }
+    } else if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI) && giTake) {
       float t;
       vec3 Li = traceRadiance(origin, dirD, sg, 0u, t, false);
       debugGiSample = Li;

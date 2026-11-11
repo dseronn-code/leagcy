@@ -47,7 +47,8 @@ const uint Q_MIRROR_GI_CACHE = 1u,     // espelho visto pela GI usa o cache em v
            Q_GLOSSY_SPEC_CACHE = 64u,  // como Q_ROUGH_SPEC_CACHE, a partir de rugosidade 0,3 (o limite dos pontos atingidos)
            Q_INDIRECT_OPAQUE = 128u,   // raios de GI e de reflexo sem teste de alfa (folha recortada = cartão inteiro)
            Q_HIT_MIRROR_CACHE = 256u,  // espelho visto por qualquer raio (GI ou reflexo) usa o cache: sem reflexo de reflexo
-           Q_GI_TILES = 512u;          // Q_GI_HALF/Q_GI_QUARTER sorteados por bloco de 8x4 pixels (um warp inteiro), não por pixel
+           Q_GI_TILES = 512u,
+           Q_GI_SPARSE = 1024u;        // raio de GI em 1 pixel de cada 2x2, num passe à parte (lighting_gi_rt.comp; peso 4)          // Q_GI_HALF/Q_GI_QUARTER sorteados por bloco de 8x4 pixels (um warp inteiro), não por pixel
 bool qualityHas(uint f) { return (QUALITY_FEATURES & f) != 0u; }
 
 // Simulação do oceano: oceanDisplacement / oceanSlope / OCEAN_PATCH ficam em frame.glsl (o sol debaixo d'água usa).
