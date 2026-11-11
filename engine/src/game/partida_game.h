@@ -28,6 +28,8 @@ class PartidaGame {
   // autoplay: computador x computador, começa sozinho (vídeos e testes sem tela).
   void init(scene::Scene& s, renderer::Renderer& r, bool autoplay, bool rayTracing);
   // Avança `realDt` segundos com os dedos que estão na tela agora; desenha o HUD em r.ui. Devolve o dt da cena.
+  // Tempos de CPU medidos fora (Android), mostrados junto com os da GPU no DIAG "tempos".
+  void setPerfExtra(const std::string& text) { perfExtra_ = text; }
   float update(float realDt, const std::vector<Touch>& touches, scene::Scene& s, scene::Camera& cam, renderer::Renderer& r,
                glm::vec2 screen);
 
@@ -104,7 +106,7 @@ class PartidaGame {
   bool debugTap_ = false;  // toque no FPS: próxima visualização de depuração
   int debugIndex_ = 0;
   float perfTimer_ = 0.0f;
-  std::string perfText_;  // último relatório de tempos da GPU (modo "tempos")  // média móvel dos quadros por segundo (mostrada no HUD)
+  std::string perfText_, perfExtra_;  // último relatório de tempos da GPU (modo "tempos")  // média móvel dos quadros por segundo (mostrada no HUD)
 };
 
 }  // namespace game

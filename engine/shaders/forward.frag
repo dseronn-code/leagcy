@@ -55,11 +55,8 @@ vec3 linearToSrgb(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)
 
 // Luz do céu num hemisfério em volta de N: média de 5 direções da LUT do céu (radiância pré-exposta) e o chão
 // refletindo um pouco por baixo. Irradiância de um céu uniforme L é πL; o π cancela com o 1/π do difuso.
-vec3 skyAmbient(vec3 N) {
-  vec3 up = sampleSky(vec3(0.0, 1.0, 0.0));
-  vec3 ring = 0.25 * (sampleSky(normalize(vec3(1.0, 0.5, 0.0))) + sampleSky(normalize(vec3(-1.0, 0.5, 0.0))) +
-                      sampleSky(normalize(vec3(0.0, 0.5, 1.0))) + sampleSky(normalize(vec3(0.0, 0.5, -1.0))));
-  vec3 sky = mix(ring, up, 0.4);
+vec3 skyAmbient(vec3 N) {  // 2 leituras da LUT (zênite e horizonte a 30°): barato por pixel no celular
+  vec3 sky = mix(sampleSky(normalize(vec3(0.6, 0.5, 0.6))), sampleSky(vec3(0.0, 1.0, 0.0)), 0.4);
   vec3 ground = sky * 0.25;  // gramado/arquibancada devolvendo parte da luz
   return mix(ground, sky, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
 }

@@ -216,6 +216,7 @@ void applyMobileSettings(Settings& s) {
   s.shadowDistance = 70.0f;
   s.shadowMapSize = 1024;
   s.forward = true;
+  s.clothSimulation = false;
   s.manualEV100 = 14.0f;  // dia de sol (o forward não mede a imagem para a auto-exposição)
 }
 
@@ -1909,7 +1910,8 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
 
   if (anySkinned) {
     // Guarda a pose anterior antes de sobrescrever (para os vetores de movimento da deformação).
-    if (historyValid_) {
+    // (o forward não tem vetores de movimento: sem a cópia, que eram 350 cópias por frame com os 25 jogadores)
+    if (historyValid_ && !settings.forward) {
       for (const auto& m : s.meshes) {
         if (!m.deformable()) continue;
         VkBufferCopy region{0, 0, m.vertices.size};
@@ -1921,7 +1923,7 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
     const float sceneDt = historyValid_ ? std::max(s.time - clothTime_, 0.0f) : 0.0f;
     clothTime_ = s.time;
     for (const auto& m : s.meshes) {
-      if (!m.cloth) continue;
+      if (!m.cloth || !settings.clothSimulation) continue;
       struct {
         VkDeviceAddress pos, prev, vertices;
         uint32_t width, height;
@@ -1957,7 +1959,7 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
       skinningPass_.dispatchGroups(cmd, globalSets_[slot], {}, (m.vertexCount + 63) / 64, 1, &p);
     }
     rhi::memoryBarrier(cmd);
-    if (!historyValid_) {  // primeiro frame: anterior = atual
+    if (!historyValid_ && !settings.forward) {  // primeiro frame: anterior = atual
       for (const auto& m : s.meshes) {
         if (!m.deformable()) continue;
         VkBufferCopy region{0, 0, m.vertices.size};

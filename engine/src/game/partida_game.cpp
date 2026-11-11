@@ -350,9 +350,9 @@ void PartidaGame::cameraUpdate(float dt, Camera& cam, glm::vec2 screen) {
   const int holder = match_.owner >= 0 ? match_.owner : match_.lastTouch;
   const float attack = holder >= 0 ? match_.attackDir(match_.players[size_t(holder)].team) : 0.0f;
   const glm::vec3 bv(float(match_.ball.vel.x), 0.0f, float(match_.ball.vel.z));
-  glm::vec3 want(b.x + attack * 6.0f + bv.x * 0.25f, 0.0f, b.z * 0.55f);
+  glm::vec3 want(b.x + attack * 6.0f + bv.x * 0.25f, 0.0f, b.z * 0.75f);
   want.x = glm::clamp(want.x, -38.0f, 38.0f);
-  want.z = glm::clamp(want.z, -16.0f, 12.0f);
+  want.z = glm::clamp(want.z, -16.0f, 24.0f);  // até a lateral do lado da câmera (lateral, escanteio) fica na tela
   const float fast = (b.y > 2.0f || glm::length(bv) > 18.0f) ? 1.0f : 0.0f;
   if (!camInit_) { camTarget_ = want; camVel_ = glm::vec3(0.0f); camZoom_ = 1.0f; camInit_ = true; }
   // mola crítica por eixo: x' = v, v' = ω²(alvo − x) − 2ωv (sem passar do ponto)
@@ -573,7 +573,7 @@ float PartidaGame::update(float realDt, const std::vector<Touch>& touches, Scene
     if (perfTimer_ > 1.0f) {
       perfTimer_ = 0.0f;
       std::string t = r.gpuTimings();
-      if (!t.empty()) perfText_ = t;
+      if (!t.empty()) perfText_ = t + (perfExtra_.empty() ? "" : " | " + perfExtra_);
     }
   }
   const bool wasPaused = paused_;

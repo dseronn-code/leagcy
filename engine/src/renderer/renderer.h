@@ -88,6 +88,7 @@ struct Settings {
   // Renderer forward de celular: objetos iluminados direto na saída (sol + sombra + céu), sem G-buffer, ReSTIR,
   // denoiser, TAA nem pós-processamento. Escolhido no init (pipelines e alvos próprios).
   bool forward = false;
+  bool clothSimulation = true;  // tecido simulado na GPU (redes, bandeiras); celular: parado (custo serial alto)
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
   float lensFlare = 1.0f;  // reflexos fantasmas e halo das lentes (0 = desligado)

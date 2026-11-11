@@ -113,6 +113,12 @@ struct Engine {
   uint32_t slot = 0, frameCount = 0;
   std::atomic<uint32_t> framesPresented{0};
   ANativeWindow* window = nullptr;
+  static constexpr float kRenderScale = 0.6f;
+  float touchScale = 1.0f;  // toque (pixels da tela) -> pixels da imagem
+  // tempos de CPU por etapa (média de ~1 s), mostrados no DIAG "tempos"
+  double tGame = 0, tScene = 0, tWait = 0, tAcquire = 0, tRecord = 0, tSubmit = 0, tPresent = 0, tTotal = 0;
+  int tFrames = 0;
+  std::chrono::steady_clock::time_point tLast = std::chrono::steady_clock::now();
   bool rendererReady = false, swapchainReady = false, sceneReady = false;
 
   void init(ANativeWindow* w, const std::string& cacheDir) {
@@ -122,6 +128,10 @@ struct Engine {
     ctx.createInstance({false, false, {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_ANDROID_SURFACE_EXTENSION_NAME}});
     legacyVk13SetInstance(ctx.instance);
     VkAndroidSurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
+    // Tela em 60%: o compositor do Android amplia a imagem de graça (hardware); o forward pinta 36% dos pixels.
+    const int32_t fullW = ANativeWindow_getWidth(window), fullH = ANativeWindow_getHeight(window);
+    ANativeWindow_setBuffersGeometry(window, int32_t(float(fullW) * kRenderScale), int32_t(float(fullH) * kRenderScale), 0);
+    touchScale = kRenderScale;
     si.window = window;
     VK_CHECK(vkCreateAndroidSurfaceKHR(ctx.instance, &si, nullptr, &surface));
     ctx.createDevice(surface);
@@ -179,9 +189,14 @@ struct Engine {
     const glm::vec2 screen(float(swapchain.extent.width), float(swapchain.extent.height));
     const bool trace = frameCount < 3;  // os primeiros frames deixam rastro no log (diagnóstico de tela preta)
     if (trace) LOG_INFO("Frame %u: jogo", frameCount);
+    using clk = std::chrono::steady_clock;
+    auto ms = [](clk::time_point a, clk::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
+    const auto c0 = clk::now();
     const float sceneDt = game.update(dt, touches, scene, camera, r, screen);
+    const auto c1 = clk::now();
     if (trace) LOG_INFO("Frame %u: cena", frameCount);
     scene.update(sceneDt);
+    const auto c2 = clk::now();
     if (trace) LOG_INFO("Frame %u: esperando a GPU", frameCount);
     FrameSync& f = frames[slot];
     const uint64_t kTimeout = 8'000'000'000ull;  // 8 s: a GPU travada vira erro com o log, não tela preta
@@ -190,6 +205,7 @@ struct Engine {
       FATAL("A GPU não terminou o frame %u em 8 s (travou); %s", frameCount, r.gpuProgress(slot).c_str());
     if (wf != VK_SUCCESS) FATAL("vkWaitForFences: %d (frame %u)", int(wf), frameCount);
     uint32_t imageIndex = 0;
+    const auto c3 = clk::now();
     VkResult acq = vkAcquireNextImageKHR(ctx.device, swapchain.handle, kTimeout, f.imageAvailable, VK_NULL_HANDLE, &imageIndex);
     if (acq == VK_ERROR_OUT_OF_DATE_KHR) { recreateSwapchain(); return; }
     if (acq == VK_TIMEOUT) FATAL("A tela não liberou imagem em 8 s (frame %u)", frameCount);
@@ -200,7 +216,9 @@ struct Engine {
     VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(f.cmd, &bi));
+    const auto c4 = clk::now();
     r.record(f.cmd, slot, camera, swapchain.images[imageIndex], swapchain.views[imageIndex], dt);
+    const auto c5 = clk::now();
     rhi::imageBarrier(f.cmd, swapchain.images[imageIndex], VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                       VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                       VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_NONE, 0);
@@ -229,7 +247,21 @@ struct Engine {
     pi.swapchainCount = 1;
     pi.pSwapchains = &swapchain.handle;
     pi.pImageIndices = &imageIndex;
+    const auto c6 = clk::now();
     const VkResult pres = vkQueuePresentKHR(ctx.queue, &pi);
+    const auto c7 = clk::now();
+    tGame += ms(c0, c1); tScene += ms(c1, c2); tWait += ms(c2, c3); tAcquire += ms(c3, c4); tRecord += ms(c4, c5);
+    tSubmit += ms(c5, c6); tPresent += ms(c6, c7); tTotal += ms(c0, c7); ++tFrames;
+    if (ms(tLast, c7) > 1000.0 && tFrames > 0) {
+      char buf[256];
+      const double n = double(tFrames);
+      std::snprintf(buf, sizeof(buf), "CPU %.1f ms: jogo %.1f | cena %.1f | espera GPU %.1f | imagem %.1f | gravar %.1f | enviar %.1f | mostrar %.1f",
+                    tTotal / n, tGame / n, tScene / n, tWait / n, tAcquire / n, tRecord / n, tSubmit / n, tPresent / n);
+      game.setPerfExtra(buf);
+      tGame = tScene = tWait = tAcquire = tRecord = tSubmit = tPresent = tTotal = 0;
+      tFrames = 0;
+      tLast = c7;
+    }
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) recreateSwapchain();
     else if (pres != VK_SUCCESS) FATAL("vkQueuePresentKHR: %d", pres);
     slot = (slot + 1) % renderer::Renderer::kFramesInFlight;
@@ -321,7 +353,8 @@ int32_t handleInput(android_app* app, AInputEvent* event) {
   const size_t n = AMotionEvent_getPointerCount(event);
   for (size_t i = 0; i < n; ++i) {
     if (action == AMOTION_EVENT_ACTION_POINTER_UP && i == changed) continue;  // esse dedo saiu
-    a.touches.push_back({int(AMotionEvent_getPointerId(event, i)), glm::vec2(AMotionEvent_getX(event, i), AMotionEvent_getY(event, i))});
+    const float k = a.engine ? a.engine->touchScale : 1.0f;
+    a.touches.push_back({int(AMotionEvent_getPointerId(event, i)), glm::vec2(AMotionEvent_getX(event, i), AMotionEvent_getY(event, i)) * k});
   }
   return 1;
 }
