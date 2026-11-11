@@ -1,3 +1,6 @@
-# Rodada 23: o jogo de demonstração (cenas/vale) — teste que joga sozinho e o jogo na janela por 20 s em 1080p.
+# Rodada 24: o jogo depois da otimização (preset Alto pela cena, cristais com 64 luzes em vez de 11.284), a IA do
+# guarda corrigida ("no_chao") e os sons. Antes: 41,5 ms em 1080p.
 python tools\demo.py --bin build\Release\legacy.exe
 build\Release\legacy.exe --scene cenas\vale\vale.json --width 1920 --height 1080 --warmup 60 --quit-after 20 --no-vsync --screenshot resultados_pc\vale.png
+python tools\mundo.py --bin build\Release\legacy.exe
+python tools\visual.py --bin build\Release\legacy.exe
