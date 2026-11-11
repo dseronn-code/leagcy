@@ -919,14 +919,22 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         if (file.find("hatch") != std::string::npos) t.length = 4.1f;
         templates.push_back(t);
       }
-      struct Lane { glm::vec2 a, d; float length; };
+      // Semáforo: cada faixa pode ter "paradas" (distâncias, em m desde o início da faixa, das linhas de parada) e
+      // uma "fase" (0 ou 1): a fase 0 tem verde na primeira metade do "ciclo" de "semaforo", a fase 1 na segunda.
+      struct Lane { glm::vec2 a, d; float length; std::vector<float> stops; int phase; };
       std::vector<Lane> lanes;
       const json lanesJson = tj.value("faixas", json::array());
       for (const json& fj : lanesJson) {
         const glm::vec2 a(fj["de"][0].get<float>(), fj["de"][1].get<float>()), b(fj["ate"][0].get<float>(), fj["ate"][1].get<float>());
         const float len = glm::length(b - a);
-        if (len > 5.0f) lanes.push_back({a, (b - a) / len, len});
+        if (len <= 5.0f) continue;
+        Lane l{a, (b - a) / len, len, {}, fj.value("fase", 0)};
+        const json stops = fj.value("paradas", json::array());
+        for (const json& st : stops) l.stops.push_back(st.get<float>());
+        std::sort(l.stops.begin(), l.stops.end());
+        lanes.push_back(l);
       }
+      const float cycle = std::max(10.0f, tj.value("semaforo", 50.0f));
       if (!templates.empty() && !lanes.empty()) {
         std::mt19937 rng(tj.value("semente", 1u));
         std::uniform_real_distribution<float> u(0.0f, 1.0f);
@@ -958,9 +966,10 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           cars->push_back(std::move(c));
         }
         const size_t laneCount = lanes.size();
-        scene.addAnimator([cars, lanes, laneCount, y](scene::Scene& sc, float, float dt) {
+        scene.addAnimator([cars, lanes, laneCount, y, cycle](scene::Scene& sc, float time, float dt) {
           std::vector<Car>& C = *cars;
           const float step = std::min(dt, 0.1f);
+          const bool firstHalf = std::fmod(time, cycle) < cycle * 0.5f;
           // Por faixa, em ordem de posição: cada carro freia se o da frente estiver perto (2 s de distância + 3 m).
           std::vector<std::vector<uint32_t>> byLane(laneCount);
           for (uint32_t i = 0; i < C.size(); ++i) byLane[C[i].lane].push_back(i);
@@ -972,7 +981,16 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               float gap = ahead.s - c.s;
               if (gap <= 0.0f) gap += lanes[c.lane].length;  // o da frente já deu a volta
               if (list.size() == 1) gap = 1e9f;
-              const float want = gap < 3.0f + c.len + c.speed * 2.0f ? std::max(0.0f, (gap - c.len - 2.5f) / 2.0f) : c.vmax;
+              float want = gap < 3.0f + c.len + c.speed * 2.0f ? std::max(0.0f, (gap - c.len - 2.5f) / 2.0f) : c.vmax;
+              const Lane& L = lanes[c.lane];
+              if (!L.stops.empty() && (firstHalf == (L.phase != 0))) {  // vermelho: para antes da próxima linha
+                for (float st : L.stops) {
+                  const float toStop = st - (c.s + c.len * 0.5f);
+                  if (toStop < -0.5f) continue;
+                  if (toStop < 6.0f + c.speed * c.speed / 6.0f) want = std::min(want, std::max(0.0f, toStop) / 1.5f);
+                  break;
+                }
+              }
               c.speed += glm::clamp(want - c.speed, -6.0f * step, 2.5f * step);  // freia forte, acelera devagar
             }
           }
