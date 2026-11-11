@@ -564,7 +564,8 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   const Quality& sq = settings.quality;
   const uint32_t qualityFeatures = (sq.mirrorGiCache ? 1u : 0u) | (sq.giHalf ? 2u : 0u) | (sq.roughSpecCache ? 4u : 0u) |
                                    (sq.cacheEighth ? 8u : 0u) | (sq.hitShadowOpaque ? 16u : 0u) |
-                                   (sq.giQuarter ? 32u : 0u) | (sq.glossySpecCache ? 64u : 0u) | (sq.indirectOpaque ? 128u : 0u);
+                                   (sq.giQuarter ? 32u : 0u) | (sq.glossySpecCache ? 64u : 0u) | (sq.indirectOpaque ? 128u : 0u) |
+                                   (sq.hitMirrorCache ? 256u : 0u);
   const uint32_t spec[3] = {features, qualityFeatures, std::max(sq.samplesPerPixel, 1u)};
   if (features != 0xFFFFFFFFu) {
     const std::pair<uint32_t, const char*> names[] = {{1u << 1, "terreno"}, {1u << 6, "vidro"}, {1u << 7, "verniz"},

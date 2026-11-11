@@ -363,7 +363,7 @@ vec3 traceRadianceAt(HitInfo hit, vec3 dir, SampleGen sg, uint bounce, bool coun
   radiance += s.diffuseColor * bc.diffuseWeight * M;
   vec3 hitOrigin = offsetRayOrigin(hit.P, hit.Ng, RAY_BIAS_EXACT * hit.t);
   // Indireta especular: superfícies espelhadas refletem por um raio (amostra VNDF); as outras, pelo cache.
-  if (s.roughness < GLOSSY_HIT_ROUGHNESS && !(bounce == 0u && qualityHas(Q_MIRROR_GI_CACHE))) {
+  if (s.roughness < GLOSSY_HIT_ROUGHNESS && !(bounce == 0u && qualityHas(Q_MIRROR_GI_CACHE)) && !qualityHas(Q_HIT_MIRROR_CACHE)) {
     float a = alphaFromRoughness(s.roughness);
     vec3 T, B;
     orthonormalBasis(bc.N, T, B);
