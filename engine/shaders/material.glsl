@@ -281,6 +281,12 @@ Surface evalMaterial(Material m, vec3 P, vec3 N, vec4 T, vec2 uv, vec4 vertexCol
     float c = cos(m.uvRotation), sn = sin(m.uvRotation);
     uv = mat2(c, sn, -sn, c) * (uv * m.uvScale) + m.uvOffset;  // mesma matriz do README da Khronos (colunas)
   }
+  if (m.flipGrid > 0.0) {  // telão animado: o quadro atual da folha de quadros
+    float cols = mod(m.flipGrid, 100.0), rows = max(floor(m.flipGrid / 100.0), 1.0);
+    uint count = uint(cols * rows), f = uint(max(frame.night.w, 0.0) * m.flipFps) % max(count, 1u);
+    vec2 cell = vec2(float(f % uint(cols)), float(f / uint(cols)));
+    uv = (clamp(fract(uv), 0.002, 0.998) + cell) / vec2(cols, rows);
+  }
   Surface s;
   vec4 base = m.baseColor * vertexColor;
   if (m.baseColorTex >= 0) base *= MATERIAL_SAMPLE(m.baseColorTex, uv);

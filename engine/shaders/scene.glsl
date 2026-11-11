@@ -90,7 +90,7 @@ struct Material {  // == scene::Material (192 bytes)
   vec2 uvScale;
   float uvRotation;
   float flowSpeed;  // rio: m/s na direção da tangente
-  float pad4b, pad4c;
+  float flipGrid, flipFps;  // telão animado: colunas + 100 × linhas, quadros/s (0 = parado)
 };
 
 struct InstanceData {  // == Scene::InstanceGpu

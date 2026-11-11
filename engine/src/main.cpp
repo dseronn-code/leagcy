@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -466,6 +467,21 @@ Options parseArgs(int argc, char** argv) {
     std::error_code ec;
     if (o.render.giRebake || std::filesystem::exists(path, ec)) o.render.giProbes = path;
     if (o.render.giRebake && !file) std::filesystem::create_directories("texcache", ec);
+  }
+  // Clima pedido pela cena .json ("noite": true, "chuva": 0.8, "nevoa": 0.004); --night/--rain/--fog valem mais.
+  if (o.scene.name.size() > 5 && o.scene.name.substr(o.scene.name.size() - 5) == ".json") {
+    std::ifstream f(o.scene.name);
+    std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    auto number = [&](const char* key, float& out) {
+      const size_t k = text.find(key);
+      if (k == std::string::npos) return false;
+      const size_t c = text.find(':', k);
+      return c != std::string::npos && std::sscanf(text.c_str() + c + 1, " %f", &out) == 1;
+    };
+    float v = 0.0f;
+    if (!o.scene.night && text.find("\"noite\": true") != std::string::npos) o.scene.night = true;
+    if (o.scene.rain <= 0.0f && number("\"chuva\"", v)) o.scene.rain = v;
+    if (o.scene.fog < 0.0f && number("\"nevoa\"", v)) o.scene.fog = v;
   }
   // A cena pode pedir um preset ("qualidade": "alto" no .json); --quality na linha de comando vale mais.
   if (!qualityGiven && o.scene.name.size() > 5 && o.scene.name.substr(o.scene.name.size() - 5) == ".json") {

@@ -120,6 +120,37 @@ class Mesh:
                 self.quad((a[0], y0, a[1]), (b[0], y0, b[1]), (b[0], y1, b[1]), (a[0], y1, a[1]),
                           uv=((0, y0 * uv_h), (L * uv_w, y0 * uv_h), (L * uv_w, y1 * uv_h), (0, y1 * uv_h)))
 
+    def cylinder(self, c, r, y0, y1, seg=12, cap=True):
+        """Cilindro vertical de raio r em c=(x, z), de y0 a y1 (com tampa em cima)."""
+        x, z = c
+        ang = [2 * math.pi * i / seg for i in range(seg + 1)]
+        for i in range(seg):
+            a0, a1 = ang[i], ang[i + 1]
+            p0 = (x + r * math.cos(a0), z + r * math.sin(a0))
+            p1 = (x + r * math.cos(a1), z + r * math.sin(a1))
+            mid = ((a0 + a1) / 2)
+            self.quad((p0[0], y0, p0[1]), (p1[0], y0, p1[1]), (p1[0], y1, p1[1]), (p0[0], y1, p0[1]),
+                      uv=((i / seg, y0), ((i + 1) / seg, y0), ((i + 1) / seg, y1), (i / seg, y1)),
+                      face=(math.cos(mid), 0, math.sin(mid)))
+            if cap:
+                base = len(self.p)
+                for q in ((x, y1, z), (p0[0], y1, p0[1]), (p1[0], y1, p1[1])):
+                    self.p.append(np.array(q, np.float64))
+                    self.n.append(np.array([0.0, 1.0, 0.0]))
+                    self.uv.append((q[0], q[2]))
+                self.idx += [base, base + 2, base + 1]
+
+    def sphere(self, c, r, seg=10):
+        cx, cy, cz = c
+        for j in range(seg // 2):
+            t0, t1 = math.pi * j / (seg // 2) - math.pi / 2, math.pi * (j + 1) / (seg // 2) - math.pi / 2
+            for i in range(seg):
+                a0, a1 = 2 * math.pi * i / seg, 2 * math.pi * (i + 1) / seg
+                P = lambda t, a: (cx + r * math.cos(t) * math.cos(a), cy + r * math.sin(t), cz + r * math.cos(t) * math.sin(a))
+                tm, am = (t0 + t1) / 2, (a0 + a1) / 2
+                self.quad(P(t0, a0), P(t0, a1), P(t1, a1), P(t1, a0),
+                          face=(math.cos(tm) * math.cos(am), math.sin(tm), math.cos(tm) * math.sin(am)))
+
     def box(self, c, h, rot=0.0):
         """Caixa de centro c e meias-medidas h, girada rot rad em torno de y."""
         cx, cy, cz = c
@@ -174,6 +205,58 @@ def ad_texture(path, rng, w=512, h=256, kind=None):
     tag = rng.choice(tags)
     d.text(((w - d.textlength(tag, font=f2)) / 2, h * 0.75), tag, font=f2, fill=(255, 255, 255))
     im.save(path)
+    return path
+
+
+def ad_flipbook(path, rng, cols=4, rows=2, w=384, h=192):
+    """Anúncio animado: `cols` x `rows` quadros numa folha (o motor anda por eles, extras legacy_flipbook). Movimento
+    por quadro: o degradê gira, as formas deslizam e crescem, a marca entra deslizando e a chamada pisca."""
+    brands = ['NOVA', 'KYRO', 'LUMEN', 'ORBITA', 'VELA', 'ZENTO', 'AURA', 'PIXEL&CO', 'MAREA', 'SOLARA', 'TEMPO',
+              'BRISA', 'QUASAR', 'ONDA', 'VOLTA', 'NEXA', 'FAROL', 'ECLIPSE', 'RUMO', 'ATLAS']
+    tags = ['NOW PLAYING', 'NEW SEASON', 'LIVE TONIGHT', 'OPEN 24H', 'SUMMER SALE', 'THE MUSICAL', 'ON SALE NOW',
+            'JUST LANDED', 'STREAM IT', 'COMING SOON', 'TASTE THE NIGHT', 'FEEL THE CITY']
+    pal = [((255, 40, 90), (40, 0, 120)), ((0, 200, 255), (0, 30, 80)), ((255, 200, 0), (200, 40, 0)),
+           ((120, 255, 120), (0, 60, 40)), ((255, 255, 255), (220, 0, 0)), ((255, 120, 0), (30, 0, 60)),
+           ((180, 0, 255), (0, 0, 30)), ((255, 230, 200), (90, 30, 10))]
+    a, b = (np.array(c, np.float64) for c in pal[rng.randrange(len(pal))])
+    brand, tag = rng.choice(brands), rng.choice(tags)
+    font_path = FONT if rng.random() < 0.7 else FONT2
+    shapes = [(rng.random(), rng.random(), rng.uniform(0.15, 0.45), rng.random() < 0.5, rng.uniform(-0.3, 0.3),
+               rng.uniform(-0.15, 0.15)) for _ in range(rng.randrange(1, 4))]
+    phase0 = rng.random() * 6
+    sheet = Image.new('RGB', (w * cols, h * rows))
+    n = cols * rows
+    yy = np.linspace(0, 1, h)[:, None, None]
+    xx = np.linspace(0, 1, w)[None, :, None]
+    for f in range(n):
+        t = f / n
+        ph = phase0 + 2 * math.pi * t
+        mix = np.clip(0.6 * yy + 0.4 * xx + 0.25 * np.sin(6 * xx + 3 * yy + ph), 0, 1)
+        img = Image.fromarray((a[None, None] * (1 - mix) + b[None, None] * mix).astype(np.uint8), 'RGB')
+        d = ImageDraw.Draw(img)
+        for (sx, sy, sr, circ, vx, vy) in shapes:
+            cx, cy = (sx + vx * math.sin(2 * math.pi * t)) * w, (sy + vy * math.cos(2 * math.pi * t)) * h
+            r = sr * h * (1 + 0.15 * math.sin(2 * math.pi * t * 2))
+            col = tuple(int(c) for c in np.clip(a * 0.6 + 255 * 0.35, 0, 255))
+            if circ:
+                d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=col)
+            else:
+                d.polygon([(cx, cy - r), (cx + r, cy + r), (cx - r, cy + r)], fill=col)
+        size = int(h * 0.36)
+        f1 = ImageFont.truetype(font_path, size)
+        tw = d.textlength(brand, font=f1)
+        if tw > w * 0.9:
+            f1 = ImageFont.truetype(font_path, int(size * w * 0.9 / tw))
+            tw = d.textlength(brand, font=f1)
+        slide = max(0.0, 1.0 - t * 3.0)  # a marca entra deslizando no começo do ciclo
+        tx, ty = (w - tw) / 2 + slide * w * 0.6, h * 0.2
+        d.text((tx + 3, ty + 3), brand, font=f1, fill=(0, 0, 0))
+        d.text((tx, ty), brand, font=f1, fill=(255, 255, 255))
+        if f % 2 == 0 or n < 4:  # a chamada pisca
+            f2 = ImageFont.truetype(FONT, int(h * 0.12))
+            d.text(((w - d.textlength(tag, font=f2)) / 2, h * 0.74), tag, font=f2, fill=(255, 255, 255))
+        sheet.paste(img, ((f % cols) * w, (f // cols) * h))
+    sheet.save(path)
     return path
 
 
@@ -797,11 +880,16 @@ def build(out, seed):
     for i, y in enumerate(range(18, 104, 14)):
         screens.append((np.array([xt, zt + 14.3]), (0.0, 1.0), np.array([1.0, 0.0]), y, 16, 11))
 
-    # Telões: cada um um material com textura própria (anúncio fictício), emissivo forte (LED: ~6.000 nits).
+    # Telões: 40 anúncios animados fictícios (folhas de 8 quadros) espalhados pelos telões, emissivos fortes (LED:
+    # ~6.000 nits). Cada telão sorteia um anúncio e uma velocidade.
+    ads = []
+    for k in range(40):
+        p = rel(ad_flipbook(tex(f'anuncio{k:02d}.png'), rng))
+        mat = g.material(f'anuncio{k:02d}', rough=0.35, tex=p, emissive=(1, 1, 1), emissive_tex=p, strength=6.0)
+        g.doc['materials'][mat]['extras'] = {'legacy_flipbook': [4, 2, rng.choice([2, 3, 4, 6, 8])]}
+        ads.append(mat)
     for i, (mid, (nx, nz), t, y, wid, hgt) in enumerate(screens):
-        p = ad_texture(tex(f'tel{i:03d}.png'), rng, 512, max(128, int(512 * hgt / max(wid, 1)) // 32 * 32))
-        mat = g.material(f'telao{i:03d}', rough=0.35, tex=rel(p), emissive=(1, 1, 1), emissive_tex=rel(p),
-                         strength=6.0)
+        mat = ads[rng.randrange(len(ads))]
         m = Mesh()
         o = np.array([mid[0] + nx * 0.4, 0, mid[1] + nz * 0.4])
         tx = np.array([t[0], 0, t[1]]) * wid / 2
@@ -832,6 +920,95 @@ def build(out, seed):
     for k in range(14):
         m.box((xs, 0.15 + 0.2 * k + 0.1, zs - 0.45 * k), (7.5, 0.1 + 0.2 * k / 2 + 0.0, 0.45))
     g.add_mesh('arquibancada', m, red)
+
+    # ---- mobiliário urbano: semáforos, hidrantes, lixeiras, frades (pilaretes) na praça, entradas de metrô com os
+    # globos verdes, bancas, tampas de bueiro, bancos e floreiras na praça.
+    steel = g.material('aco', color=(0.25, 0.26, 0.27), rough=0.35, metal=1.0)
+    dark = g.material('pintura_escura', color=(0.03, 0.035, 0.03), rough=0.4)
+    yellow = g.material('semaforo', color=(0.55, 0.42, 0.05), rough=0.45)
+    red_l = g.material('sinal_vermelho', color=(1, 0.1, 0.05), emissive=(1, 0.08, 0.04), strength=60.0)
+    green_l = g.material('sinal_verde', color=(0.1, 1, 0.5), emissive=(0.1, 1.0, 0.55), strength=60.0)
+    walk_l = g.material('sinal_pedestre', color=(1, 0.5, 0.1), emissive=(1.0, 0.45, 0.08), strength=40.0)
+    hydrant = g.material('hidrante', color=(0.6, 0.05, 0.03), rough=0.5)
+    bin_mat = g.material('lixeira', color=(0.06, 0.2, 0.1), rough=0.6, metal=0.5)
+    granite_d = g.material('granito_escuro', color=(0.2, 0.2, 0.21), rough=0.35)
+    globe = g.material('globo_metro', color=(0.2, 1, 0.4), emissive=(0.25, 1.0, 0.45), strength=30.0)
+    wood = g.material('banco', color=(0.32, 0.2, 0.12), rough=0.6)
+    plant = g.material('planta', color=(0.06, 0.18, 0.05), rough=0.8)
+    stand = g.material('banca', color=(0.08, 0.16, 0.3), rough=0.5, metal=0.3)
+    stand_l = g.material('banca_luz', color=(1, 1, 1), emissive=(1, 0.9, 0.7), strength=8.0)
+    manhole = g.material('bueiro', color=(0.08, 0.08, 0.08), rough=0.35, metal=1.0)
+    props = {k: Mesh() for k in ('aco', 'escuro', 'semaforo', 'vermelho', 'verde', 'pedestre', 'hidrante', 'lixeira',
+                                 'granito', 'globo', 'banco', 'planta', 'banca', 'banca_luz', 'bueiro')}
+    pr = props
+    steam_points = []
+    for n in range(41, 49):
+        z, w = street_z(n), street_width(n)
+        for ax in (AVE_X['7th'], BWAY_K * z):
+            for sx in (-1, 1):
+                for sz in (-1, 1):  # semáforo em cada canto do cruzamento
+                    px, pz = ax + sx * 15.6, z + sz * (w / 2 + 0.6)
+                    if abs(ax) < 1e-6 and abs(BWAY_K * z) < 25 and sx < 0:
+                        continue
+                    pr['escuro'].cylinder((px, pz), 0.11, 0.15, 5.2)
+                    arm_dir = -sx
+                    pr['escuro'].box((px + arm_dir * 3.2, 5.0, pz), (3.2, 0.08, 0.08))
+                    hx = px + arm_dir * 5.8
+                    pr['semaforo'].box((hx, 4.4, pz), (0.2, 0.55, 0.18))
+                    lit = (n + (1 if sx > 0 else 0)) % 2 == 0
+                    (pr['vermelho'] if lit else pr['verde']).sphere((hx, 4.75 if lit else 4.05, pz - sz * 0.19), 0.1, 8)
+                    pr['semaforo'].box((px, 2.7, pz - sz * 0.15), (0.17, 0.2, 0.12))
+                    pr['pedestre'].box((px, 2.7, pz - sz * 0.27), (0.12, 0.13, 0.005))
+        for x in np.arange(-250, 300, 40.0):  # hidrantes e lixeiras nas calçadas
+            for zz in (z - w / 2 + 0.7, z + w / 2 - 0.7):
+                if any(abs(x - ax) < 20 for ax in AVE_X.values()) or abs(x - BWAY_K * zz) < 20:
+                    continue
+                xx = x + rng.uniform(-6, 6)
+                if rng.random() < 0.5:
+                    pr['hidrante'].cylinder((xx, zz), 0.13, 0.15, 0.85)
+                    pr['hidrante'].sphere((xx, 0.85, zz), 0.13, 8)
+                    pr['hidrante'].box((xx, 0.6, zz), (0.24, 0.05, 0.05))
+                else:
+                    pr['lixeira'].cylinder((xx, zz), 0.3, 0.15, 1.05, seg=16)
+        for x in (-170.0, 130.0):  # bueiros no asfalto (com vapor na cena .json)
+            pr['bueiro'].cylinder((x + rng.uniform(-20, 20), z + rng.uniform(-2, 2)), 0.45, 0.0, 0.012, seg=16)
+            steam_points.append((float(x), float(z)))
+    # Praça: frades de granito na borda (contra carros), bancos e floreiras.
+    pl_edge = plaza.boundary
+    for k in np.arange(0, pl_edge.length, 2.4):
+        p = pl_edge.interpolate(k)
+        if road.distance(p) < 1.0 and rng.random() < 0.9:
+            pr['granito'].cylinder((p.x, p.y), 0.22, 0.15, 1.0, seg=10)
+    for zc in np.arange(street_z(46) + 20, street_z(42) - 20, 14.0):
+        if any(abs(zc - street_z(n)) < 16 for n in range(42, 48)):
+            continue
+        xc = BWAY_K * zc
+        for side in (-1, 1):
+            if rng.random() < 0.6:
+                pr['banco'].box((xc + side * 7.5, 0.6, zc), (0.35, 0.05, 1.8), rot=math.atan(BWAY_K))
+                pr['granito'].box((xc + side * 7.5, 0.37, zc), (0.3, 0.22, 1.7), rot=math.atan(BWAY_K))
+            else:
+                pr['granito'].box((xc + side * 7.0, 0.55, zc), (0.9, 0.4, 0.9))
+                pr['planta'].sphere((xc + side * 7.0, 1.25, zc), 0.8, 10)
+    # Entradas de metrô (escada com grade e os dois globos verdes acesos) e bancas de jornal.
+    for (x, z) in ((-21.0, street_z(42) + 9), (24.0, street_z(42) - 9), (-21.0, street_z(45) + 9), (21.0, street_z(47) - 9)):
+        for sx in (-1, 1):
+            pr['escuro'].box((x + sx * 1.3, 0.65, z), (0.04, 0.5, 2.6))
+            pr['escuro'].cylinder((x + sx * 1.3, z + 2.6), 0.05, 0.15, 2.4)
+            pr['globo'].sphere((x + sx * 1.3, 2.6, z + 2.6), 0.2, 10)
+            g.light((x + sx * 1.3, 2.6, z + 2.6), (0.3, 1.0, 0.45), 60.0, 12.0)
+        pr['escuro'].box((x, 0.65, z - 2.6), (1.3, 0.5, 0.04))
+    for (x, z) in ((16.5, street_z(43) - 14), (-17.0, street_z(46) + 20), (-17.5, street_z(44) - 25)):
+        pr['banca'].box((x, 1.4, z), (1.2, 1.25, 2.2))
+        pr['banca'].box((x + 0.3, 2.8, z), (1.6, 0.06, 2.5))
+        pr['banca_luz'].box((x + 1.21, 1.6, z), (0.01, 0.6, 1.9))
+    for key, mat in (('aco', steel), ('escuro', dark), ('semaforo', yellow), ('vermelho', red_l), ('verde', green_l),
+                     ('pedestre', walk_l), ('hidrante', hydrant), ('lixeira', bin_mat), ('granito', granite_d),
+                     ('globo', globe), ('banco', wood), ('planta', plant), ('banca', stand), ('banca_luz', stand_l),
+                     ('bueiro', manhole)):
+        g.add_mesh('rua_' + key, props[key], mat)
+    with open(os.path.join(out, 'vapor.json'), 'w') as f:
+        json.dump(steam_points, f)
 
     # Postes: luz de rua (sódio/LED quente) a cada ~30 m nas calçadas; KHR_lights_punctual.
     pole = g.material('poste', color=(0.08, 0.09, 0.1), rough=0.4, metal=1.0)
@@ -872,7 +1049,8 @@ def main():
         build(tmp, a.semente)
         os.makedirs(a.saida, exist_ok=True)
         subprocess.run([a.gltfpack, '-i', os.path.join(tmp, 'times_square.gltf'), '-o',
-                        os.path.join(a.saida, 'times_square.gltf'), '-cc', '-kn', '-km'], check=True)
+                        os.path.join(a.saida, 'times_square.gltf'), '-cc', '-kn', '-km', '-ke'], check=True)
+        shutil.copyfile(os.path.join(tmp, 'vapor.json'), os.path.join(a.saida, 'vapor.json'))
         # O gltfpack copia as texturas para o lado do .gltf (e aponta para lá): a pasta tex/ antiga sobra.
         shutil.rmtree(os.path.join(a.saida, 'tex'), ignore_errors=True)
 

@@ -97,7 +97,10 @@ struct Material {
   glm::vec2 uvScale{1.0f};
   float uvRotation = 0.0f;
   float flowSpeed = 0.0f;  // rio (kMaterialRiver): velocidade da correnteza em m/s, na direção da tangente da malha
-  float pad4[2] = {};
+  // Telão animado (folha de quadros na textura, extras "legacy_flipbook" do glTF): colunas + 100 × linhas da grade
+  // (0 = sem animação) e quadros por segundo; o UV do material anda pelas células com o tempo da cena.
+  float flipGrid = 0.0f;
+  float flipFps = 0.0f;
 };
 static_assert(sizeof(Material) == 192);
 

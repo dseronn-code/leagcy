@@ -266,6 +266,13 @@ struct Loader {
         if (std::strstr(x, "\"legacy_olho\"")) m.flags |= kMaterialEye | kMaterialClearcoat, m.clearcoat = 1.0f,
                                                    m.clearcoatRoughness = 0.02f;
         if (std::strstr(x, "\"legacy_cabelo\"")) m.flags |= kMaterialHair;
+        if (const char* k = std::strstr(x, "\"legacy_flipbook\"")) {  // [colunas, linhas, quadros/s]
+          float c = 0, r = 0, fps = 0;
+          if (const char* b = std::strchr(k, '['); b && std::sscanf(b, "[%f , %f , %f", &c, &r, &fps) == 3 && c >= 1 && r >= 1) {
+            m.flipGrid = c + 100.0f * r;
+            m.flipFps = fps;
+          }
+        }
       }
       // Recorte por alfa + dois lados: folhas, galhos, cortinas — balançam com o vento.
       if ((m.flags & kMaterialAlphaMask) && (m.flags & kMaterialDoubleSided)) m.flags |= kMaterialFoliage;
