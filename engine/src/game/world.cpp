@@ -10,7 +10,9 @@
 #include <filesystem>
 #include <cmath>
 #include <fstream>
+#include <memory>
 #include <random>
+#include <unordered_map>
 #include <functional>
 #include <cstring>
 #include <map>
@@ -696,6 +698,16 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           const float vmin = vel[0].get<float>(), vmax = vel[1].get<float>();
           const float y = mj.value("altura", 0.0f), yaw0 = glm::radians(mj.value("girar_graus", 0.0f));
           const int count = std::max(0, mj.value("quantidade", 300));
+          // Estado de todos os agentes num só animador: cada um anda pela faixa e ajusta o deslocamento lateral para
+          // não atravessar quem está logo à frente (grade de 1,5 m para achar os vizinhos).
+          struct Agent {
+            Lane L;
+            float dir, baseSide, side, speed, s0, scale;
+            std::vector<uint32_t> objs;
+            glm::vec2 pos{0.0f};
+          };
+          auto agents = std::make_shared<std::vector<Agent>>();
+          agents->reserve(size_t(count));
           for (int i = 0; i < count; ++i) {
             float pick = u(rng) * total;  // faixa sorteada pelo comprimento (gente espalhada por igual)
             size_t li = 0;
@@ -729,24 +741,62 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               }
               agent.push_back(o);
             }
-            const glm::vec2 d = (L.b - L.a) / L.length, n(-d.y, d.x);
-            scene.addAnimator([=](scene::Scene& sc, float t, float) {
-              const float s = std::fmod(s0 + speed * t, L.length);
-              glm::vec2 p = (dir > 0.0f ? L.a + d * s : L.b - d * s) + n * side;
+            agents->push_back({L, dir, side, side, speed, s0, scale, agent});
+          }
+          scene.addAnimator([agents, obstacles, y, yaw0](scene::Scene& sc, float t, float dt) {
+            std::vector<Agent>& A = *agents;
+            // 1) Posição ao longo da faixa, com o deslocamento lateral atual, e o contorno dos obstáculos.
+            for (Agent& a : A) {
+              const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x);
+              const float s = std::fmod(a.s0 + a.speed * t, a.L.length);
+              glm::vec2 p = (a.dir > 0.0f ? a.L.a + d * s : a.L.b - d * s) + n * a.side;
               for (const glm::vec3& o : obstacles) {  // dentro do raio: empurra para o lado mais perto, pela normal
-                const glm::vec2 c(o.x, o.y), r = p - c;
+                const glm::vec2 r = p - glm::vec2(o.x, o.y);
                 const float dist = glm::length(r);
                 if (dist < o.z) {
                   const float across = glm::dot(r, n);
                   p += n * ((across >= 0.0f ? 1.0f : -1.0f) * o.z - across) * (1.0f - dist / o.z * 0.3f);
                 }
               }
-              const glm::vec2 f = d * dir;
-              glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
+              a.pos = p;
+            }
+            // 2) Desvio: quem tem alguém a menos de 0,8 m à frente puxa o lado para longe dele (devagar, ~1 m/s de
+            //    lado); sem ninguém, volta aos poucos para o próprio caminho.
+            std::unordered_map<int64_t, std::vector<uint32_t>> grid;
+            auto key = [](glm::vec2 p) { return (int64_t(std::floor(p.x / 1.5f)) << 32) ^ int64_t(uint32_t(int32_t(std::floor(p.y / 1.5f)))); };
+            for (uint32_t i = 0; i < A.size(); ++i) grid[key(A[i].pos)].push_back(i);
+            const float step = std::min(dt, 0.1f);
+            for (uint32_t i = 0; i < A.size(); ++i) {
+              Agent& a = A[i];
+              const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
+              float push = 0.0f;
+              const int cx = int(std::floor(a.pos.x / 1.5f)), cz = int(std::floor(a.pos.y / 1.5f));
+              for (int gx = -1; gx <= 1; ++gx)
+                for (int gz = -1; gz <= 1; ++gz) {
+                  const auto it = grid.find((int64_t(cx + gx) << 32) ^ int64_t(uint32_t(cz + gz)));
+                  if (it == grid.end()) continue;
+                  for (uint32_t j : it->second) {
+                    if (j == i) continue;
+                    const glm::vec2 r = A[j].pos - a.pos;
+                    const float dist = glm::length(r);
+                    if (dist < 0.8f && glm::dot(r, f) > -0.1f) {
+                      const float across = glm::dot(r, n);
+                      push += (across > 0.0f || (across == 0.0f && i < j) ? -1.0f : 1.0f) * (0.8f - dist);
+                    }
+                  }
+                }
+              const float half = a.L.width * 0.5f + 0.6f;
+              if (push != 0.0f) a.side = glm::clamp(a.side + glm::clamp(push * 4.0f, -1.0f, 1.0f) * step, -half, half);
+              else a.side += (a.baseSide - a.side) * std::min(1.0f, 0.3f * step);
+            }
+            // 3) Pose de cada pessoa.
+            for (const Agent& a : A) {
+              const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, f = d * a.dir;
+              glm::mat4 m = glm::translate(glm::mat4(1.0f), {a.pos.x, y, a.pos.y});
               m = glm::rotate(m, std::atan2(f.x, f.y) + yaw0, glm::vec3(0, 1, 0));
-              for (uint32_t o : agent) sc.setTransform(o, glm::scale(m, glm::vec3(scale)));
-            });
-          }
+              for (uint32_t o : a.objs) sc.setTransform(o, glm::scale(m, glm::vec3(a.scale)));
+            }
+          });
           LOG_INFO("Multidão: %d pessoas (%zu modelos, %u poses cada) em %zu faixas", count, clips.size(), poses,
                    lanes.size());
         }
