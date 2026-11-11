@@ -112,6 +112,21 @@ def convert(args):
             if ji == 0 and any(n.endswith('position') for n in chans):
                 root_t[fi] = pos * args.escala
         col += len(chans)
+    if args.no_lugar:  # o rumo da raiz (giro em torno de y) também sai: anda sempre para a mesma direção
+        def rotate_vec(q, v):
+            x, y, z, w = q
+            u = np.array([x, y, z])
+            return v + 2 * np.cross(u, np.cross(u, v) + w * v)
+        heads = []
+        for fi in range(len(times)):
+            f = rotate_vec(rot[0, fi], np.array([0.0, 0.0, 1.0]))
+            heads.append(math.atan2(f[0], f[2]))
+        heads = np.unwrap(np.array(heads))
+        h0 = heads[0]
+        for fi in range(len(times)):
+            d = -(heads[fi] - h0)
+            qy = np.array([0.0, math.sin(d / 2), 0.0, math.cos(d / 2)])
+            rot[0, fi] = qmul(qy, rot[0, fi])
     if args.no_lugar:  # deslocamento horizontal fora: a raiz fica sobre a origem (altura e balanço continuam)
         root_t[:, 0] -= root_t[:, 0]
         root_t[:, 2] -= root_t[:, 2]
