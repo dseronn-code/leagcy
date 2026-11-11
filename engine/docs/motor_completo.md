@@ -642,9 +642,14 @@ de vitória como linhas do tempo em JSON, HUD com o contador e o menu de pausa p
 ruínas e os personagens no chão do terreno ao começar.
 
 Teste (`tools/demo.py`, joga sozinho): a abertura toca e termina; o jogador coletando os 5 cristais dispara a vitória
-(que também termina); F derruba o guarda e ele levanta; o guarda vê o jogador, persegue e o alcança (nesse teste a
-prova é o "pego pelo guarda"; com o jogador posto 6 m à frente, a amostra seguinte ainda viu "patrulhando"); a imagem
-tem céu, terreno e os cristais.
+(que também termina); F derruba o guarda e ele levanta; o guarda vê o jogador, persegue e o alcança (com o jogador posto 6 m à frente, o guarda passa a
+"perseguindo" e toca o som de alerta); a imagem
+tem céu, terreno e os cristais. Na RTX 3070 Ti (rodada 24): 5/5; o guarda passa por "perseguindo" e toca o alerta.
+
+Desempenho em 1080p na RTX 3070 Ti: **11,6 ms por quadro (86 q/s)**, com DLSS-RR qualidade (1280 x 707 → 1920 x 1061).
+Antes da otimização eram 41,5 ms: os cristais eram malhas emissivas (11.284 luzes de triângulo); viraram caixas
+(64 luzes) e a cena pede o preset `"qualidade": "alto"` (vale quando `--quality` não é dado). A luz (ReSTIR) caiu de
+17 para 3,6 ms; o maior custo agora é o TAA/DLSS (5,3 ms).
 
 ![Vale dos Cristais](screenshots/vale_dos_cristais.png)
 
