@@ -112,6 +112,19 @@ def convert(args):
             if ji == 0 and any(n.endswith('position') for n in chans):
                 root_t[fi] = pos * args.escala
         col += len(chans)
+    if args.ciclo:  # corta no quadro mais parecido com o primeiro (depois de 0,8 s): o laço emenda sem pulo
+        mn = max(2, int(0.8 / (dt * args.passo)))
+        best, best_k = None, len(times)
+        for k in range(mn, len(times)):
+            d = sum(1.0 - abs(float(np.dot(rot[j, 0], rot[j, k]))) for j in range(1, len(joints)))
+            d += 0.2 * float(np.linalg.norm(root_t[0, 1] - root_t[k, 1]))
+            if best is None or d < best:
+                best, best_k = d, k
+        rot = rot[:, :best_k + 1]
+        rot[:, best_k] = rot[:, 0]  # último quadro = primeiro (o laço fecha)
+        root_t = root_t[:best_k + 1]
+        root_t[best_k] = root_t[0]
+        times = times[:best_k + 1]
     if args.no_lugar:  # o rumo da raiz (giro em torno de y) também sai: anda sempre para a mesma direção
         def rotate_vec(q, v):
             x, y, z, w = q
@@ -216,6 +229,7 @@ def main():
     ap.add_argument('--ate', type=int, default=-1)
     ap.add_argument('--passo', type=int, default=1)
     ap.add_argument('--no-lugar', action='store_true')
+    ap.add_argument('--ciclo', action='store_true', help='corta num ciclo que emenda (andar em laço)')
     convert(ap.parse_args())
 
 
