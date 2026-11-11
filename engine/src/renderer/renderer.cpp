@@ -58,7 +58,6 @@ struct FrameUniforms {
 static_assert(sizeof(FrameUniforms) == 992);
 constexpr uint32_t kRippleSize = 256, kMaxDisturbers = 64;
 constexpr float kRippleCell = 0.25f;  // m por texel: grade de 64 m
-constexpr uint32_t kShadowMapSize = 2048;
 
 // Frente dos triângulos: anti-horário, como no glTF (a projeção inverte o Y e o viewport do Vulkan também: as duas
 // inversões se cancelam — conferido pela imagem, com culling o chão e as paredes continuam lá).
@@ -206,6 +205,18 @@ Quality qualityPreset(QualityPreset preset) {
   return q;
 }
 
+void applyMobileSettings(Settings& s) {
+  s.quality = qualityPreset(QualityPreset::Low);
+  s.quality.renderScale = 0.5f;
+  s.quality.bloomMips = 3;
+  s.denoiser = false;  // sem ray tracing não há sinal ruidoso
+  s.motionBlur = false;
+  s.depthOfField = false;
+  s.lensFlare = 0.0f;
+  s.shadowDistance = 70.0f;
+  s.shadowMapSize = 1024;
+}
+
 bool parseDebugView(const char* name, uint32_t& out) {
   const std::pair<const char*, uint32_t> names[] = {{"sol", kDebugSunVisibility}, {"sol-luz", kDebugSunShading},
                                                     {"normal", kDebugGeometricNormal}, {"nl", kDebugSunCosine},
@@ -253,7 +264,7 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   rainOcclusion_ = rhi::createImage2D(ctx, {256, 256}, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
   useShadowMaps_ = !ctx.rayTracing || settings.shadowMaps;
   {
-    const uint32_t size = useShadowMaps_ ? kShadowMapSize : 16;  // sem uso: só um alvo válido para o descritor
+    const uint32_t size = useShadowMaps_ ? std::max(settings.shadowMapSize, 256u) : 16;  // sem uso: só um alvo válido para o descritor
     // A comparação com filtro linear exige FILTER_LINEAR no formato. GPUs de celular (Adreno) não têm isso em D32:
     // o resultado vira indefinido (tudo "na sombra", campo preto). Ordem: D32 linear > D16 linear > D32 sem filtro.
     auto linearDepth = [&](VkFormat f) {
@@ -1108,14 +1119,14 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
       const glm::mat4 view = glm::lookAt(center + L * (radius + back), center, lup);
       glm::mat4 proj = glm::orthoRH_ZO(-radius, radius, -radius, radius, 0.0f, 2.0f * radius + back);
       glm::vec4 o = proj * view * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
-      const float half = 0.5f * float(kShadowMapSize);
+      const float half = 0.5f * float(shadowMap_.extent.width);
       const glm::vec2 snapped = glm::round(glm::vec2(o) * half) / half;
       proj[3][0] += snapped.x - o.x;
       proj[3][1] += snapped.y - o.y;
       shadowMatrices_[c] = proj * view;
       u.shadowMatrices[c] = shadowMatrices_[c];
       if (c < 3) u.shadowSplits[c] = split;
-      if (c == 0) u.shadowParams.x = 2.0f * radius / float(kShadowMapSize);
+      if (c == 0) u.shadowParams.x = 2.0f * radius / float(shadowMap_.extent.width);
       prevSplit = split;
     }
     u.shadowSplits.w = prevSplit;

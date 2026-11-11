@@ -454,6 +454,7 @@ void keeperSaves(Match& m) {
 
 // Quem domina a bola: o mais perto que alcança, se ela estiver baixa e não rápida demais.
 void resolvePossession(Match& m) {
+  if (m.phase == Phase::Kickoff && m.owner >= 0) return;  // saída de bola: só o toque do batedor libera a bola
   if (m.owner >= 0) {
     if (distXZ(m.players[size_t(m.owner)].pos, m.ball.pos) > 2.2f || m.ball.pos.y > 1.2f) m.owner = -1;
   }
@@ -683,8 +684,8 @@ void stepMatch(Match& m, const Input* inputs) {
       // bola solta perto do gol: o goleiro sai
       if (m.owner < 0 && distXZ(m.ball.pos, ownGoal(m, t)) < 15.0f && chaser[t] >= 0 && timeTo(p, m.ball.pos) < timeTo(m.players[size_t(chaser[t])], m.ball.pos))
         it.target = interceptPoint(m, p), it.sprint = true;
-    } else if (!live && m.phase == Phase::Kickoff) {
-      it.target = p.pos;
+    } else if (m.phase == Phase::Kickoff && (!live || p.team != m.restartTeam)) {
+      it.target = p.pos;  // saída de bola: o adversário espera a bola rolar (sem bote no batedor)
     } else if (m.owner < 0 && p.index == m.passTarget) {
       it.target = receivePoint(m, p);
       it.sprint = true;
@@ -784,8 +785,15 @@ void stepMatch(Match& m, const Input* inputs) {
   if (m.owner < 0 || m.phase == Phase::Play) {
     if (!(restart && m.owner >= 0) && !(m.phase == Phase::Kickoff)) stepBall(m.ball, m.ballParams, kTick);
   }
-  if (m.phase == Phase::Kickoff && m.owner >= 0) {  // bola parada no centro até a saída
+  if (m.phase == Phase::Kickoff && m.owner >= 0) {  // bola parada no centro até a saída; quem bate fica nela
     m.ball.pos = {0.0f, m.ballParams.radius, 0.0f};
+    Player& kp = m.players[size_t(m.owner)];
+    kp.pos = m.ball.pos - toWorld(m, kp.team, 0.4f, 0.0f);
+    kp.pos.y = 0.0f;
+    kp.vel = {};
+  } else if (m.phase == Phase::Kickoff && m.owner < 0) {
+    // Saída sem dono (não deveria acontecer): a bola fica viva em vez de congelar no centro para sempre.
+    m.phase = Phase::Play;
   }
   if (restart && m.owner >= 0) {
     const Player& tp = m.players[size_t(m.owner)];

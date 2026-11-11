@@ -385,6 +385,9 @@ class Scene {
   bool ignoreFileTangents = false;  // --ignore-tangents: recalcula mesmo quando o glTF traz TANGENT (teste das tangentes)
   bool meshLights = true;  // triângulos emissivos viram luzes no upload
   bool meshLods = true;    // gera LODs das malhas grandes no upload
+  // < 1: no upload, malhas com esqueleto (personagens) ficam com esta fração dos triângulos (mesmos vértices, então
+  // skinning e animação não mudam). Celular: 25 jogadores de ~40 mil triângulos pesam mais que o estádio inteiro.
+  float skinnedTriangleScale = 1.0f;
   // Geometria virtualizada nas malhas rígidas desenhadas por meshlets (no lugar dos LODs inteiros acima): cada pedaço
   // escolhe na GPU o nível com erro de até ~1 pixel. Desligada por padrão enquanto é validada contra as metas
   // (--nanite liga; a cena "nanite" liga sozinha).

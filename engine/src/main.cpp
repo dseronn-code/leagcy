@@ -159,6 +159,7 @@ struct Options {
   bool headless = false;
   bool validation = false;
   bool rayTracing = true;
+  bool mobile = false;  // --mobile: as configurações do APK (sem RT, preset de celular, personagens simplificados)
   bool vsync = true;
   uint32_t width = 1920, height = 1080;
   bool fullscreen = false;
@@ -212,6 +213,7 @@ Options parseArgs(int argc, char** argv) {
     if (a == "--headless") o.headless = true;
     else if (a == "--validation") o.validation = true;
     else if (a == "--no-rt") o.rayTracing = false;
+    else if (a == "--mobile") { o.mobile = true; o.rayTracing = false; }
     else if (a == "--no-vsync") o.vsync = false;
     else if (a == "--width") o.width = uint32_t(std::atoi(next()));
     else if (a == "--height") o.height = uint32_t(std::atoi(next()));
@@ -435,6 +437,7 @@ Options parseArgs(int argc, char** argv) {
   }
   // Medição: sem o limite de "vagalumes" (o caminho ingênuo sem amostrar luzes perde energia nele).
   if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;
+  if (o.mobile) renderer::applyMobileSettings(o.render);  // por último: vale sobre --preset
   return o;
 }
 
@@ -461,6 +464,7 @@ int runAtmosphereTest(const Options& opt) {
   if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
   scene.streamSync = opt.streamSync;
   scene.textureStreaming = opt.textureStreaming;
+  if (opt.mobile) scene.skinnedTriangleScale = 0.2f;
   scene.upload(ctx);
   renderer::Renderer r;
   r.init(ctx, scene, {64, 64}, VK_FORMAT_R8G8B8A8_SRGB, opt.render);
@@ -552,6 +556,7 @@ int runHeadless(const Options& opt) {
   if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
   scene.streamSync = opt.streamSync;
   scene.textureStreaming = opt.textureStreaming;
+  if (opt.mobile) scene.skinnedTriangleScale = 0.2f;
   scene.upload(ctx);
 
   VkExtent2D extent{opt.width, opt.height};
@@ -736,7 +741,8 @@ int runWindowed(const Options& opt) {
   if (opt.clusterLod >= 0) scene.clusterLod = opt.clusterLod != 0;
     scene.streamSync = opt.streamSync;
     scene.textureStreaming = opt.textureStreaming;
-    scene.upload(ctx);
+    if (opt.mobile) scene.skinnedTriangleScale = 0.2f;
+  scene.upload(ctx);
     return true;
   };
   if (!buildScene(opt.scene.name)) return 1;

@@ -4,6 +4,8 @@
 
 #include "scene/texture_compress.h"
 
+#include <meshoptimizer.h>
+
 #include <algorithm>
 #include <atomic>
 #include <array>
@@ -1201,6 +1203,44 @@ void Scene::modelBounds(int model, glm::vec3& lo, glm::vec3& hi) const {
 }
 
 void Scene::upload(rhi::Context& ctx) {
+  if (skinnedTriangleScale < 1.0f) {
+    size_t before = 0, after = 0;
+    for (MeshData& md : cpuMeshes_) {
+      if (md.skinModel < 0 && md.joints.empty()) continue;
+      const size_t tris = md.indices.size() / 3;
+      before += tris;
+      if (tris >= 600) {
+        const size_t target = std::max<size_t>(size_t(float(tris) * skinnedTriangleScale), 150) * 3;
+        std::vector<uint32_t> out(md.indices.size());
+        float err = 0.0f;
+        out.resize(meshopt_simplify(out.data(), md.indices.data(), md.indices.size(), &md.vertices[0].position.x,
+                                    md.vertices.size(), sizeof(Vertex), target, 0.02f, 0, &err));
+        if (!out.empty() && out.size() < md.indices.size()) {
+          md.indices = std::move(out);
+          // Só os vértices ainda usados (o skinning roda por vértice: menos vértices, menos trabalho por frame).
+          std::vector<uint32_t> remap(md.vertices.size(), ~0u);
+          uint32_t n = 0;
+          for (uint32_t& i : md.indices) {
+            if (remap[i] == ~0u) remap[i] = n++;
+            i = remap[i];
+          }
+          auto compact = [&](auto& v) {
+            if (v.empty()) return;
+            std::remove_reference_t<decltype(v)> c(n);
+            for (size_t k = 0; k < remap.size(); ++k)
+              if (remap[k] != ~0u) c[remap[k]] = v[k];
+            v = std::move(c);
+          };
+          compact(md.vertices);
+          compact(md.colors);
+          compact(md.joints);
+          compact(md.weights);
+        }
+      }
+      after += md.indices.size() / 3;
+    }
+    if (before) LOG_INFO("Personagens simplificados: %zu -> %zu triângulos", before, after);
+  }
   for (auto& m : models) animateModel(m, 0.0f);  // pose inicial
   for (auto& o : objects) o.prevTransform = o.transform;
   // Geometria virtualizada: triângulos das malhas rígidas grandes reordenados em pedaços compactos (o nível 0), antes

@@ -134,6 +134,7 @@ struct Engine {
     scene.textureCacheDir = cacheDir + "/texcache";
     scene.textureStreaming = false;
     LOG_INFO("Etapa: enviando a cena para a GPU");
+    scene.skinnedTriangleScale = 0.2f;  // jogadores com ~1/5 dos triângulos (a 20 m da câmera não se nota)
     scene.upload(ctx);
     sceneReady = true;
     LOG_INFO("Etapa: criando a tela (swapchain)");
@@ -143,10 +144,7 @@ struct Engine {
     // Preset de celular: resolução interna de 50% reconstruída pelo TAAU, 1 amostra, ReSTIR enxuto, sem motion blur
     // pesado; sem ray tracing por enquanto.
     renderer::Settings rs;
-    rs.quality = renderer::qualityPreset(renderer::QualityPreset::Low);
-    rs.quality.renderScale = 0.5f;
-    rs.motionBlur = true;
-    rs.lensFlare = 0.6f;
+    renderer::applyMobileSettings(rs);
     LOG_INFO("Etapa: criando o renderer (%ux%u)", swapchain.extent.width, swapchain.extent.height);
     r.init(ctx, scene, swapchain.extent, swapchain.format, rs);
     rendererReady = true;

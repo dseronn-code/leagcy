@@ -48,6 +48,10 @@ struct Quality {
 
 enum class QualityPreset { Low, Medium, High, Ultra, Cinema };
 Quality qualityPreset(QualityPreset preset);
+// Celular (sem ray tracing, meta de 60 fps): preset baixo a 50%, sem denoiser/motion blur/lens flare, bloom curto e
+// sombras só no campo. Usado pelo APK e por --mobile no PC (para medir e conferir a mesma imagem).
+struct Settings;
+void applyMobileSettings(Settings& s);
 bool parseQualityPreset(const char* name, QualityPreset& out);  // baixo, medio, alto, ultra, cinema
 
 struct Settings {
@@ -80,6 +84,7 @@ struct Settings {
   // mais lento com eles (8,9 x 9,9–10,2 ms; o culling por GPU já desenha os membros barato). --hlod liga.
   bool hlod = false;
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
+  uint32_t shadowMapSize = 2048;  // texels de cada cascata (celular: 1024)
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
   float lensFlare = 1.0f;  // reflexos fantasmas e halo das lentes (0 = desligado)
