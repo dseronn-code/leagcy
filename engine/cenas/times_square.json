@@ -348,8 +348,7 @@
    "times_square/pessoas/p139.gltf",
    "times_square/pessoas/p140.gltf"
   ],
-  "animacoes": "times_square/personagens/animacoes.gltf",
-  "clipe": "andar",
+  "animacoes": "times_square/personagens/estilos.gltf",
   "mapa": {
    "Hips": "pelvis",
    "Chest": "spine_01",
@@ -1064,6 +1063,20 @@
     55.0,
     2.8
    ]
+  ],
+  "clipes": [
+   "Neutral",
+   "Proud",
+   "HandsInPockets",
+   "OnPhoneRight",
+   "OnPhoneLeft",
+   "ArmsFolded",
+   "ArmsBehindBack",
+   "Rushed",
+   "Old",
+   "Heavyset",
+   "LookUp",
+   "CrowdAvoidance"
   ]
  }
 }

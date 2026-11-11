@@ -638,11 +638,17 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         std::vector<std::pair<std::string, std::string>> map;
         const json mapJson = mj.value("mapa", json::object());  // cópia: items() de um temporário fica pendurado
         for (auto& [a, b] : mapJson.items()) map.push_back({a, b.get<std::string>()});
-        const std::string clipName = mj.value("clipe", "andar");
+        // "clipes": um jeito de andar por modelo (o k-ésimo modelo usa clipes[k % n]); senão "clipe" para todos.
+        std::vector<std::string> clipNames;
+        const json clipsJson = mj.value("clipes", json::array());
+        for (const json& c : clipsJson) clipNames.push_back(c.get<std::string>());
+        if (clipNames.empty()) clipNames.push_back(mj.value("clipe", "andar"));
         const uint32_t poses = std::clamp(mj.value("poses", 24), 4, 128);
         std::vector<std::vector<uint32_t>> clips;
         const json people = mj.value("pessoas", json::array());
+        size_t personIndex = 0;
         for (const json& pf : people) {
+          const std::string clipName = clipNames[personIndex++ % clipNames.size()];
           int model = -1;
           const std::string file = path(pf.get<std::string>());
           if (!scene::loadGltf(scene, file, glm::mat4(1.0f), &model) || model < 0) {
