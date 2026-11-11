@@ -113,7 +113,7 @@ def convert(args):
                 root_t[fi] = pos * args.escala
         col += len(chans)
     if args.ciclo:  # corta no quadro mais parecido com o primeiro (depois de 0,8 s): o laço emenda sem pulo
-        mn = max(2, int(0.8 / (dt * args.passo)))
+        mn = max(2, int(args.ciclo_min / (dt * args.passo)))
         best, best_k = None, len(times)
         for k in range(mn, len(times)):
             d = sum(1.0 - abs(float(np.dot(rot[j, 0], rot[j, k]))) for j in range(1, len(joints)))
@@ -230,6 +230,7 @@ def main():
     ap.add_argument('--passo', type=int, default=1)
     ap.add_argument('--no-lugar', action='store_true')
     ap.add_argument('--ciclo', action='store_true', help='corta num ciclo que emenda (andar em laço)')
+    ap.add_argument('--ciclo-min', type=float, default=0.8, help='duração mínima do ciclo (s)')
     convert(ap.parse_args())
 
 

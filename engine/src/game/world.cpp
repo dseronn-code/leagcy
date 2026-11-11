@@ -35,6 +35,82 @@ using json = nlohmann::json;
 
 namespace {
 
+// ---- Multidão (cena .json, "multidao") ----
+// Pessoas: cada glTF com esqueleto recebe por retargeting o clipe nomeado (clipNames[k % n] para o k-ésimo) do arquivo
+// de animações e é "assado" em poses, uma por peça (corpo, roupa, cabelo, olhos...). Devolve as peças de cada pessoa.
+std::vector<std::vector<uint32_t>> bakeCrowdPeople(scene::Scene& scene, const std::function<std::string(std::string)>& path,
+                                                   const json& people, const std::string& animFile,
+                                                   const std::vector<std::string>& clipNames,
+                                                   const std::vector<std::pair<std::string, std::string>>& map,
+                                                   uint32_t poses) {
+  std::vector<std::vector<uint32_t>> clips;
+  int src = -1;
+  if (!scene::loadGltf(scene, path(animFile), glm::mat4(1.0f), &src) || src < 0) {
+    LOG_WARN("Multidão: não carreguei as animações %s", animFile.c_str());
+    return clips;
+  }
+  scene.models[size_t(src)].animation = -1;
+  size_t personIndex = 0;
+  for (const json& pf : people) {
+    const std::string clipName = clipNames[personIndex++ % clipNames.size()];
+    int model = -1;
+    const std::string file = path(pf.get<std::string>());
+    if (!scene::loadGltf(scene, file, glm::mat4(1.0f), &model) || model < 0) {
+      LOG_WARN("Multidão: não carreguei %s", file.c_str());
+      continue;
+    }
+    scene::Model& m = scene.models[size_t(model)];
+    int a = -1;
+    for (size_t k = 0; k < scene.models[size_t(src)].animations.size(); ++k)
+      if (scene.models[size_t(src)].animations[k].name == clipName)
+        a = scene::retargetAnimation(m, scene.models[size_t(src)], int(k), map, clipName);
+    if (a < 0) {
+      LOG_WARN("Multidão: sem o clipe \"%s\" para %s", clipName.c_str(), file.c_str());
+      continue;
+    }
+    m.animation = a;
+    std::vector<uint32_t> parts;
+    for (uint32_t k = 0; k < uint32_t(m.skinnedObjects.size()); ++k) parts.push_back(scene.bakeCrowdClip(model, poses, k));
+    clips.push_back(parts);
+    m.root = glm::translate(glm::mat4(1.0f), {0.0f, -1000.0f, 0.0f});  // o original fica escondido
+  }
+  return clips;
+}
+
+// Uma pessoa da multidão: as peças dela com a mesma fase do passo; roupa e cabelo com cor sorteada de paletas
+// realistas (cada agente com a sua cópia do material), para os modelos não parecerem clones.
+std::vector<uint32_t> spawnCrowdPerson(scene::Scene& scene, const std::vector<uint32_t>& person, const glm::mat4& transform,
+                                       float phase, std::mt19937& rng) {
+  std::uniform_real_distribution<float> u(0.0f, 1.0f);
+  static const glm::vec3 clothes[] = {{0.25f, 0.27f, 0.35f}, {0.12f, 0.12f, 0.13f}, {0.75f, 0.68f, 0.55f},
+                                      {0.62f, 0.15f, 0.12f}, {0.35f, 0.38f, 0.25f}, {0.55f, 0.55f, 0.57f},
+                                      {1.0f, 1.0f, 1.0f},    {0.2f, 0.3f, 0.55f},   {0.45f, 0.28f, 0.18f},
+                                      {0.9f, 0.85f, 0.75f},  {0.3f, 0.12f, 0.3f},   {1.0f, 0.75f, 0.2f}};
+  static const glm::vec3 hairs[] = {{0.25f, 0.2f, 0.18f}, {0.5f, 0.38f, 0.28f}, {1.0f, 0.85f, 0.6f},
+                                    {0.15f, 0.13f, 0.12f}, {0.75f, 0.75f, 0.75f}, {0.6f, 0.3f, 0.18f}};
+  const glm::vec3 shirtTint = clothes[size_t(u(rng) * 12.0f) % 12], hairTint = hairs[size_t(u(rng) * 6.0f) % 6];
+  const bool tintClothes = u(rng) < 0.75f;
+  std::vector<uint32_t> agent;
+  for (uint32_t clip : person) {
+    const uint32_t o = scene.addCrowdAgent(clip, transform, phase);
+    scene::Material m = scene.materials[scene.objects[o].material];
+    const uint32_t f = m.flags;
+    const bool skinOrEye = (f & (scene::kMaterialSubsurface | scene::kMaterialEye | scene::kMaterialClearcoat)) != 0;
+    const bool hairLike = (f & scene::kMaterialAlphaMask) != 0;
+    if (!skinOrEye && (hairLike || tintClothes)) {
+      const glm::vec3 t = hairLike ? hairTint : glm::mix(glm::vec3(1.0f), shirtTint, 0.85f);
+      m.baseColor = glm::vec4(glm::vec3(m.baseColor) * t, m.baseColor.a);
+      scene.objects[o].material = scene.addMaterial(m);
+    }
+    agent.push_back(o);
+  }
+  return agent;
+}
+
+}  // namespace
+
+namespace {
+
 glm::vec3 vec3Of(const json& j, glm::vec3 fallback) {
   if (!j.is_array() || j.size() != 3) return fallback;
   return {j[0].get<float>(), j[1].get<float>(), j[2].get<float>()};
@@ -618,188 +694,169 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             ++created;
           }
     }
-    // Multidão: várias pessoas (glTF com esqueleto, ex.: tools/humano.py), cada uma com a animação de andar copiada
-    // de outro esqueleto (retargeting) e "assada" em poses (Scene::bakeCrowdClip: sem skinning por pessoa); os
-    // agentes andam nos dois sentidos por faixas (segmentos com largura), cada um com pessoa, velocidade, fase e
-    // tamanho sorteados.
-    //   "multidao": {"pessoas": ["a.gltf", ...], "animacoes": "anim.gltf", "clipe": "andar", "mapa": {...},
-    //                "poses": 24, "quantidade": 600, "altura": 0.15, "girar_graus": 0, "semente": 1,
-    //                "velocidade": [1.1, 1.6], "faixas": [{"de": [x, z], "ate": [x, z], "largura": 4}, ...]}
+    // Multidão: várias pessoas (glTF com esqueleto, ex.: tools/humano.py) com a animação de andar copiada de outro
+    // esqueleto (retargeting) e "assada" em poses (sem skinning por pessoa); os agentes andam nos dois sentidos por
+    // faixas e desviam de obstáculos e uns dos outros. "parados": gente em pé (no celular, olhando os telões...)
+    // espalhada em áreas retangulares.
+    //   "multidao": {"pessoas": [...], "animacoes": "anim.gltf", "clipes": ["andar", ...], "mapa": {...},
+    //                "poses": 16, "quantidade": 600, "altura": 0.15, "girar_graus": 0, "semente": 1,
+    //                "velocidade": [1.1, 1.6], "faixas": [{"de": [x, z], "ate": [x, z], "largura": 4}, ...],
+    //                "obstaculos": [[x, z, raio], ...],
+    //                "parados": {"pessoas": [...], "animacoes": "...", "clipes": [...], "quantidade": 200,
+    //                            "areas": [[x0, z0, x1, z1], ...], "olhar_para": [x, z]}}
     if (doc.contains("multidao") && doc["multidao"].is_object()) {
       const json& mj = doc["multidao"];
-      auto path = [&](std::string f) {
+      const std::function<std::string(std::string)> path = [&](std::string f) {
         if (!f.empty() && !std::ifstream(f) && std::ifstream(sceneDir + f)) f = sceneDir + f;
         return f;
       };
-      int src = -1;
-      const std::string animFile = path(mj.value("animacoes", ""));
-      if (!scene::loadGltf(scene, animFile, glm::mat4(1.0f), &src) || src < 0) {
-        LOG_WARN("Multidão: não carreguei as animações %s", animFile.c_str());
-      } else {
-        scene.models[size_t(src)].animation = -1;
-        std::vector<std::pair<std::string, std::string>> map;
-        const json mapJson = mj.value("mapa", json::object());  // cópia: items() de um temporário fica pendurado
-        for (auto& [a, b] : mapJson.items()) map.push_back({a, b.get<std::string>()});
-        // "clipes": um jeito de andar por modelo (o k-ésimo modelo usa clipes[k % n]); senão "clipe" para todos.
-        std::vector<std::string> clipNames;
-        const json clipsJson = mj.value("clipes", json::array());
-        for (const json& c : clipsJson) clipNames.push_back(c.get<std::string>());
-        if (clipNames.empty()) clipNames.push_back(mj.value("clipe", "andar"));
-        const uint32_t poses = std::clamp(mj.value("poses", 24), 4, 128);
-        std::vector<std::vector<uint32_t>> clips;
-        const json people = mj.value("pessoas", json::array());
-        size_t personIndex = 0;
-        for (const json& pf : people) {
-          const std::string clipName = clipNames[personIndex++ % clipNames.size()];
-          int model = -1;
-          const std::string file = path(pf.get<std::string>());
-          if (!scene::loadGltf(scene, file, glm::mat4(1.0f), &model) || model < 0) {
-            LOG_WARN("Multidão: não carreguei %s", file.c_str());
-            continue;
-          }
-          scene::Model& m = scene.models[size_t(model)];
-          int a = -1;
-          for (size_t k = 0; k < scene.models[size_t(src)].animations.size(); ++k)
-            if (scene.models[size_t(src)].animations[k].name == clipName)
-              a = scene::retargetAnimation(m, scene.models[size_t(src)], int(k), map, clipName);
-          if (a < 0) {
-            LOG_WARN("Multidão: sem o clipe \"%s\" para %s", clipName.c_str(), file.c_str());
-            continue;
-          }
-          m.animation = a;
-          std::vector<uint32_t> parts;  // uma por peça (material): corpo, roupa, sapatos, cabelo, olhos...
-          for (uint32_t k = 0; k < uint32_t(m.skinnedObjects.size()); ++k)
-            parts.push_back(scene.bakeCrowdClip(model, poses, k));
-          clips.push_back(parts);
-          m.root = glm::translate(glm::mat4(1.0f), {0.0f, -1000.0f, 0.0f});  // o original fica escondido
+      std::vector<std::pair<std::string, std::string>> map;
+      const json mapJson = mj.value("mapa", json::object());  // cópia: items() de um temporário fica pendurado
+      for (auto& [a, b] : mapJson.items()) map.push_back({a, b.get<std::string>()});
+      auto names = [](const json& j, const char* fallback) {
+        std::vector<std::string> out;
+        const json list = j.value("clipes", json::array());
+        for (const json& c : list) out.push_back(c.get<std::string>());
+        if (out.empty()) out.push_back(j.value("clipe", std::string(fallback)));
+        return out;
+      };
+      const uint32_t poses = std::clamp(mj.value("poses", 24), 4, 128);
+      std::mt19937 rng(mj.value("semente", 1u));
+      std::uniform_real_distribution<float> u(0.0f, 1.0f);
+      const float y = mj.value("altura", 0.0f), yaw0 = glm::radians(mj.value("girar_graus", 0.0f));
+      const auto clips = bakeCrowdPeople(scene, path, mj.value("pessoas", json::array()), mj.value("animacoes", ""),
+                                         names(mj, "andar"), map, poses);
+      struct Lane { glm::vec2 a, b; float width, length; };
+      std::vector<Lane> lanes;
+      float total = 0.0f;
+      const json lanesJson = mj.value("faixas", json::array());
+      for (const json& fj : lanesJson) {
+        Lane l{{fj["de"][0].get<float>(), fj["de"][1].get<float>()}, {fj["ate"][0].get<float>(), fj["ate"][1].get<float>()},
+               fj.value("largura", 3.0f), 0.0f};
+        l.length = glm::length(l.b - l.a);
+        if (l.length > 1.0f) {
+          lanes.push_back(l);
+          total += l.length;
         }
-        struct Lane { glm::vec2 a, b; float width, length; };
-        std::vector<Lane> lanes;
-        float total = 0.0f;
-        const json lanesJson = mj.value("faixas", json::array());
-        for (const json& fj : lanesJson) {
-          Lane l{{fj["de"][0].get<float>(), fj["de"][1].get<float>()}, {fj["ate"][0].get<float>(), fj["ate"][1].get<float>()},
-                 fj.value("largura", 3.0f), 0.0f};
-          l.length = glm::length(l.b - l.a);
-          if (l.length > 1.0f) {
-            lanes.push_back(l);
-            total += l.length;
-          }
+      }
+      // Obstáculos ([x, z, raio], ex.: bancas, bancos, entradas do metrô): a pessoa contorna pela lateral.
+      std::vector<glm::vec3> obstacles;
+      const json obsJson = mj.value("obstaculos", json::array());
+      for (const json& o : obsJson)
+        if (o.is_array() && o.size() >= 3) obstacles.push_back({o[0].get<float>(), o[1].get<float>(), o[2].get<float>()});
+      if (!clips.empty() && !lanes.empty()) {
+        const json vel = mj.value("velocidade", json::array({1.1, 1.6}));
+        const float vmin = vel[0].get<float>(), vmax = vel[1].get<float>();
+        const int count = std::max(0, mj.value("quantidade", 300));
+        // Estado de todos os agentes num só animador: cada um anda pela faixa e ajusta o deslocamento lateral para
+        // não atravessar quem está logo à frente (grade de 1,5 m para achar os vizinhos).
+        struct Agent {
+          Lane L;
+          float dir, baseSide, side, speed, s0, scale;
+          std::vector<uint32_t> objs;
+          glm::vec2 pos{0.0f};
+        };
+        auto agents = std::make_shared<std::vector<Agent>>();
+        agents->reserve(size_t(count));
+        for (int i = 0; i < count; ++i) {
+          float pick = u(rng) * total;  // faixa sorteada pelo comprimento (gente espalhada por igual)
+          size_t li = 0;
+          while (li + 1 < lanes.size() && pick > lanes[li].length) pick -= lanes[li++].length;
+          const Lane L = lanes[li];
+          const float dir = u(rng) < 0.5f ? 1.0f : -1.0f, side = (u(rng) - 0.5f) * L.width;
+          const float speed = vmin + (vmax - vmin) * u(rng), s0 = u(rng) * L.length, scale = 0.94f + 0.12f * u(rng);
+          const std::vector<uint32_t>& person = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
+          const float phase = 4.0f * u(rng);
+          agents->push_back({L, dir, side, side, speed, s0, scale, spawnCrowdPerson(scene, person, glm::mat4(1.0f), phase, rng)});
         }
-        // Obstáculos ([x, z, raio], ex.: bancas, bancos, entradas do metrô): a pessoa contorna pela lateral.
-        std::vector<glm::vec3> obstacles;
-        const json obsJson = mj.value("obstaculos", json::array());
-        for (const json& o : obsJson)
-          if (o.is_array() && o.size() >= 3) obstacles.push_back({o[0].get<float>(), o[1].get<float>(), o[2].get<float>()});
-        if (!clips.empty() && !lanes.empty()) {
-          std::mt19937 rng(mj.value("semente", 1u));
-          std::uniform_real_distribution<float> u(0.0f, 1.0f);
-          const json vel = mj.value("velocidade", json::array({1.1, 1.6}));
-          const float vmin = vel[0].get<float>(), vmax = vel[1].get<float>();
-          const float y = mj.value("altura", 0.0f), yaw0 = glm::radians(mj.value("girar_graus", 0.0f));
-          const int count = std::max(0, mj.value("quantidade", 300));
-          // Estado de todos os agentes num só animador: cada um anda pela faixa e ajusta o deslocamento lateral para
-          // não atravessar quem está logo à frente (grade de 1,5 m para achar os vizinhos).
-          struct Agent {
-            Lane L;
-            float dir, baseSide, side, speed, s0, scale;
-            std::vector<uint32_t> objs;
-            glm::vec2 pos{0.0f};
-          };
-          auto agents = std::make_shared<std::vector<Agent>>();
-          agents->reserve(size_t(count));
-          for (int i = 0; i < count; ++i) {
-            float pick = u(rng) * total;  // faixa sorteada pelo comprimento (gente espalhada por igual)
-            size_t li = 0;
-            while (li + 1 < lanes.size() && pick > lanes[li].length) pick -= lanes[li++].length;
-            const Lane L = lanes[li];
-            const float dir = u(rng) < 0.5f ? 1.0f : -1.0f, side = (u(rng) - 0.5f) * L.width;
-            const float speed = vmin + (vmax - vmin) * u(rng), s0 = u(rng) * L.length, scale = 0.94f + 0.12f * u(rng);
-            const std::vector<uint32_t>& person = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
-            const float phase = 4.0f * u(rng);
-            std::vector<uint32_t> agent;
-            // Variação por pessoa (para os 40 modelos não parecerem clones): cor da roupa e do cabelo sorteadas de
-            // paletas realistas, multiplicando a cor do material (cada agente com a sua cópia do material).
-            static const glm::vec3 clothes[] = {{0.25f, 0.27f, 0.35f}, {0.12f, 0.12f, 0.13f}, {0.75f, 0.68f, 0.55f},
-                                                {0.62f, 0.15f, 0.12f}, {0.35f, 0.38f, 0.25f}, {0.55f, 0.55f, 0.57f},
-                                                {1.0f, 1.0f, 1.0f},    {0.2f, 0.3f, 0.55f},   {0.45f, 0.28f, 0.18f},
-                                                {0.9f, 0.85f, 0.75f},  {0.3f, 0.12f, 0.3f},   {1.0f, 0.75f, 0.2f}};
-            static const glm::vec3 hairs[] = {{0.25f, 0.2f, 0.18f}, {0.5f, 0.38f, 0.28f}, {1.0f, 0.85f, 0.6f},
-                                              {0.15f, 0.13f, 0.12f}, {0.75f, 0.75f, 0.75f}, {0.6f, 0.3f, 0.18f}};
-            const glm::vec3 shirtTint = clothes[size_t(u(rng) * 12.0f) % 12], hairTint = hairs[size_t(u(rng) * 6.0f) % 6];
-            const bool tintClothes = u(rng) < 0.75f;
-            for (uint32_t clip : person) {
-              const uint32_t o = scene.addCrowdAgent(clip, glm::mat4(1.0f), phase);
-              scene::Material m = scene.materials[scene.objects[o].material];
-              const uint32_t f = m.flags;
-              const bool skinOrEye = (f & (scene::kMaterialSubsurface | scene::kMaterialEye | scene::kMaterialClearcoat)) != 0;
-              const bool hairLike = (f & scene::kMaterialAlphaMask) != 0;
-              if (!skinOrEye && (hairLike || tintClothes)) {
-                const glm::vec3 t = hairLike ? hairTint : glm::mix(glm::vec3(1.0f), shirtTint, 0.85f);
-                m.baseColor = glm::vec4(glm::vec3(m.baseColor) * t, m.baseColor.a);
-                scene.objects[o].material = scene.addMaterial(m);
+        scene.addAnimator([agents, obstacles, y, yaw0](scene::Scene& sc, float t, float dt) {
+          std::vector<Agent>& A = *agents;
+          // 1) Posição ao longo da faixa, com o deslocamento lateral atual, e o contorno dos obstáculos.
+          for (Agent& a : A) {
+            const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x);
+            const float s = std::fmod(a.s0 + a.speed * t, a.L.length);
+            glm::vec2 p = (a.dir > 0.0f ? a.L.a + d * s : a.L.b - d * s) + n * a.side;
+            for (const glm::vec3& o : obstacles) {  // dentro do raio: empurra para o lado mais perto, pela normal
+              const glm::vec2 r = p - glm::vec2(o.x, o.y);
+              const float dist = glm::length(r);
+              if (dist < o.z) {
+                const float across = glm::dot(r, n);
+                p += n * ((across >= 0.0f ? 1.0f : -1.0f) * o.z - across) * (1.0f - dist / o.z * 0.3f);
               }
-              agent.push_back(o);
             }
-            agents->push_back({L, dir, side, side, speed, s0, scale, agent});
+            a.pos = p;
           }
-          scene.addAnimator([agents, obstacles, y, yaw0](scene::Scene& sc, float t, float dt) {
-            std::vector<Agent>& A = *agents;
-            // 1) Posição ao longo da faixa, com o deslocamento lateral atual, e o contorno dos obstáculos.
-            for (Agent& a : A) {
-              const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x);
-              const float s = std::fmod(a.s0 + a.speed * t, a.L.length);
-              glm::vec2 p = (a.dir > 0.0f ? a.L.a + d * s : a.L.b - d * s) + n * a.side;
-              for (const glm::vec3& o : obstacles) {  // dentro do raio: empurra para o lado mais perto, pela normal
-                const glm::vec2 r = p - glm::vec2(o.x, o.y);
-                const float dist = glm::length(r);
-                if (dist < o.z) {
-                  const float across = glm::dot(r, n);
-                  p += n * ((across >= 0.0f ? 1.0f : -1.0f) * o.z - across) * (1.0f - dist / o.z * 0.3f);
-                }
-              }
-              a.pos = p;
-            }
-            // 2) Desvio: quem tem alguém a menos de 0,8 m à frente puxa o lado para longe dele (devagar, ~1 m/s de
-            //    lado); sem ninguém, volta aos poucos para o próprio caminho.
-            std::unordered_map<int64_t, std::vector<uint32_t>> grid;
-            auto key = [](glm::vec2 p) { return (int64_t(std::floor(p.x / 1.5f)) << 32) ^ int64_t(uint32_t(int32_t(std::floor(p.y / 1.5f)))); };
-            for (uint32_t i = 0; i < A.size(); ++i) grid[key(A[i].pos)].push_back(i);
-            const float step = std::min(dt, 0.1f);
-            for (uint32_t i = 0; i < A.size(); ++i) {
-              Agent& a = A[i];
-              const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
-              float push = 0.0f;
-              const int cx = int(std::floor(a.pos.x / 1.5f)), cz = int(std::floor(a.pos.y / 1.5f));
-              for (int gx = -1; gx <= 1; ++gx)
-                for (int gz = -1; gz <= 1; ++gz) {
-                  const auto it = grid.find((int64_t(cx + gx) << 32) ^ int64_t(uint32_t(cz + gz)));
-                  if (it == grid.end()) continue;
-                  for (uint32_t j : it->second) {
-                    if (j == i) continue;
-                    const glm::vec2 r = A[j].pos - a.pos;
-                    const float dist = glm::length(r);
-                    if (dist < 0.8f && glm::dot(r, f) > -0.1f) {
-                      const float across = glm::dot(r, n);
-                      push += (across > 0.0f || (across == 0.0f && i < j) ? -1.0f : 1.0f) * (0.8f - dist);
-                    }
+          // 2) Desvio: quem tem alguém a menos de 0,8 m à frente puxa o lado para longe dele (~1 m/s de lado); sem
+          //    ninguém, volta aos poucos para o próprio caminho.
+          std::unordered_map<int64_t, std::vector<uint32_t>> grid;
+          auto key = [](int x, int z) { return (int64_t(x) << 32) ^ int64_t(uint32_t(z)); };
+          for (uint32_t i = 0; i < A.size(); ++i)
+            grid[key(int(std::floor(A[i].pos.x / 1.5f)), int(std::floor(A[i].pos.y / 1.5f)))].push_back(i);
+          const float step = std::min(dt, 0.1f);
+          for (uint32_t i = 0; i < A.size(); ++i) {
+            Agent& a = A[i];
+            const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
+            float push = 0.0f;
+            const int cx = int(std::floor(a.pos.x / 1.5f)), cz = int(std::floor(a.pos.y / 1.5f));
+            for (int gx = -1; gx <= 1; ++gx)
+              for (int gz = -1; gz <= 1; ++gz) {
+                const auto it = grid.find(key(cx + gx, cz + gz));
+                if (it == grid.end()) continue;
+                for (uint32_t j : it->second) {
+                  if (j == i) continue;
+                  const glm::vec2 r = A[j].pos - a.pos;
+                  const float dist = glm::length(r);
+                  if (dist < 0.8f && glm::dot(r, f) > -0.1f) {
+                    const float across = glm::dot(r, n);
+                    push += (across > 0.0f || (across == 0.0f && i < j) ? -1.0f : 1.0f) * (0.8f - dist);
                   }
                 }
-              const float half = a.L.width * 0.5f + 0.6f;
-              if (push != 0.0f) a.side = glm::clamp(a.side + glm::clamp(push * 4.0f, -1.0f, 1.0f) * step, -half, half);
-              else a.side += (a.baseSide - a.side) * std::min(1.0f, 0.3f * step);
-            }
-            // 3) Pose de cada pessoa.
-            for (const Agent& a : A) {
-              const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, f = d * a.dir;
-              glm::mat4 m = glm::translate(glm::mat4(1.0f), {a.pos.x, y, a.pos.y});
-              m = glm::rotate(m, std::atan2(f.x, f.y) + yaw0, glm::vec3(0, 1, 0));
-              for (uint32_t o : a.objs) sc.setTransform(o, glm::scale(m, glm::vec3(a.scale)));
-            }
-          });
-          LOG_INFO("Multidão: %d pessoas (%zu modelos, %u poses cada) em %zu faixas", count, clips.size(), poses,
-                   lanes.size());
+              }
+            const float half = a.L.width * 0.5f + 0.6f;
+            if (push != 0.0f) a.side = glm::clamp(a.side + glm::clamp(push * 4.0f, -1.0f, 1.0f) * step, -half, half);
+            else a.side += (a.baseSide - a.side) * std::min(1.0f, 0.3f * step);
+          }
+          // 3) Pose de cada pessoa.
+          for (const Agent& a : A) {
+            const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, f = d * a.dir;
+            glm::mat4 m = glm::translate(glm::mat4(1.0f), {a.pos.x, y, a.pos.y});
+            m = glm::rotate(m, std::atan2(f.x, f.y) + yaw0, glm::vec3(0, 1, 0));
+            for (uint32_t o : a.objs) sc.setTransform(o, glm::scale(m, glm::vec3(a.scale)));
+          }
+        });
+        LOG_INFO("Multidão: %d pessoas andando (%zu modelos, %u poses cada) em %zu faixas", count, clips.size(), poses,
+                 lanes.size());
+      }
+      // Gente parada: posições sorteadas nas áreas (longe dos obstáculos), olhando para um ponto com variação.
+      if (mj.contains("parados") && mj["parados"].is_object()) {
+        const json& pj = mj["parados"];
+        const auto idle = bakeCrowdPeople(scene, path, pj.value("pessoas", json::array()), pj.value("animacoes", ""),
+                                          names(pj, "parado"), map, poses);
+        std::vector<glm::vec4> areas;
+        const json areasJson = pj.value("areas", json::array());
+        for (const json& a : areasJson)
+          areas.push_back({a[0].get<float>(), a[1].get<float>(), a[2].get<float>(), a[3].get<float>()});
+        const json look = pj.value("olhar_para", json());
+        int made = 0;
+        const int want = std::max(0, pj.value("quantidade", 100));
+        for (int i = 0; i < want * 4 && made < want && !idle.empty() && !areas.empty(); ++i) {
+          const glm::vec4 a = areas[size_t(u(rng) * float(areas.size())) % areas.size()];
+          const glm::vec2 p(a.x + (a.z - a.x) * u(rng), a.y + (a.w - a.y) * u(rng));
+          bool blocked = false;
+          for (const glm::vec3& o : obstacles) blocked |= glm::length(p - glm::vec2(o.x, o.y)) < o.z;
+          if (blocked) continue;
+          float yaw = glm::two_pi<float>() * u(rng);
+          if (look.is_array() && u(rng) < 0.7f) {  // a maioria olha para os telões, com ±40° de variação
+            const glm::vec2 to = glm::vec2(look[0].get<float>(), look[1].get<float>()) - p;
+            yaw = std::atan2(to.x, to.y) + (u(rng) - 0.5f) * 1.4f;
+          }
+          glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
+          m = glm::rotate(m, yaw + yaw0, glm::vec3(0, 1, 0));
+          m = glm::scale(m, glm::vec3(0.94f + 0.12f * u(rng)));
+          spawnCrowdPerson(scene, idle[size_t(u(rng) * float(idle.size())) % idle.size()], m, 8.0f * u(rng), rng);
+          ++made;
         }
+        LOG_INFO("Multidão: %d pessoas paradas (%zu modelos)", made, idle.size());
       }
     }
     // Terreno de quilômetros: ladrilhos de "ladrilho" metros (o padrão é a célula do mundo aberto), cada um uma

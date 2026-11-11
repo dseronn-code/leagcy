@@ -1077,6 +1077,68 @@
    "Heavyset",
    "LookUp",
    "CrowdAvoidance"
-  ]
+  ],
+  "parados": {
+   "pessoas": [
+    "times_square/pessoas/p129.gltf",
+    "times_square/pessoas/p130.gltf",
+    "times_square/pessoas/p131.gltf",
+    "times_square/pessoas/p132.gltf",
+    "times_square/pessoas/p133.gltf",
+    "times_square/pessoas/p134.gltf",
+    "times_square/pessoas/p135.gltf",
+    "times_square/pessoas/p136.gltf",
+    "times_square/pessoas/p137.gltf",
+    "times_square/pessoas/p138.gltf",
+    "times_square/pessoas/p139.gltf",
+    "times_square/pessoas/p140.gltf"
+   ],
+   "animacoes": "times_square/personagens/parados.gltf",
+   "clipes": [
+    "parado_Neutral",
+    "parado_OnPhoneRight",
+    "parado_LookUp",
+    "parado_ArmsFolded",
+    "parado_HandsInPockets",
+    "parado_OnPhoneLeft"
+   ],
+   "quantidade": 400,
+   "areas": [
+    [
+     12.6,
+     170.5,
+     34.6,
+     223.5
+    ],
+    [
+     3.4,
+     90.5,
+     25.4,
+     149.5
+    ],
+    [
+     -6.2,
+     10.5,
+     15.8,
+     69.5
+    ],
+    [
+     -15.8,
+     -69.5,
+     6.2,
+     -10.5
+    ],
+    [
+     -25.4,
+     -149.5,
+     -3.4,
+     -90.5
+    ]
+   ],
+   "olhar_para": [
+    30,
+    200
+   ]
+  }
  }
 }
