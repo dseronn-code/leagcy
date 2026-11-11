@@ -814,7 +814,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               const float dist = glm::length(r);
               if (dist < o.z) {
                 const float across = glm::dot(r, n);
-                p += n * ((across >= 0.0f ? 1.0f : -1.0f) * o.z - across) * (1.0f - dist / o.z * 0.3f);
+                p += n * ((across >= 0.0f ? 1.0f : -1.0f) * o.z - across);  // até a borda do raio
               }
             }
             a.pos = p;
