@@ -58,6 +58,18 @@ class Mesh:
         self.tri(a, b, c, out, center)
         self.tri(a, c, d, out, center)
 
+    def quad_n(self, q, nq):
+        """Quadrilátero com normais por vértice (lataria lisa); a ordem segue a normal média."""
+        q = [np.asarray(x, np.float64) for x in q]
+        nq = [np.asarray(x, np.float64) for x in nq]
+        f = np.cross(q[1] - q[0], q[3] - q[0])
+        if np.dot(f, sum(nq)) < 0:
+            q, nq = [q[0], q[3], q[2], q[1]], [nq[0], nq[3], nq[2], nq[1]]
+        base = len(self.p)
+        self.p += q
+        self.n += nq
+        self.idx += [base, base + 1, base + 2, base, base + 2, base + 3]
+
     def cylinder_x(self, cx, cy, cz, r, w, seg=20):
         """Cilindro com o eixo em x (roda), centrado em (cx, cy, cz), largura w."""
         x0, x1 = cx - w / 2, cx + w / 2
@@ -90,60 +102,105 @@ def profile(m, nseg=48):
 
 
 def build_car(m, taxi=False):
+    """Lataria lisa: seções transversais arredondadas (barriga na lateral, ombro e teto abaulados, quinas da planta
+    arredondadas) ao longo do comprimento, normais suaves calculadas na grade, caixas de roda recortadas. Vidros
+    laterais acima da cintura e para-brisa/vigia onde o teto inclina."""
     body, glass, dark, chrome, head, tail, sign, plate = (Mesh() for _ in range(8))
-    z, ytop = profile(m)
-    W, floor, belt = m['W'], m['floor'], m['belt']
+    z, ytop = profile(m, 72)
+    W, floor, belt, L, r = m['W'], m['floor'], m['belt'], m['L'], m['wheel']
     hw = W / 2
-    # Planta com as quinas chanfradas: a largura afina perto dos para-choques e no teto (tumblehome).
-    def half_width(zz, yy):
-        k = 1.0 - 0.10 * max(0.0, (abs(zz) - (m['L'] / 2 - 0.45)) / 0.45)
-        t = 1.0 - 0.12 * max(0.0, (yy - belt) / max(m['H'] - belt, 0.1))
-        return hw * k * t
-    rows = [floor, (floor + belt) / 2, belt]  # cortes na lateral: assoalho, meio, cintura
-    for i in range(len(z) - 1):
+    wheels = (L / 2 - 0.78, -L / 2 + 0.85)
+
+    def plan(zz):  # quinas da planta arredondadas (elipse nos últimos 0,6 m)
+        e = max(0.0, abs(zz) - (L / 2 - 0.6)) / 0.62
+        return math.sqrt(max(0.0, 1.0 - e * e)) * 0.55 + 0.45 if e > 0 else 1.0
+
+    def bottom(zz):  # caixa de roda: a saia sobe em arco em volta de cada roda
+        yb = floor
+        for zw in wheels:
+            d = zz - zw
+            R = r + 0.07
+            if abs(d) < R:
+                yb = max(yb, r + math.sqrt(R * R - d * d))
+        return yb
+
+    NB, NS, NU, NR = 3, 5, 4, 7
+
+    def section(zz, yt):
+        """Meia seção (lado +x), de baixo ao centro do teto: lista de (x, y, vidro?)."""
+        w = hw * plan(zz)
+        yb = bottom(zz)
+        cabin = yt > belt + 0.18
+        ylow = belt if cabin else max(yb + 0.12, yt - 0.14)
+        pts = []
+        for k in range(NB):  # dobra de baixo (a saia vira para dentro)
+            a = (k / (NB - 1)) * math.pi / 2
+            pts.append((w * (0.9 + 0.1 * math.sin(a)), yb + 0.1 * (1 - math.cos(a)), False))
+        for k in range(1, NS + 1):  # lateral com barriga
+            f = k / NS
+            y = yb + 0.1 + (ylow - yb - 0.1) * f
+            pts.append((w * (1.0 + 0.025 * math.sin(math.pi * f)), y, False))
+        if cabin:
+            wr, yr0 = w * 0.8, yt - 0.08
+            for k in range(1, NU + 1):  # coluna/vidro lateral, inclinado para dentro
+                f = k / NU
+                pts.append((w + (wr - w) * f, ylow + (yr0 - ylow) * f, k < NU))
+        else:
+            wr, yr0 = w * 0.97, yt - 0.04
+            for k in range(1, NU + 1):
+                f = k / NU
+                pts.append((w + (wr - w) * f, ylow + (yr0 - ylow) * math.sin(f * math.pi / 2), False))
+        for k in range(1, NR + 1):  # ombro + teto/capô abaulado até o centro
+            a = (k / NR) * math.pi / 2
+            pts.append((wr * math.cos(a), yr0 + (yt - yr0) * math.sin(a), False))
+        return pts
+
+    secs = [section(zz, yt) for zz, yt in zip(z, ytop)]
+    nz, ns = len(secs), len(secs[0])
+    G = np.array([[(x, y, zz) for (x, y, _) in sec] for sec, zz in zip(secs, z)])  # (nz, ns, 3)
+    tz = np.gradient(G, axis=0)
+    ts = np.gradient(G, axis=1)
+    N = np.cross(tz, ts)
+    ctr = np.stack([np.zeros(nz), np.full(nz, (floor + belt) / 2), z], -1)[:, None, :]
+    flip = np.sum(N * (G - ctr), -1) < 0
+    N[flip] *= -1
+    N /= np.maximum(np.linalg.norm(N, axis=-1, keepdims=True), 1e-9)
+    for i in range(nz - 1):
+        slope = abs(ytop[i + 1] - ytop[i]) / max(z[i + 1] - z[i], 1e-6)
+        for j in range(ns - 1):
+            gl = secs[i][j][2] and secs[i + 1][j][2]
+            if not gl and j >= ns - NR - 1 and slope > 0.45 and min(ytop[i], ytop[i + 1]) > belt + 0.18:
+                gl = True  # para-brisa / vigia
+            tgt = glass if gl else body
+            for sx in (1, -1):
+                q = [G[i, j], G[i + 1, j], G[i + 1, j + 1], G[i, j + 1]]
+                nq = [N[i, j], N[i + 1, j], N[i + 1, j + 1], N[i, j + 1]]
+                if sx < 0:
+                    q = [v * (-1, 1, 1) for v in q]
+                    nq = [v * (-1, 1, 1) for v in nq]
+                tgt.quad_n(q, nq)
+    for i in range(nz - 1):  # assoalho
         z0, z1 = z[i], z[i + 1]
-        y0t, y1t = ytop[i], ytop[i + 1]
-        # lateral (de assoalho até o contorno), em faixas; acima da cintura é vidro
-        for side in (-1, 1):
-            for a, b in ((floor, min(belt, y0t)), (belt, None)):
-                if b is None:  # vidro: da cintura ao teto
-                    if y0t <= belt + 0.02 and y1t <= belt + 0.02:
-                        continue
-                    ya0, yb0, ya1, yb1 = belt, y0t, belt, y1t
-                    tgt = glass
-                else:
-                    ya0, yb0, ya1, yb1 = floor, min(belt, y0t), floor, min(belt, y1t)
-                    tgt = body
-                P = lambda zz, yy: (side * half_width(zz, yy), yy, zz)
-                q = [P(z0, ya0), P(z1, ya1), P(z1, yb1), P(z0, yb0)]
-                tgt.quad(*q, out=(side, 0, 0))
-        # teto/capô (de um lado ao outro): vidro nos trechos inclinados do para-brisa/vigia, carroceria no resto
-        slope = abs(y1t - y0t) / max(z1 - z0, 1e-6)
-        is_glass = slope > 0.45 and min(y0t, y1t) > belt
-        tgt = glass if is_glass else body
-        a = (-half_width(z0, y0t), y0t, z0)
-        b = (half_width(z0, y0t), y0t, z0)
-        c = (half_width(z1, y1t), y1t, z1)
-        d = (-half_width(z1, y1t), y1t, z1)
-        tgt.quad(a, d, c, b, out=(0, 1, 0))
-        # assoalho
-        dark.quad((-hw * 0.9, floor, z0), (hw * 0.9, floor, z0), (hw * 0.9, floor, z1), (-hw * 0.9, floor, z1),
-                  out=(0, -1, 0))
-    # traseira e frente (tampas)
-    for zz, yy, s in ((z[0], ytop[0], -1), (z[-1], ytop[-1], 1)):
-        w0, w1 = half_width(zz, floor), half_width(zz, yy)
-        q = [(-w0, floor, zz), (w0, floor, zz), (w1, yy, zz), (-w1, yy, zz)]
-        body.quad(*q, out=(0, 0, s))
-    # para-choques escuros, grade, faróis, lanternas, placas
+        w0, w1 = G[i, 0, 0], G[i + 1, 0, 0]
+        dark.quad((-w0, bottom(z0), z0), (w0, bottom(z0), z0), (w1, bottom(z1), z1), (-w1, bottom(z1), z1), out=(0, -1, 0))
+    for i, s in ((0, -1), (nz - 1, 1)):  # pontas (já quase fechadas pela planta arredondada)
+        c = (0.0, (G[i, 0, 1] + ytop[i]) / 2, z[i])
+        for j in range(ns - 1):
+            for sx in (1, -1):
+                body.tri(c, G[i, j] * (sx, 1, 1), G[i, j + 1] * (sx, 1, 1), out=(0, 0, s))
+    for zw in wheels:  # forro escuro das caixas de roda
+        for sx in (-1, 1):
+            dark.box((sx * (hw - 0.3), r + 0.12, zw), (0.28, 0.3, r + 0.06))
     zf, zr = z[-1], z[0]
-    dark.box((0, floor + 0.12, zf + 0.04), (hw * 0.95, 0.1, 0.05))
-    dark.box((0, floor + 0.12, zr - 0.04), (hw * 0.95, 0.1, 0.05))
-    dark.box((0, floor + 0.32, zf + 0.01), (hw * 0.45, 0.07, 0.02))  # grade
+    # para-choques escuros, grade, faróis, lanternas, placas
+    dark.box((0, floor + 0.12, zf - 0.04), (hw * 0.62, 0.09, 0.06))
+    dark.box((0, floor + 0.12, zr + 0.04), (hw * 0.62, 0.09, 0.06))
+    dark.box((0, floor + 0.32, zf - 0.06), (hw * 0.4, 0.07, 0.03))  # grade
     for s in (-1, 1):
-        head.box((s * hw * 0.68, floor + 0.36, zf + 0.015), (0.2, 0.06, 0.02))
-        tail.box((s * hw * 0.72, floor + 0.45, zr - 0.015), (0.18, 0.06, 0.02))
-    plate.box((0, floor + 0.2, zf + 0.1), (0.26, 0.06, 0.005))
-    plate.box((0, floor + 0.3, zr - 0.1), (0.26, 0.06, 0.005))
+        head.box((s * hw * 0.48, floor + 0.38, zf - 0.1), (0.17, 0.045, 0.07))
+        tail.box((s * hw * 0.5, floor + 0.47, zr + 0.11), (0.17, 0.045, 0.07))
+    plate.box((0, floor + 0.2, zf - 0.02), (0.2, 0.05, 0.03))
+    plate.box((0, floor + 0.3, zr + 0.03), (0.2, 0.05, 0.03))
     # retrovisores
     for s in (-1, 1):
         body.box((s * (hw + 0.08), belt + 0.08, z[-1] * 0.15 + 0.6), (0.08, 0.06, 0.1))

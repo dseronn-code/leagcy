@@ -18,6 +18,7 @@ Sem dados de mapa (o OpenStreetMap não é alcançável daqui), o traçado sai d
 Prédios são estilizados (massas e proporções parecidas, fachadas próprias): nada de cópia de arquitetura nem de marca.
 """
 import argparse
+from array import array
 import json
 import math
 import os
@@ -58,24 +59,133 @@ def street_width(n):
 # ---------------------------------------------------------------------------------------------------------- malha
 class Mesh:
     def __init__(self):
-        self.p, self.n, self.uv, self.idx = [], [], [], []
+        # Vetores planos (array do Python, float32): a cidade tem dezenas de milhões de valores
+        self.p, self.n, self.uv, self.c, self.idx = (array('f'), array('f'), array('f'), array('f'), array('I'))
+        self.nv = 0
+        self.tint = (1.0, 1.0, 1.0)  # cor por vértice (COLOR_0): variação de tom por prédio...
+        self.grime = None            # ...e sujeira: (y do chão, altura, força, y do topo) escurece base e topo
 
-    def quad(self, a, b, c, d, uv=((0, 0), (1, 0), (1, 1), (0, 1)), face=None):
+    def col(self, q):
+        """Cor do vértice: tom do prédio × sujeira (mais escuro junto à calçada, onde respinga, e sob a cornija)."""
+        t = self.tint
+        if self.grime is None:
+            return t
+        y0, h, k, ytop = self.grime
+        s = min(max((q[1] - y0) / h, 0.0), 1.0)
+        f = 1.0 - k * (1.0 - s * s * (3 - 2 * s))
+        if ytop is not None:
+            s2 = min(max((ytop - q[1]) / 2.5, 0.0), 1.0)
+            f *= 1.0 - 0.25 * (1.0 - s2)
+        return (t[0] * f, t[1] * f, t[2] * f)
+
+    def vert(self, q, nrm, t):
+        q = (float(q[0]), float(q[1]), float(q[2]))
+        self.p.extend(q)
+        self.n.extend((float(nrm[0]), float(nrm[1]), float(nrm[2])))
+        self.uv.extend((float(t[0]), float(t[1])))
+        self.c.extend(self.col(q))
+        self.nv += 1
+
+    def quad(self, a, b, c, d, uv=((0, 0), (1, 0), (1, 1), (0, 1)), face=None, nrms=None):
         """Quadrilátero a-b-c-d (anti-horário visto de fora). face: para onde a frente deve apontar (vira a ordem se
-        preciso)."""
+        preciso). nrms: normais por vértice (superfície curva lisa); senão a normal da face."""
         a, b, c, d = (np.asarray(x, np.float64) for x in (a, b, c, d))
         nrm = np.cross(b - a, d - a)
         nrm /= max(np.linalg.norm(nrm), 1e-9)
         if face is not None and np.dot(nrm, face) < 0:
             a, b, c, d = a, d, c, b
             uv = (uv[0], uv[3], uv[2], uv[1])
+            if nrms is not None:
+                nrms = (nrms[0], nrms[3], nrms[2], nrms[1])
             nrm = -nrm
-        base = len(self.p)
-        for q, t in zip((a, b, c, d), uv):
-            self.p.append(q)
-            self.n.append(nrm)
-            self.uv.append(t)
-        self.idx += [base, base + 1, base + 2, base, base + 2, base + 3]
+        base = self.nv
+        for k, (q, t) in enumerate(zip((a, b, c, d), uv)):
+            self.vert(q, nrm if nrms is None else nrms[k], t)
+        self.idx.extend((base, base + 1, base + 2, base, base + 2, base + 3))
+
+    def tri(self, a, b, c, face, uv=((0, 0), (1, 0), (0, 1))):
+        a, b, c = (np.asarray(x, np.float64) for x in (a, b, c))
+        nrm = np.cross(b - a, c - a)
+        nrm /= max(np.linalg.norm(nrm), 1e-9)
+        if np.dot(nrm, face) < 0:
+            b, c = c, b
+            uv = (uv[0], uv[2], uv[1])
+            nrm = -nrm
+        base = self.nv
+        for q, t in zip((a, b, c), uv):
+            self.vert(q, nrm, t)
+        self.idx.extend((base, base + 1, base + 2))
+
+    def frustum(self, c, r0, r1, y0, y1, seg=12, cap=True, uvs=None):
+        """Tronco de cone vertical liso (poste afunilado, telhado cônico com r1=0). uvs: u em metros × uvs ao redor
+        (madeira da caixa d'água); senão 0..1."""
+        x, z = c
+        U = 1.0 if uvs is None else 2 * math.pi * max(r0, r1) * uvs
+        slope = (r0 - r1) / max(y1 - y0, 1e-6)
+        for i in range(seg):
+            a0, a1 = 2 * math.pi * i / seg, 2 * math.pi * (i + 1) / seg
+            N = [np.array([math.cos(a), slope, math.sin(a)]) / math.hypot(1, slope) for a in (a0, a1)]
+            P = lambda a, r, y: (x + r * math.cos(a), y, z + r * math.sin(a))
+            self.quad(P(a0, r0, y0), P(a1, r0, y0), P(a1, r1, y1), P(a0, r1, y1),
+                      uv=((U * i / seg, y0), (U * (i + 1) / seg, y0), (U * (i + 1) / seg, y1), (U * i / seg, y1)),
+                      face=(math.cos((a0 + a1) / 2), 0, math.sin((a0 + a1) / 2)), nrms=(N[0], N[1], N[1], N[0]))
+            if cap and r1 > 0:
+                base = self.nv
+                for q in ((x, y1, z), P(a0, r1, y1), P(a1, r1, y1)):
+                    self.vert(q, (0, 1, 0), (q[0], q[2]))
+                self.idx.extend((base, base + 2, base + 1))
+
+    def tube(self, path, r, seg=8, uvs=1.0):
+        """Tubo liso ao longo de um caminho 3D (braço de poste, corrimão, aro de caixa d'água)."""
+        path = [np.asarray(q, np.float64) for q in path]
+        prev = None
+        rings = []
+        for i, q in enumerate(path):
+            tng = path[min(i + 1, len(path) - 1)] - path[max(i - 1, 0)]
+            tng /= max(np.linalg.norm(tng), 1e-9)
+            if prev is None:
+                up = np.array([0.0, 1.0, 0.0]) if abs(tng[1]) < 0.9 else np.array([1.0, 0.0, 0.0])
+                u = np.cross(tng, up)
+            else:
+                u = prev - tng * np.dot(prev, tng)  # transporte paralelo: o anel não torce
+            u /= max(np.linalg.norm(u), 1e-9)
+            v = np.cross(tng, u)
+            prev = u
+            rings.append([(q + r * (math.cos(a) * u + math.sin(a) * v), math.cos(a) * u + math.sin(a) * v)
+                          for a in (2 * math.pi * k / seg for k in range(seg + 1))])
+        L = 0.0
+        for i in range(len(path) - 1):
+            L1 = L + float(np.linalg.norm(path[i + 1] - path[i]))
+            for k in range(seg):
+                (p00, n00), (p01, n01) = rings[i][k], rings[i][k + 1]
+                (p10, n10), (p11, n11) = rings[i + 1][k], rings[i + 1][k + 1]
+                self.quad(p00, p01, p11, p10, uv=((k / seg, L * uvs), ((k + 1) / seg, L * uvs), ((k + 1) / seg, L1 * uvs),
+                                                  (k / seg, L1 * uvs)), face=n00 + n11, nrms=(n00, n01, n11, n10))
+            L = L1
+
+    def beam(self, p0, p1, w, h, up=(0.0, 1.0, 0.0)):
+        """Barra de seção w × h de p0 a p1 (degrau, viga inclinada, grade)."""
+        p0, p1 = np.asarray(p0, np.float64), np.asarray(p1, np.float64)
+        ax = p1 - p0
+        L = float(np.linalg.norm(ax))
+        if L < 1e-6:
+            return
+        ax /= L
+        up = np.asarray(up, np.float64)
+        sd = np.cross(ax, up)
+        if np.linalg.norm(sd) < 1e-6:
+            sd = np.cross(ax, np.array([1.0, 0.0, 0.0]))
+        sd /= np.linalg.norm(sd)
+        upv = np.cross(sd, ax)
+        sd, upv = sd * w / 2, upv * h / 2
+        c = [p0 - sd - upv, p0 + sd - upv, p0 + sd + upv, p0 - sd + upv]
+        e = [q + ax * L for q in c]
+        for i in range(4):
+            j = (i + 1) % 4
+            mid = (c[i] + c[j]) / 2 - p0
+            self.quad(c[i], c[j], e[j], e[i], uv=((0, 0), (1, 0), (1, L), (0, L)), face=mid)
+        self.quad(c[0], c[1], c[2], c[3], face=-ax)
+        self.quad(e[0], e[1], e[2], e[3], face=ax)
 
     def polygon(self, poly, y, up=True, uv_scale=1.0):
         """Polígono horizontal (shapely) na altura y, triangulado (com furos)."""
@@ -86,19 +196,17 @@ class Mesh:
             verts = np.concatenate(rings)
             ends = np.cumsum([len(r) for r in rings]).astype(np.uint32)
             tri = earcut.triangulate_float64(verts, ends).reshape(-1, 3)
-            base = len(self.p)
+            base = self.nv
             for x, z in verts:
-                self.p.append(np.array([x, y, z]))
-                self.n.append(np.array([0.0, 1.0 if up else -1.0, 0.0]))
-                self.uv.append((x * uv_scale, z * uv_scale))
+                self.vert((x, y, z), (0.0, 1.0 if up else -1.0, 0.0), (x * uv_scale, z * uv_scale))
             for t in tri:
                 # earcut no plano xz: orientação para a normal +y (x, z -> anti-horário visto de cima = z para baixo)
                 a, b, c = (base + int(i) for i in t)
-                pa, pb, pc = self.p[a], self.p[b], self.p[c]
+                pa, pb, pc = (self.p[3 * k:3 * k + 3] for k in (a, b, c))
                 ny = (pb[2] - pa[2]) * (pc[0] - pa[0]) - (pb[0] - pa[0]) * (pc[2] - pa[2])
                 if (ny > 0) != up:
                     b, c = c, b
-                self.idx += [a, b, c]
+                self.idx.extend((a, b, c))
 
     def extrude_walls(self, poly, y0, y1, uv_w=1.0, uv_h=1.0):
         """Paredes verticais do contorno de um polígono, de y0 a y1 (normal para fora)."""
@@ -121,35 +229,21 @@ class Mesh:
                           uv=((0, y0 * uv_h), (L * uv_w, y0 * uv_h), (L * uv_w, y1 * uv_h), (0, y1 * uv_h)))
 
     def cylinder(self, c, r, y0, y1, seg=12, cap=True):
-        """Cilindro vertical de raio r em c=(x, z), de y0 a y1 (com tampa em cima)."""
-        x, z = c
-        ang = [2 * math.pi * i / seg for i in range(seg + 1)]
-        for i in range(seg):
-            a0, a1 = ang[i], ang[i + 1]
-            p0 = (x + r * math.cos(a0), z + r * math.sin(a0))
-            p1 = (x + r * math.cos(a1), z + r * math.sin(a1))
-            mid = ((a0 + a1) / 2)
-            self.quad((p0[0], y0, p0[1]), (p1[0], y0, p1[1]), (p1[0], y1, p1[1]), (p0[0], y1, p0[1]),
-                      uv=((i / seg, y0), ((i + 1) / seg, y0), ((i + 1) / seg, y1), (i / seg, y1)),
-                      face=(math.cos(mid), 0, math.sin(mid)))
-            if cap:
-                base = len(self.p)
-                for q in ((x, y1, z), (p0[0], y1, p0[1]), (p1[0], y1, p1[1])):
-                    self.p.append(np.array(q, np.float64))
-                    self.n.append(np.array([0.0, 1.0, 0.0]))
-                    self.uv.append((q[0], q[2]))
-                self.idx += [base, base + 2, base + 1]
+        """Cilindro vertical liso de raio r em c=(x, z), de y0 a y1 (com tampa em cima)."""
+        self.frustum(c, r, r, y0, y1, seg, cap)
 
-    def sphere(self, c, r, seg=10):
+    def sphere(self, c, r, seg=10, sy=1.0):
         cx, cy, cz = c
         for j in range(seg // 2):
             t0, t1 = math.pi * j / (seg // 2) - math.pi / 2, math.pi * (j + 1) / (seg // 2) - math.pi / 2
             for i in range(seg):
                 a0, a1 = 2 * math.pi * i / seg, 2 * math.pi * (i + 1) / seg
-                P = lambda t, a: (cx + r * math.cos(t) * math.cos(a), cy + r * math.sin(t), cz + r * math.cos(t) * math.sin(a))
+                P = lambda t, a: (cx + r * math.cos(t) * math.cos(a), cy + r * sy * math.sin(t), cz + r * math.cos(t) * math.sin(a))
                 tm, am = (t0 + t1) / 2, (a0 + a1) / 2
+                Nn = lambda t, a: (math.cos(t) * math.cos(a), math.sin(t), math.cos(t) * math.sin(a))
                 self.quad(P(t0, a0), P(t0, a1), P(t1, a1), P(t1, a0),
-                          face=(math.cos(tm) * math.cos(am), math.sin(tm), math.cos(tm) * math.sin(am)))
+                          face=(math.cos(tm) * math.cos(am), math.sin(tm), math.cos(tm) * math.sin(am)),
+                          nrms=(Nn(t0, a0), Nn(t0, a1), Nn(t1, a1), Nn(t1, a0)))
 
     def box(self, c, h, rot=0.0):
         """Caixa de centro c e meias-medidas h, girada rot rad em torno de y."""
@@ -448,16 +542,47 @@ def curtain_texture(path, rng, w=256, h=256):
     return path + '_cor.png', path + '_luz.png'
 
 
+def ogee(y0, d0, y1, d1, n=6):
+    """Curva em S (cimácio) de (y0, d0) a (y1, d1): perfil de moldura clássica."""
+    return [(y0 + (y1 - y0) * k / n, d0 + (d1 - d0) * (0.5 - 0.5 * math.cos(math.pi * k / n))) for k in range(1, n + 1)]
+
+
+# Perfis (altura, saliência) de baixo para cima, começando e terminando na parede (d = 0). Escala 1 = ~1,2 m.
+CORNIJA_GRANDE = ([(0, 0), (0, 0.06), (0.1, 0.06), (0.1, 0.12), (0.55, 0.12), (0.55, 0.2)] + ogee(0.55, 0.2, 0.66, 0.3, 3)
+                  + [(0.66, 0.85), (0.86, 0.85)] + ogee(0.86, 0.85, 1.12, 1.05) + [(1.18, 1.05), (1.18, 0)])
+CORNIJA_SIMPLES = [(0, 0), (0, 0.05)] + ogee(0, 0.05, 0.16, 0.22, 4) + [(0.22, 0.22), (0.26, 0.26), (0.32, 0.26),
+                                                                           (0.32, 0)]
+FRISO = [(0, 0), (0, 0.04), (0.05, 0.08), (0.17, 0.08), (0.22, 0.04), (0.22, 0)]
+BASE_PEDRA = [(0, 0), (0, 0.14), (0.75, 0.14)] + ogee(0.75, 0.14, 0.9, 0.04, 3) + [(0.9, 0)]
+
+
 class Facades:
-    """Fachadas com geometria: janelas recuadas com caixilho e sala atrás, cornijas, vitrines com marquise no térreo,
-    pele de vidro com montantes nas torres. As malhas ficam agrupadas por material (self.mesh[nome])."""
+    """Kit de fachada no estilo de Manhattan (gramática de divisão: lote → térreo / faixa / andares / coroamento →
+    vãos → módulo de janela), todo em geometria: cornijas com perfil curvo e mísulas, janelas recuadas com verga,
+    peitoril, arco ou frontão, pilastras, frisos, escadas de incêndio de ferro, aparelhos de ar-condicionado, toldos,
+    letreiros, portas de enrolar, andaimes de calçada (sidewalk sheds), caixas d'água de madeira, casas de máquinas e
+    condensadores no telhado. Cada prédio sorteia o estilo; cada janela sorteia detalhes. Malhas agrupadas por
+    material (self.mesh[nome]); cor por vértice com o tom do prédio e a sujeira (base e topo mais escuros)."""
+
+    PLAIN = ('sala', 'vitrine', 'caixilho', 'ferro', 'faixa_luz', 'toldo', 'luz_', 'placa', 'ar_cond', 'montante',
+             'cortina', 'coroa', 'tapume', 'andaime', 'aco_teto', 'condensador', 'caixa_agua')
 
     def __init__(self, rng):
         self.rng = rng
         self.mesh = {}
+        self.tint = (1.0, 1.0, 1.0)
+        self.grime = None
+        self.obstacles = []
+        self.lights = []
+        self.lod = 0  # 0 = detalhe completo (perto da praça); 1 = janelas simples
 
     def m(self, name):
-        return self.mesh.setdefault(name, Mesh())
+        M = self.mesh.setdefault(name, Mesh())
+        if name.startswith(self.PLAIN):
+            M.tint, M.grime = (1.0, 1.0, 1.0), None
+        else:
+            M.tint, M.grime = self.tint, self.grime
+        return M
 
     @staticmethod
     def edges(poly):
@@ -492,86 +617,381 @@ class Facades:
         """Os 4 lados do vão da janela (da fachada até o vidro)."""
         P, M = self.P, self.m(frame)
         T = (t[0], 0, t[1])
+        s = 0.5
         M.quad(P(a, t, n, u0, y0, 0), P(a, t, n, u0, y0, -depth), P(a, t, n, u1, y0, -depth), P(a, t, n, u1, y0, 0),
-               face=(0, 1, 0))  # peitoril
+               uv=((u0 * s, 0), (u0 * s, depth * s), (u1 * s, depth * s), (u1 * s, 0)), face=(0, 1, 0))
         M.quad(P(a, t, n, u1, y1, 0), P(a, t, n, u1, y1, -depth), P(a, t, n, u0, y1, -depth), P(a, t, n, u0, y1, 0),
-               face=(0, -1, 0))  # verga
+               uv=((u1 * s, 0), (u1 * s, depth * s), (u0 * s, depth * s), (u0 * s, 0)), face=(0, -1, 0))
         M.quad(P(a, t, n, u0, y1, 0), P(a, t, n, u0, y1, -depth), P(a, t, n, u0, y0, -depth), P(a, t, n, u0, y0, 0),
-               face=T)
+               uv=((0, y1 * s), (depth * s, y1 * s), (depth * s, y0 * s), (0, y0 * s)), face=T)
         M.quad(P(a, t, n, u1, y0, 0), P(a, t, n, u1, y0, -depth), P(a, t, n, u1, y1, -depth), P(a, t, n, u1, y1, 0),
-               face=(-T[0], 0, -T[2]))
+               uv=((0, y0 * s), (depth * s, y0 * s), (depth * s, y1 * s), (0, y1 * s)), face=(-T[0], 0, -T[2]))
 
-    def bar(self, name, a, t, n, u, y0, y1, w, d0, d1):
-        """Montante/caixilho vertical: caixa de largura w, da profundidade d0 à d1."""
+    def block(self, name, a, t, n, u0, u1, y0, y1, d0, d1, uvs=0.5, back=False):
+        """Caixa encostada na fachada (peitoril, verga, pilastra, mísula, ar-condicionado): u0..u1, y0..y1, d0..d1."""
         P, M = self.P, self.m(name)
-        ua, ub = u - w / 2, u + w / 2
         N, T = (n[0], 0, n[1]), (t[0], 0, t[1])
-        M.quad(P(a, t, n, ua, y0, d1), P(a, t, n, ub, y0, d1), P(a, t, n, ub, y1, d1), P(a, t, n, ua, y1, d1), face=N)
-        M.quad(P(a, t, n, ub, y0, d1), P(a, t, n, ub, y0, d0), P(a, t, n, ub, y1, d0), P(a, t, n, ub, y1, d1), face=T)
-        M.quad(P(a, t, n, ua, y0, d0), P(a, t, n, ua, y0, d1), P(a, t, n, ua, y1, d1), P(a, t, n, ua, y1, d0),
+        q = lambda *c: c
+        M.quad(P(a, t, n, u0, y0, d1), P(a, t, n, u1, y0, d1), P(a, t, n, u1, y1, d1), P(a, t, n, u0, y1, d1),
+               uv=((u0 * uvs, -y0 * uvs), (u1 * uvs, -y0 * uvs), (u1 * uvs, -y1 * uvs), (u0 * uvs, -y1 * uvs)), face=N)
+        M.quad(P(a, t, n, u0, y1, d1), P(a, t, n, u1, y1, d1), P(a, t, n, u1, y1, d0), P(a, t, n, u0, y1, d0),
+               uv=((u0 * uvs, d1 * uvs), (u1 * uvs, d1 * uvs), (u1 * uvs, d0 * uvs), (u0 * uvs, d0 * uvs)), face=(0, 1, 0))
+        M.quad(P(a, t, n, u0, y0, d0), P(a, t, n, u1, y0, d0), P(a, t, n, u1, y0, d1), P(a, t, n, u0, y0, d1),
+               uv=((u0 * uvs, d0 * uvs), (u1 * uvs, d0 * uvs), (u1 * uvs, d1 * uvs), (u0 * uvs, d1 * uvs)), face=(0, -1, 0))
+        M.quad(P(a, t, n, u1, y0, d1), P(a, t, n, u1, y0, d0), P(a, t, n, u1, y1, d0), P(a, t, n, u1, y1, d1),
+               uv=((d1 * uvs, -y0 * uvs), (d0 * uvs, -y0 * uvs), (d0 * uvs, -y1 * uvs), (d1 * uvs, -y1 * uvs)), face=T)
+        M.quad(P(a, t, n, u0, y0, d0), P(a, t, n, u0, y0, d1), P(a, t, n, u0, y1, d1), P(a, t, n, u0, y1, d0),
+               uv=((d0 * uvs, -y0 * uvs), (d1 * uvs, -y0 * uvs), (d1 * uvs, -y1 * uvs), (d0 * uvs, -y1 * uvs)),
                face=(-T[0], 0, -T[2]))
+        if back:
+            M.quad(P(a, t, n, u0, y0, d0), P(a, t, n, u1, y0, d0), P(a, t, n, u1, y1, d0), P(a, t, n, u0, y1, d0),
+                   face=(-N[0], 0, -N[2]))
+
+    # Compatibilidade com o código antigo (montantes, cornijas planas).
+    def bar(self, name, a, t, n, u, y0, y1, w, d0, d1):
+        self.block(name, a, t, n, u - w / 2, u + w / 2, y0, y1, d0, d1)
 
     def hbar(self, name, a, t, n, u0, u1, y, h, d0, d1):
-        """Faixa horizontal saliente (cornija, laje, marquise): de y-h/2 a y+h/2, profundidade d0..d1."""
-        P, M = self.P, self.m(name)
-        y0, y1 = y - h / 2, y + h / 2
-        N = (n[0], 0, n[1])
-        M.quad(P(a, t, n, u0, y0, d1), P(a, t, n, u1, y0, d1), P(a, t, n, u1, y1, d1), P(a, t, n, u0, y1, d1), face=N)
-        M.quad(P(a, t, n, u0, y1, d1), P(a, t, n, u1, y1, d1), P(a, t, n, u1, y1, d0), P(a, t, n, u0, y1, d0),
-               face=(0, 1, 0))
-        M.quad(P(a, t, n, u0, y0, d0), P(a, t, n, u1, y0, d0), P(a, t, n, u1, y0, d1), P(a, t, n, u0, y0, d1),
-               face=(0, -1, 0))
+        self.block(name, a, t, n, u0, u1, y - h / 2, y + h / 2, d0, d1)
 
-    def masonry(self, poly, y0, y1, wall, storefront=True):
-        """Pódio de alvenaria: térreo de lojas (vitrine + marquise) e andares de janelas recuadas, cornija no alto."""
+    def profile(self, name, a, t, n, u0, u1, y, pts, s=1.0, caps=True):
+        """Moldura corrida: extruda o perfil (altura, saliência) ao longo da fachada de u0 a u1, com tampas nas
+        pontas. As normais seguem a curva (média dos dois segmentos vizinhos): a luz corre pela moldura."""
+        P, M = self.P, self.m(name)
+        pts = [(y + dy * s, d * s) for dy, d in pts]
+        segs = []
+        for (ya, da), (yb, db) in zip(pts[:-1], pts[1:]):
+            L = math.hypot(yb - ya, db - da)
+            segs.append(None if L < 1e-6 else ((yb - ya) / L, -(db - da) / L))  # normal 2D (d, y)
+        arc = 0.0
+        for i, ((ya, da), (yb, db)) in enumerate(zip(pts[:-1], pts[1:])):
+            if segs[i] is None:
+                continue
+            nd, ny = segs[i]
+
+            def vn(j):  # normal suave no vértice j do perfil, se o ângulo com o vizinho for pequeno
+                o = segs[j] if 0 <= j < len(segs) else None
+                if o is None or nd * o[0] + ny * o[1] < 0.8:
+                    return np.array([n[0] * nd, ny, n[1] * nd])
+                m2 = np.array([nd + o[0], ny + o[1]])
+                m2 /= np.linalg.norm(m2)
+                return np.array([n[0] * m2[0], m2[1], n[1] * m2[0]])
+            na, nb = vn(i - 1), vn(i + 1)
+            L = math.hypot(yb - ya, db - da)
+            M.quad(P(a, t, n, u0, ya, da), P(a, t, n, u1, ya, da), P(a, t, n, u1, yb, db), P(a, t, n, u0, yb, db),
+                   uv=((u0 * 0.5, arc * 0.5), (u1 * 0.5, arc * 0.5), (u1 * 0.5, (arc + L) * 0.5), (u0 * 0.5, (arc + L) * 0.5)),
+                   face=(n[0] * nd, ny, n[1] * nd), nrms=(na, na, nb, nb))
+            arc += L
+        if caps:
+            ring = [(d, yy) for yy, d in pts]
+            if ring[0] == ring[-1]:
+                ring = ring[:-1]
+            tri = earcut.triangulate_float64(np.array(ring, np.float64), np.array([len(ring)], np.uint32)).reshape(-1, 3)
+            for u, f in ((u0, -1), (u1, 1)):
+                for i0, i1, i2 in tri:
+                    q = [P(a, t, n, u, ring[k][1], ring[k][0]) for k in (i0, i1, i2)]
+                    M.tri(*q, face=(t[0] * f, 0, t[1] * f),
+                          uv=tuple((ring[k][0] * 0.5, ring[k][1] * 0.5) for k in (i0, i1, i2)))
+
+    # ------------------------------------------------------------------------------------------- elementos
+    def window(self, st, a, t, n, c, ww, wy0, wy1, depth, wall, trim):
+        """Módulo de janela: vidro com sala atrás, vão, caixilho de guilhotina, peitoril, e verga/arco/frontão."""
         rng = self.rng
-        ground = 5.0 if storefront else 0.0
-        fh = rng.uniform(3.4, 4.0)
-        bay = rng.uniform(2.6, 3.4)
-        ww = bay * rng.uniform(0.45, 0.62)
-        sill, head = rng.uniform(0.8, 1.0), rng.uniform(0.45, 0.7)
-        depth = rng.uniform(0.18, 0.3)
+        u0, u1 = c - ww / 2, c + ww / 2
+        lit = rng.random() < st['acesas']
+        self.wall_quad(f'sala{rng.randrange(8)}' if lit else f'sala_apagada{rng.randrange(3)}', a, t, n,
+                       u0, u1, wy0, wy1, -depth, unit=True)
+        self.recess(a, t, n, u0, u1, wy0, wy1, depth, wall)
+        # peitoril de pedra saliente, um pouco mais largo que o vão
+        self.block(trim, a, t, n, u0 - 0.08, u1 + 0.08, wy0 - 0.1, wy0, -0.02, 0.07)
+        if self.lod > 0 or st.get('leve'):  # longe da praça: só vidro, vão e peitoril
+            return
+        fr = st['caixilho']
+        d = -depth + 0.06  # caixilho: moldura (frente) 6 cm à frente do vidro, trilho da guilhotina no meio
+        ym = (wy0 + wy1) / 2
+        for (ua, ub, ya, yb) in ((u0, u1, wy0, wy0 + 0.06), (u0, u1, wy1 - 0.06, wy1), (u0, u0 + 0.06, wy0 + 0.06, wy1 - 0.06),
+                                 (u1 - 0.06, u1, wy0 + 0.06, wy1 - 0.06), (u0 + 0.06, u1 - 0.06, ym - 0.03, ym + 0.03)):
+            self.wall_quad(fr, a, t, n, ua, ub, ya, yb, d)
+        if st['folhas'] > 1:
+            self.wall_quad(fr, a, t, n, c - 0.025, c + 0.025, wy0 + 0.06, wy1 - 0.06, d)
+        head = st['verga']
+        if head == 'verga':
+            self.block(trim, a, t, n, u0 - 0.12, u1 + 0.12, wy1, wy1 + 0.28, 0.0, 0.05)
+            self.block(trim, a, t, n, c - 0.11, c + 0.11, wy1 - 0.04, wy1 + 0.34, 0.0, 0.09)  # pedra-chave
+        elif head == 'arco':  # arco de moldura (capelo italianizante)
+            rise = ww * 0.22
+            R = (ww * ww / 4 + rise * rise) / (2 * rise)
+            yc = wy1 + 0.12 - (R - rise)
+            th = math.asin(min(1.0, (ww / 2 + 0.15) / R))
+            M = self.m(trim)
+            pts = [self.P(a, t, n, c + R * math.sin(f), yc + R * math.cos(f), 0.05) for f in np.linspace(-th, th, 6)]
+            for p0, p1 in zip(pts[:-1], pts[1:]):
+                M.beam(p0, p1, 0.2, 0.1, up=(n[0], 0, n[1]))
+            self.block(trim, a, t, n, u0 - 0.2, u0 - 0.02, wy1 - 0.1, wy1 + 0.05, 0.0, 0.1)  # mísulas do capelo
+            self.block(trim, a, t, n, u1 + 0.02, u1 + 0.2, wy1 - 0.1, wy1 + 0.05, 0.0, 0.1)
+            self.block(trim, a, t, n, c - 0.09, c + 0.09, wy1 + rise - 0.05, wy1 + rise + 0.3, 0.0, 0.12)
+        elif head == 'frontao':  # frontão triangular sobre cornija pequena
+            self.profile(trim, a, t, n, u0 - 0.15, u1 + 0.15, wy1 + 0.02, CORNIJA_SIMPLES, s=0.6)
+            M = self.m(trim)
+            h = ww * 0.28
+            y = wy1 + 0.22
+            pl = [self.P(a, t, n, u0 - 0.15, y, 0.04), self.P(a, t, n, c, y + h, 0.04), self.P(a, t, n, u1 + 0.15, y, 0.04)]
+            M.beam(pl[0], pl[1], 0.14, 0.12, up=(n[0], 0, n[1]))
+            M.beam(pl[1], pl[2], 0.14, 0.12, up=(n[0], 0, n[1]))
+        # ar-condicionado de janela (o som de NY no verão): caixa bege saliente no vão de baixo
+        if rng.random() < st['ar']:
+            self.block('ar_cond', a, t, n, c - 0.33, c + 0.33, wy0 + 0.02, wy0 + 0.44, -depth + 0.05, 0.38, back=True)
+
+    def fire_escape(self, a, t, n, uc, width, ys, fh, nfl):
+        """Escada de incêndio de ferro preto: plataformas em cada andar, guarda-corpo, lances inclinados alternando o
+        lado e a escada de correr pendurada no primeiro patamar."""
+        P, M = self.P, self.m('ferro')
+        D = 1.15
+        u0, u1 = uc - width / 2, uc + width / 2
+        N = (n[0], 0, n[1])
+        for k in range(nfl):
+            y = ys + k * fh
+            self.block('ferro', a, t, n, u0, u1, y - 0.05, y, 0.02, D, uvs=1.0)  # piso de grade
+            for yy in (y + 0.55, y + 1.05):  # guarda-corpo
+                M.beam(P(a, t, n, u0, yy, D), P(a, t, n, u1, yy, D), 0.035, 0.035)
+                M.beam(P(a, t, n, u0, yy, 0.02), P(a, t, n, u0, yy, D), 0.035, 0.035)
+                M.beam(P(a, t, n, u1, yy, 0.02), P(a, t, n, u1, yy, D), 0.035, 0.035)
+            for uu in np.linspace(u0, u1, max(3, int(width / 0.45))):
+                M.beam(P(a, t, n, uu, y, D), P(a, t, n, uu, y + 1.05, D), 0.022, 0.022)
+            for dd in (0.45, D):
+                M.beam(P(a, t, n, u0, y, dd), P(a, t, n, u0, y + 1.05, dd), 0.022, 0.022)
+                M.beam(P(a, t, n, u1, y, dd), P(a, t, n, u1, y + 1.05, dd), 0.022, 0.022)
+            # mísulas (suportes em diagonal até a parede)
+            for uu in (u0 + 0.1, u1 - 0.1):
+                M.beam(P(a, t, n, uu, y - 0.05, D - 0.1), P(a, t, n, uu, y - 0.8, 0.02), 0.04, 0.04)
+            if k < nfl - 1:  # lance para o andar de cima
+                run = min(fh * 0.95, width - 0.6)
+                sgn = 1 if k % 2 == 0 else -1
+                ua = (u1 - 0.25) if sgn > 0 else (u0 + 0.25)
+                ub = ua - sgn * run
+                for dd in (0.4, 0.95):
+                    M.beam(P(a, t, n, ua, y, dd), P(a, t, n, ub, y + fh, dd), 0.03, 0.12, up=N)
+                    M.beam(P(a, t, n, ua, y + 0.9, dd), P(a, t, n, ub, y + fh + 0.9, dd), 0.025, 0.025)
+                steps = int(fh / 0.24)
+                for j in range(1, steps):
+                    f = j / steps
+                    uu = ua + (ub - ua) * f
+                    M.beam(P(a, t, n, uu, y + fh * f, 0.4), P(a, t, n, uu, y + fh * f, 0.95), 0.2, 0.025)
+        # escada de correr do primeiro patamar (recolhida, pendurada)
+        uu = u0 + 0.5
+        y = ys
+        for dd in (0.6, 1.0):
+            M.beam(P(a, t, n, uu, y - 0.05, dd), P(a, t, n, uu, y - 2.6, dd), 0.04, 0.04)
+        for yy in np.arange(y - 0.35, y - 2.6, -0.3):
+            M.beam(P(a, t, n, uu, yy, 0.6), P(a, t, n, uu, yy, 1.0), 0.025, 0.025)
+
+    def awning(self, a, t, n, u0, u1, y, k, depth=1.3):
+        """Toldo de lona inclinado com sanefa e laterais."""
+        P, M = self.P, self.m(f'toldo{k}')
+        top, low = y, y - 0.65
+        M.quad(P(a, t, n, u0, top, 0.02), P(a, t, n, u1, top, 0.02), P(a, t, n, u1, low, depth), P(a, t, n, u0, low, depth),
+               uv=((u0 * 0.5, 0), (u1 * 0.5, 0), (u1 * 0.5, 0.75), (u0 * 0.5, 0.75)), face=(n[0], 1, n[1]))
+        M.quad(P(a, t, n, u0, low, depth), P(a, t, n, u1, low, depth), P(a, t, n, u1, low - 0.28, depth),
+               P(a, t, n, u0, low - 0.28, depth), uv=((u0 * 0.5, 0.75), (u1 * 0.5, 0.75), (u1 * 0.5, 0.9), (u0 * 0.5, 0.9)),
+               face=(n[0], 0, n[1]))
+        for u, f in ((u0, -1), (u1, 1)):
+            M.tri(P(a, t, n, u, top, 0.02), P(a, t, n, u, low, depth), P(a, t, n, u, low, 0.02), face=(t[0] * f, 0, t[1] * f))
+            M.quad(P(a, t, n, u, low, 0.02), P(a, t, n, u, low, depth), P(a, t, n, u, low - 0.28, depth),
+                   P(a, t, n, u, low - 0.28, depth - 0.01), face=(t[0] * f, 0, t[1] * f))
+
+    def shed(self, a, t, n, L, y0):
+        """Andaime de calçada (sidewalk shed): deque de madeira a 3,3 m, pilares de aço, tapume verde em cima e luzes
+        embaixo. Os pilares viram obstáculo para a multidão."""
+        D, H = 3.1, 3.3
+        P = self.P
+        self.block('tapume', a, t, n, 0, L, y0 + H, y0 + H + 0.22, 0.0, D, back=False)
+        self.block('tapume', a, t, n, 0, L, y0 + H + 0.22, y0 + H + 1.15, D - 0.04, D, back=True)
+        M = self.m('andaime')
+        for u in np.arange(0.3, L, 2.4):
+            self.block('andaime', a, t, n, u - 0.06, u + 0.06, y0, y0 + H, D - 0.16, D - 0.04)
+            self.block('andaime', a, t, n, u - 0.06, u + 0.06, y0 + 2.6, y0 + H, 0.0, D - 0.04)  # travessa
+            x, _, z = P(a, t, n, u, 0, D - 0.1)
+            self.obstacles.append((x, z, 0.45))
+            if u + 2.4 < L:
+                M.beam(P(a, t, n, u, y0 + 0.4, D - 0.1), P(a, t, n, u + 2.4, y0 + H - 0.2, D - 0.1), 0.05, 0.05)
+        for u in np.arange(1.5, L, 3.0):
+            self.block('luz_andaime', a, t, n, u - 0.3, u + 0.3, y0 + H - 0.05, y0 + H, D / 2 - 0.08, D / 2 + 0.08)
+            x, _, z = P(a, t, n, u, 0, D / 2)
+            self.lights.append(((x, y0 + H - 0.3, z), (1.0, 0.92, 0.8), 120.0, 8.0))
+
+    def storefront(self, st, a, t, n, L, y0, ground, wall, trim, nb, bw):
+        """Térreo: vitrines (ou portas de enrolar) entre pilastras, faixa de letreiro, toldo ou marquise."""
+        rng = self.rng
+        lit_store = st['loja_luz']
+        for i in range(nb):
+            u0, u1 = i * bw + 0.35, (i + 1) * bw - 0.35
+            yt = y0 + 3.6
+            kind = rng.randrange(6) if rng.random() < lit_store else 5
+            self.wall_quad(f'vitrine{kind}', a, t, n, u0, u1, y0 + 0.45, yt, -0.3, unit=True)
+            self.recess(a, t, n, u0, u1, y0 + 0.45, yt, 0.3, 'caixilho')
+            self.block('caixilho', a, t, n, u0, u1, yt - 0.08, yt, -0.3, -0.22)
+            if kind != 5 and rng.random() < 0.6:  # montante da vitrine
+                self.block('caixilho', a, t, n, (u0 + u1) / 2 - 0.03, (u0 + u1) / 2 + 0.03, y0 + 0.45, yt, -0.3, -0.24)
+            self.block(trim, a, t, n, i * bw, u0, y0, y0 + ground, 0.0, 0.12)        # pilastra
+            self.block(trim, a, t, n, u1, (i + 1) * bw, y0, y0 + ground, 0.0, 0.12)
+            self.block(trim, a, t, n, u0, u1, y0, y0 + 0.45, 0.0, 0.06)              # embasamento
+            self.wall_quad(wall, a, t, n, u0, u1, yt, y0 + ground)
+        # letreiros: caixa de luz por loja (2 a 3 vãos)
+        i = 0
+        while i < nb:
+            span = min(nb - i, rng.choice([1, 2, 2, 3]))
+            u0, u1 = i * bw + 0.5, (i + span) * bw - 0.5
+            if rng.random() < 0.8:
+                self.block('marquise', a, t, n, u0, u1, y0 + 3.75, y0 + 4.6, 0.12, 0.3)
+                self.wall_quad(f'placa{rng.randrange(16)}', a, t, n, u0 + 0.05, u1 - 0.05, y0 + 3.8, y0 + 4.55, 0.305,
+                               unit=True)
+            if st['toldo'] and rng.random() < 0.75:
+                self.awning(a, t, n, i * bw + 0.3, (i + span) * bw - 0.3, y0 + 3.7, st['toldo_cor'])
+            i += span
+        if not st['toldo']:
+            self.block('marquise', a, t, n, 0, L, y0 + 4.75, y0 + 4.95, 0.0, 1.2)
+            for u in np.arange(1.0, L - 0.5, 2.5):  # spots embaixo da marquise (não uma faixa contínua)
+                self.block('faixa_luz', a, t, n, u - 0.12, u + 0.12, y0 + 4.71, y0 + 4.75, 0.55, 0.8)
+        self.profile(trim, a, t, n, -0.15, L + 0.15, y0 + ground - 0.32, CORNIJA_SIMPLES, s=1.0)
+
+    def masonry(self, poly, y0, y1, wall, storefront=True, st=None, street_edge=None):
+        """Prédio de alvenaria (pré-guerra): térreo de lojas, andares de janelas com moldura, frisos, pilastras,
+        escadas de incêndio nas fachadas de tijolo das ruas, cornija grande com mísulas e platibanda."""
+        rng = self.rng
+        st = st or {}
+        st.setdefault('acesas', 0.45)
+        st.setdefault('verga', rng.choice(['verga', 'verga', 'arco', 'frontao', 'simples']))
+        st.setdefault('folhas', rng.choice([1, 1, 2]))
+        st.setdefault('caixilho', 'caixilho')
+        st.setdefault('ar', 0.12 if 'tijolo' in wall else 0.05)
+        st.setdefault('loja_luz', 0.85)
+        st.setdefault('toldo', rng.random() < 0.5)
+        st.setdefault('toldo_cor', rng.randrange(6))
+        trim = st.get('trim', 'cornija')
+        ground = 5.2 if storefront else 0.0
+        fh = st.get('fh', rng.uniform(3.2, 3.7))
+        bay = rng.uniform(2.1, 2.8)
+        ww = min(bay * rng.uniform(0.42, 0.55), 1.3)
+        sill, head = rng.uniform(0.75, 0.95), rng.uniform(0.55, 0.8)
+        depth = rng.uniform(0.2, 0.3)
+        pil = st.get('pilastras', rng.random() < 0.3)
+        escape = st.get('incendio', 'tijolo' in wall and rng.random() < 0.6)
+        self.grime = (y0, 3.0, 0.4, y1)
         for a, b, L, t, n in self.edges(poly):
             nb = max(1, int(L // bay))
             bw = L / nb
             yb = y0
             if storefront and y1 - y0 > 8:
-                # Térreo: vitrines entre pilares, marquise com faixa de luz.
-                for i in range(nb):
-                    u0, u1 = i * bw + 0.25, (i + 1) * bw - 0.25
-                    self.wall_quad(f'vitrine{rng.randrange(6)}', a, t, n, u0, u1, y0 + 0.4, y0 + 3.8, -0.25, unit=True)
-                    self.recess(a, t, n, u0, u1, y0 + 0.4, y0 + 3.8, 0.25, 'caixilho')
-                    self.wall_quad(wall, a, t, n, i * bw, u0, y0, y0 + ground)
-                    self.wall_quad(wall, a, t, n, u1, (i + 1) * bw, y0, y0 + ground)
-                    self.wall_quad(wall, a, t, n, u0, u1, y0, y0 + 0.4)
-                    self.wall_quad(wall, a, t, n, u0, u1, y0 + 3.8, y0 + ground)
-                self.hbar('marquise', a, t, n, 0, L, y0 + 4.0, 0.35, 0.0, 1.4)
-                self.hbar('faixa_luz', a, t, n, 0, L, y0 + 3.8, 0.06, 1.35, 1.42)
+                self.storefront(st, a, t, n, L, y0, ground, wall, trim, nb, bw)
                 yb = y0 + ground
+                if st.get('andaime') and abs(n[1]) > 0.7:
+                    self.shed(a, t, n, L, y0)
+            elif y1 - y0 > 8:
+                self.profile(trim, a, t, n, -0.1, L + 0.1, y0, BASE_PEDRA, s=1.0, caps=True)
             y = yb
-            while y + fh <= y1 - 1.0:
+            floors = []
+            while y + fh <= y1 - 1.6:
+                floors.append(y)
+                y += fh
+            for k, fy in enumerate(floors):
                 for i in range(nb):
                     c = (i + 0.5) * bw
                     u0, u1 = c - ww / 2, c + ww / 2
-                    wy0, wy1 = y + sill, y + fh - head
-                    lit = rng.random() < 0.45
-                    self.wall_quad(f'sala{rng.randrange(8)}' if lit else f'sala_apagada{rng.randrange(3)}', a, t, n,
-                                   u0, u1, wy0, wy1, -depth, unit=True)
-                    self.recess(a, t, n, u0, u1, wy0, wy1, depth, wall)
-                    self.bar('caixilho', a, t, n, c, wy0, wy1, 0.05, -depth, -depth + 0.06)
-                    self.wall_quad(wall, a, t, n, i * bw, u0, y, y + fh)
-                    self.wall_quad(wall, a, t, n, u1, (i + 1) * bw, y, y + fh)
-                    self.wall_quad(wall, a, t, n, u0, u1, y, wy0)
-                    self.wall_quad(wall, a, t, n, u0, u1, wy1, y + fh)
-                if rng.random() < 0.25:  # friso entre andares
-                    self.hbar('cornija', a, t, n, 0, L, y + fh, 0.18, 0.0, 0.12)
-                y += fh
-            self.wall_quad(wall, a, t, n, 0, L, y, y1)  # faixa até o topo
-            self.hbar('cornija', a, t, n, -0.6, L + 0.6, y1 - 0.4, 0.8, 0.0, 0.6)
-            self.hbar(wall, a, t, n, 0, L, y1 + 0.5, 1.0, -0.2, 0.0)  # platibanda
+                    wy0, wy1 = fy + sill, fy + fh - head
+                    self.window(st, a, t, n, c, ww, wy0, wy1, depth, wall, trim)
+                    self.wall_quad(wall, a, t, n, i * bw, u0, fy, fy + fh)
+                    self.wall_quad(wall, a, t, n, u1, (i + 1) * bw, fy, fy + fh)
+                    self.wall_quad(wall, a, t, n, u0, u1, fy, wy0)
+                    self.wall_quad(wall, a, t, n, u0, u1, wy1, fy + fh)
+                if k == 0 or (st.get('friso', 0.25) > rng.random() and k < len(floors) - 1):
+                    self.profile(trim, a, t, n, -0.05, L + 0.05, fy - 0.11, FRISO, s=1.0)
+            if pil and floors:
+                for i in range(nb + 1):
+                    u = i * bw
+                    self.block(wall, a, t, n, max(0, u - 0.28), min(L, u + 0.28), floors[0], y, 0.0, 0.1)
+            if escape and abs(n[1]) > 0.7 and len(floors) >= 3 and nb >= 3 and L < 40:
+                i0 = rng.randrange(0, nb - 1)
+                self.fire_escape(a, t, n, (i0 + 1) * bw, 2 * bw - 0.2, floors[1] if storefront else floors[0] + fh,
+                                 fh, len(floors) - 1)
+            self.wall_quad(wall, a, t, n, 0, L, y, y1)  # faixa até a cornija
+            big = st.get('cornija_grande', y1 - y0 < 70)
+            if big:
+                yc = y1 - 0.25
+                self.profile(trim, a, t, n, -1.1, L + 1.1, yc, CORNIJA_GRANDE, s=1.0)
+                if self.lod == 0:
+                    for u in np.arange(0.4, L - 0.2, 0.9):  # mísulas sob a coroa
+                        self.block(trim, a, t, n, u - 0.08, u + 0.08, yc + 0.3, yc + 0.66, 0.2, 0.78)
+                ytop = yc + 1.18
+            else:
+                self.profile(trim, a, t, n, -0.3, L + 0.3, y1 - 0.3, CORNIJA_SIMPLES, s=1.2)
+                ytop = y1 + 0.1
+            self.block(wall, a, t, n, -0.05, L + 0.05, ytop, ytop + 0.9, -0.25, 0.0)  # platibanda
+            self.block(trim, a, t, n, -0.08, L + 0.08, ytop + 0.9, ytop + 1.0, -0.3, 0.04)  # capeamento
+        self.grime = None
+        return y1
 
-    def curtain(self, poly, y0, y1, k):
-        """Torre de pele de vidro: painéis por módulo (textura com andares) e montantes salientes."""
+    def roof(self, poly, y, small=True):
+        """Telhado de Nova York: caixa d'água de cedro em pernas de aço, casa de máquinas, condensadores, respiros."""
+        rng = self.rng
+        inner = polys(poly.buffer(-2.5, join_style=2))
+        if not inner:
+            return
+        inner = max(inner, key=lambda q: q.area)
+        minx, minz, maxx, maxz = inner.bounds
+
+        def spot(r):
+            for _ in range(20):
+                x, z = rng.uniform(minx + r, maxx - r), rng.uniform(minz + r, maxz - r)
+                if inner.contains(Point(x, z).buffer(r)):
+                    return x, z
+            return None
+        if small and inner.area > 40 and rng.random() < 0.55:
+            r = rng.uniform(1.8, 2.6)
+            p = spot(r + 0.5)
+            if p:
+                x, z = p
+                legs = rng.uniform(2.8, 4.5)
+                S = self.m('aco_teto')
+                yb = y + legs
+                k = 6
+                for i in range(k):
+                    ang = 2 * math.pi * i / k
+                    lx, lz = x + r * 0.8 * math.cos(ang), z + r * 0.8 * math.sin(ang)
+                    S.beam((lx, y, lz), (lx, yb, lz), 0.14, 0.14)
+                    ang2 = 2 * math.pi * (i + 1) / k
+                    l2 = (x + r * 0.8 * math.cos(ang2), z + r * 0.8 * math.sin(ang2))
+                    S.beam((lx, y + 0.3, lz), (l2[0], yb - 0.3, l2[1]), 0.05, 0.05)  # contraventamento
+                S.cylinder((x, z), r + 0.15, yb - 0.25, yb, seg=20)  # plataforma
+                W = self.m('caixa_agua')
+                h = rng.uniform(3.6, 5.0)
+                W.frustum((x, z), r, r * 0.97, yb, yb + h, seg=28, cap=False, uvs=0.5)
+                W.frustum((x, z), r + 0.12, 0.0, yb + h, yb + h + r * 0.55, seg=28, uvs=0.5)
+                for hy in np.linspace(yb + 0.4, yb + h - 0.3, int(h / 0.7)):  # aros de aço
+                    S.tube([(x + (r + 0.03) * math.cos(f), hy, z + (r + 0.03) * math.sin(f))
+                            for f in np.linspace(0, 2 * math.pi, 29)], 0.025, seg=5)
+                S.beam((x + r, yb + h, z), (x + r, y, z), 0.04, 0.04)  # escada de acesso
+        if inner.area > 30 and rng.random() < 0.7:  # casa de máquinas do elevador
+            p = spot(2.0)
+            if p:
+                x, z = p
+                hx, hz = rng.uniform(1.5, 2.5), rng.uniform(1.5, 3.0)
+                self.m('telhado_casa').box((x, y + 1.7, z), (hx, 1.7, hz))
+                self.m('aco_teto').box((x, y + 3.45, z), (hx + 0.1, 0.06, hz + 0.1))
+        for _ in range(rng.randrange(1, 5)):  # condensadores de ar com o ventilador em cima
+            p = spot(1.2)
+            if p:
+                x, z = p
+                C = self.m('condensador')
+                C.box((x, y + 0.65, z), (0.9, 0.65, 0.6), rot=rng.choice([0, math.pi / 2]))
+                self.m('aco_teto').cylinder((x, z), 0.42, y + 1.3, y + 1.36, seg=14)
+        for _ in range(rng.randrange(0, 4)):  # respiros e chaminés
+            p = spot(0.3)
+            if p:
+                self.m('aco_teto').cylinder(p, rng.uniform(0.08, 0.2), y, y + rng.uniform(0.8, 2.2), seg=8)
+
+    def curtain(self, poly, y0, y1, k, crown=True):
+        """Torre de pele de vidro: painéis por módulo (textura com andares), montantes salientes, faixas de laje a cada
+        4 andares e coroamento iluminado."""
         mod = self.rng.uniform(1.5, 1.8)
         fh = 4 * 3.8  # o ladrilho da textura tem 4 andares de 3,8 m
         for a, b, L, t, n in self.edges(poly):
@@ -582,8 +1002,15 @@ class Facades:
             M.quad(P(a, t, n, 0, y0, 0), P(a, t, n, L, y0, 0), P(a, t, n, L, y1, 0), P(a, t, n, 0, y1, 0),
                    uv=((0, -y0 / fh), (nb / 8.0, -y0 / fh), (nb / 8.0, -y1 / fh), (0, -y1 / fh)), face=(n[0], 0, n[1]))
             for i in range(nb + 1):
-                self.bar('montante', a, t, n, i * bw, y0, y1, 0.08, 0.0, 0.22)
-            self.hbar('montante', a, t, n, 0, L, y1 + 0.6, 1.2, -0.1, 0.25)
+                self.block('montante', a, t, n, i * bw - 0.05, i * bw + 0.05, y0, y1, 0.0, 0.2)
+            yy = y0 + fh
+            while yy < y1 - 2:
+                self.block('montante', a, t, n, -0.1, L + 0.1, yy - 0.2, yy, 0.0, 0.12)
+                yy += fh
+            if crown:
+                self.block('montante', a, t, n, -0.2, L + 0.2, y1, y1 + 3.5, -0.2, 0.25)
+                self.block('coroa', a, t, n, 0.0, L, y1 + 0.6, y1 + 0.75, 0.25, 0.3)
+                self.block('coroa', a, t, n, 0.0, L, y1 + 2.6, y1 + 2.75, 0.25, 0.3)
 
 
 # ---------------------------------------------------------------------------------------------------------- glTF
@@ -619,11 +1046,16 @@ class Gltf:
         return self.tex[uri]
 
     def material(self, name, color=(1, 1, 1), rough=0.8, metal=0.0, tex=None, emissive=None, emissive_tex=None,
-                 strength=1.0, double=False):
+                 strength=1.0, double=False, normal_tex=None, orm_tex=None, normal_scale=1.0):
         m = {'name': name, 'pbrMetallicRoughness': {'baseColorFactor': list(color) + [1.0], 'metallicFactor': metal,
                                                      'roughnessFactor': rough}}
         if tex:
             m['pbrMetallicRoughness']['baseColorTexture'] = {'index': self.texture(tex)}
+        if normal_tex:
+            m['normalTexture'] = {'index': self.texture(normal_tex), 'scale': normal_scale}
+        if orm_tex:  # Poly Haven "arm": R = oclusão, G = rugosidade, B = metal (o mesmo arranjo do glTF)
+            m['pbrMetallicRoughness']['metallicRoughnessTexture'] = {'index': self.texture(orm_tex)}
+            m['occlusionTexture'] = {'index': self.texture(orm_tex)}
         if emissive is not None:
             m['emissiveFactor'] = list(emissive)
             if emissive_tex:
@@ -640,13 +1072,16 @@ class Gltf:
     def add_mesh(self, name, mesh, mat):
         if not mesh.idx:
             return
-        P = np.array(mesh.p, np.float32)
-        N = np.array(mesh.n, np.float32)
-        T = np.array(mesh.uv, np.float32)
-        I = np.array(mesh.idx, np.uint32)
+        P = np.frombuffer(mesh.p, np.float32).reshape(-1, 3)
+        N = np.frombuffer(mesh.n, np.float32).reshape(-1, 3)
+        T = np.frombuffer(mesh.uv, np.float32).reshape(-1, 2)
+        I = np.frombuffer(mesh.idx, np.uint32)
         prim = {'attributes': {'POSITION': self.acc(P, 'VEC3', 5126, 34962, True), 'NORMAL': self.acc(N, 'VEC3', 5126, 34962),
                                'TEXCOORD_0': self.acc(T, 'VEC2', 5126, 34962)},
                 'indices': self.acc(I, 'SCALAR', 5125, 34963), 'material': mat}
+        C = np.frombuffer(mesh.c, np.float32).reshape(-1, 3)
+        if len(C) == len(P) and np.abs(C - 1.0).max() > 1e-3:  # tom/sujeira por vértice só quando há
+            prim['attributes']['COLOR_0'] = self.acc(np.clip(C, 0, 1), 'VEC3', 5126, 34962)
         self.doc['meshes'].append({'name': name, 'primitives': [prim]})
         self.doc['nodes'].append({'name': name, 'mesh': len(self.doc['meshes']) - 1})
         self.doc['scenes'][0]['nodes'].append(len(self.doc['nodes']) - 1)
@@ -720,8 +1155,53 @@ def lots(block, rng):
     return out
 
 
+# ---------------------------------------------------------------------------------------------------------- PBR
+# Texturas reais CC0 do Poly Haven (polyhaven.com, licença CC0): cor, normal (OpenGL) e "arm" (oclusão, rugosidade,
+# metal = o ORM do glTF), em 1K. Baixadas uma vez para --texturas (python3 tools/times_square.py baixa sozinho).
+PH_IDS = ['large_red_bricks', 'red_brick_03', 'brick_wall_001', 'dark_brick_wall', 'painted_brick',
+          'white_sandstone_bricks', 'large_sandstone_blocks_01', 'rectangular_facade_tiles', 'concrete_wall_006',
+          'brushed_concrete', 'white_stucco', 'beige_wall_001', 'grey_plaster', 'asphalt_02', 'concrete_pavement',
+          'concrete_tiles_02', 'painted_metal_shutter', 'rusty_metal_02', 'corrugated_iron', 'raw_plank_wall',
+          'rough_linen', 'metal_plate']
+
+
+def baixar_texturas(pasta):
+    import subprocess
+    for pid in PH_IDS:
+        d = os.path.join(pasta, pid)
+        if all(os.path.exists(os.path.join(d, f + '.jpg')) for f in ('cor', 'normal', 'arm')):
+            continue
+        os.makedirs(d, exist_ok=True)
+        info = json.loads(subprocess.run(['curl', '-sS', f'https://api.polyhaven.com/files/{pid}'], check=True,
+                                         capture_output=True).stdout)
+        for key, name in (('Diffuse', 'cor'), ('nor_gl', 'normal'), ('arm', 'arm')):
+            subprocess.run(['curl', '-sS', '-o', os.path.join(d, name + '.jpg'), info[key]['1k']['jpg']['url']], check=True)
+
+
+class Pbr:
+    """Materiais com as texturas reais: copia os mapas para tex/ uma vez e cria o material do glTF."""
+
+    def __init__(self, g, src, out):
+        self.g, self.src, self.out = g, src, out
+        self.done = set()
+
+    def maps(self, pid):
+        if pid not in self.done:
+            for f in ('cor', 'normal', 'arm'):
+                im = Image.open(os.path.join(self.src, pid, f + '.jpg'))
+                im.convert('RGB').save(os.path.join(self.out, 'tex', f'{pid}_{f}.jpg'), quality=88)
+            self.done.add(pid)
+        return tuple(f'tex/{pid}_{f}.jpg' for f in ('cor', 'normal', 'arm'))
+
+    def __call__(self, name, pid, tint=(1, 1, 1), rough=1.0, metal=0.0, normal=1.0, **kw):
+        # metal 0 nas alvenarias: o canal B do "arm" tem ruído de JPEG (até 0,26) que vira pontinhos de metal
+        c, nm, arm = self.maps(pid)
+        return self.g.material(name, color=tint, rough=rough, metal=metal, tex=c, normal_tex=nm, orm_tex=arm,
+                               normal_scale=normal, **kw)
+
+
 # ---------------------------------------------------------------------------------------------------------- cena
-def build(out, seed):
+def build(out, seed, texdir):
     rng = random.Random(seed)
     os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
     tex = lambda name: os.path.join(out, 'tex', name)
@@ -729,23 +1209,25 @@ def build(out, seed):
     g = Gltf()
 
     road, sidewalk, plaza, blocks, (zmin, zmax) = layout()
-    asphalt = g.material('asfalto', rough=0.55, tex=rel(tile_texture(tex('asfalto.png'), 'asfalto')))
-    walk = g.material('calcada', rough=0.7, tex=rel(tile_texture(tex('calcada.png'), 'calcada')))
-    granite = g.material('granito', rough=0.5, tex=rel(tile_texture(tex('granito.png'), 'granito')))
-    curb = g.material('meio_fio', color=(0.45, 0.44, 0.42), rough=0.7)
+    baixar_texturas(texdir)
+    pbr = Pbr(g, texdir, out)
+    asphalt = pbr('asfalto', 'asphalt_02', tint=(0.8, 0.8, 0.82))
+    walk = pbr('calcada', 'concrete_pavement', tint=(0.85, 0.84, 0.82))
+    granite = pbr('granito', 'concrete_tiles_02', tint=(0.8, 0.8, 0.85))
+    curb = pbr('meio_fio', 'brushed_concrete', tint=(0.75, 0.74, 0.72))
     paint = g.material('faixa', color=(0.85, 0.85, 0.8), rough=0.5)
 
     m = Mesh()
-    m.polygon(road, 0.0, uv_scale=0.25)
+    m.polygon(road, 0.0, uv_scale=0.22)
     g.add_mesh('pista', m, asphalt)
     m = Mesh()
-    m.polygon(sidewalk, 0.15, uv_scale=0.5)
+    m.polygon(sidewalk, 0.15, uv_scale=0.35)
     g.add_mesh('calcada', m, walk)
     m = Mesh()
-    m.polygon(plaza, 0.15, uv_scale=0.25)
+    m.polygon(plaza, 0.15, uv_scale=0.5)
     g.add_mesh('praca', m, granite)
     m = Mesh()
-    m.extrude_walls(unary_union([sidewalk, plaza]).buffer(0), 0.0, 0.15)
+    m.extrude_walls(unary_union([sidewalk, plaza]).buffer(0), 0.0, 0.15, uv_w=0.5, uv_h=0.5)
     g.add_mesh('meio_fio', m, curb)
 
     # Faixas de pedestre nas esquinas da 7th Ave e linhas da pista.
@@ -772,9 +1254,11 @@ def build(out, seed):
             facade_mats[(st, k)] = g.material(f'fachada_{st}{k}', rough=0.3 if st == 'vidro' else 0.85,
                                               metal=0.6 if st == 'vidro' else 0.0, tex=rel(c),
                                               emissive=(0.25, 0.25, 0.25), emissive_tex=rel(e), strength=0.3)
-    roof = g.material('telhado', color=(0.18, 0.18, 0.19), rough=0.9)
+    roof = pbr('telhado', 'brushed_concrete', tint=(0.35, 0.34, 0.33))
     fac = Facades(rng)
-    walls = {k: f'parede_{k}' for k in ('pedra', 'tijolo', 'concreto')}
+    WALLS = {'tijolo': ['tijolo0', 'tijolo1', 'tijolo2', 'tijolo3', 'tijolo4'], 'pedra': ['pedra0', 'pedra1', 'pedra2'],
+             'reboco': ['reboco0', 'reboco1'], 'concreto': ['concreto0']}
+    TRIMS = ['cornija', 'cornija', 'cornija_branca', 'cornija_escura']
     bldg = {k: Mesh() for k in facade_mats}
     roofs = Mesh()
     near_plaza = LineString([(BWAY_K * street_z(41), street_z(41)), (BWAY_K * street_z(48), street_z(48))])
@@ -791,30 +1275,65 @@ def build(out, seed):
                 tower = podium + rng.uniform(40, 210 if d < 250 else 120)
             st = rng.choice(facade_styles)
             k = rng.randrange(3)
-            bl = polys(lot.buffer(-0.3))
+            bl = polys(lot.buffer(-0.3, join_style=2))
             if not bl:
                 continue
             body = max(bl, key=lambda q: q.area)
             detailed = d < 260  # perto da praça: fachada com geometria; longe: textura
+            top = podium
             if detailed:
-                fac.masonry(body, 0.15, podium, walls[rng.choice(['pedra', 'pedra', 'tijolo', 'concreto'])])
+                fam = rng.choices(['tijolo', 'pedra', 'reboco', 'concreto'], [5, 3, 2, 1])[0]
+                wall = rng.choice(WALLS[fam])
+                v = rng.uniform(0.85, 1.1)
+                fac.tint = (v * rng.uniform(0.94, 1.06), v * rng.uniform(0.94, 1.06), v * rng.uniform(0.94, 1.06))
+                style = {'trim': rng.choice(TRIMS), 'andaime': (not bowtie) and rng.random() < 0.1,
+                         'caixilho': rng.choice(['caixilho', 'caixilho', 'caixilho_branco', 'caixilho_verde'])}
+                fac.lod = 0 if d < 140 else 1
+                top = fac.masonry(body, 0.15, podium, wall, st=style)
             else:
                 bldg[(st, k)].extrude_walls(body, 0.15, podium, uv_w=1 / 12.0, uv_h=1 / 14.0)
-            top = podium
             if tower > podium:
-                cl = polys(body.buffer(-rng.uniform(3, 8)))
+                cl = polys(body.buffer(-rng.uniform(3, 8), join_style=2))
                 core = max(cl, key=lambda q: q.area) if cl else None
                 if core is not None and core.area > 80:
-                    st2 = rng.choice(['vidro', 'vidro', 'concreto', 'pedra'])
-                    if detailed:
-                        fac.curtain(core, podium, tower, rng.randrange(4))
+                    roofs.polygon(body.difference(core), top + 0.05)
+                    if detailed:  # torre com recuos ("bolo de noiva" do zoneamento de 1916) e coroamento
+                        glass = rng.random() < 0.65
+                        tiers = rng.choice([1, 2, 2, 3])
+                        cur, yb, kk = core, top, rng.randrange(4)
+                        fac.tint = (1.0, 1.0, 1.0)
+                        for ti in range(tiers):
+                            yt = yb + (tower - yb) * (1.0 / (tiers - ti)) * rng.uniform(0.85, 1.0) if ti < tiers - 1 else tower
+                            last = ti == tiers - 1
+                            if glass:
+                                fac.curtain(cur, yb, yt, kk, crown=last)
+                                yr = yt
+                            else:
+                                yr = fac.masonry(cur, yb, yt, rng.choice(WALLS['pedra']), storefront=False,
+                                                 st={'trim': 'cornija', 'verga': 'simples', 'incendio': False, 'ar': 0.0,
+                                                     'pilastras': True, 'fh': 3.8, 'cornija_grande': False,
+                                                     'acesas': 0.35, 'leve': True})
+                            roofs.polygon(cur, yr + (3.5 if glass and last else 0.0))
+                            if not last:
+                                nx = polys(cur.buffer(-rng.uniform(2.5, 5.0), join_style=2))
+                                if not nx or max(nx, key=lambda q: q.area).area < 60:
+                                    break
+                                cur = max(nx, key=lambda q: q.area)
+                            yb = yr
+                        if rng.random() < 0.3 and tower > 120:  # mastro/antena no topo
+                            cc = cur.centroid
+                            fac.m('montante').frustum((cc.x, cc.y), 0.6, 0.08, yr, yr + rng.uniform(15, 40), seg=10)
+                        else:
+                            fac.roof(cur, yr + (3.5 if glass else 0.0), small=False)
                     else:
-                        bldg[(st2, rng.randrange(3))].extrude_walls(core, podium, tower, 1 / 12.0, 1 / 14.0)
-                    roofs.polygon(body.difference(core), podium + 0.05)
-                    roofs.polygon(core, tower)
+                        bldg[(rng.choice(['vidro', 'vidro', 'concreto', 'pedra']), rng.randrange(3))].extrude_walls(
+                            core, podium, tower, 1 / 12.0, 1 / 14.0)
+                        roofs.polygon(core, tower)
                     top = None
             if top is not None:
                 roofs.polygon(body, top)
+                if detailed:
+                    fac.roof(body, top, small=podium < 80)
             # Telões e neons nas fachadas voltadas para a praça (bowtie) e nas ruas em volta.
             if bowtie:
                 ring = np.array(body.exterior.coords)
@@ -835,21 +1354,50 @@ def build(out, seed):
                         wid = min(L * rng.uniform(0.6, 0.95), hgt * rng.uniform(1.4, 3.0))
                         screens.append((mid, (nx, nz), (b - a) / L, y, wid, hgt))
                         y += hgt + rng.uniform(0.5, 3)
-                    if rng.random() < 0.7:  # letreiro de neon baixo, na altura da marquise
-                        neons.append((mid, (nx, nz), (b - a) / L, 3.6, min(L * 0.8, 9), 1.4))
+                    if rng.random() < 0.7:  # letreiro de neon baixo, acima da faixa de letreiros das lojas
+                        neons.append((mid, (nx, nz), (b - a) / L, 5.4, min(L * 0.8, 9), 1.4))
     for k, mesh in bldg.items():
         g.add_mesh(f'predios_{k[0]}{k[1]}', mesh, facade_mats[k])
     g.add_mesh('telhados', roofs, roof)
 
     # Materiais das fachadas com geometria.
     fmat = {}
-    for k in ('pedra', 'tijolo', 'concreto'):
-        fmat[f'parede_{k}'] = g.material(f'parede_{k}', rough=0.85, tex=rel(stone_texture(tex(f'parede_{k}.png'), k)))
-    fmat['cornija'] = g.material('cornija', rough=0.75, tex=rel(stone_texture(tex('cornija.png'), 'cornija')))
-    fmat['caixilho'] = g.material('caixilho', color=(0.06, 0.06, 0.065), rough=0.35, metal=1.0)
+    for k, (pid, tint) in enumerate([('large_red_bricks', (0.85, 0.8, 0.78)), ('red_brick_03', (1, 1, 1)),
+                                     ('brick_wall_001', (0.95, 0.92, 0.9)), ('dark_brick_wall', (1, 1, 1)),
+                                     ('large_red_bricks', (0.62, 0.52, 0.42))]):
+        fmat[f'tijolo{k}'] = pbr(f'tijolo{k}', pid, tint=tint)
+    for k, (pid, tint) in enumerate([('white_sandstone_bricks', (0.95, 0.92, 0.86)),
+                                     ('large_sandstone_blocks_01', (1.0, 0.97, 0.92)),
+                                     ('rectangular_facade_tiles', (0.9, 0.9, 0.9))]):
+        fmat[f'pedra{k}'] = pbr(f'pedra{k}', pid, tint=tint)
+    fmat['reboco0'] = pbr('reboco0', 'white_stucco', tint=(0.82, 0.78, 0.7))
+    fmat['reboco1'] = pbr('reboco1', 'grey_plaster', tint=(0.9, 0.86, 0.8))
+    fmat['concreto0'] = pbr('concreto0', 'concrete_wall_006', tint=(0.95, 0.95, 0.95))
+    fmat['cornija'] = pbr('cornija', 'beige_wall_001', tint=(0.95, 0.9, 0.82))
+    fmat['cornija_branca'] = pbr('cornija_branca', 'white_stucco', tint=(0.9, 0.9, 0.88))
+    fmat['cornija_escura'] = pbr('cornija_escura', 'painted_metal_shutter', tint=(0.18, 0.2, 0.19), normal=0.3)
+    fmat['caixilho'] = g.material('caixilho', color=(0.05, 0.05, 0.055), rough=0.35, metal=0.0)
+    fmat['caixilho_branco'] = g.material('caixilho_branco', color=(0.75, 0.74, 0.7), rough=0.4)
+    fmat['caixilho_verde'] = g.material('caixilho_verde', color=(0.04, 0.12, 0.08), rough=0.4)
     fmat['montante'] = g.material('montante', color=(0.55, 0.57, 0.6), rough=0.3, metal=1.0)
-    fmat['marquise'] = g.material('marquise', color=(0.05, 0.05, 0.055), rough=0.4, metal=1.0)
-    fmat['faixa_luz'] = g.material('faixa_luz', color=(1, 1, 1), emissive=(1.0, 0.92, 0.8), strength=25.0)
+    fmat['marquise'] = g.material('marquise', color=(0.04, 0.04, 0.045), rough=0.4, metal=1.0)
+    fmat['faixa_luz'] = g.material('faixa_luz', color=(1, 1, 1), emissive=(1.0, 0.9, 0.75), strength=5.0)
+    fmat['ferro'] = pbr('ferro', 'rusty_metal_02', tint=(0.07, 0.065, 0.06), rough=0.9, metal=1.0)
+    fmat['ar_cond'] = pbr('ar_cond', 'corrugated_iron', tint=(0.78, 0.75, 0.68), normal=0.6)
+    fmat['condensador'] = pbr('condensador', 'corrugated_iron', tint=(0.7, 0.7, 0.7))
+    fmat['aco_teto'] = pbr('aco_teto', 'rusty_metal_02', tint=(0.3, 0.3, 0.3), metal=1.0)
+    fmat['caixa_agua'] = pbr('caixa_agua', 'raw_plank_wall', tint=(0.62, 0.5, 0.4))
+    fmat['telhado_casa'] = pbr('telhado_casa', 'dark_brick_wall', tint=(0.8, 0.8, 0.8))
+    fmat['tapume'] = pbr('tapume', 'raw_plank_wall', tint=(0.12, 0.3, 0.18), normal=0.5)
+    fmat['andaime'] = g.material('andaime', color=(0.08, 0.1, 0.16), rough=0.45, metal=0.6)
+    fmat['luz_andaime'] = g.material('luz_andaime', color=(1, 1, 1), emissive=(1.0, 0.93, 0.82), strength=30.0)
+    fmat['coroa'] = g.material('coroa', color=(1, 1, 1), emissive=(0.75, 0.85, 1.0), strength=40.0)
+    for k, cor in enumerate([(0.45, 0.04, 0.04), (0.05, 0.18, 0.08), (0.06, 0.08, 0.25), (0.08, 0.08, 0.08),
+                             (0.5, 0.28, 0.04), (0.3, 0.05, 0.18)]):
+        fmat[f'toldo{k}'] = pbr(f'toldo{k}', 'rough_linen', tint=cor, double=True)
+    for k in range(16):  # letreiros de loja (caixa de luz com nome fictício)
+        p = rel(neon_texture(tex(f'placa{k:02d}.png'), rng))
+        fmat[f'placa{k}'] = g.material(f'placa{k}', tex=p, emissive=(1, 1, 1), emissive_tex=p, strength=2.5)
     for k in range(8):  # vidro com a sala acesa atrás (reflexo do vidro + interior emissivo)
         r = rel(room_texture(tex(f'sala{k}.png'), rng, True))
         fmat[f'sala{k}'] = g.material(f'sala{k}', color=(0.5, 0.5, 0.5), rough=0.05, tex=r, emissive=(1, 1, 1),
@@ -859,8 +1407,8 @@ def build(out, seed):
         fmat[f'sala_apagada{k}'] = g.material(f'sala_apagada{k}', rough=0.04, tex=r)
     for k, kind in enumerate(['quente', 'quente', 'fria', 'colorida', 'colorida', 'fechada']):
         r = rel(shop_texture(tex(f'vitrine{k}.png'), rng, kind))
-        if kind == 'fechada':
-            fmat[f'vitrine{k}'] = g.material(f'vitrine{k}', rough=0.5, metal=0.8, tex=r)
+        if kind == 'fechada':  # porta de enrolar de aço
+            fmat[f'vitrine{k}'] = pbr(f'vitrine{k}', 'painted_metal_shutter', tint=(0.75, 0.75, 0.75))
         else:
             fmat[f'vitrine{k}'] = g.material(f'vitrine{k}', color=(0.6, 0.6, 0.6), rough=0.05, tex=r,
                                              emissive=(1, 1, 1), emissive_tex=r, strength=1.2)
@@ -870,6 +1418,8 @@ def build(out, seed):
                                          emissive_tex=rel(e), strength=0.6)
     for name, mesh in fac.mesh.items():
         g.add_mesh('fachada_' + name, mesh, fmat[name])
+    for pos, col, inten, rr in fac.lights:
+        g.light(pos, col, inten, rr)
 
     # Torre de telões empilhados na ponta sul da praça (estilizada; não é cópia do prédio real).
     zt = street_z(42) - 15 - 22
@@ -951,10 +1501,13 @@ def build(out, seed):
                     px, pz = ax + sx * 15.6, z + sz * (w / 2 + 0.6)
                     if abs(ax) < 1e-6 and abs(BWAY_K * z) < 25 and sx < 0:
                         continue
-                    pr['escuro'].cylinder((px, pz), 0.11, 0.15, 5.2)
+                    pr['escuro'].frustum((px, pz), 0.14, 0.09, 0.15, 5.4, seg=10)
+                    pr['escuro'].frustum((px, pz), 0.2, 0.16, 0.15, 0.9, seg=10)
                     obstacles.append((px, pz, 0.6))
                     arm_dir = -sx
-                    pr['escuro'].box((px + arm_dir * 3.2, 5.0, pz), (3.2, 0.08, 0.08))
+                    pr['escuro'].tube([(px + arm_dir * 6.2 * f, 5.0 + 0.35 * f * (1 - f), pz) for f in np.linspace(0, 1, 6)],
+                                      0.07, seg=7)
+                    pr['escuro'].beam((px, 4.2, pz), (px + arm_dir * 1.6, 4.95, pz), 0.05, 0.05)  # mão-francesa
                     hx = px + arm_dir * 5.8
                     pr['semaforo'].box((hx, 4.4, pz), (0.2, 0.55, 0.18))
                     lit = (n + (1 if sx > 0 else 0)) % 2 == 0
@@ -1016,7 +1569,7 @@ def build(out, seed):
     with open(os.path.join(out, 'vapor.json'), 'w') as f:
         json.dump(steam_points, f)
     with open(os.path.join(out, 'obstaculos.json'), 'w') as f:
-        json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles], f)
+        json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles + fac.obstacles], f)
 
     # Postes: luz de rua (sódio/LED quente) a cada ~30 m nas calçadas; KHR_lights_punctual.
     pole = g.material('poste', color=(0.08, 0.09, 0.1), rough=0.4, metal=1.0)
@@ -1028,9 +1581,17 @@ def build(out, seed):
             for zz in (z - w / 2 + 0.6, z + w / 2 - 0.6):
                 if any(abs(x - ax) < 18 for ax in AVE_X.values()) or abs(x - BWAY_K * zz) < 18:
                     continue
-                poles.box((x, 4.5, zz), (0.09, 4.5, 0.09))
-                lamps.box((x, 9.0, zz), (0.35, 0.08, 0.2))
-                g.light((x, 8.85, zz), (1.0, 0.85, 0.65), 1800.0)
+                # poste afunilado com braço curvo sobre a pista e luminária "cabeça de cobra"
+                sz = 1.0 if z > zz else -1.0
+                poles.frustum((x, zz), 0.16, 0.07, 0.15, 8.2, seg=10)
+                poles.frustum((x, zz), 0.22, 0.17, 0.15, 1.1, seg=10)  # base mais grossa
+                arm = [(x, 8.0 + 1.0 * math.sin(f * math.pi / 2), zz + sz * 1.2 * (1 - math.cos(f * math.pi / 2)) +
+                        sz * 1.3 * max(0.0, f - 1)) for f in np.linspace(0, 2.0, 12)]
+                poles.tube(arm, 0.05, seg=7)
+                hx, hy, hz = arm[-1]
+                poles.sphere((hx, hy - 0.05, hz + sz * 0.25), 0.42, 12, sy=0.32)
+                lamps.cylinder((hx, hz + sz * 0.25), 0.26, hy - 0.2, hy - 0.17, seg=12)
+                g.light((hx, hy - 0.3, hz + sz * 0.25), (1.0, 0.85, 0.65), 1800.0)
     g.add_mesh('postes', poles, pole)
     g.add_mesh('lampadas', lamps, lamp)
 
@@ -1044,17 +1605,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--saida', default=os.path.join('cenas', 'times_square'))
     ap.add_argument('--semente', type=int, default=42)
+    ap.add_argument('--texturas', default='/home/user/p3/downloads/ph',
+                    help='pasta das texturas CC0 do Poly Haven (baixadas sozinhas se faltarem)')
     ap.add_argument('--gltfpack', help='gltfpack (npm install gltfpack): comprime a malha (meshopt + quantização), '
                                        '~9x menor; sem ele o .bin sai cru (~180 MB)')
     a = ap.parse_args()
     if not a.gltfpack:
-        build(a.saida, a.semente)
+        build(a.saida, a.semente, a.texturas)
         return
     import shutil
     import subprocess
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
-        build(tmp, a.semente)
+        build(tmp, a.semente, a.texturas)
         os.makedirs(a.saida, exist_ok=True)
         subprocess.run([a.gltfpack, '-i', os.path.join(tmp, 'times_square.gltf'), '-o',
                         os.path.join(a.saida, 'times_square.gltf'), '-cc', '-kn', '-km', '-ke'], check=True)
