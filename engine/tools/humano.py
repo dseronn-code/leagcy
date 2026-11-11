@@ -317,6 +317,77 @@ def subdivide_piece(pos, uv, faces, weights, keep=None):
     return P, np.array(uvs, np.float64), out, W
 
 
+def bake_skin_maps(pos, uv, faces, keep, out_dir, size=2048, seed=1):
+    """Mapas de detalhe da pele no UV do corpo: relevo (normal em espaço tangente) com poros e rugas finas, e
+    rugosidade com a zona T (nariz e testa) mais oleosa. Cada texel sabe o ponto 3D dele (rasterização dos triângulos
+    no espaço UV), então o tamanho dos poros e as zonas do rosto saem em metros, não em UV."""
+    rng = np.random.default_rng(seed)
+    P3 = np.full((size, size, 3), np.nan, np.float32)
+    tris = triangulate(faces, keep)
+    for tv, tt in tris:
+        if min(tt) < 0:
+            continue
+        uvs = uv[list(tt)] * size
+        uvs[:, 1] = size - uvs[:, 1]  # v do glTF de cima para baixo (o mesmo flip da malha)
+        ps = pos[list(tv)]
+        x0, y0 = np.floor(uvs.min(0)).astype(int)
+        x1, y1 = np.ceil(uvs.max(0)).astype(int)
+        x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, size - 1), min(y1, size - 1)
+        if x1 < x0 or y1 < y0:
+            continue
+        xs, ys = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+        (ax, ay), (bx, by), (cx, cy) = uvs
+        den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(den) < 1e-12:
+            continue
+        w0 = ((by - cy) * (xs - cx) + (cx - bx) * (ys - cy)) / den
+        w1 = ((cy - ay) * (xs - cx) + (ax - cx) * (ys - cy)) / den
+        w2 = 1 - w0 - w1
+        inside = (w0 >= -1e-3) & (w1 >= -1e-3) & (w2 >= -1e-3)
+        if not inside.any():
+            continue
+        pt = w0[..., None] * ps[0] + w1[..., None] * ps[1] + w2[..., None] * ps[2]
+        sub = P3[y0:y1 + 1, x0:x1 + 1]
+        sub[inside] = pt[inside]
+    valid = ~np.isnan(P3[..., 0])
+    P = np.nan_to_num(P3)
+    # Zonas (corpo em metros, de frente para +z): cabeça acima do pescoço; zona T = faixa central do rosto.
+    head_y = np.nanmax(P3[..., 1])
+    face = valid & (P[..., 1] > head_y - 0.26) & (P[..., 2] > np.nanmean(P3[valid][:, 2]) + 0.02)
+    tzone = face & (np.abs(P[..., 0]) < 0.022) | face & (P[..., 1] > head_y - 0.11) & (np.abs(P[..., 0]) < 0.05)
+    # Poros: pontos sorteados por texel (densidade maior no rosto), cada um um afundamento gaussiano de ~1 texel.
+    h = np.zeros((size, size), np.float32)
+    dens = np.where(face, 0.10, 0.035) * valid
+    pores = rng.random((size, size)) < dens
+    h[pores] -= rng.uniform(0.6, 1.0, pores.sum())
+    def blur(a, k):
+        f = np.fft.fft2(a)
+        fy, fx = np.meshgrid(np.fft.fftfreq(size), np.fft.fftfreq(size), indexing='ij')
+        return np.real(np.fft.ifft2(f * np.exp(-(fx * fx + fy * fy) * (2 * np.pi * k) ** 2 / 2)))
+    h = blur(h, 0.9)
+    # Rugas finas (cruzadas) e ondulação suave.
+    n1 = blur(rng.normal(0, 1, (size, size)).astype(np.float32), 2.5)
+    n2 = blur(rng.normal(0, 1, (size, size)).astype(np.float32), 9.0)
+    h += 0.35 * n1 / (np.abs(n1).max() + 1e-6) + 0.5 * n2 / (np.abs(n2).max() + 1e-6)
+    h *= valid
+    gy, gx = np.gradient(h)
+    strength = 7.0
+    nrm = np.stack([-gx * strength, gy * strength, np.ones_like(h)], -1)  # y do UV invertido (v para baixo)
+    nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True)
+    nimg = ((nrm * 0.5 + 0.5) * 255).astype(np.uint8)
+    # Rugosidade (canal G do metallicRoughness do glTF): pele 0,52; zona T 0,34; poros um pouco mais ásperos.
+    rough = np.full((size, size), 0.52, np.float32)
+    rough[face] = 0.46
+    rough[tzone] = 0.34
+    rough += 0.05 * n1 / (np.abs(n1).max() + 1e-6) - 0.1 * h * pores
+    mr = np.zeros((size, size, 3), np.uint8)
+    mr[..., 1] = (np.clip(rough, 0.05, 1.0) * 255).astype(np.uint8)
+    from PIL import Image
+    Image.fromarray(nimg).save(os.path.join(out_dir, 'pele_normal.jpg'), quality=92)
+    Image.fromarray(mr).save(os.path.join(out_dir, 'pele_rugosidade.jpg'), quality=92)
+    return 'tex/pele_normal.jpg', 'tex/pele_rugosidade.jpg'
+
+
 def triangulate(faces, keep=None):
     tris = []
     for vi, ti in faces:
@@ -620,6 +691,12 @@ def build(args):
 
     # --- corpo (sem os vértices de ajuda e sem o que a roupa cobre)
     keep = body.body_verts - hidden
+    if args.pele_detalhe:  # poros, rugas finas e zona T oleosa (mapas no UV do corpo, em metros)
+        nmap, rmap = bake_skin_maps(to_m(v), body.vt, body.faces, keep, texdir, seed=args.semente)
+        sm = g.doc['materials'][skin_mat]
+        sm['normalTexture'] = {'index': g.texture(nmap), 'scale': 1.0}
+        sm['pbrMetallicRoughness']['metallicRoughnessTexture'] = {'index': g.texture(rmap)}
+        sm['pbrMetallicRoughness']['roughnessFactor'] = 1.0
     if args.subdividir:  # corpo liso (4x os polígonos): o contorno deixa de ser facetado
         bv, buv, bf, bw = subdivide_piece(v, body.vt, body.faces, vw, keep)
         add_prim(bv, buv, triangulate(bf), bw, skin_mat)
@@ -665,6 +742,7 @@ def main():
     ap.add_argument('--tex-max', type=int, default=0, help='reduz as texturas a no máximo N px (multidão)')
     ap.add_argument('--subdividir', action='store_true', help='Catmull-Clark no corpo e na roupa (protagonista)')
     ap.add_argument('--sem-detalhes', action='store_true', help='sem os alvos de rosto sorteados (teste)')
+    ap.add_argument('--pele-detalhe', action='store_true', help='mapas de poros e oleosidade da pele (protagonista)')
     a = ap.parse_args()
     os.makedirs(os.path.dirname(os.path.abspath(a.saida)), exist_ok=True)
     info = build(a)
