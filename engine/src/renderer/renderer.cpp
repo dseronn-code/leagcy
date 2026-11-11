@@ -185,25 +185,31 @@ Quality qualityPreset(QualityPreset preset) {
   // Alto e Médio: os conjuntos medidos na RTX 3070 Ti a 1080p, com a qualidade conferida contra a referência por path
   // tracing na própria placa (docs/auditoria.md, rodadas 3–15). Alto deixa a Sponza em ~26 ms; Médio põe o Bistro
   // (cena urbana densa, ~20 mil luzes de malha) dentro dos 33 ms (30 quadros por segundo).
+  // Médio e Baixo (11/11, rodadas 25–31): 60 q/s no Bistro. Economias sem perda medida contra a referência (ReSTIR com
+  // 4 candidatos, 2 vizinhos e sem os raios de correção; reflexo de reflexo e alimentação 1/8 pelo cache: erro 0,053 ->
+  // 0,052) e a GI esparsa em passe próprio (1 pixel de cada 2x2, warps cheios: 22,2 -> 17,1 ms, erro 0,060).
   switch (preset) {
-    case QualityPreset::Low:
-      q = {0.5f, 1, 4, 3, 3, 1, 3.0f, 8.0f, 256, 128, 5, 24, 8, 4.0f, false};
-      q.mirrorGiCache = q.giHalf = q.roughSpecCache = q.cacheEighth = q.hitShadowOpaque = true;
+    case QualityPreset::Low:  // Bistro 15,3 ms, erro 0,069
+      q = {0.5f, 1, 4, 2, 3, 1, 3.0f, 8.0f, 256, 128, 5, 24, 8, 4.0f, false};
+      q.mirrorGiCache = q.roughSpecCache = q.cacheEighth = q.hitShadowOpaque = q.hitMirrorCache = true;
+      q.giSparse = q.indirectOpaque = q.glossySpecCache = true;
       break;
-    case QualityPreset::Medium:
+    case QualityPreset::Medium:  // Bistro 16,7 ms (60 q/s), erro 0,062; Sponza 9,6 ms
       q.renderScale = 0.5f;
       q.samplesPerPixel = 1;
-      q.restirCandidates = 8;
-      q.restirNeighbors = 4;
-      // Sem cacheEighth: com as economias no shader sobrou folga (Bistro 29 ms), e ele era o corte que mais piorava a
-      // imagem (erro 0,086 -> 0,098 contra a referência).
-      q.mirrorGiCache = q.giHalf = q.roughSpecCache = q.hitShadowOpaque = true;
+      q.restirCandidates = 4;
+      q.restirNeighbors = 2;
+      q.restirBiasCorrection = false;
+      q.mirrorGiCache = q.roughSpecCache = q.hitShadowOpaque = q.cacheEighth = q.hitMirrorCache = true;
+      q.giSparse = q.indirectOpaque = true;
       break;
-    case QualityPreset::High:
+    case QualityPreset::High:  // as economias sem perda; GI em todos os pixels
       q.renderScale = 0.67f;
       q.samplesPerPixel = 1;
-      q.restirCandidates = 8;
-      q.mirrorGiCache = q.roughSpecCache = true;
+      q.restirCandidates = 4;
+      q.restirNeighbors = 2;
+      q.restirBiasCorrection = false;
+      q.mirrorGiCache = q.roughSpecCache = q.cacheEighth = q.hitMirrorCache = true;
       break;
     case QualityPreset::Ultra:
       break;

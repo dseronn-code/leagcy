@@ -1,11 +1,14 @@
-# Rodada 31: GI esparsa num passe à parte (1 pixel de cada 2x2, warps cheios). F = economias sem perda (rodada 29).
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa,indireto-opaco
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa,indireto-opaco,especular-brilho
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa,indireto-opaco"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa,indireto-opaco,especular-brilho"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas sponza --extra="--quality medio"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas sponza --extra="--quality medio --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa,indireto-opaco"
-build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --camera-path caminhos\sponza_nave.txt --no-restir-bias-rays --restir-candidates 4 --restir-neighbors 2 --perf-skip reflexo-duplo-cache,cache-oitavo --perf-skip gi-esparsa,indireto-opaco
+# Rodada 32: os presets novos (Médio = 60 q/s no Bistro). Tempo de cada preset, qualidade parada contra a referência,
+# estabilidade em movimento (DLSS-RR, Sponza à noite andando) e o jogo de demonstração (preset Alto pela cena).
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality baixo
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality alto
+build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --camera-path caminhos\sponza_nave.txt
+build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality medio"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality baixo"
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--quality alto"
+python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos dlss-rr --extra="--quality medio"
+python tools\denoiser.py --bin build\Release\legacy.exe --out resultados_pc\den --candidatos dlss-rr --extra="--quality alto"
+build\Release\legacy.exe --scene cenas\vale\vale.json --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync
+python tools\demo.py --bin build\Release\legacy.exe
