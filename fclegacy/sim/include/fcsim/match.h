@@ -50,7 +50,9 @@ struct Player {
 struct Input {
   int8_t dirX = 0, dirZ = 0;  // stick (x = para o gol adversário do ponto de vista da câmera é tratado no jogo)
   uint8_t buttons = 0;        // bits abaixo (estado "segurando")
-  enum : uint8_t { Pass = 1, Through = 2, Shoot = 4, Sprint = 8, Lob = 16, Press = 32, Switch = 64 };
+  // Lob: gesto para cima/baixo no botão (passe alto, cruzamento, enfiada por cima). Special: deslizar para o lado
+  // (chute colocado no ataque; na defesa, chama o 2º homem para pressionar), como os gestos do eFootball.
+  enum : uint8_t { Pass = 1, Through = 2, Shoot = 4, Sprint = 8, Lob = 16, Press = 32, Switch = 64, Special = 128 };
 };
 
 enum class Phase : uint8_t { Kickoff, Play, ThrowIn, Corner, GoalKick, Goal, HalfTime, FullTime };
@@ -94,9 +96,23 @@ struct Match {
   enum Action : uint8_t { ActPass, ActShot, ActHeader, ActSave, ActTackle, ActLob };
   std::array<int, 2 * kPlayersPerTeam> actionTick{};
   std::array<uint8_t, 2 * kPlayersPerTeam> actionType{};
-  // carga dos botões do humano (passos segurando) e estado anterior
+  // Barra de força do humano (eFootball): enche em 1 s segurando Passe/Lançamento/Chute; dispara ao soltar ou cheia.
   int charge[2] = {0, 0};
+  uint8_t chargeButton[2] = {0, 0};  // qual botão está carregando (0 = nenhum)
+  bool chargeFired[2] = {false, false};  // já disparou com a barra cheia: espera soltar
   uint8_t prevButtons[2] = {0, 0};
+  // Passe/chute de primeira: comandado antes de a bola chegar, executado no domínio.
+  uint8_t queued[2] = {0, 0};
+  float queuedPower[2] = {0.0f, 0.0f};
+  Vec3 queuedDir[2]{};
+  bool queuedLob[2] = {false, false}, queuedSpecial[2] = {false, false};
+  // Direção e arrancada do humano neste passo (orientam o primeiro toque no domínio).
+  Vec3 humanStick[2]{};
+  bool humanDash[2] = {false, false};
+  bool callPress[2] = {false, false};  // 2º homem pressionando o portador (gesto na Pressão)
+  int switchCooldown[2] = {0, 0};      // troca automática de jogador: espera entre trocas (sem pular)
+  Vec3 prevBallPos{};                  // posição da bola no passo anterior (interceptação contínua)
+  float chargeLevel(int team) const { return float(charge[team]) / float(kTicksPerSecond); }
 
   // Sentido de ataque do time neste tempo (+1 ataca +x, -1 ataca -x).
   float attackDir(int team) const { return ((team == 0) == (half == 1)) ? 1.0f : -1.0f; }

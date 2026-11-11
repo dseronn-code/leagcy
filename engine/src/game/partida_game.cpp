@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <cstdlib>
 #include <fstream>
 
@@ -179,11 +180,41 @@ void PartidaGame::readTouches(const std::vector<Touch>& touches, glm::vec2 scree
   // tela: direita = +x do campo, baixo = +z (a câmera fica do lado +z olhando para -z)
   input_.dirX = int8_t(glm::clamp(sv.x, -1.0f, 1.0f) * 127.0f);
   input_.dirZ = int8_t(glm::clamp(sv.y, -1.0f, 1.0f) * 127.0f);
+  // Botões: o dedo que começou num botão continua apertando-o mesmo saindo dele, e o deslize vira gesto (eFootball
+  // Classic): para cima/baixo em Passe ou Lançamento = passe alto/cruzamento (Lob); para o lado no Chute = chute
+  // colocado (Special); na defesa, deslizar a Pressão = chamar o 2º homem (Special).
+  std::map<int, ButtonTouch> still;
+  gesture_ = 0;
   for (const Touch& t : touches) {
     if (t.id == stickTouch_) continue;
-    for (const Button& b : buttons_)
-      if (glm::length(t.pos - b.c) < b.r * 1.2f) input_.buttons |= weHaveBall ? b.bit : b.defenseBit;
+    auto it = buttonTouches_.find(t.id);
+    ButtonTouch bt;
+    if (it != buttonTouches_.end()) {
+      bt = it->second;
+    } else {
+      bt.button = -1;
+      for (size_t k = 0; k < buttons_.size(); ++k)
+        if (glm::length(t.pos - buttons_[k].c) < buttons_[k].r * 1.2f) { bt.button = int(k); break; }
+      bt.start = t.pos;
+      if (bt.button < 0) continue;
+    }
+    const Button& b = buttons_[size_t(bt.button)];
+    const uint8_t bit = weHaveBall ? b.bit : b.defenseBit;
+    input_.buttons |= bit;
+    const glm::vec2 d = t.pos - bt.start;
+    const float th = 3.5f * u;
+    if (std::abs(d.y) > th && std::abs(d.y) > std::abs(d.x) && (bit & (fcsim::Input::Pass | fcsim::Input::Through)) && weHaveBall) {
+      input_.buttons |= fcsim::Input::Lob;
+      gesture_ = 1;
+    } else if (std::abs(d.x) > th || (!weHaveBall && glm::length(d) > th)) {
+      if (weHaveBall ? (bit & fcsim::Input::Shoot) != 0 : (bit & fcsim::Input::Pass) != 0) {
+        input_.buttons |= fcsim::Input::Special;
+        gesture_ = 2;
+      }
+    }
+    still[t.id] = bt;
   }
+  buttonTouches_ = std::move(still);
 }
 
 // ------------------------------------------------------------------------------------------------- desenho
@@ -288,7 +319,12 @@ void PartidaGame::drawBall(Scene& s, float dt, float alpha) {
   const glm::vec3 w = g(match_.ball.spin);
   const float wl = glm::length(w);
   if (wl > 1e-3f) ballRot_ = glm::normalize(glm::angleAxis(wl * dt, w / wl) * ballRot_);
-  s.setTransform(W.ball, glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(ballRot_) * glm::scale(glm::mat4(1.0f), glm::vec3(kBallRadius)));
+  // Desenhada 1,6x maior que a real (22 cm somem a 50 m na câmera ampla; jogos de futebol fazem o mesmo), apoiada no
+  // gramado: a física continua com o tamanho real.
+  constexpr float kBallVisual = 1.6f;
+  const glm::vec3 pv = p + glm::vec3(0.0f, (kBallVisual - 1.0f) * kBallRadius, 0.0f);
+  s.setTransform(W.ball, glm::translate(glm::mat4(1.0f), pv) * glm::mat4_cast(ballRot_) *
+                             glm::scale(glm::mat4(1.0f), glm::vec3(kBallRadius * kBallVisual)));
   const int k = p.x < 0.0f ? 0 : 1;
   const glm::vec3 inNet = glm::vec3(glm::inverse(W.netTransform[k]) * glm::vec4(p, 1.0f));
   s.meshes[W.netMesh[k]].clothColliders[0] = glm::vec4(inNet, kBallRadius + 0.03f);
@@ -307,15 +343,31 @@ void PartidaGame::crowdCheer(Scene& s, bool cheer) {
 }
 
 void PartidaGame::cameraUpdate(float dt, Camera& cam, glm::vec2 screen) {
-  // câmera de transmissão (como a "Ampla" do eFootball): alta na lateral, acompanhando a bola no comprimento
+  // Câmera "Dynamic Wide" do eFootball: lateral e elevada (~23 m de altura, ~40 m da linha da bola, ~30° para
+  // baixo, campo de visão vertical de 34°), olhando um pouco à frente no sentido do ataque de quem tem a bola, seguida
+  // por mola crítica (mais rápida no comprimento, mais lenta na largura) e abrindo um pouco em bola longa ou alta.
   const glm::vec3 b = ballPos_;
-  const glm::vec3 want(glm::clamp(b.x, -34.0f, 34.0f), 0.0f, glm::clamp(b.z * 0.5f, -12.0f, 12.0f));
-  if (!camInit_) { camTarget_ = want; camInit_ = true; }
-  camTarget_ += (want - camTarget_) * std::min(1.0f, dt * 2.0f);
-  cam.position = glm::vec3(camTarget_.x * 0.9f, 17.5f, 47.0f);
-  cam.lookAt(camTarget_ + glm::vec3(0.0f, 0.0f, -5.0f));
-  const float hfov = glm::radians(50.0f), aspect = screen.x / std::max(screen.y, 1.0f);
-  cam.fovY = 2.0f * std::atan(std::tan(hfov * 0.5f) / std::max(aspect, 0.6f));
+  const int holder = match_.owner >= 0 ? match_.owner : match_.lastTouch;
+  const float attack = holder >= 0 ? match_.attackDir(match_.players[size_t(holder)].team) : 0.0f;
+  const glm::vec3 bv(float(match_.ball.vel.x), 0.0f, float(match_.ball.vel.z));
+  glm::vec3 want(b.x + attack * 6.0f + bv.x * 0.25f, 0.0f, b.z * 0.55f);
+  want.x = glm::clamp(want.x, -38.0f, 38.0f);
+  want.z = glm::clamp(want.z, -16.0f, 12.0f);
+  const float fast = (b.y > 2.0f || glm::length(bv) > 18.0f) ? 1.0f : 0.0f;
+  if (!camInit_) { camTarget_ = want; camVel_ = glm::vec3(0.0f); camZoom_ = 1.0f; camInit_ = true; }
+  // mola crítica por eixo: x' = v, v' = ω²(alvo − x) − 2ωv (sem passar do ponto)
+  const glm::vec3 omega(1.0f / 0.5f, 0.0f, 1.0f / 0.8f);
+  const float h = std::min(dt, 0.05f);
+  for (int k = 0; k < 3; k += 2) {
+    camVel_[k] += (omega[k] * omega[k] * (want[k] - camTarget_[k]) - 2.0f * omega[k] * camVel_[k]) * h;
+    camTarget_[k] += camVel_[k] * h;
+  }
+  camZoom_ += ((1.0f + 0.08f * fast) - camZoom_) * std::min(1.0f, h * 1.5f);
+  const float dist = 40.0f * camZoom_, height = 23.0f * camZoom_;
+  cam.position = glm::vec3(camTarget_.x, height, camTarget_.z + dist);
+  cam.lookAt(camTarget_);
+  cam.fovY = glm::radians(34.0f);
+  (void)screen;
 }
 
 glm::vec2 PartidaGame::project(const Camera& cam, glm::vec3 p, glm::vec2 screen) const {
@@ -426,10 +478,17 @@ void PartidaGame::drawHud(const Camera& cam, glm::vec2 screen) {
     const glm::vec2 head = project(cam, feet + glm::vec3(0.0f, 2.05f, 0.0f), screen);
     ui_.triangle(head + glm::vec2(-1.3f * u, -2.4f * u), head + glm::vec2(1.3f * u, -2.4f * u), head, kCyan);
     ui_.textShadow(teams_[0].players[size_t(ci % 11)], {head.x, head.y - 3.4f * u}, 3.6f * u, kInk, Font::Body, Align::Center);
-    const float charge = float(match_.charge[0]) / float(fcsim::kTicksPerSecond);
+    // barra de força nos pés (eFootball): amarela, roxa no chute colocado; o traço marca 85% (acima, a bola sobe)
+    const float charge = match_.chargeLevel(0);
     if (charge > 0.0f) {
-      ui_.rect({head.x - 5 * u, head.y - 9.5f * u}, {10 * u, 1.2f * u}, kPanel);
-      ui_.rect({head.x - 5 * u, head.y - 9.5f * u}, {10 * u * glm::clamp(charge, 0.0f, 1.0f), 1.2f * u}, charge > 0.85f ? rgb(0xff4d5e) : kYellow);
+      const glm::vec2 foot = project(cam, feet, screen) + glm::vec2(0.0f, 2.6f * u);
+      const float w = 12.0f * u, h = 1.6f * u;
+      const glm::vec4 fill = gesture_ == 2 ? rgb(0xb05cff) : kYellow;
+      ui_.rect({foot.x - w * 0.5f - 0.3f * u, foot.y - 0.3f * u}, {w + 0.6f * u, h + 0.6f * u}, rgb(0x000000, 0.7f));
+      ui_.rect({foot.x - w * 0.5f, foot.y}, {w * glm::clamp(charge, 0.0f, 1.0f), h}, fill);
+      ui_.rect({foot.x - w * 0.5f + w * 0.85f, foot.y - 0.3f * u}, {0.3f * u, h + 0.6f * u}, rgb(0xffffff, 0.8f));
+      const char* kind = gesture_ == 1 ? "Passe alto" : gesture_ == 2 ? "Colocado" : nullptr;
+      if (kind) ui_.textShadow(kind, {foot.x, foot.y + h + 3.0f * u}, 3.0f * u, kInk, Font::Body, Align::Center);
     }
   }
   if (match_.owner >= 0 && match_.owner != ci && screen_ == Screen::Playing) {

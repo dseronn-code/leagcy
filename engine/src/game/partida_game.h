@@ -4,6 +4,7 @@
 // bandeirinhas, bola, rede, torcida), a câmera de transmissão, os controles por toque (joystick fixo + 4 botões,
 // vários dedos ao mesmo tempo, pausa e jogo automático) e o HUD no estilo de transmissão (placar, nomes, minimapa).
 #include <array>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -85,11 +86,15 @@ class PartidaGame {
   glm::vec2 stickBase_{0.0f}, stickVec_{0.0f};
   std::vector<Button> buttons_;
   std::vector<int> prevTouchIds_;
+  struct ButtonTouch { int button = -1; glm::vec2 start{0.0f}; };
+  std::map<int, ButtonTouch> buttonTouches_;  // dedo -> botão em que começou (gestos de deslize)
+  int gesture_ = 0;                           // 0 nenhum, 1 passe alto (Lob), 2 colocado/2º homem (Special)
   bool tapped_ = false, paused_ = false, autoTeam_ = false;
   glm::vec2 pauseBtn_{0.0f}, autoBtn_{0.0f}, diagBtn_{0.0f};
   float topBtnR_ = 0.0f;
   // câmera
-  glm::vec3 camTarget_{0.0f};
+  glm::vec3 camTarget_{0.0f}, camVel_{0.0f};
+  float camZoom_ = 1.0f;
   bool camInit_ = false;
   // times
   TeamInfo teams_[2];

@@ -101,18 +101,22 @@ float laneSafety(const Match& m, int team, const Vec3& a, const Vec3& b) {
   return worst;
 }
 
-void shoot(Match& m, int pi, float aimZ, float aimY, float power) {
+// Chute (eFootball): a barra dá a velocidade e também o erro — mais barra, mais força e menos precisão; acima de ~80%
+// a bola sobe (por cima do gol de longe). Colocado (finesse): mais lento, curva e preciso.
+void shoot(Match& m, int pi, float aimZ, float aimY, float power, bool finesse = false) {
   Player& p = m.players[size_t(pi)];
   const int t = p.team;
   const Vec3 goal = goalCenter(m, t);
   const float d = distXZ(p.pos, goal);
   const float pressure = pressureOn(m, pi);
-  const float speed = 18.0f + 12.0f * clampf(power, 0.0f, 1.0f);
-  // erro: cresce com a distância, a força, a pressão e cai com a finalização
-  const float sigma = (0.25f + d * 0.035f) * (1.35f - p.attr.shooting) * (1.0f + 0.8f * pressure) * (0.7f + 0.6f * power);
+  power = clampf(power, 0.0f, 1.0f);
+  const float speed = (15.0f + 15.0f * power + 2.5f * p.attr.shooting) * (finesse ? 0.78f : 1.0f);
+  // erro: cresce com a distância, a pressão e a barra; cai com a finalização
+  const float sigma = (0.2f + d * 0.03f) * (1.25f - p.attr.shooting) * (1.0f + 0.8f * pressure) * (0.6f + 0.8f * power) *
+                      (finesse ? 0.75f : 1.0f);
   Vec3 target = goal;
   target.z += (aimZ + m.rng.gauss() * sigma) * m.attackDir(t);
-  const float ty = clampf(aimY + m.rng.gauss() * sigma * 0.5f, 0.15f, 3.6f);
+  const float ty = clampf(aimY + m.rng.gauss() * sigma * 0.5f, 0.15f, 4.5f);
   Vec3 dir = flat(target - p.pos);
   const float len = std::max(1.0f, length(dir));
   dir = dir / len;
@@ -120,8 +124,9 @@ void shoot(Match& m, int pi, float aimZ, float aimY, float power) {
   const float vy = (ty - 0.11f) / time + 0.5f * kG * time;
   const float vh = std::sqrt(std::max(1.0f, speed * speed - vy * vy));
   Vec3 vel{dir.x * vh, vy, dir.z * vh};
-  // efeito: chute colocado curva para dentro (spin vertical), chute forte com pouco giro
-  const Vec3 spin{0.0f, (aimZ >= 0.0f ? -1.0f : 1.0f) * m.attackDir(t) * 25.0f * (1.0f - power), 0.0f};
+  // efeito: colocado curva para dentro (spin vertical forte), chute forte quase sem giro
+  const float curl = finesse ? 55.0f : 25.0f * (1.0f - power);
+  const Vec3 spin{0.0f, (aimZ >= 0.0f ? -1.0f : 1.0f) * m.attackDir(t) * curl, 0.0f};
   kick(m, pi, vel, spin);
   {
     BallState probe = m.ball;
@@ -138,19 +143,38 @@ void shoot(Match& m, int pi, float aimZ, float aimY, float power) {
   m.pendingPasser = -1;
 }
 
-void pass(Match& m, int pi, int to, bool through, bool lob) {
+// Passe. power < 0: IA (força automática); 0..1: barra do humano — a assistência corrige a direção para o
+// companheiro, e a força decide a velocidade (fraco = mais fácil de cortar) e, na enfiada, quanto à frente dele.
+void pass(Match& m, int pi, int to, bool through, bool lob, float power = -1.0f) {
   Player& p = m.players[size_t(pi)];
   const Player& r = m.players[size_t(to)];
+  const bool human = power >= 0.0f;
+  const float pw = human ? clampf(power, 0.0f, 1.0f) : 0.5f;
   Vec3 target = r.pos;
-  if (through) target = r.pos + toWorld(m, p.team, 7.0f, 0.0f) + flat(r.vel) * 0.6f;  // à frente do companheiro
-  else target = r.pos + flat(r.vel) * 0.5f;
+  if (through) {
+    // à frente do companheiro, na corrida dele (ou rumo ao gol), sem passar da marca do goleiro
+    const Vec3 run = length(flat(r.vel)) > 2.0f ? normalizeOr(flat(r.vel), toWorld(m, p.team, 1.0f, 0.0f)) : toWorld(m, p.team, 1.0f, 0.0f);
+    const float lead = human ? 4.0f + 10.0f * pw : 7.0f;
+    target = r.pos + run * lead + flat(r.vel) * 0.4f;
+    const Vec3 ta = toAttack(m, p.team, target);
+    if (ta.x > kHalfLength - 7.0f) target = toWorld(m, p.team, kHalfLength - 7.0f, ta.z);
+  } else {
+    target = r.pos + flat(r.vel) * 0.5f;
+  }
   target.x = clampf(target.x, -kHalfLength + 1.0f, kHalfLength - 1.0f);
   target.z = clampf(target.z, -kHalfWidth + 1.0f, kHalfWidth - 1.0f);
   const float pressure = pressureOn(m, pi);
-  const float err = (1.15f - p.attr.passing) * (0.5f + pressure) * distXZ(p.pos, target) * 0.045f;
+  const float err = (1.15f - p.attr.passing) * (0.5f + pressure) * distXZ(p.pos, target) * 0.045f * (human ? 0.7f + 0.6f * pw : 1.0f);
   target.x += m.rng.gauss() * err;
   target.z += m.rng.gauss() * err;
-  Vec3 vel = lob ? loftedPass(p.pos, target) : groundPass(p.pos, target, through ? 9.0f : 8.0f);
+  Vec3 vel;
+  if (lob) {
+    const Vec3 from = flat(p.pos);
+    const Vec3 aim = human ? from + flat(target - from) * (0.88f + 0.24f * pw) : target;
+    vel = loftedPass(p.pos, aim);
+  } else {
+    vel = groundPass(p.pos, target, human ? 3.0f + 11.0f * pw : (through ? 9.0f : 8.0f));
+  }
   kick(m, pi, vel, lob ? Vec3{} : rollingSpin(vel, m.ballParams.radius));
   m.stats[p.team].passes++;
   m.pendingPasser = pi;
@@ -176,7 +200,8 @@ int choosePassTarget(const Match& m, int pi, Vec3 dir, bool through, float* outS
     for (const Player& o : m.players) if (o.team != p.team) space = std::min(space, distXZ(o.pos, r.pos));
     float score = progress * (through ? 0.1f : 0.06f) + clampf(safety, -3.0f, 4.0f) * 0.45f - (safety < 0.8f ? 3.0f : 0.0f) + clampf(space, 0.0f, 7.0f) * 0.18f -
                   std::max(0.0f, d - 30.0f) * 0.08f;
-    if (useDir) score += dot(toN, dir) * 3.0f - (dot(toN, dir) < 0.3f ? 6.0f : 0.0f);
+    // cone de ±40° em volta do joystick (assistência do eFootball): fora dele só se não houver ninguém dentro
+    if (useDir) score += dot(toN, dir) * 5.0f - (dot(toN, dir) < 0.766f ? 8.0f : 0.0f);
     if (score > bestScore) { bestScore = score; best = r.index; }
   }
   if (outScore) *outScore = bestScore;
@@ -250,7 +275,7 @@ Vec3 carrierDecision(Match& m, int pi) {
   if (d < 30.0f && std::fabs(a.z) < 22.0f) {
     const float open = clampf(laneSafety(m, t, p.pos, goal) / 2.0f, 0.0f, 1.0f);
     const float xg = 0.42f / (1.0f + (d / 10.0f) * (d / 10.0f)) * (0.4f + 0.6f * open);
-    if (xg > 0.028f + 0.03f * m.rng.uniform() || d < 13.0f) {
+    if (xg > 0.014f + 0.02f * m.rng.uniform() || d < 16.0f) {
       const float side = (a.z >= 0.0f ? -1.0f : 1.0f);  // canto oposto
       shoot(m, pi, side * (2.2f + m.rng.uniform() * 1.0f), 0.5f + m.rng.uniform() * 1.3f, 0.55f + 0.4f * m.rng.uniform());
       return {};
@@ -310,13 +335,22 @@ Vec3 carrierDecision(Match& m, int pi) {
 
 // ---------------------------------------------------------------------------------------------- movimento
 
+// Aceleração exponencial (eFootball: v(t) = vmax·(1 − e^(−t/τ)), τ ~1 s): arranque forte que vai suavizando até a
+// máxima; frenagem e mudança de direção até ~8 m/s². Sem exp() da libm: o passo k = dt/(τ+dt) é a mesma curva discreta.
 void movePlayer(Player& p, const Vec3& desiredVel) {
   const Vec3 v = flat(p.vel);
   Vec3 dv = desiredVel - v;
   const bool braking = dot(desiredVel, v) < dot(v, v) * 0.5f;
-  const float maxDv = p.attr.accel * (braking ? 1.6f : 1.0f) * kTick;
+  const float tau = 0.85f * 5.5f / std::max(p.attr.accel, 1.0f);
   const float l = length(dv);
-  if (l > maxDv) dv = dv * (maxDv / l);
+  if (braking) {
+    const float maxDv = 8.0f * kTick;
+    if (l > maxDv) dv = dv * (maxDv / l);
+  } else {
+    dv = dv * (kTick / (tau + kTick));
+    const float minDv = 1.2f * kTick;  // nunca fica preso a 99% da velocidade pedida
+    if (length(dv) < minDv) dv = l > minDv ? dv * (minDv / std::max(length(dv), 1e-6f)) : desiredVel - v;
+  }
   p.vel = v + dv;
   p.pos += p.vel * kTick;
   p.pos.y = 0.0f;
@@ -452,6 +486,19 @@ void keeperSaves(Match& m) {
   }
 }
 
+// Chute do humano: canto pelo joystick (para cima/baixo na tela = lado do gol); sem direção, o canto longe do
+// chutador (assistência). Altura pela barra: até ~85% baixo/meia altura, acima disso sobe (cheia: por cima com frequência).
+void humanShoot(Match& m, int pi, const Vec3& stick, float power, bool finesse) {
+  const Player& p = m.players[size_t(pi)];
+  const int t = p.team;
+  const Vec3 a = toAttack(m, t, p.pos);
+  float aimZ;
+  if (std::fabs(stick.z) > 0.25f) aimZ = clampf(stick.z * m.attackDir(t), -1.0f, 1.0f) * 2.9f;
+  else aimZ = (a.z >= 0.0f ? -1.0f : 1.0f) * 2.6f;
+  float aimY = finesse ? 0.6f + 0.7f * power : 0.35f + 1.1f * power + std::max(0.0f, power - 0.85f) * 9.0f;
+  shoot(m, pi, aimZ, aimY, power, finesse);
+}
+
 // Quem domina a bola: o mais perto que alcança, se ela estiver baixa e não rápida demais.
 void resolvePossession(Match& m) {
   if (m.phase == Phase::Kickoff && m.owner >= 0) return;  // saída de bola: só o toque do batedor libera a bola
@@ -461,11 +508,19 @@ void resolvePossession(Match& m) {
   if (m.ball.pos.y > 0.7f) return;
   int best = -1;
   float bd = 1e9f;
+  // Interceptação contínua: a bola a 30 m/s anda 1 m por passo; mede a menor distância do pé ao trecho que ela
+  // percorreu neste passo (antes, um passe forte atravessava as pernas de quem estava no caminho).
+  const Vec3 seg = flat(m.ball.pos - m.prevBallPos);
+  const float segL2 = dot(seg, seg);
   for (const Player& p : m.players) {
     if (p.cooldown > 0 || p.index == m.owner) continue;
     const Vec3 foot = p.pos + p.facing * 0.3f;
     const float reach = (p.role == Role::Goalkeeper ? 1.0f : 0.7f) + 0.2f * p.attr.dribbling;
-    const float d = distXZ(foot, m.ball.pos);
+    float d = distXZ(foot, m.ball.pos);
+    if (m.owner < 0 && segL2 > 0.04f) {
+      const float u = clampf(dot(flat(foot - m.prevBallPos), seg) / segL2, 0.0f, 1.0f);
+      d = std::min(d, distXZ(foot, m.prevBallPos + seg * u));
+    }
     if (d > reach || d > bd) continue;
     // roubo: só se o portador não estiver com a bola colada
     if (m.owner >= 0) {
@@ -500,11 +555,34 @@ void resolvePossession(Match& m) {
   m.possessionAge = 0;
   m.shotTeam = -1;
   p.touchTimer = 0;
-  // primeiro toque: amortece a bola na frente do corpo (o erro do toque cresce com a velocidade e a pressão)
+  // Primeiro toque (domínio automático): amortece a bola na frente do corpo; o erro cresce com a velocidade da bola
+  // e a pressão e cai com o controle. O humano orienta o toque pelo joystick (com Acelerar, um toque longo).
   const float err = clampf((rel - 6.0f) * 0.04f * (1.2f - p.attr.dribbling) * (1.0f + pressureOn(m, best)), 0.0f, 1.2f);
-  m.ball.vel = flat(p.vel) * 1.05f + p.facing * (0.8f + err * 4.0f) + Vec3{m.rng.signedUnit() * err * 2.0f, 0.0f, m.rng.signedUnit() * err * 2.0f};
+  const Vec3 jitter{m.rng.signedUnit() * err * 2.0f, 0.0f, m.rng.signedUnit() * err * 2.0f};
+  const int t = p.team;
+  if (m.controlled[t] == best && length(m.humanStick[t]) > 0.3f) {
+    const Vec3 sd = normalizeOr(m.humanStick[t], p.facing);
+    p.facing = sd;
+    m.ball.vel = flat(p.vel) * 0.6f + sd * (m.humanDash[t] ? 4.5f : 2.0f) + jitter;
+  } else {
+    m.ball.vel = flat(p.vel) * 1.05f + p.facing * (0.8f + err * 4.0f) + jitter;
+  }
   m.ball.spin = rollingSpin(m.ball.vel, m.ballParams.radius);
   m.ball.onGround = true;
+  // passe/chute de primeira comandado antes de a bola chegar
+  if (m.controlled[t] == best && m.queued[t]) {
+    const uint8_t q = m.queued[t];
+    m.queued[t] = 0;
+    m.ball.pos = p.pos + p.facing * 0.35f;
+    m.ball.pos.y = m.ballParams.radius;
+    if (q & Input::Shoot) {
+      p.facing = normalizeOr(flat(goalCenter(m, t) - p.pos), p.facing);
+      humanShoot(m, best, m.queuedDir[t], m.queuedPower[t], m.queuedSpecial[t]);
+    } else {
+      const int to = choosePassTarget(m, best, length(m.queuedDir[t]) > 0.2f ? m.queuedDir[t] : p.facing, q & Input::Through);
+      if (to >= 0) pass(m, best, to, q & Input::Through, m.queuedLob[t], m.queuedPower[t]);
+    }
+  }
 }
 
 // Condução: toques na bola na direção do corpo; parado, a bola fica colada no pé.
@@ -521,11 +599,16 @@ void dribble(Match& m, Player& p) {
   }
   if (p.touchTimer > 0) { --p.touchTimer; return; }
   if (distXZ(foot, m.ball.pos) > 1.1f) return;
-  const float push = sp + 0.35f + (1.0f - p.attr.dribbling) * 1.0f + (sp / p.attr.topSpeed) * 0.8f;
+  // Cadência do eFootball: conduzindo, um toque a cada ~0,42 s com a bola ~0,8 m à frente; em arrancada, a cada
+  // ~0,75 s e ~2,2 m à frente. Bom drible encurta o intervalo (até ~30%).
+  const bool dash = sp > 0.75f * p.attr.topSpeed;
+  const float interval = (dash ? 0.75f : 0.42f) * (1.15f - 0.3f * p.attr.dribbling);
+  const float lead = dash ? 2.2f : 0.8f;
+  const float push = sp + lead / interval;
   m.ball.vel = p.facing * push;
   m.ball.spin = rollingSpin(m.ball.vel, m.ballParams.radius);
   m.ball.onGround = true;
-  p.touchTimer = int(6.0f + 7.0f * (sp / p.attr.topSpeed) - 3.0f * p.attr.dribbling);
+  p.touchTimer = std::max(3, int(interval * float(kTicksPerSecond)));
 }
 
 }  // namespace
@@ -603,16 +686,36 @@ void stepMatch(Match& m, const Input* inputs) {
   }
 
   // ---- controle humano: quem é o jogador controlado ----
+  // Com a bola: o portador. Passe a caminho: o recebedor (o controle passa para ele, como no eFootball). Na defesa,
+  // troca assistida: o jogador que chega primeiro na bola, com folga de 0,35 s e espera de 0,5 s entre trocas (não
+  // pula de um para outro); Trocar escolhe o melhor que não é o atual.
   for (int t = 0; t < 2; ++t) {
     if (m.cfg.humanTeam != t) { m.controlled[t] = -1; continue; }
     const Input& in = inputs ? inputs[t] : Input{};
-    if (m.owner >= 0 && teamOf(m.owner) == t) m.controlled[t] = m.owner;
-    else {
-      const int near = nearestOfTeam(m, t, m.ball.pos, false);
-      const bool switchPressed = (in.buttons & Input::Switch) && !(m.prevButtons[t] & Input::Switch);
-      if (m.controlled[t] < 0 || switchPressed ||
-          (near != m.controlled[t] && distXZ(m.players[size_t(near)].pos, m.ball.pos) + 3.0f < distXZ(m.players[size_t(m.controlled[t])].pos, m.ball.pos)))
-        m.controlled[t] = near;
+    if (m.switchCooldown[t] > 0) --m.switchCooldown[t];
+    if (m.owner >= 0 && teamOf(m.owner) == t) { m.controlled[t] = m.owner; continue; }
+    if (m.owner < 0 && m.passTarget >= 0 && teamOf(m.passTarget) == t) { m.controlled[t] = m.passTarget; continue; }
+    const bool switchPressed = (in.buttons & Input::Switch) && !(m.prevButtons[t] & Input::Switch);
+    int best = -1, second = -1;
+    float bt = 1e9f, st = 1e9f;
+    for (const Player& q : m.players) {
+      if (q.team != t || q.role == Role::Goalkeeper) continue;
+      const float tt = timeTo(q, interceptPoint(m, q));
+      if (tt < bt) { st = bt; second = best; bt = tt; best = q.index; }
+      else if (tt < st) { st = tt; second = q.index; }
+    }
+    if (best < 0) continue;
+    int& c = m.controlled[t];
+    if (c < 0) { c = best; continue; }
+    if (switchPressed) {
+      c = best != c ? best : (second >= 0 ? second : best);
+      m.switchCooldown[t] = 15;
+      continue;
+    }
+    const float ct = timeTo(m.players[size_t(c)], interceptPoint(m, m.players[size_t(c)]));
+    if (best != c && m.switchCooldown[t] == 0 && bt + 0.35f < ct) {
+      c = best;
+      m.switchCooldown[t] = 15;
     }
   }
 
@@ -707,6 +810,9 @@ void stepMatch(Match& m, const Input* inputs) {
           m.pendingPasser = -1;
         }
       }
+    } else if (!weHaveIt && p.index == cover[t] && m.owner >= 0 && m.callPress[t]) {
+      it.target = interceptPoint(m, p);  // 2º homem chamado para pressionar o portador
+      it.sprint = true;
     } else if (!weHaveIt && p.index == cover[t] && m.owner >= 0) {
       // cobertura: entre a bola e o próprio gol
       it.target = m.ball.pos + normalizeOr(flat(ownGoal(m, t) - m.ball.pos), Vec3{}) * 6.0f;
@@ -729,30 +835,73 @@ void stepMatch(Match& m, const Input* inputs) {
     const Input in = inputs ? inputs[t] : Input{};
     const Vec3 stick{float(in.dirX) / 127.0f, 0.0f, float(in.dirZ) / 127.0f};
     const bool sprint = in.buttons & Input::Sprint;
-    const uint8_t released = m.prevButtons[t] & ~in.buttons;
-    const uint8_t held = in.buttons & (Input::Pass | Input::Through | Input::Shoot | Input::Lob);
-    m.charge[t] = held ? std::min(m.charge[t] + 1, kTicksPerSecond) : (released ? m.charge[t] : 0);
-    const float power = float(m.charge[t]) / float(kTicksPerSecond);
+    m.humanStick[t] = stick;
+    m.humanDash[t] = sprint;
+    // Barra de força: o primeiro dos três botões segurado carrega; dispara ao soltar ou com a barra cheia (1 s).
+    const uint8_t kickButtons = Input::Pass | Input::Through | Input::Shoot;
+    const uint8_t held = in.buttons & kickButtons;
+    uint8_t fire = 0;
+    if (!held) {
+      if (m.chargeButton[t] && !m.chargeFired[t] && (m.prevButtons[t] & m.chargeButton[t])) fire = m.chargeButton[t];
+      m.chargeFired[t] = false;
+    } else if (!m.chargeFired[t]) {
+      if (!m.chargeButton[t] || !(held & m.chargeButton[t])) { m.chargeButton[t] = held & Input::Shoot ? Input::Shoot : held & Input::Through ? Input::Through : Input::Pass; m.charge[t] = 0; }
+      m.charge[t] = std::min(m.charge[t] + 1, kTicksPerSecond);
+      if (m.charge[t] >= kTicksPerSecond) { fire = m.chargeButton[t]; m.chargeFired[t] = true; }
+    }
+    const float power = m.chargeLevel(t);
+    const bool lob = in.buttons & Input::Lob || m.prevButtons[t] & Input::Lob;
+    const bool special = in.buttons & Input::Special || m.prevButtons[t] & Input::Special;
     const bool canAct = live && !((m.phase == Phase::Kickoff || restart) && m.phaseTicks < 10);
-    if (p.index == m.owner && canAct) {
-      if (released & Input::Shoot) {
-        shoot(m, ci, stick.z * m.attackDir(t) * 3.0f, 0.4f + power * 1.6f, power);
-      } else if (released & (Input::Pass | Input::Through | Input::Lob)) {
-        const bool through = released & Input::Through, lob = released & Input::Lob;
+    const bool attacking = (m.owner >= 0 && teamOf(m.owner) == t) || (m.owner < 0 && m.passTarget >= 0 && teamOf(m.passTarget) == t);
+    if (fire && p.index == m.owner && canAct) {
+      if (fire & Input::Shoot) {
+        humanShoot(m, ci, stick, power, special);
+      } else {
+        const bool through = fire & Input::Through;
         const int to = choosePassTarget(m, ci, length(stick) > 0.2f ? stick : p.facing, through);
-        if (to >= 0) pass(m, ci, to, through, lob);
+        if (to >= 0) pass(m, ci, to, through, lob, power);
       }
       if (m.owner != ci) m.phase = Phase::Play;
+    } else if (fire && attacking && p.index != m.owner && m.owner < 0) {
+      // de primeira: guarda o comando, executado no domínio (resolvePossession)
+      m.queued[t] = fire;
+      m.queuedPower[t] = power;
+      m.queuedDir[t] = stick;
+      m.queuedLob[t] = lob;
+      m.queuedSpecial[t] = special;
     }
-    if (released) m.charge[t] = 0;
-    // defesa: botão de chute vira carrinho/desarme; passe vira pressão (vai na bola sozinho)
-    Vec3 want = stick * (effectiveTop(p) * (sprint ? 1.0f : 0.65f));
-    if (p.index != m.owner && (in.buttons & Input::Pass) && m.owner >= 0 && teamOf(m.owner) != t)
-      want = arriveVel(p, interceptPoint(m, p), sprint);
-    if (p.index != m.owner && (released & Input::Shoot) && m.owner >= 0 && teamOf(m.owner) != t && distXZ(p.pos, m.ball.pos) < 1.8f) {
+    if (!held) { m.charge[t] = 0; m.chargeButton[t] = 0; }
+    if (!attacking) m.queued[t] = 0;  // de primeira só vale com a bola indo para o nosso time
+
+    // movimento: andando ~60% da máxima; com bola um pouco menos; Acelerar = máxima
+    const bool withBall = p.index == m.owner;
+    Vec3 want = stick * (effectiveTop(p) * (sprint ? (withBall ? 0.92f : 1.0f) : (withBall ? 0.55f : 0.6f)));
+    const bool opponentHasBall = m.owner >= 0 && teamOf(m.owner) != t;
+    // recebedor: vai sozinho ao ponto onde alcança a bola, a não ser que o joystick mande outra coisa
+    if (attacking && p.index != m.owner && m.owner < 0 && p.index == m.passTarget && length(stick) < 0.3f)
+      want = arriveVel(p, receivePoint(m, p), true);
+    // Pressão segurada (botão Passe na defesa) = Match-up: entre o portador e o gol, de frente para ele, a ~1,8 m,
+    // espelhando; longe, corre até lá. O desarme sai sozinho quando a bola se afasta do pé dele (resolvePossession).
+    m.callPress[t] = false;
+    if (p.index != m.owner && (in.buttons & Input::Pass) && !attacking) {
+      if (opponentHasBall) {
+        const Player& o = m.players[size_t(m.owner)];
+        const Vec3 guard = o.pos + normalizeOr(flat(ownGoal(m, t) - o.pos), Vec3{}) * 1.8f + flat(o.vel) * 0.25f;
+        want = arriveVel(p, guard, true);
+        if (distXZ(p.pos, guard) < 6.0f) want += flat(o.vel) * 0.5f;  // perto: acompanha o passo do atacante
+        if (special) m.callPress[t] = true;  // deslizar a Pressão: o 2º homem vai pressionar também
+      } else {
+        want = arriveVel(p, interceptPoint(m, p), sprint);
+      }
+    }
+    // Desarme (botão Chute na defesa): bote no portador ao alcance
+    if (p.index != m.owner && (fire & Input::Shoot) && opponentHasBall && distXZ(p.pos, m.ball.pos) < 1.9f) {
       const Player& o = m.players[size_t(m.owner)];
       const float win = clampf(0.4f + 0.6f * (p.attr.defending - o.attr.dribbling), 0.1f, 0.9f);
       p.cooldown = 12;
+      m.actionTick[size_t(p.index)] = m.tick;
+      m.actionType[size_t(p.index)] = Match::ActTackle;
       if (m.rng.uniform() < win) {
         m.stats[t].tackles++;
         m.owner = -1; m.lastTouch = ci;
@@ -760,7 +909,9 @@ void stepMatch(Match& m, const Input* inputs) {
         m.pendingPasser = -1;
       }
     }
-    turnTo(p, length(want) > 0.5f ? want : flat(m.ball.pos - p.pos), 0.35f);
+    const Vec3 faceTo = opponentHasBall && (in.buttons & Input::Pass) ? flat(m.players[size_t(m.owner)].pos - p.pos)
+                        : length(want) > 0.5f ? want : flat(m.ball.pos - p.pos);
+    turnTo(p, faceTo, 0.35f);
     movePlayer(p, want);
     if (p.index == m.owner) dribble(m, p);
     m.prevButtons[t] = in.buttons;
@@ -783,6 +934,7 @@ void stepMatch(Match& m, const Input* inputs) {
 
   // ---- bola ----
   if (m.owner < 0 || m.phase == Phase::Play) {
+    m.prevBallPos = m.ball.pos;
     if (!(restart && m.owner >= 0) && !(m.phase == Phase::Kickoff)) stepBall(m.ball, m.ballParams, kTick);
   }
   if (m.phase == Phase::Kickoff && m.owner >= 0) {  // bola parada no centro até a saída; quem bate fica nela
