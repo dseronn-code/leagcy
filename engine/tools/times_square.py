@@ -809,7 +809,7 @@ def build(out, seed):
         B = o + tx + [0, y, 0]
         if np.dot(np.cross(B - A, [0, 1, 0]), [nx, 0, nz]) < 0:  # frente para fora da fachada
             A, B = B, A
-        m.quad(A, B, B + [0, hgt, 0], A + [0, hgt, 0])
+        m.quad(A, B, B + [0, hgt, 0], A + [0, hgt, 0], uv=((0, 1), (1, 1), (1, 0), (0, 0)))  # v do glTF: 0 em cima
         frame = Mesh()
         g.add_mesh(f'telao{i:03d}', m, mat)
     for i, (mid, (nx, nz), t, y, wid, hgt) in enumerate(neons):
@@ -821,7 +821,7 @@ def build(out, seed):
         A, B = o - tx + [0, y, 0], o + tx + [0, y, 0]
         if np.dot(np.cross(B - A, [0, 1, 0]), [nx, 0, nz]) < 0:
             A, B = B, A
-        m.quad(A, B, B + [0, hgt, 0], A + [0, hgt, 0])
+        m.quad(A, B, B + [0, hgt, 0], A + [0, hgt, 0], uv=((0, 1), (1, 1), (1, 0), (0, 0)))  # v do glTF: 0 em cima
         g.add_mesh(f'neon{i:03d}', m, mat)
 
     # Arquibancada vermelha iluminada (Duffy Square, ao norte da 46th, no meio da gravata).
