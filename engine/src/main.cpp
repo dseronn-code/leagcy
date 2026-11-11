@@ -339,7 +339,8 @@ Options parseArgs(int argc, char** argv) {
                                                         {"sombra-acerto-opaca", 4096u},
                                                         {"diag-cache-direto", 16384u}, {"diag-cache-ref2", 32768u},
                                                         {"diag-taa-antigo", 65536u},
-                                                        {"diag-taa-karis", 131072u}, {"diag-taa-bilinear", 262144u}};
+                                                        {"diag-taa-karis", 131072u}, {"diag-taa-bilinear", 262144u},
+                                                        {"gi-quarto", 8192u}, {"especular-brilho", 524288u}, {"indireto-opaco", 1048576u}};
       for (auto& [n, b] : kinds)
         if (v.find(std::string(",") + n + ",") != std::string::npos) o.render.perfSkipMask |= b;
     }
@@ -445,7 +446,10 @@ Options parseArgs(int argc, char** argv) {
     if (m & 1024u) q.roughSpecCache = true;
     if (m & 2048u) q.cacheEighth = true;
     if (m & 4096u) q.hitShadowOpaque = true;
-    m &= ~(128u | 512u | 1024u | 2048u | 4096u);
+    if (m & 8192u) q.giQuarter = true;
+    if (m & 524288u) q.glossySpecCache = true;
+    if (m & 1048576u) q.indirectOpaque = true;
+    m &= ~(128u | 512u | 1024u | 2048u | 4096u | 8192u | 524288u | 1048576u);
   }
   // Medição: sem o limite de "vagalumes" (o caminho ingênuo sem amostrar luzes perde energia nele).
   if (noFireflyClamp) o.render.quality.fireflyLimit = 1e30f;

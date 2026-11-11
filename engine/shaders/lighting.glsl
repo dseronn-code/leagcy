@@ -635,13 +635,16 @@ void main() {
     vec3 dirD = cosineSampleHemisphere(g.N, sample2D(sg, DIM_DIFFUSE));
     // Q_GI_HALF: o raio sai em metade dos pixels (sorteio independente por pixel, amostra e frame) com
     // peso 2 — mesma média, metade do custo, mais ruído para o denoiser.
-    const bool giHalf = qualityHas(Q_GI_HALF);
-    const bool giTake = !giHalf || (pcg3d(uvec3(uvec2(id), frame.frameInfo.x * spp + k)).x & 1u) != 0u;
+    const bool giQuarter = qualityHas(Q_GI_QUARTER), giHalf = qualityHas(Q_GI_HALF) && !giQuarter;
+    const uint giRoll = pcg3d(uvec3(uvec2(id), frame.frameInfo.x * spp + k)).x;
+    const bool giTake = giQuarter ? (giRoll & 3u) == 0u : (!giHalf || (giRoll & 1u) != 0u);
+    const float giWeight = giQuarter ? 4.0 : giHalf ? 2.0 : 1.0;
+    if (qualityHas(Q_INDIRECT_OPAQUE)) gRayFlagsExtra = gl_RayFlagsOpaqueEXT;
     if (dot(dirD, g.Ng) > 0.0 && !perfSkip(PERF_GI) && giTake) {
       float t;
       vec3 Li = traceRadiance(origin, dirD, sg, 0u, t, false);
       debugGiSample = Li;
-      diffuse += bc.diffuseWeight * Li * aoDiffuse * (giHalf ? 2.0 : 1.0);
+      diffuse += bc.diffuseWeight * Li * aoDiffuse * giWeight;
       if (!pathReference() && cacheUpdatePixel()) rcAdd(g.P, g.Ng, Li);  // M da superfície visível
       diffHitSum += t;
       diffHitCount += 1.0;
@@ -658,7 +661,8 @@ void main() {
     // Q_ROUGH_SPEC_CACHE: lobo largo (rugosidade ≥ 0,5) ≈ irradiância, então o especular indireto vem do
     // cache na própria superfície (M × refletância especular esperada), sem raio — o mesmo que os pontos atingidos
     // por raios já fazem acima de GLOSSY_HIT_ROUGHNESS.
-    if (qualityHas(Q_ROUGH_SPEC_CACHE) && g.roughness >= 0.5) {
+    if (qualityHas(Q_INDIRECT_OPAQUE)) gRayFlagsExtra = gl_RayFlagsOpaqueEXT;  // a luz do ponto atingido zera a bandeira
+    if ((qualityHas(Q_ROUGH_SPEC_CACHE) && g.roughness >= 0.5) || (qualityHas(Q_GLOSSY_SPEC_CACHE) && g.roughness >= GLOSSY_HIT_ROUGHNESS)) {
       specular += cachedIndirect(g.P, g.Ng, g.N) * specularAlbedo(g.f0, g.f90, bc.dfg) * bc.energyCompensation * aoSpecular;
     } else if (NoLr > 0.0 && dot(Lr, g.Ng) > 0.0 && !perfSkip(PERF_SPEC)) {
       float t;
@@ -666,6 +670,7 @@ void main() {
                   vndfWeight(bc.NoV, NoLr, a) * bc.energyCompensation * aoSpecular;
       specHitMin = min(specHitMin, t);
     }
+    gRayFlagsExtra = 0u;
 
     // Verniz: um raio de reflexo próprio (VNDF com a rugosidade do verniz, na normal suave).
     if (sceneHas(MATERIAL_CLEARCOAT) && coat > 0.0) {

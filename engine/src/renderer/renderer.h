@@ -44,6 +44,9 @@ struct Quality {
   bool roughSpecCache = false;   // rugosidade >= 0,5: especular indireto do cache
   bool cacheEighth = false;      // cache alimentado por 1 em 8 pixels
   bool hitShadowOpaque = false;  // sombras dos pontos atingidos sem teste de alfa
+  bool giQuarter = false;        // raio de GI em 1/4 dos pixels (peso 4, sem viés)
+  bool glossySpecCache = false;  // rugosidade >= 0,3: especular indireto do cache
+  bool indirectOpaque = false;   // raios de GI e de reflexo sem teste de alfa
 };
 
 enum class QualityPreset { Low, Medium, High, Ultra, Cinema };

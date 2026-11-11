@@ -42,7 +42,10 @@ const uint Q_MIRROR_GI_CACHE = 1u,     // espelho visto pela GI usa o cache em v
            Q_GI_HALF = 2u,             // raio de GI em metade dos pixels (sorteio por pixel e frame, peso 2: sem viés)
            Q_ROUGH_SPEC_CACHE = 4u,    // superfície fosca (rugosidade >= 0,5): especular indireto do cache, sem raio
            Q_CACHE_EIGHTH = 8u,        // cache alimentado por 1 em 8 pixels (em vez de 1 em 4)
-           Q_HIT_SHADOW_OPAQUE = 16u;  // sombras dos pontos atingidos por raios sem teste de alfa (folhas = opacas)
+           Q_HIT_SHADOW_OPAQUE = 16u,  // sombras dos pontos atingidos por raios sem teste de alfa (folhas = opacas)
+           Q_GI_QUARTER = 32u,         // raio de GI em 1/4 dos pixels (peso 4, sem viés; vale sobre Q_GI_HALF)
+           Q_GLOSSY_SPEC_CACHE = 64u,  // como Q_ROUGH_SPEC_CACHE, a partir de rugosidade 0,3 (o limite dos pontos atingidos)
+           Q_INDIRECT_OPAQUE = 128u;   // raios de GI e de reflexo sem teste de alfa (folha recortada = cartão inteiro)
 bool qualityHas(uint f) { return (QUALITY_FEATURES & f) != 0u; }
 
 // Simulação do oceano: oceanDisplacement / oceanSlope / OCEAN_PATCH ficam em frame.glsl (o sol debaixo d'água usa).
