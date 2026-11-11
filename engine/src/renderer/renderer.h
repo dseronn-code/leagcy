@@ -85,6 +85,9 @@ struct Settings {
   bool hlod = false;
   float shadowDistance = 150.0f;  // m cobertos pelas cascatas
   uint32_t shadowMapSize = 2048;  // texels de cada cascata (celular: 1024)
+  // Renderer forward de celular: objetos iluminados direto na saída (sol + sombra + céu), sem G-buffer, ReSTIR,
+  // denoiser, TAA nem pós-processamento. Escolhido no init (pipelines e alvos próprios).
+  bool forward = false;
   float shutter = 0.5f;             // fração do frame com obturador aberto (0.5 = 180°)
   float bloomStrength = 0.05f;
   float lensFlare = 1.0f;  // reflexos fantasmas e halo das lentes (0 = desligado)
@@ -188,6 +191,7 @@ class Renderer {
   struct Targets {
     std::array<rhi::Image, 2> depth, normal;  // ping-pong: atual / anterior
     rhi::Image diffuse, specular, motion, emissive;
+    rhi::Image forwardDepth;  // renderer forward: profundidade na resolução de saída
     std::array<rhi::Image, 2> visibility;
     rhi::Image viewZ, nrdNormalRoughness, diffuseDenoised, specularDenoised;  // entradas/saídas do NRD
     rhi::Image nrdValidation;  // camada de depuração do NRD (RGBA8)
@@ -306,7 +310,9 @@ class Renderer {
   rhi::ComputePass skinningPass_, aerialPerspectivePass_, radianceCacheResolvePass_;
   rhi::ComputePass skyLutPass_, restirTemporalPass_, restirSpatialPass_, lightingPass_;
   bool restirOff_ = false, reservoirsCleared_ = false;
-  VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;  // D16 em GPUs que não filtram D32
+  VkFormat shadowFormat_ = VK_FORMAT_D32_SFLOAT;
+  rhi::PassLayout forwardLayout_;
+  VkPipeline forwardPipeline_ = VK_NULL_HANDLE, forwardBlendPipeline_ = VK_NULL_HANDLE, forwardSkyPipeline_ = VK_NULL_HANDLE;  // D16 em GPUs que não filtram D32
  public:
   bool skinningFailed = false;  // o driver recusou skinning.comp (personagens na pose de repouso)
  private:

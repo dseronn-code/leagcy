@@ -599,6 +599,7 @@ int runHeadless(const Options& opt) {
     applyCameraPath(cameraKeys, 0.0f, camera);
   }
   auto t0 = std::chrono::steady_clock::now();
+  double gameMs = 0.0, sceneMs = 0.0;  // CPU: jogo (simulação, animação dos personagens, HUD) e cena (esqueletos)
   double cpuRecordMs = 0.0;  // CPU gravando o frame (atualização da cena, BVH de luzes, chamadas de desenho), sem a GPU
   bool ok = true;
   // Medição: com 20 frames ou mais, os tempos (GPU, CPU e o total) contam só a segunda metade; a primeira inclui a
@@ -626,7 +627,9 @@ int runHeadless(const Options& opt) {
     const bool frozen = warming || opt.pause || (opt.pauseAt != 0 && f >= opt.pauseAt);
     float sceneDt = dt;
     if (playing && !warming) sceneDt = penalti.update(dt, game::Pointer{}, scene, camera, r, glm::vec2(float(extent.width), float(extent.height)));
+    const auto g0 = std::chrono::steady_clock::now();
     if (playingMatch && !warming) sceneDt = partida.update(dt, {}, scene, camera, r, glm::vec2(float(extent.width), float(extent.height)));
+    if (f > timedFrom) gameMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - g0).count();
     if (game::World* w = game::currentWorld()) {
       w->setListener(camera.position, camera.forward());
       // Sem janela não há teclado nem controle: só as entradas simuladas (--simular), no tempo do quadro.
@@ -638,7 +641,9 @@ int runHeadless(const Options& opt) {
       applyGameOptions(*w, r.settings);
       w->qualityRequest.clear();  // sem janela a qualidade fica a da linha de comando
     }
+    const auto s0 = std::chrono::steady_clock::now();
     scene.update(frozen ? 0.0f : sceneDt);
+    if (f > timedFrom) sceneMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - s0).count();
     if (game::World* w = game::currentWorld()) applyScriptCamera(*w, camera);
     scene.stream(ctx, camera.position);  // streaming do mundo (células perto da câmera)
     if (!frozen) r.restartReference();  // --reference: só acumula com a cena parada
@@ -670,6 +675,7 @@ int runHeadless(const Options& opt) {
   LOG_INFO("%u frames em %.2fs (%.1f ms/frame, inclui espera da CPU)%s", timed, secs, secs * 1000.0 / timed,
            timedFrom ? " — segunda metade" : "");
   if (timed > 1) LOG_INFO("CPU gravando o frame: %.2f ms/frame", cpuRecordMs / double(timed - 1));
+  if (timed > 1) LOG_INFO("CPU jogo %.2f ms/frame, cena %.2f ms/frame", gameMs / double(timed - 1), sceneMs / double(timed - 1));
   if (!scene.textures.empty()) LOG_INFO("Texturas na GPU no fim: %.0f MB", double(scene.textureBytes()) / 1048576.0);
   if (std::string t = r.gpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());
   if (std::string t = r.cpuTimings(); !t.empty()) LOG_INFO("%s", t.c_str());

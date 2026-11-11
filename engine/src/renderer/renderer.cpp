@@ -215,6 +215,8 @@ void applyMobileSettings(Settings& s) {
   s.lensFlare = 0.0f;
   s.shadowDistance = 70.0f;
   s.shadowMapSize = 1024;
+  s.forward = true;
+  s.manualEV100 = 14.0f;  // dia de sol (o forward não mede a imagem para a auto-exposição)
 }
 
 bool parseDebugView(const char* name, uint32_t& out) {
@@ -725,6 +727,35 @@ void Renderer::init(rhi::Context& ctx, scene::Scene& scene, VkExtent2D outputExt
   tm.colorFormats = {outputFormat};
   tonemapPipeline_ = rhi::createGraphicsPipeline(ctx, tm);
 
+  if (settings.forward) {  // renderer forward de celular: mesmas entradas de vértice do G-buffer, saída já final
+    forwardLayout_.init(ctx, g, {}, 16);
+    rhi::GraphicsPipelineDesc fd = gb;
+    fd.fragmentShader = "forward.frag";
+    fd.layout = forwardLayout_.pipelineLayout;
+    fd.colorFormats = {outputFormat};
+    fd.depthFormat = kDepthFormat;
+    forwardPipeline_ = rhi::createGraphicsPipeline(ctx, fd);
+    rhi::GraphicsPipelineDesc fb = fd;  // decals/transparências: mistura por alfa, sem escrever profundidade
+    fb.depthWrite = false;
+    VkPipelineColorBlendAttachmentState alpha{};
+    alpha.blendEnable = VK_TRUE;
+    alpha.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    alpha.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    alpha.colorBlendOp = alpha.alphaBlendOp = VK_BLEND_OP_ADD;
+    alpha.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    alpha.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    alpha.colorWriteMask = 0xF;
+    fb.blendStates = {alpha};
+    forwardBlendPipeline_ = rhi::createGraphicsPipeline(ctx, fb);
+    rhi::GraphicsPipelineDesc fs;
+    fs.vertexShader = "fullscreen.vert";
+    fs.fragmentShader = "forward_sky.frag";
+    fs.layout = forwardLayout_.pipelineLayout;
+    fs.colorFormats = {outputFormat};
+    fs.depthFormat = kDepthFormat;
+    forwardSkyPipeline_ = rhi::createGraphicsPipeline(ctx, fs);
+  }
+
   // Camada 2D (HUD do jogo): vértices em buffer visível ao host, um por frame em voo; atlas de fontes branco até o
   // jogo enviar o dele.
   {
@@ -883,6 +914,7 @@ void Renderer::createTargets() {
   // Imagens entregues ao DLSS/FSR: o NGX limpa algumas com vkCmdClearColorImage (validação na RTX 3070 Ti).
   const VkImageUsageFlags upscalerIo = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
+  if (settings.forward) t_.forwardDepth = rhi::createImage2D(ctx, outputExtent_, kDepthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
   for (int i = 0; i < 2; ++i) {
     t_.depth[i] = rhi::createImage2D(ctx, R, kDepthFormat,
                                      VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | upscalerIo);
@@ -942,6 +974,7 @@ void Renderer::createTargets() {
       rhi::imageBarrier(cmd, img.handle, aspect, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_NONE,
                         0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
     };
+    if (t_.forwardDepth.handle) toGeneral(t_.forwardDepth, VK_IMAGE_ASPECT_DEPTH_BIT);
     for (int i = 0; i < 2; ++i) {
       toGeneral(t_.depth[i], VK_IMAGE_ASPECT_DEPTH_BIT);
       for (rhi::Image* img : {&t_.normal[i], &t_.visibility[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
@@ -982,6 +1015,7 @@ void Renderer::destroyTargets() {
   nrdReady_ = false;
   upscaler_.destroy();
   upscalerReady_ = false;
+  rhi::destroyImage(ctx, t_.forwardDepth);
   for (int i = 0; i < 2; ++i) {
     for (rhi::Image* img : {&t_.depth[i], &t_.normal[i], &t_.visibility[i], &t_.diffuseHistory[i], &t_.specularHistory[i], &t_.moments[i],
                             &t_.historyLength[i], &t_.taa[i]})
@@ -1052,7 +1086,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
 
   // ---- Uniforms: jitter Halton (16 posições, ou as que o DLSS/FSR pedem) em pixels internos ----
   uint32_t hi = uint32_t(frameIndex_ % (upscalerReady_ ? upscaler_.jitterPhases() : 16u)) + 1;
-  glm::vec2 jitterPx(halton(hi, 2) - 0.5f, halton(hi, 3) - 0.5f);
+  glm::vec2 jitterPx = settings.forward ? glm::vec2(0.0f) : glm::vec2(halton(hi, 2) - 0.5f, halton(hi, 3) - 0.5f);
   glm::vec2 jitterUv = jitterPx / glm::vec2(R.width, R.height);
   float aspect = float(O.width) / float(O.height);
   FrameUniforms u{};
@@ -1245,7 +1279,7 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
   // ---- 2. G-buffer: culling na GPU (frustum + oclusão em duas fases) e desenho indireto ----
   // Fase 0: desenha o que estava visível no frame anterior. Monta a pirâmide de profundidade (HiZ) dessa passada.
   // Fase 1: testa tudo contra ela; desenha (por cima, carregando o G-buffer) o que apareceu. Sem oclusão desligada.
-  {
+  if (!settings.forward) {
     const uint32_t batchCount = uint32_t(drawBatches_.size()), entries = drawEntries_;
     const bool occlusion = settings.gpuCulling && settings.occlusionCulling && historyValid_;
     const bool meshlets = settings.meshlets && gbufferMeshPipeline_ != VK_NULL_HANDLE;
@@ -1391,6 +1425,74 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
     }
     barrier();
     profiler_.mark(cmd, "sombra_cascatas");
+  }
+
+  // ---- Renderer forward de celular: céu, opacos e transparências iluminados direto na saída, HUD por cima ----
+  if (settings.forward) {
+    ExposurePush ep{settings.exposureCompensation, settings.manualEV100, 3.0f, 1.5f};
+    exposurePass_.dispatch(cmd, gs, {Binding::storageBuffer(histogram_), Binding::storageBuffer(exposureState_)}, {1, 1}, &ep);
+    barrier();
+    rhi::imageBarrier(cmd, output, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo out = attachment(outputView, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_ATTACHMENT_LOAD_OP_DONT_CARE);
+    VkRenderingAttachmentInfo fdepth = attachment(t_.forwardDepth.view, VK_IMAGE_LAYOUT_GENERAL, VK_ATTACHMENT_LOAD_OP_CLEAR);
+    fdepth.clearValue.depthStencil = {0.0f, 0};  // reverse-Z: 0 = longe
+    VkRenderingInfo fri{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    fri.renderArea = {{0, 0}, O};
+    fri.layerCount = 1;
+    fri.colorAttachmentCount = 1;
+    fri.pColorAttachments = &out;
+    fri.pDepthAttachment = &fdepth;
+    vkCmdBeginRendering(cmd, &fri);
+    setViewport(cmd, O);
+    struct { VkDeviceAddress drawList; uint32_t srgb, pad; } fp{drawList_.address, isSrgb(outputFormat_) ? 0u : 1u, 0u};
+    auto bindForward = [&](VkPipeline p) {
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+      vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, forwardLayout_.pipelineLayout, 0, 1, &gs, 0, nullptr);
+      vkCmdPushConstants(cmd, forwardLayout_.pipelineLayout, VK_SHADER_STAGE_ALL, 0, sizeof(fp), &fp);
+    };
+    bindForward(forwardSkyPipeline_);  // tela cheia sem profundidade: a geometria desenha por cima
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    for (int pass = 0; pass < 2; ++pass) {  // 0 = opacos, 1 = decals/transparências (depois, misturados)
+      bindForward(pass == 0 ? forwardPipeline_ : forwardBlendPipeline_);
+      for (const DrawBatch& b : drawBatches_) {
+        if (b.lod != 0 || b.hlodProxy || b.blend != (pass == 1)) continue;
+        if (!scene_->meshes[b.mesh].resident) continue;
+        const auto& m = scene_->meshes[b.mesh];
+        vkCmdSetCullMode(cmd, b.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT);
+        vkCmdSetFrontFace(cmd, b.mirrored != kFrontFaceClockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE);
+        VkBuffer vbs[2] = {m.vertices.handle, m.vertices.handle};
+        VkDeviceSize offsets[2] = {0, 0};
+        vkCmdBindVertexBuffers(cmd, 0, 2, vbs, offsets);
+        vkCmdBindIndexBuffer(cmd, m.indices.handle, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, m.indexCount, b.count, 0, 0, b.first);
+      }
+    }
+    if (!ui.empty() && uiBuffers_[slot].mapped) {
+      const size_t n = std::min(ui.size(), kMaxUiVertices) / 3 * 3;
+      std::memcpy(uiBuffers_[slot].mapped, ui.data(), n * sizeof(UiVertex));
+      vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline_);
+      const VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &uiBuffers_[slot].handle, &offset);
+      struct { float w, h; uint32_t srgb, pad; } up{float(O.width), float(O.height), isSrgb(outputFormat_) ? 1u : 0u, 0u};
+      uiLayout_.bind(*ctx_, cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gs, {Binding::sampled(uiAtlas_.view, linear_)}, &up);
+      vkCmdDraw(cmd, uint32_t(n), 1, 0, 0);
+    }
+    ui.clear();
+    vkCmdEndRendering(cmd);
+    profiler_.mark(cmd, "forward");
+    cpuMark("passes");
+    prevViewProj_ = u.viewProjNoJitter;
+    prevInvViewProj_ = u.invViewProj;
+    prevView_ = u.view;
+    prevProjNoJitter_ = cam.projection(aspect);
+    prevJitterPixels_ = -jitterPx;
+    prevCameraPos_ = cam.position;
+    prevJitter_ = jitterUv;
+    historyValid_ = true;
+    ++frameIndex_;
+    return;
   }
 
   // ---- 3. ReSTIR DI ----
@@ -1995,6 +2097,9 @@ void Renderer::destroy() {
   rhi::destroyImage(ctx, shadowMap_);
   vkDestroySampler(ctx.device, shadowSampler_, nullptr);
   if (shadowPipeline_ != VK_NULL_HANDLE) vkDestroyPipeline(ctx.device, shadowPipeline_, nullptr);
+  for (VkPipeline p : {forwardPipeline_, forwardBlendPipeline_, forwardSkyPipeline_})
+    if (p != VK_NULL_HANDLE) vkDestroyPipeline(ctx.device, p, nullptr);
+  if (forwardLayout_.pipelineLayout) forwardLayout_.destroy(ctx);
   shadowLayout_.destroy(ctx);
   for (rhi::Image* img : {&cloudNoise_, &skyClear_, &cloudShadow_, &rainOcclusion_}) rhi::destroyImage(ctx, *img);
   vkDestroySampler(ctx.device, cloudSampler_, nullptr);

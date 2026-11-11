@@ -356,7 +356,7 @@ void android_main(android_app* app) {
     if (app->destroyRequested) break;
     if (!a.engine || a.paused) { last = std::chrono::steady_clock::now(); continue; }
     const auto now = std::chrono::steady_clock::now();
-    const float dt = std::min(std::chrono::duration<float>(now - last).count(), 0.1f);
+    const float dt = std::min(std::chrono::duration<float>(now - last).count(), 1.0f)  /* o jogo limita a 0,1 s; o FPS vê o real */;
     last = now;
     try {
       a.engine->frame(dt, a.touches);
