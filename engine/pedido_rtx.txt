@@ -1,19 +1,13 @@
-# Rodada 25. Parte A: brilho do TAA do motor (placas sem DLSS). Na rodada 20, ReLAX + TAAU saiu +4,4% (480x270) e
-# +7,1% (1080p) mais claro que a referência por path tracing; o TAA antigo dava -0,1%. Uma variação por linha.
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-karis"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-bilinear"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-antigo"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--no-denoiser --upscaler taau"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser svgf --upscaler taau"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 1024 --cenas bistro,sponza --extra="--denoiser svgf --upscaler taau --perf-skip diag-taa-antigo"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-karis"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser relax --upscaler taau --perf-skip diag-taa-bilinear"
-python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--no-denoiser --upscaler taau"
-# Parte B: onde vai o tempo da Sponza e do Bistro em 1080p (meta nova: 60 q/s = 16,7 ms).
-build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality alto --camera-path caminhos\sponza_nave.txt
-build\Release\legacy.exe --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality medio --camera-path caminhos\sponza_nave.txt
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality medio
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality baixo
-build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 15 --no-vsync --quality medio --scale 0.5
+# Rodada 26: onde vão os 13,5 ms da iluminacao_rt e os 9 ms do restir no Bistro (Médio, 1080p). Cada linha tira um
+# tipo de raio (imagem errada de propósito; só o tempo importa). E o viés do SVGF + TAAU (padrão sem DLSS) em 1080p.
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip gi
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip especular
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip sombras-acerto
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip secundarios
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip luz
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip cache
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip opaco
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip sol
+build\Release\legacy.exe --scene assets\Bistro\bistro.gltf --width 1920 --height 1080 --warmup 60 --quit-after 8 --no-vsync --quality medio --perf-skip gi-metade
+python tools\reflexos.py --bin build\Release\legacy.exe --out resultados_pc\refl --ref-frames 512 --cenas bistro --tamanho 1920x1080 --extra="--denoiser svgf --upscaler taau"
