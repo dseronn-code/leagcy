@@ -695,7 +695,29 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             const std::vector<uint32_t>& person = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
             const float phase = 4.0f * u(rng);
             std::vector<uint32_t> agent;
-            for (uint32_t clip : person) agent.push_back(scene.addCrowdAgent(clip, glm::mat4(1.0f), phase));
+            // Variação por pessoa (para os 40 modelos não parecerem clones): cor da roupa e do cabelo sorteadas de
+            // paletas realistas, multiplicando a cor do material (cada agente com a sua cópia do material).
+            static const glm::vec3 clothes[] = {{0.25f, 0.27f, 0.35f}, {0.12f, 0.12f, 0.13f}, {0.75f, 0.68f, 0.55f},
+                                                {0.62f, 0.15f, 0.12f}, {0.35f, 0.38f, 0.25f}, {0.55f, 0.55f, 0.57f},
+                                                {1.0f, 1.0f, 1.0f},    {0.2f, 0.3f, 0.55f},   {0.45f, 0.28f, 0.18f},
+                                                {0.9f, 0.85f, 0.75f},  {0.3f, 0.12f, 0.3f},   {1.0f, 0.75f, 0.2f}};
+            static const glm::vec3 hairs[] = {{0.25f, 0.2f, 0.18f}, {0.5f, 0.38f, 0.28f}, {1.0f, 0.85f, 0.6f},
+                                              {0.15f, 0.13f, 0.12f}, {0.75f, 0.75f, 0.75f}, {0.6f, 0.3f, 0.18f}};
+            const glm::vec3 shirtTint = clothes[size_t(u(rng) * 12.0f) % 12], hairTint = hairs[size_t(u(rng) * 6.0f) % 6];
+            const bool tintClothes = u(rng) < 0.75f;
+            for (uint32_t clip : person) {
+              const uint32_t o = scene.addCrowdAgent(clip, glm::mat4(1.0f), phase);
+              scene::Material m = scene.materials[scene.objects[o].material];
+              const uint32_t f = m.flags;
+              const bool skinOrEye = (f & (scene::kMaterialSubsurface | scene::kMaterialEye | scene::kMaterialClearcoat)) != 0;
+              const bool hairLike = (f & scene::kMaterialAlphaMask) != 0;
+              if (!skinOrEye && (hairLike || tintClothes)) {
+                const glm::vec3 t = hairLike ? hairTint : glm::mix(glm::vec3(1.0f), shirtTint, 0.85f);
+                m.baseColor = glm::vec4(glm::vec3(m.baseColor) * t, m.baseColor.a);
+                scene.objects[o].material = scene.addMaterial(m);
+              }
+              agent.push_back(o);
+            }
             const glm::vec2 d = (L.b - L.a) / L.length, n(-d.y, d.x);
             scene.addAnimator([=](scene::Scene& sc, float t, float) {
               const float s = std::fmod(s0 + speed * t, L.length);
