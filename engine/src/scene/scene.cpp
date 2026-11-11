@@ -249,6 +249,17 @@ void Scene::animateModel(Model& m, float dt) {
   }
 }
 
+void Scene::setMorphWeight(int model, const std::string& name, float weight) {
+  if (model < 0 || size_t(model) >= models.size()) return;
+  for (uint32_t o : models[size_t(model)].skinnedObjects) {
+    const uint32_t mi = objects[o].mesh;
+    if (mi >= meshes.size()) continue;
+    GpuMesh& m = meshes[mi];
+    for (uint32_t k = 0; k < m.morphCount; ++k)
+      if (m.morphNames[k] == name) m.morphWeights[k] = weight;
+  }
+}
+
 void Scene::update(float dt) {
   time += dt;
   // Os movidos no frame anterior assentam (anterior = atual); os outros já estão assim.
@@ -1417,6 +1428,19 @@ void Scene::upload(rhi::Context& ctx) {
       gm.jointOffset = totalJoints;
       gm.jointCount = uint32_t(models[size_t(data.skinModel)].skins[size_t(data.skin)].joints.size());
       totalJoints += gm.jointCount;
+      if (!data.morphTargets.empty()) {
+        gm.morphCount = std::min<uint32_t>(uint32_t(data.morphTargets.size()), GpuMesh::kMaxMorphs);
+        gm.morphNames.assign(data.morphNames.begin(), data.morphNames.begin() + gm.morphCount);
+        std::vector<float> d;
+        d.reserve(size_t(gm.morphCount) * data.vertices.size() * 3);
+        for (uint32_t k = 0; k < gm.morphCount; ++k)
+          for (size_t v = 0; v < data.vertices.size(); ++v) {
+            const glm::vec3 p = v < data.morphTargets[k].size() ? data.morphTargets[k][v] : glm::vec3(0.0f);
+            d.insert(d.end(), {p.x, p.y, p.z});
+          }
+        gm.morphDeltas = rhi::createBufferWithData(ctx, d.data(), d.size() * sizeof(float),
+                                                   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+      }
       ++skinnedCount;
     }
     if (cloth) {
@@ -1628,7 +1652,7 @@ void Scene::destroy(rhi::Context& ctx) {
   if (!texturePack_.empty()) std::remove(texturePack_.c_str());
   if (ctx.rayTracing) tlas.destroy();
   for (auto& m : meshes) {
-    for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.prevVertices, &m.clothPos, &m.clothPrev,
+    for (rhi::Buffer* b : {&m.vertices, &m.indices, &m.restVertices, &m.skinData, &m.morphDeltas, &m.prevVertices, &m.clothPos, &m.clothPrev,
                            &m.meshlets, &m.colors, &m.hairRest, &m.hairPos, &m.hairPrev})
       rhi::destroyBuffer(ctx, *b);
     if (ctx.rayTracing) rhi::destroyAccel(ctx, m.blas);

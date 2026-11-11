@@ -338,6 +338,17 @@ struct Loader {
             md.weights[v] = sum > 0.0f ? w / sum : glm::vec4(1, 0, 0, 0);
           }
         }
+        for (size_t k = 0; k < prim.targets_count; ++k) {  // morph targets: só o deslocamento de posição
+          std::vector<glm::vec3> d(pos->count, glm::vec3(0.0f));
+          for (size_t a = 0; a < prim.targets[k].attributes_count; ++a) {
+            const cgltf_attribute& ta = prim.targets[k].attributes[a];
+            if (ta.type != cgltf_attribute_type_position) continue;
+            for (size_t v = 0; v < pos->count && v < ta.data->count; ++v) cgltf_accessor_read_float(ta.data, v, &d[v].x, 3);
+          }
+          md.morphTargets.push_back(std::move(d));
+          md.morphNames.push_back(k < mesh.target_names_count && mesh.target_names[k] ? mesh.target_names[k]
+                                                                                      : "alvo" + std::to_string(k));
+        }
         if (!nrm) computeNormals(md);
         if (!tan || scene.ignoreFileTangents) computeTangentsMikk(md);  // o que o glTF manda quando o arquivo não traz TANGENT
         uint32_t material = prim.material ? materialMap[size_t(prim.material - data->materials)] : defaultMaterial;

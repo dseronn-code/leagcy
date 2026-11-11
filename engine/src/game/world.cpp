@@ -1469,6 +1469,26 @@ void World::ragdollBlendStep(scene::Scene& scene, Character& c, float dt) {
 void World::animateCharacter(scene::Scene& scene, Character& c, glm::vec3 feet, float dt) {
   CharacterVisual& v = c.visual;
   scene::Model& m = scene.models[size_t(v.model)];
+  // Rosto: as expressões pedidas e o piscar (a cada 2–6 s, 0,16 s fechando e abrindo; às vezes duas seguidas).
+  {
+    v.blinkTimer -= dt;
+    if (v.blinkTimer <= 0.0f) {
+      v.blinkTime = 0.0f;
+      const float r = float(std::rand()) / float(RAND_MAX);
+      v.blinkTimer = r < 0.15f ? 0.35f : 2.0f + 4.0f * r;
+    }
+    float blink = 0.0f;
+    if (v.blinkTime >= 0.0f) {
+      v.blinkTime += dt;
+      blink = v.blinkTime < 0.16f ? std::sin(glm::pi<float>() * v.blinkTime / 0.16f) : 0.0f;
+      if (v.blinkTime >= 0.16f) v.blinkTime = -1.0f;
+    }
+    for (const auto& [name, w] : v.expressions) scene.setMorphWeight(v.model, name, w);
+    for (const char* eye : {"eye-left-closure", "eye-right-closure"}) {
+      const auto it = v.expressions.find(eye);
+      scene.setMorphWeight(v.model, eye, std::min(1.0f, (it == v.expressions.end() ? 0.0f : it->second) + blink));
+    }
+  }
   // Cabelo por fios: a calota segue o osso da cabeça (pose do quadro anterior; a simulação dos fios cuida da inércia).
   if (v.hairObject >= 0 && v.hairNode >= 0 && size_t(v.hairNode) < m.nodeWorld.size())
     scene.setTransform(uint32_t(v.hairObject), m.nodeWorld[size_t(v.hairNode)] * glm::translate(glm::mat4(1.0f), v.hairCenter) *

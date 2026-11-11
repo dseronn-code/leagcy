@@ -123,6 +123,10 @@ struct Scripting::Impl {
           return n ? n->value : "";
         }),
         "valida", &Entidade::valid,
+        "expressao", [](const Entidade& h, const std::string& nome, float peso) {  // rosto: morph target (0..1)
+          if (!h.valid()) return;
+          if (Character* c = h.world->registry.try_get<Character>(h.e)) c->visual.expressions[nome] = glm::clamp(peso, 0.0f, 1.0f);
+        },
         "posicao", [](const Entidade& h) {
           glm::vec3 p(0.0f);
           if (h.valid() && h.world->registry.all_of<Transform>(h.e)) p = h.world->registry.get<Transform>(h.e).position;

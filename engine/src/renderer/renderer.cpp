@@ -99,7 +99,9 @@ struct ObjectGpu {
 };
 struct SkinningPush {
   uint64_t rest, skin, joints, out;
-  uint32_t vertexCount, pad;
+  uint32_t vertexCount, morphCount;
+  uint64_t morphs;
+  float morphWeights[8];
 };
 struct AtrousPush {
   int32_t stepSize;
@@ -1864,7 +1866,8 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
       if (!m.skinned) continue;
       SkinningPush p{m.restVertices.address, m.skinData.address,
                      jointBuffers_[slot].address + VkDeviceAddress(m.jointOffset) * sizeof(glm::mat4), m.vertices.address,
-                     m.vertexCount, 0};
+                     m.vertexCount, m.morphCount, m.morphCount ? m.morphDeltas.address : 0, {}};
+      for (uint32_t k = 0; k < m.morphCount && k < 8; ++k) p.morphWeights[k] = m.morphWeights[k];
       skinningPass_.dispatchGroups(cmd, globalSets_[slot], {}, (m.vertexCount + 63) / 64, 1, &p);
     }
     rhi::memoryBarrier(cmd);

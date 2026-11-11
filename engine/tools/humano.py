@@ -480,6 +480,10 @@ def choose(rng, opts):
     return opts[rng.randrange(len(opts))]
 
 
+EXPRESSIONS = ['eye-left-closure', 'eye-right-closure', 'mouth-corner-puller', 'mouth-open', 'eyebrows-left-up',
+               'eyebrows-right-up', 'eyebrows-left-down', 'eyebrows-right-down']
+
+
 def build(args):
     data, assets = args.mpfb, args.assets
     rng = random.Random(args.semente)
@@ -564,8 +568,8 @@ def build(args):
 
     prims = []
 
-    def add_prim(pos_dm, uv, tris, vweights, mat):
-        """Triângulos de uma peça: vértice glTF = par (posição, UV)."""
+    def add_prim(pos_dm, uv, tris, vweights, mat, morphs=None):
+        """Triângulos de uma peça: vértice glTF = par (posição, UV). morphs: deslocamentos (dm) por expressão."""
         if not tris:
             return
         key, vidx, tidx, out_tris = {}, [], [], []
@@ -590,7 +594,15 @@ def build(args):
         T[ok] = uv[tidx[ok]]
         T[:, 1] = 1.0 - T[:, 1]
         J, W = top4([vweights[i] for i in vidx])
-        prims.append({'attributes': {'POSITION': g.accessor(P, 'VEC3', 5126, 34962, minmax=True),
+        targets = []
+        for name in expr_names:  # todas as peças com os mesmos alvos (o glTF exige); sem efeito = zeros
+            d = morphs.get(name) if morphs else None
+            D = (d[vidx] * UNIT).astype(np.float32) if d is not None else np.zeros((len(vidx), 3), np.float32)
+            acc = g.accessor(D, 'VEC3', 5126, 34962)
+            g.doc['accessors'][acc]['min'] = [float(x) for x in D.min(0)]
+            g.doc['accessors'][acc]['max'] = [float(x) for x in D.max(0)]
+            targets.append({'POSITION': acc})
+        prims.append({**({'targets': targets} if targets else {}), 'attributes': {'POSITION': g.accessor(P, 'VEC3', 5126, 34962, minmax=True),
                                      'NORMAL': g.accessor(N, 'VEC3', 5126, 34962),
                                      'TEXCOORD_0': g.accessor(T, 'VEC2', 5126, 34962),
                                      'JOINTS_0': g.accessor(J, 'VEC4', 5123, 34962),
@@ -622,7 +634,8 @@ def build(args):
         return g.material(m)
 
     # --- acessórios (ajustados à forma) e o corpo escondido sob a roupa
-    def fit(mhclo):
+    def fit(mhclo, verts=None):
+        v = verts if verts is not None else base_v
         hdr, refs, delete = parse_mhclo(mhclo)
         scale = np.ones(3)
         for k, ax in (('x_scale', 0), ('y_scale', 1), ('z_scale', 2)):
@@ -643,6 +656,20 @@ def build(args):
             pw.append(d)
         return hdr, pos, pw, set(delete)
 
+    # Expressões (morph targets): unidades de expressão do MakeHuman da etnia predominante — piscar, sorrir, abrir a
+    # boca, sobrancelhas. O motor soma os deslocamentos com os pesos de cada quadro (pisca sozinho).
+    base_v = v
+    expr = []
+    if args.expressoes:
+        race = max(info['race'], key=lambda r: info['race'][r])
+        for en in EXPRESSIONS:
+            pth = os.path.join(data, 'targets', 'expression', 'units', race, en + '.target.gz')
+            if os.path.exists(pth):
+                idx, dd = load_target(pth)
+                full = np.zeros_like(v)
+                full[idx] = dd
+                expr.append((en, full))
+    expr_names = [en for en, _ in expr]
     pieces = []
     hidden = set()
     assets_dir = lambda *p: os.path.join(assets, *p)
@@ -653,13 +680,17 @@ def build(args):
         if not cl:
             return
         hdr, pos, pw, dele = fit(os.path.join(folder, cl[0]))
+        morphs = {}
+        if kind in ('eyes', 'eyebrows', 'eyelashes', 'teeth', 'tongue'):  # o rosto mexe: as peças acompanham
+            for en, ed in expr:
+                morphs[en] = fit(os.path.join(folder, cl[0]), base_v + ed)[1] - pos
         pv, puv, pf = load_obj(os.path.join(folder, hdr.get('obj_file', name + '.obj')))
         mpath = mat_override or os.path.join(folder, hdr.get('material', name + '.mhmat'))
         mat = mat_from(mpath, f'{kind}:{name}', alpha, extras, rough, clearcoat, cutoff)
         hidden.update(dele)
         if args.subdividir and kind in ('clothes',):
             pos, puv, pf, pw = subdivide_piece(pos, puv, pf, pw)
-        pieces.append((pos, puv, triangulate(pf), pw, mat))
+        pieces.append((pos, puv, triangulate(pf), pw, mat, morphs))
 
     skins = sorted(os.listdir(assets_dir('skins')))
     skin_pref = ('young' if info['age'] < 0.75 else 'old') + '_' + (
@@ -679,6 +710,8 @@ def build(args):
           rough=0.7, cutoff=0.55)
     piece('eyelashes', perfil.get('cilios', choose(rng, sorted(os.listdir(assets_dir('eyelashes'))))), alpha=True,
           rough=0.7, cutoff=0.7)
+    piece('teeth', 'teeth_base', rough=0.25)  # dentes e língua: aparecem com a boca aberta
+    piece('tongue', 'tongue01', rough=0.4)
     hairs = sorted(os.listdir(assets_dir('hair')))
     male_hair = [h for h in hairs if h.startswith('short') or h == 'afro01']
     hair = perfil.get('cabelo', choose(rng, male_hair if male else hairs))
@@ -699,11 +732,12 @@ def build(args):
         sm['pbrMetallicRoughness']['roughnessFactor'] = 1.0
     if args.subdividir:  # corpo liso (4x os polígonos): o contorno deixa de ser facetado
         bv, buv, bf, bw = subdivide_piece(v, body.vt, body.faces, vw, keep)
-        add_prim(bv, buv, triangulate(bf), bw, skin_mat)
+        bm = {en: subdivide_piece(v + ed, body.vt, body.faces, vw, keep)[0] - bv for en, ed in expr}
+        add_prim(bv, buv, triangulate(bf), bw, skin_mat, bm)
     else:
-        add_prim(v, body.vt, triangulate(body.faces, keep), vw, skin_mat)
-    for pos, puv, tris, pw, mat in pieces:
-        add_prim(pos, puv, tris, pw, mat)
+        add_prim(v, body.vt, triangulate(body.faces, keep), vw, skin_mat, dict(expr))
+    for pos, puv, tris, pw, mat, morphs in pieces:
+        add_prim(pos, puv, tris, pw, mat, morphs)
 
     # --- nós do esqueleto e a pele (skin)
     first = len(g.doc['nodes'])
@@ -723,7 +757,11 @@ def build(args):
     g.doc['skins'].append({'joints': [first + i for i in range(len(order))],
                            'inverseBindMatrices': g.accessor(ibm, 'MAT4', 5126),
                            'skeleton': first + bone_index[order[0]]})
-    g.doc['meshes'].append({'name': 'pessoa', 'primitives': prims})
+    mesh = {'name': 'pessoa', 'primitives': prims}
+    if expr_names:
+        mesh['weights'] = [0.0] * len(expr_names)
+        mesh['extras'] = {'targetNames': expr_names}
+    g.doc['meshes'].append(mesh)
     g.doc['nodes'].append({'name': 'pessoa', 'mesh': 0, 'skin': 0})
     g.doc['scenes'][0]['nodes'] = [first + bone_index[order[0]], len(g.doc['nodes']) - 1]
     g.doc['extras'] = {'legacy_pessoa': {'semente': args.semente, 'macros': info, 'pele': skin, 'cabelo': hair,
@@ -743,6 +781,7 @@ def main():
     ap.add_argument('--subdividir', action='store_true', help='Catmull-Clark no corpo e na roupa (protagonista)')
     ap.add_argument('--sem-detalhes', action='store_true', help='sem os alvos de rosto sorteados (teste)')
     ap.add_argument('--pele-detalhe', action='store_true', help='mapas de poros e oleosidade da pele (protagonista)')
+    ap.add_argument('--expressoes', action='store_true', help='morph targets do rosto (piscar, sorrir...)')
     a = ap.parse_args()
     os.makedirs(os.path.dirname(os.path.abspath(a.saida)), exist_ok=True)
     info = build(a)

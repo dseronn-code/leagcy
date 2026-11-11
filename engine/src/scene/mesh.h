@@ -36,7 +36,11 @@ struct MeshData {
   bool clothPinned = true;               // coluna 0 presa (bandeira); falso = cai livre (toalha)
   // Cabelo simulado (shaders/hair_sim.comp): fios consecutivos de hairPoints pontos (2 vértices de fita por ponto).
   uint32_t hairStrands = 0, hairPoints = 0;
-  glm::vec4 clothColliders[4] = {};      // esferas de colisão no espaço do pano (xyz centro, w raio; w = 0 nenhuma)
+  glm::vec4 clothColliders[4] = {};
+  // Morph targets (glTF): deslocamento de posição por vértice de cada alvo (rosto: piscar, sorrir...), somado com
+  // os pesos de cada quadro antes do esqueleto. Só nas malhas com esqueleto.
+  std::vector<std::vector<glm::vec3>> morphTargets;
+  std::vector<std::string> morphNames;      // esferas de colisão no espaço do pano (xyz centro, w raio; w = 0 nenhuma)
 };
 
 // Versão simplificada (LOD) com ~`targetTriangles` triângulos: agrupamento de vértices numa grade com a posição de

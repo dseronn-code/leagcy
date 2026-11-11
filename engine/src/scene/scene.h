@@ -343,6 +343,12 @@ struct GpuMesh {
   rhi::Buffer restVertices, skinData, prevVertices;
   int skinModel = -1, skin = -1;
   uint32_t jointOffset = 0, jointCount = 0;  // posição no buffer global de juntas
+  // Morph targets (até kMaxMorphs): deslocamentos vec3 de cada alvo, alvo a alvo; pesos deste quadro.
+  static constexpr uint32_t kMaxMorphs = 8;
+  rhi::Buffer morphDeltas;
+  uint32_t morphCount = 0;
+  std::vector<std::string> morphNames;
+  float morphWeights[kMaxMorphs] = {};
   VkDeviceSize updateScratchOffset = 0;
   glm::vec3 boundsMin{0.0f}, boundsMax{0.0f};  // caixa local (culling na GPU)
   // Tecido simulado: posições atual e anterior da simulação (vec4 por vértice).
@@ -437,6 +443,8 @@ class Scene {
   // Move um objeto (animadores, animação glTF). Só os objetos movidos são reenviados à GPU e ao TLAS: numa cidade
   // parada o custo por frame não cresce com o número de objetos. Não altere `transform` diretamente após o upload.
   void setTransform(uint32_t object, const glm::mat4& transform);
+  // Peso de um morph target por nome em todas as malhas com esqueleto do modelo (0 = repouso, 1 = alvo inteiro).
+  void setMorphWeight(int model, const std::string& name, float weight);
   // Objetos cujos dados na GPU mudaram no último update(): os movidos agora e os movidos no frame anterior (o
   // prevTransform deles assentou). Pode ter repetições.
   const std::vector<uint32_t>& changedObjects() const { return changed_; }

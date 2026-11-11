@@ -6,6 +6,7 @@
 #include <array>
 #include <functional>
 #include <memory>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -117,6 +118,9 @@ struct CharacterVisual {
   float hairLength = 0.6f, hairHalfWidth = 0.0011f;
   glm::vec3 hairCenter{0.0f}, hairRadius{0.1f}, hairColor{0.08f, 0.06f, 0.05f};
   int hairNode = -1, hairObject = -1;
+  // Rosto (morph targets do modelo): pesos pedidos pelo script (e:expressao) e o piscar automático.
+  std::map<std::string, float> expressions;
+  float blinkTimer = 2.0f, blinkTime = -1.0f;
   // Estado.
   int model = -1, idleA = -1, walkA = -1, runA = -1;
   float speed = 0.0f, yaw = 0.0f, phase = 0.0f, idleTime = 0.0f;

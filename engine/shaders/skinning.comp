@@ -13,12 +13,17 @@ struct SkinVertex { uvec4 joints; vec4 weights; };
 layout(buffer_reference, scalar) readonly buffer SkinData { SkinVertex s[]; };
 layout(buffer_reference, scalar) readonly buffer Joints { mat4 m[]; };
 
+layout(buffer_reference, scalar) readonly buffer Morphs { float d[]; };  // alvo a alvo, vec3 por vértice
+
 layout(push_constant) uniform Push {
   uint64_t rest;
   uint64_t skin;
   uint64_t joints;
   uint64_t out_;
   uint vertexCount;
+  uint morphCount;  // morph targets (rosto): deslocamentos somados com os pesos antes do esqueleto
+  uint64_t morphs;
+  float morphWeights[8];
 } pc;
 
 void main() {
@@ -35,6 +40,12 @@ void main() {
   vec3 p = vec3(rv.v[b], rv.v[b + 1u], rv.v[b + 2u]);
   vec3 n = vec3(rv.v[b + 3u], rv.v[b + 4u], rv.v[b + 5u]);
   vec4 t = vec4(rv.v[b + 8u], rv.v[b + 9u], rv.v[b + 10u], rv.v[b + 11u]);
+  for (uint k = 0u; k < pc.morphCount; ++k) {
+    if (pc.morphWeights[k] == 0.0) continue;
+    uint m = (k * pc.vertexCount + i) * 3u;
+    Morphs M = Morphs(pc.morphs);
+    p += pc.morphWeights[k] * vec3(M.d[m], M.d[m + 1u], M.d[m + 2u]);
+  }
   p = (M * vec4(p, 1.0)).xyz;
   mat3 N = mat3(M);  // juntas sem escala não uniforme
   n = normalize(N * n);
