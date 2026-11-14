@@ -564,7 +564,7 @@ class Facades:
     condensadores no telhado. Cada prédio sorteia o estilo; cada janela sorteia detalhes. Malhas agrupadas por
     material (self.mesh[nome]); cor por vértice com o tom do prédio e a sujeira (base e topo mais escuros)."""
 
-    PLAIN = ('sala', 'vitrine', 'caixilho', 'ferro', 'faixa_luz', 'toldo', 'luz_', 'placa', 'ar_cond', 'montante',
+    PLAIN = ('escorrido', 'mural', 'sala', 'vitrine', 'caixilho', 'ferro', 'faixa_luz', 'toldo', 'luz_', 'placa', 'ar_cond', 'montante',
              'cortina', 'coroa', 'tapume', 'andaime', 'aco_teto', 'condensador', 'caixa_agua')
 
     def __init__(self, rng):
@@ -575,15 +575,19 @@ class Facades:
         self.obstacles = []
         self.lights = []
         self.lod = 0  # 0 = detalhe completo (perto da praça); 1 = janelas simples
+        self.ao = 1.0  # oclusão de contato da peça que está sendo feita
         self.is_street = None  # (ponto médio, normal) -> a fachada dá para a rua? (senão é empena de divisa)
         self.n_murais = 0
 
     def m(self, name):
+        """Malha do material; a cor de vértice leva o tom do prédio, a sujeira e a oclusão de contato (self.ao:
+        < 1 dentro dos vãos e embaixo das saliências, oclusão assada na cor de vértice)."""
         M = self.mesh.setdefault(name, Mesh())
+        k = self.ao
         if name.startswith(self.PLAIN):
-            M.tint, M.grime = (1.0, 1.0, 1.0), None
+            M.tint, M.grime = (k, k, k), None
         else:
-            M.tint, M.grime = self.tint, self.grime
+            M.tint, M.grime = (self.tint[0] * k, self.tint[1] * k, self.tint[2] * k), self.grime
         return M
 
     @staticmethod
@@ -616,8 +620,10 @@ class Facades:
                           uv=uv, face=(n[0], 0, n[1]))
 
     def recess(self, a, t, n, u0, u1, y0, y1, depth, frame):
-        """Os 4 lados do vão da janela (da fachada até o vidro)."""
+        """Os 4 lados do vão da janela (da fachada até o vidro), mais escuros: pouca luz entra no vão."""
+        self.ao = 0.5
         P, M = self.P, self.m(frame)
+        self.ao = 1.0
         T = (t[0], 0, t[1])
         s = 0.5
         M.quad(P(a, t, n, u0, y0, 0), P(a, t, n, u0, y0, -depth), P(a, t, n, u1, y0, -depth), P(a, t, n, u1, y0, 0),
@@ -696,13 +702,27 @@ class Facades:
                           uv=tuple((ring[k][0] * 0.5, ring[k][1] * 0.5) for k in (i0, i1, i2)))
 
     # ------------------------------------------------------------------------------------------- elementos
-    def window(self, st, a, t, n, c, ww, wy0, wy1, depth, wall, trim):
-        """Módulo de janela: vidro com sala atrás, vão, caixilho de guilhotina, peitoril, e verga/arco/frontão."""
+    def window(self, st, a, t, n, c, ww, wy0, wy1, depth, wall, trim, lit=None):
+        """Módulo de janela: vidro com sala atrás, vão, caixilho de guilhotina, peitoril, e verga/arco/frontão.
+        lit: a sala está acesa (decidido por apartamento, não por janela). Às vezes a janela foi fechada com tijolo
+        (reforma antiga) e embaixo do peitoril escorre sujeira."""
         rng = self.rng
         u0, u1 = c - ww / 2, c + ww / 2
-        lit = rng.random() < st['acesas']
+        if lit is None:
+            lit = rng.random() < st['acesas']
+        if self.lod == 0 and rng.random() < 0.03:  # vão emparedado
+            self.ao = 0.85
+            self.wall_quad(wall, a, t, n, u0, u1, wy0, wy1, -0.08)
+            self.ao = 1.0
+            self.recess(a, t, n, u0, u1, wy0, wy1, 0.08, wall)
+            self.block(trim, a, t, n, u0 - 0.08, u1 + 0.08, wy0 - 0.1, wy0, -0.02, 0.07)
+            return
         self.wall_quad(f'sala{rng.randrange(8)}' if lit else f'sala_apagada{rng.randrange(3)}', a, t, n,
                        u0, u1, wy0, wy1, -depth, unit=True)
+        if self.lod == 0 and rng.random() < 0.45:  # escorrido sob o peitoril (a chuva lava a sujeira do peitoril)
+            h = rng.uniform(0.5, 1.8)
+            self.wall_quad(f'escorrido{rng.randrange(4)}', a, t, n, u0 - 0.04, u1 + 0.04, wy0 - 0.1 - h, wy0 - 0.1,
+                           0.006, unit=True)
         self.recess(a, t, n, u0, u1, wy0, wy1, depth, wall)
         # peitoril de pedra saliente, um pouco mais largo que o vão
         self.block(trim, a, t, n, u0 - 0.08, u1 + 0.08, wy0 - 0.1, wy0, -0.02, 0.07)
@@ -942,11 +962,16 @@ class Facades:
                 floors.append(y)
                 y += fh
             for k, fy in enumerate(floors):
+                apt = []  # apartamentos de 2 a 4 vãos: acesos ou apagados juntos
+                while len(apt) < nb:
+                    on = rng.random() < st['acesas']
+                    apt += [on] * rng.randrange(2, 5)
                 for i in range(nb):
                     c = (i + 0.5) * bw
                     u0, u1 = c - ww / 2, c + ww / 2
                     wy0, wy1 = fy + sill, fy + fh - head
-                    self.window(st, a, t, n, c, ww, wy0, wy1, depth, wall, trim)
+                    self.window(st, a, t, n, c, ww, wy0, wy1, depth, wall, trim,
+                                lit=apt[i] if rng.random() > 0.12 else not apt[i])
                     self.wall_quad(wall, a, t, n, i * bw, u0, fy, fy + fh)
                     self.wall_quad(wall, a, t, n, u1, (i + 1) * bw, fy, fy + fh)
                     self.wall_quad(wall, a, t, n, u0, u1, fy, wy0)
@@ -962,6 +987,22 @@ class Facades:
                 self.fire_escape(a, t, n, (i0 + 1) * bw, 2 * bw - 0.2, floors[1] if storefront else floors[0] + fh,
                                  fh, len(floors) - 1)
             self.wall_quad(wall, a, t, n, 0, L, y, y1)  # faixa até a cornija
+            if self.lod == 0 and st.get('cunhais') and floors:  # cunhais: pedras alternadas nas quinas
+                yy, k2 = floors[0], 0
+                while yy + 0.62 < y1 - 0.4:
+                    wq = 0.55 if k2 % 2 == 0 else 0.32
+                    for u0q, u1q in ((0.0, wq), (L - wq, L)):
+                        self.block(trim, a, t, n, u0q, u1q, yy + 0.02, yy + 0.6, 0.0, 0.05)
+                    yy += 0.62
+                    k2 += 1
+            if self.lod == 0:  # manchas escorrendo da cornija (a água pinga da saliência)
+                u = rng.uniform(0, 2)
+                while u < L - 0.5:
+                    wst = rng.uniform(0.8, 3.0)
+                    if rng.random() < 0.6:
+                        self.wall_quad(f'escorrido{rng.randrange(4)}', a, t, n, u, min(L, u + wst),
+                                       y1 - 0.4 - rng.uniform(1.5, 5.0), y1 - 0.4, 0.006, unit=True)
+                    u += wst + rng.uniform(0.3, 2.5)
             big = st.get('cornija_grande', y1 - y0 < 70)
             if big:
                 yc = y1 - 0.25
@@ -1535,6 +1576,67 @@ def street_details(g, pbr, rng, road, sidewalk, plaza, near_plaza, obstacles, te
         g.add_mesh('rua_placa_' + key, m, mat)
 
 
+def streak_texture(path, seed, w=128, h=256):
+    """Escorrido de sujeira (RGBA, alfa recortado): listras verticais que afinam e somem para baixo, como a água da
+    chuva levando a fuligem do peitoril ou da cornija pela parede."""
+    rng = np.random.default_rng(seed)
+    x = np.arange(w)[None, :]
+    y = (np.arange(h)[:, None]) / h
+    cols = np.zeros(w)
+    for _ in range(rng.integers(6, 14)):
+        c = rng.uniform(0, w)
+        cols += rng.uniform(0.4, 1.0) * np.exp(-((np.arange(w) - c) / rng.uniform(1.5, 6)) ** 2)
+    length = 0.4 + 0.6 * np.convolve(rng.random(w), np.ones(9) / 9, 'same')
+    dens = np.clip(cols, 0, 1)[None, :] * np.clip(1 - y / length[None, :], 0, 1) ** 1.5
+    dens = dens * (0.7 + 0.3 * np.clip(1 - y * 3, 0, 1)) + 0.25 * np.clip(1 - y * 8, 0, 1)  # mais forte no topo
+    a = (dens > rng.random((h, w)) * 0.9 + 0.08)
+    v = 25 + 15 * rng.random((h, w))
+    rgb = np.stack([v * 1.05, v, v * 0.9], -1)
+    Image.fromarray(np.dstack([rgb, np.where(a, 255, 0)]).astype(np.uint8), 'RGBA').save(path)
+    return path
+
+
+def plaza_textures(base, texdir, W=1024, metros=2.4):
+    """Piso da praça como o da reforma de 2017: placas de concreto pré-moldado em dois tons, em faixas, com discos de
+    aço embutidos que brilham com a luz dos telões. Gera cor, normal (das juntas e discos) e ORM (disco = metal liso)."""
+    px = W / metros
+    yy, xx = np.mgrid[0:W, 0:W] / px  # metros
+    pw, ph = 0.6, 0.3
+    row = np.floor(yy / ph)
+    xo = xx + (row % 2) * pw / 2
+    jx = np.minimum(xo % pw, pw - xo % pw)
+    jy = np.minimum(yy % ph, ph - yy % ph)
+    joint = np.minimum(jx, jy)
+    band = (np.floor(yy / (ph * 4)) % 3 == 0)  # faixas escuras
+    src = Image.open(os.path.join(texdir, 'concrete_pavement', 'cor.jpg')).convert('L').resize((W, W))
+    noise = np.asarray(src, np.float32) / 255.0
+    tone = np.where(band, 0.30, 0.52) * (0.8 + 0.4 * noise)
+    pid = (np.floor(xo / pw) * 31 + row * 17) % 7 / 7.0  # cada placa um pouco diferente
+    tone *= 0.92 + 0.12 * pid
+    # discos de aço (~11 cm) espalhados numa grade irregular
+    rng = np.random.default_rng(5)
+    disc = np.zeros((W, W), bool)
+    for _ in range(int(metros * metros * 9)):
+        cx, cy = rng.uniform(0, W), rng.uniform(0, W)
+        r = 0.055 * px
+        x0, x1, y0, y1 = int(cx - r - 1), int(cx + r + 2), int(cy - r - 1), int(cy + r + 2)
+        sub = (np.arange(max(0, y0), min(W, y1))[:, None] - cy) ** 2 + (np.arange(max(0, x0), min(W, x1))[None, :] - cx) ** 2
+        disc[max(0, y0):min(W, y1), max(0, x0):min(W, x1)] |= sub < r * r
+    height = np.clip(joint / 0.006, 0, 1) - 0.2 * disc
+    col = np.stack([tone, tone, tone * 1.03], -1)
+    col[joint < 0.004] *= 0.45
+    col[disc] = (0.55, 0.56, 0.58)
+    gy, gx = np.gradient(height * 0.004 * px)
+    nrm = np.stack([-gx, gy, np.ones_like(gx)], -1)
+    nrm /= np.linalg.norm(nrm, axis=-1, keepdims=True)
+    orm = np.stack([np.where(joint < 0.004, 0.6, 1.0), np.where(disc, 0.22, 0.62 + 0.1 * noise), disc * 1.0], -1)
+    out = []
+    for arr, name in ((col, 'cor'), (nrm * 0.5 + 0.5, 'normal'), (orm, 'arm')):
+        Image.fromarray(np.clip(arr * 255, 0, 255).astype(np.uint8)).save(f'{base}_{name}.jpg', quality=90)
+        out.append(f'{base}_{name}.jpg')
+    return out
+
+
 # ---------------------------------------------------------------------------------------------------------- PBR
 # Texturas reais CC0 do Poly Haven (polyhaven.com, licença CC0): cor, normal (OpenGL) e "arm" (oclusão, rugosidade,
 # metal = o ORM do glTF), em 1K. Baixadas uma vez para --texturas (python3 tools/times_square.py baixa sozinho).
@@ -1593,7 +1695,8 @@ def build(out, seed, texdir):
     pbr = Pbr(g, texdir, out)
     asphalt = pbr('asfalto', 'asphalt_02', tint=(0.8, 0.8, 0.82))
     walk = pbr('calcada', 'concrete_pavement', tint=(0.85, 0.84, 0.82))
-    granite = pbr('granito', 'concrete_tiles_02', tint=(0.8, 0.8, 0.85))
+    pc, pn, pa = plaza_textures(tex('praca'), texdir)
+    granite = g.material('praca', tex=rel(pc), normal_tex=rel(pn), orm_tex=rel(pa), rough=1.0, metal=1.0)
     curb = pbr('meio_fio', 'brushed_concrete', tint=(0.75, 0.74, 0.72))
     paint = g.material('faixa', color=(0.85, 0.85, 0.8), rough=0.5)
 
@@ -1604,7 +1707,7 @@ def build(out, seed, texdir):
     m.polygon(sidewalk, 0.15, uv_scale=0.35)
     g.add_mesh('calcada', m, walk)
     m = Mesh()
-    m.polygon(plaza, 0.15, uv_scale=0.5)
+    m.polygon(plaza, 0.15, uv_scale=1 / 2.4)
     g.add_mesh('praca', m, granite)
     m = Mesh()  # chão dos quarteirões: fecha a fresta entre a calçada e as fachadas (via-se o céu por baixo)
     m.polygon(blocks, 0.149, uv_scale=0.35)
@@ -1673,6 +1776,7 @@ def build(out, seed, texdir):
                 v = rng.uniform(0.85, 1.1)
                 fac.tint = (v * rng.uniform(0.94, 1.06), v * rng.uniform(0.94, 1.06), v * rng.uniform(0.94, 1.06))
                 style = {'trim': rng.choice(TRIMS), 'andaime': (not bowtie) and rng.random() < 0.1,
+                         'cunhais': rng.random() < 0.4,
                          'caixilho': rng.choice(['caixilho', 'caixilho', 'caixilho_branco', 'caixilho_verde'])}
                 fac.lod = 0 if d < 140 else 1
                 top = fac.masonry(body, 0.15, podium, wall, st=style)
@@ -1802,6 +1906,9 @@ def build(out, seed, texdir):
         c, e = curtain_texture(tex(f'cortina{k}'), rng)
         fmat[f'cortina{k}'] = g.material(f'cortina{k}', rough=0.06, metal=0.3, tex=rel(c), emissive=(1, 1, 1),
                                          emissive_tex=rel(e), strength=0.6)
+    for k in range(4):
+        fmat[f'escorrido{k}'] = g.material(f'escorrido{k}', tex=rel(streak_texture(tex(f'escorrido{k}.png'), 50 + k)),
+                                           rough=0.75, mask=0.5)
     brick_src = os.path.join(texdir, 'large_red_bricks', 'cor.jpg')
     for k in range(12):  # anúncios pintados e murais nas empenas
         r = rel(mural_texture(tex(f'mural{k:02d}.png'), rng, brick_src, k))
