@@ -564,7 +564,7 @@ class Facades:
     condensadores no telhado. Cada prédio sorteia o estilo; cada janela sorteia detalhes. Malhas agrupadas por
     material (self.mesh[nome]); cor por vértice com o tom do prédio e a sujeira (base e topo mais escuros)."""
 
-    PLAIN = ('escorrido', 'mural', 'sala', 'vitrine', 'caixilho', 'ferro', 'faixa_luz', 'toldo', 'luz_', 'placa', 'ar_cond', 'montante',
+    PLAIN = ('escorrido', 'mural', 'grafite', 'cartaz', 'umidade', 'sala', 'vitrine', 'caixilho', 'ferro', 'faixa_luz', 'toldo', 'luz_', 'placa', 'ar_cond', 'montante',
              'cortina', 'coroa', 'tapume', 'andaime', 'aco_teto', 'condensador', 'caixa_agua')
 
     def __init__(self, rng):
@@ -828,6 +828,17 @@ class Facades:
         P = self.P
         self.block('tapume', a, t, n, 0, L, y0 + H, y0 + H + 0.22, 0.0, D, back=False)
         self.block('tapume', a, t, n, 0, L, y0 + H + 0.22, y0 + H + 1.15, D - 0.04, D, back=True)
+        u = 0.3  # cartazes colados no tapume e nos pilares (shows, filmes, festas: tudo fictício)
+        while u < L - 1.0:
+            pw = self.rng.uniform(0.6, 1.0)
+            if self.rng.random() < 0.7:
+                self.wall_quad(f'cartaz{self.rng.randrange(10)}', a, t, n, u, u + pw, y0 + H + 0.25,
+                               y0 + H + 0.25 + pw * 1.2 * 0.75, D + 0.004, unit=True)
+            u += pw + self.rng.uniform(0.0, 0.8)
+        for uu in np.arange(0.3, L, 2.4):
+            if self.rng.random() < 0.5:
+                self.wall_quad(f'cartaz{self.rng.randrange(10)}', a, t, n, uu - 0.3, uu + 0.3, y0 + 1.2, y0 + 2.0,
+                               D - 0.035, unit=True)
         M = self.m('andaime')
         for u in np.arange(0.3, L, 2.4):
             self.block('andaime', a, t, n, u - 0.06, u + 0.06, y0, y0 + H, D - 0.16, D - 0.04)
@@ -850,6 +861,12 @@ class Facades:
             yt = y0 + 3.6
             kind = rng.randrange(6) if rng.random() < lit_store else 5
             self.wall_quad(f'vitrine{kind}', a, t, n, u0, u1, y0 + 0.45, yt, -0.3, unit=True)
+            if kind == 5 and rng.random() < 0.75:  # porta de enrolar fechada: pichada
+                gh = rng.uniform(1.0, 2.4)
+                gw = min(u1 - u0, rng.uniform(1.5, 3.2))
+                gu = rng.uniform(u0, u1 - gw)
+                self.wall_quad(f'grafite{rng.randrange(8)}', a, t, n, gu, gu + gw, y0 + 0.6, y0 + 0.6 + gh, -0.295,
+                               unit=True)
             self.recess(a, t, n, u0, u1, y0 + 0.45, yt, 0.3, 'caixilho')
             self.block('caixilho', a, t, n, u0, u1, yt - 0.08, yt, -0.3, -0.22)
             if kind != 5 and rng.random() < 0.6:  # montante da vitrine
@@ -881,6 +898,10 @@ class Facades:
         antigo pintado na parede (ghost sign) ou mural, como em Manhattan."""
         rng = self.rng
         self.wall_quad(wall, a, t, n, 0, L, y0, y1)
+        for _ in range(self.rng.randrange(1, 4)):  # manchas de umidade grandes na empena
+            sw, sh = self.rng.uniform(2, min(8, L)), self.rng.uniform(2, 7)
+            su, sy = self.rng.uniform(0, max(0.01, L - sw)), self.rng.uniform(y0, max(y0 + 0.01, y1 - sh))
+            self.wall_quad(f'umidade{self.rng.randrange(3)}', a, t, n, su, su + sw, sy, sy + sh, 0.005, unit=True)
         self.block(wall, a, t, n, -0.05, L + 0.05, y1, y1 + 0.9, -0.25, 0.0)  # platibanda
         self.block(trim, a, t, n, -0.08, L + 0.08, y1 + 0.9, y1 + 1.0, -0.3, 0.04)
         if y1 - y0 > 22 and L > 8 and rng.random() < 0.45:
@@ -1418,7 +1439,7 @@ def street_details(g, pbr, rng, road, sidewalk, plaza, near_plaza, obstacles, te
                        mask=0.5)
     bus = g.material('pintura_bus', color=(0.9, 0.9, 0.86), rough=0.55,
                      tex=rel(text_decal(tex('solo_bus.png'), 'BUS ONLY')), mask=0.5)
-    redlane = g.material('faixa_onibus', color=(0.42, 0.08, 0.06), rough=0.6)
+    redlane = g.material('faixa_onibus', color=(0.2, 0.06, 0.045), rough=0.7)  # vermelho-tijolo gasto, não vivo
     line = g.material('linha_branca', color=(0.82, 0.82, 0.78), rough=0.55)
     yellow = g.material('linha_amarela', color=(0.75, 0.55, 0.06), rough=0.55)
     patches = [g.material(f'remendo{k}', rough=0.45, tex=rel(decal_texture(tex(f'remendo{k}.png'), 'remendo', 10 + k)),
@@ -1592,6 +1613,86 @@ def streak_texture(path, seed, w=128, h=256):
     a = (dens > rng.random((h, w)) * 0.9 + 0.08)
     v = 25 + 15 * rng.random((h, w))
     rgb = np.stack([v * 1.05, v, v * 0.9], -1)
+    Image.fromarray(np.dstack([rgb, np.where(a, 255, 0)]).astype(np.uint8), 'RGBA').save(path)
+    return path
+
+
+def graffiti_texture(path, seed, w=512, h=256):
+    """Pichação/tag (RGBA recortado): palavras inventadas em traço grosso com contorno, cores de spray, respingos."""
+    pr = random.Random(seed)
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    word = pr.choice(['ZEKO', 'RAVN', 'KRUZ', 'MOTH', 'SKEP', 'ODIN', 'VEXA', 'PLUM', 'JINX', 'TOKA', 'NOVA', 'BRISK'])
+    fill = pr.choice([(230, 40, 60), (40, 200, 230), (250, 210, 40), (150, 80, 230), (60, 220, 90), (245, 245, 245)])
+    line = pr.choice([(10, 10, 10), (255, 255, 255), (30, 30, 120)])
+    f = ImageFont.truetype(pr.choice([FONT, FONT2]), int(h * 0.62))
+    tw = d.textlength(word, font=f)
+    x0 = (w - tw) / 2
+    layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((x0, h * 0.12), word, font=f, fill=fill + (255,), stroke_width=7, stroke_fill=line + (255,))
+    layer = layer.rotate(pr.uniform(-12, 12), resample=Image.BICUBIC).transform(
+        (w, h), Image.AFFINE, (1, pr.uniform(-0.35, 0.35), 0, 0, 1, 0), resample=Image.BICUBIC)
+    img.alpha_composite(layer)
+    for _ in range(40):  # respingos e escorridos de tinta
+        x, y = pr.uniform(0, w), pr.uniform(0, h)
+        r = pr.uniform(1, 3)
+        d.ellipse((x - r, y - r, x + r, y + r), fill=fill + (255,))
+    a = np.asarray(img).copy()
+    a[..., 3] = np.where(a[..., 3] > 100, 255, 0)
+    a[np.random.default_rng(seed).random((h, w)) < 0.12, 3] = 0  # tinta falhada
+    Image.fromarray(a, 'RGBA').save(path)
+    return path
+
+
+def poster_texture(path, seed, w=256, h=320):
+    """Cartaz colado (show, filme, festa) com nomes inventados, já desbotado e rasgado nas bordas."""
+    pr = random.Random(seed)
+    bg = pr.choice([(230, 60, 40), (20, 20, 30), (250, 220, 60), (40, 90, 200), (240, 240, 230), (200, 40, 140)])
+    fg = (255, 255, 255) if sum(bg) < 400 else (20, 20, 25)
+    img = Image.new('RGB', (w, h), bg)
+    d = ImageDraw.Draw(img)
+    for _ in range(pr.randrange(1, 4)):
+        r = pr.randrange(30, 120)
+        cx, cy = pr.randrange(w), pr.randrange(h // 2, h)
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=pr.choice([fg, (255, 140, 0), (0, 200, 200)]))
+    words = pr.choice([['LIVE', 'THE MOTHS'], ['TONIGHT', 'DJ KAIRO'], ['NEW ALBUM', 'GLASS OWL'], ['FRI 9PM', 'NEON RIOT'],
+                       ['IN THEATERS', 'DEEP HARBOR'], ['SALE', '50% OFF'], ['COMEDY', 'BIG LAUGHS'], ['JAZZ', 'BLUE NOTEZ']])
+    for i, wd in enumerate(words):
+        f = ImageFont.truetype(FONT, 34 if i == 0 else 44)
+        tw = d.textlength(wd, font=f)
+        if tw > w - 16:
+            f = ImageFont.truetype(FONT, int((34 if i == 0 else 44) * (w - 16) / tw))
+            tw = d.textlength(wd, font=f)
+        d.text(((w - tw) / 2, 20 + i * 52), wd, font=f, fill=fg)
+    a = np.asarray(img).astype(np.float32)
+    a = a * 0.75 + 40  # desbotado pelo sol e pela chuva
+    alpha = np.full((h, w), 255, np.uint8)
+    rng = np.random.default_rng(seed)
+    for side in range(4):  # bordas rasgadas
+        depth = (rng.random(w if side < 2 else h) ** 3 * 18).astype(int)
+        for i, dd in enumerate(depth):
+            if side == 0:
+                alpha[:dd, i] = 0
+            elif side == 1:
+                alpha[h - dd:, i] = 0
+            elif side == 2:
+                alpha[i, :dd] = 0
+            else:
+                alpha[i, w - dd:] = 0
+    Image.fromarray(np.dstack([np.clip(a, 0, 255), alpha]).astype(np.uint8), 'RGBA').save(path)
+    return path
+
+
+def damp_texture(path, seed, w=256):
+    """Mancha de umidade/fuligem (RGBA recortado com borda pontilhada), escura e esverdeada."""
+    rng = np.random.default_rng(seed)
+    low = np.asarray(Image.fromarray((rng.random((8, 8)) * 255).astype(np.uint8)).resize((w, w), Image.BICUBIC)) / 255.0
+    yy, xx = np.mgrid[0:w, 0:w] / w - 0.5
+    r = np.hypot(xx, yy * 0.8)
+    v = low - r * 1.4
+    a = v > rng.random((w, w)) * 0.35 - 0.05
+    c = 30 + 25 * low
+    rgb = np.stack([c * 0.9, c, c * 0.85], -1)
     Image.fromarray(np.dstack([rgb, np.where(a, 255, 0)]).astype(np.uint8), 'RGBA').save(path)
     return path
 
@@ -1906,6 +2007,15 @@ def build(out, seed, texdir):
         c, e = curtain_texture(tex(f'cortina{k}'), rng)
         fmat[f'cortina{k}'] = g.material(f'cortina{k}', rough=0.06, metal=0.3, tex=rel(c), emissive=(1, 1, 1),
                                          emissive_tex=rel(e), strength=0.6)
+    for k in range(8):
+        fmat[f'grafite{k}'] = g.material(f'grafite{k}', tex=rel(graffiti_texture(tex(f'grafite{k}.png'), 60 + k)),
+                                         rough=0.5, mask=0.5)
+    for k in range(10):
+        fmat[f'cartaz{k}'] = g.material(f'cartaz{k}', tex=rel(poster_texture(tex(f'cartaz{k}.png'), 70 + k)),
+                                        rough=0.7, mask=0.5)
+    for k in range(3):
+        fmat[f'umidade{k}'] = g.material(f'umidade{k}', tex=rel(damp_texture(tex(f'umidade{k}.png'), 80 + k)),
+                                         rough=0.8, mask=0.5)
     for k in range(4):
         fmat[f'escorrido{k}'] = g.material(f'escorrido{k}', tex=rel(streak_texture(tex(f'escorrido{k}.png'), 50 + k)),
                                            rough=0.75, mask=0.5)
@@ -2036,6 +2146,8 @@ def build(out, seed, texdir):
             continue
         xc = BWAY_K * zc
         for side in (-1, 1):
+            if not plaza.contains(Point(xc + side * 7.5, zc).buffer(2.0)):  # no cruzamento com a 7th, a praça some
+                continue
             if rng.random() < 0.6:
                 pr['banco'].box((xc + side * 7.5, 0.6, zc), (0.35, 0.05, 1.8), rot=math.atan(BWAY_K))
                 obstacles.append((xc + side * 7.5, zc, 2.1))
