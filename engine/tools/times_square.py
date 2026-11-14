@@ -457,67 +457,161 @@ def stone_texture(path, kind, w=256):
     return path
 
 
-def room_texture(path, rng, lit, w=128, h=128):
-    """Interior visto pela janela: parede do fundo, teto com luminária, móveis em silhueta (ou sala apagada)."""
-    if lit:
-        wall = np.array(rng.choice([(235, 210, 170), (220, 225, 235), (250, 225, 190), (200, 215, 230), (245, 200, 150)]))
-        k = rng.uniform(0.45, 1.0)
+def interior_image(rng, w, h, room_w, room_h, depth, kind, lit, tint):
+    """Interior em perspectiva visto pela janela (o "interior mapping" assado numa imagem, como o vidro de uma
+    vitrine visto de frente): cada pixel lança um raio do olho, 1,5 m à frente do vidro, para dentro de uma caixa
+    (fundo, chão, teto e laterais) e pega a cor da superfície que acerta: piso de tábua ou ladrilho, paredes com
+    rodapé, teto com luminárias e queda de luz, prateleiras de produtos nas laterais (loja), quadro e estante (sala);
+    silhuetas de móveis e de gente em profundidade. Assim o vidro mostra uma sala de verdade, não um desenho chapado."""
+    ys, xs = np.mgrid[0:h, 0:w]
+    px = (xs + 0.5) / w * room_w            # ponto no vidro (m), x da esquerda, y de baixo
+    py = (1 - (ys + 0.5) / h) * room_h
+    ex, ey, ez = room_w / 2 + rng.uniform(-0.2, 0.2), room_h * 0.55, -1.5
+    dx, dy, dz = px - ex, py - ey, 0 - ez
+    big = 1e9
+    t_back = np.full(px.shape, (depth - ez) / dz)
+    t_floor = np.where(dy < 0, (0 - ey) / np.minimum(dy, -1e-6), big)
+    t_ceil = np.where(dy > 0, (room_h - ey) / np.maximum(dy, 1e-6), big)
+    t_left = np.where(dx < 0, (0 - ex) / np.minimum(dx, -1e-6), big)
+    t_right = np.where(dx > 0, (room_w - ex) / np.maximum(dx, 1e-6), big)
+    t0 = (0 - ez) / dz  # o raio entra pelo vidro em z = 0
+    T = np.stack([t_back, t_floor, t_ceil, t_left, t_right])
+    T = np.where(T < t0, big, T)
+    hit = np.argmin(T, 0)
+    t = np.take_along_axis(T, hit[None], 0)[0]
+    X, Y, Z = ex + dx * t, ey + dy * t, ez + dz * t
+    img = np.zeros((h, w, 3))
+    wallc = np.array(tint, float)
+    noise = rng_img(rng, w, h)
+    # piso
+    if kind == 'loja':
+        tile = ((np.floor(X / 0.4) + np.floor(Z / 0.4)) % 2) * 0.12 + 0.75
+        floorc = np.array([210, 205, 195]) * tile[..., None]
     else:
-        wall = np.array([20, 24, 32])
-        k = 1.0
-    y = np.linspace(0, 1, h)[:, None]
-    shade = 0.55 + 0.45 * np.exp(-((y - 0.15) / 0.35) ** 2)  # luz que vem do teto
-    img = np.ones((h, w, 3)) * wall[None, None] * shade[..., None] * k
-    if lit:
-        img[int(h * 0.04):int(h * 0.09), int(w * 0.2):int(w * 0.8)] = 255  # luminária
+        plank = 0.75 + 0.25 * ((np.floor(X / 0.18) * 7.3) % 1.0)[..., None]
+        floorc = np.array([120, 80, 50]) * plank
+    m = hit == 1
+    img[m] = floorc[m]
+    # teto
+    m = hit == 2
+    img[m] = wallc * 0.85
+    # paredes (fundo e laterais), com rodapé
+    for k in (0, 3, 4):
+        m = hit == k
+        img[m] = wallc * (0.92 if k == 0 else 0.8)
+    base = (hit != 1) & (hit != 2) & (Y < 0.12)
+    img[base] = (60, 50, 45)
+    sub = rng.choice(['mercado', 'roupa', 'restaurante']) if kind == 'loja' else None
+    if sub == 'roupa':  # araras com roupas penduradas nas laterais (faixas verticais coloridas na altura do peito)
+        rack = ((hit == 3) | (hit == 4)) & (Y > 0.6) & (Y < 1.6)
+        item = np.floor(Z / 0.07)
+        hue = (np.sin(item * 78.233) * 43758.5453) % 1.0
+        pal = np.array([[30, 30, 35], [200, 200, 195], [150, 30, 40], [40, 60, 120], [190, 160, 120], [80, 90, 70]], float)
+        img[rack] = pal[(hue[rack] * 6).astype(int) % 6] * (0.8 + 0.2 * ((Y[rack] - 0.6) / 1.0))[..., None]
+        img[((hit == 3) | (hit == 4)) & (np.abs(Y - 1.62) < 0.02)] = (160, 160, 165)
+    elif sub == 'restaurante':  # parede de tijolo/madeira, quadros, balcão no fundo
+        wood = (hit == 3) | (hit == 4)
+        img[wood & (Y < 1.1)] = (90, 55, 35)
+        img[(hit == 0) & (Y < 1.1)] = (70, 40, 28)
+    if sub == 'mercado':  # prateleiras de produtos nas laterais e no fundo
+        shelf = ((hit == 3) | (hit == 4) | (hit == 0)) & (Y > 0.15) & (Y < 2.1)
+        row = np.floor((Y - 0.15) / 0.38)
+        frac = ((Y - 0.15) / 0.38) % 1
+        along = np.where(hit == 0, X, Z)
+        item = np.floor(along / 0.11) + row * 13
+        hue = (np.sin(item * 12.9898) * 43758.5453) % 1.0
+        prod = shelf & (frac > 0.12) & (frac < 0.12 + 0.75 * (0.5 + 0.5 * ((hue * 7) % 1)))
+        pal = np.array([[220, 50, 50], [240, 200, 60], [60, 140, 230], [250, 250, 245], [60, 180, 90], [240, 120, 40],
+                        [150, 70, 180], [30, 30, 35]], float)
+        img[prod] = pal[(hue[prod] * 8).astype(int) % 8]
+        board = shelf & (frac <= 0.1)
+        img[board] = (90, 85, 80)
+    else:  # sala: quadro na parede do fundo, estante numa lateral
+        pic = (hit == 0) & (np.abs(X - room_w * rng.uniform(0.3, 0.7)) < 0.35) & (np.abs(Y - 1.5) < 0.25)
+        img[pic] = np.array(rng.choice([(40, 70, 110), (150, 60, 40), (30, 90, 60), (200, 170, 90)]))
+        side = 3 if rng.random() < 0.5 else 4
+        books = (hit == side) & (Z > depth * 0.3) & (Z < depth * 0.75) & (Y < 1.9)
+        bk = ((np.floor(Z / 0.05) * 5.1 + np.floor(Y / 0.35) * 3.7) % 1.0)
+        img[books] = (np.array([120, 70, 40]) * 0.5 + np.array([200, 150, 90]) * bk[..., None] * 0.6)[books]
+    # luz: luminária no teto perto do centro, queda com a distância, cantos mais escuros (oclusão)
+    lx, ly, lz = room_w / 2, room_h - 0.05, depth * 0.45
+    dist2 = (X - lx) ** 2 + (Y - ly) ** 2 + (Z - lz) ** 2
+    light = 0.35 + 1.6 / (1.0 + dist2 * 0.6)
+    corner = np.minimum.reduce([X, room_w - X, Y, room_h - Y, depth - Z + 0.3]) / 0.4
+    light *= 0.6 + 0.4 * np.clip(corner, 0, 1)
+    if kind == 'loja':  # fileiras de luminárias fluorescentes no teto
+        tubes = (hit == 2) & ((Z % 1.2) < 0.12) & (np.abs(X - room_w / 2) < room_w * 0.35)
+        img[tubes] = 255
+        light = light * 1.15
+    else:
+        lamp = (hit == 2) & ((X - lx) ** 2 + (Z - lz) ** 2 < 0.06)
+        img[lamp] = 255
+    if not lit:
+        light = light * 0.06 + 0.02
+    img = img * light[..., None] * (0.92 + 0.16 * noise[..., None])
     im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
+    # silhuetas em profundidade (móveis, gente): projetadas pela mesma câmera
     d = ImageDraw.Draw(im)
-    dark = (25, 22, 20) if lit else (8, 9, 12)
-    for _ in range(rng.randrange(1, 4)):  # mesas, estantes, cadeiras
-        x0 = rng.randrange(0, w - 20)
-        ww, hh = rng.randrange(14, 50), rng.randrange(10, 60)
-        d.rectangle([x0, h - hh - rng.randrange(0, 10), x0 + ww, h], fill=dark)
-    if lit and rng.random() < 0.35:  # alguém na sala
-        cx = rng.randrange(20, w - 20)
-        d.ellipse([cx - 6, h * 0.45, cx + 6, h * 0.45 + 12], fill=dark)
-        d.rectangle([cx - 9, h * 0.45 + 12, cx + 9, h], fill=dark)
+
+    def proj(x, y, z):
+        s = (0 - ez) / (z - ez)
+        return ((ex + (x - ex) * s) / room_w * w, (1 - (ey + (y - ey) * s) / room_h) * h)
+    dark = (28, 24, 22) if lit else (6, 6, 8)
+    for _ in range(rng.randrange(1, 4) if kind != 'loja' else rng.randrange(0, 4)):
+        z = rng.uniform(1.8, depth * 0.9)
+        x = rng.uniform(0.3, room_w - 0.3)
+        if rng.random() < (0.7 if kind == 'loja' else 0.3):  # pessoa
+            (a1, b1), (a2, b2) = proj(x - 0.22, 1.45, z), proj(x + 0.22, 0.0, z)
+            hx, hy = proj(x, 1.6, z)
+            hr = abs(proj(x + 0.11, 1.6, z)[0] - hx)
+            d.rectangle([a1, b1, a2, b2], fill=dark)
+            d.ellipse([hx - hr, hy - hr * 1.3, hx + hr, hy + hr * 0.9], fill=dark)
+        else:  # móvel (sofá, mesa, balcão): sombreado, com tampo mais claro, não um bloco preto
+            hw, hh = rng.uniform(0.2, 0.5), rng.uniform(0.4, 0.8)
+            base_c = np.array(rng.choice([(90, 60, 40), (60, 60, 70), (120, 100, 80), (50, 70, 60)])) * (0.6 if lit else 0.08)
+            (a1, b1), (a2, b2) = proj(x - hw, hh, z), proj(x + hw, 0.0, z)
+            d.rectangle([a1, b1, a2, b2], fill=tuple(int(c) for c in base_c))
+            (c1, e1), (c2, e2) = proj(x - hw, hh, z + 0.4), proj(x + hw, hh, z)
+            d.rectangle([c1, e1, c2, e2], fill=tuple(int(min(255, c * 1.6)) for c in base_c))
+    return im
+
+
+def rng_img(rng, w, h):
+    n = np.random.default_rng(rng.randrange(1 << 30)).random((h // 8 + 1, w // 8 + 1))
+    return np.asarray(Image.fromarray((n * 255).astype(np.uint8)).resize((w, h), Image.BICUBIC)) / 255.0
+
+
+def room_texture(path, rng, lit, w=192, h=320):
+    """Sala atrás da janela (apartamento ou escritório), em perspectiva; acesa (cor de lâmpada 2700–5000 K) ou
+    apagada (só um resto de luz da rua)."""
+    tint = rng.choice([(235, 215, 180), (220, 225, 235), (250, 230, 200), (200, 215, 230), (245, 205, 160),
+                       (230, 230, 225)])
+    k = rng.uniform(0.55, 1.0) if lit else 1.0
+    im = interior_image(rng, w, h, 1.2, 2.0, rng.uniform(3.0, 5.0), 'sala', lit, tuple(c * k for c in tint))
+    if lit and rng.random() < 0.4:  # cortina ou persiana cobrindo parte do vidro
+        d = ImageDraw.Draw(im)
+        if rng.random() < 0.5:
+            yy = int(h * rng.uniform(0.15, 0.6))
+            for y in range(0, yy, 6):
+                d.rectangle([0, y, w, y + 3], fill=tuple(int(c * 0.7) for c in tint))
+        else:
+            xx = int(w * rng.uniform(0.2, 0.45))
+            d.rectangle([0, 0, xx, h], fill=tuple(int(c * 0.55) for c in tint))
     im.save(path)
     return path
 
 
-def shop_texture(path, rng, kind, w=256, h=128):
-    """Vitrine: loja aberta (interior claro, prateleiras com produtos coloridos, tom quente/frio/colorido) ou fechada
-    (porta de aço de enrolar, com pichação leve)."""
+def shop_texture(path, rng, kind, w=384, h=256):
+    """Vitrine: interior da loja em perspectiva (piso de ladrilho, prateleiras de produtos, luminárias de tubo,
+    clientes) ou, fechada, a porta de aço de enrolar (essa usa a textura real de porta de aço no material)."""
     if kind == 'fechada':
         img = np.ones((h, w, 3)) * np.array([70, 72, 76])[None, None]
         img[::6] *= 0.55
-        im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
-        d = ImageDraw.Draw(im)
-        for _ in range(rng.randrange(0, 3)):
-            col = tuple(rng.randrange(80, 255) for _ in range(3))
-            x, y = rng.randrange(w - 60), rng.randrange(20, h - 30)
-            d.text((x, y), rng.choice(['NYC', 'K7', 'ZOE', 'RX', '22']),
-                   font=ImageFont.truetype(FONT, rng.randrange(16, 30)), fill=col)
-        im.save(path)
+        Image.fromarray(np.clip(img, 0, 255).astype(np.uint8)).save(path)
         return path
-    tint = {'quente': (255, 225, 180), 'fria': (225, 240, 255), 'colorida': rng.choice([(255, 120, 200), (120, 200, 255),
-                                                                                        (255, 200, 90), (150, 255, 170)])}[kind]
-    img = np.ones((h, w, 3)) * np.array(tint)[None, None] * np.linspace(1.0, 0.55, h)[:, None, None]
-    im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
-    d = ImageDraw.Draw(im)
-    for row in range(3):
-        yb = int(h * (0.35 + 0.22 * row))
-        d.rectangle([0, yb, w, yb + 3], fill=(70, 62, 56))
-        x = rng.randrange(4)
-        while x < w:
-            ww = rng.randrange(6, 18)
-            col = tuple(rng.randrange(30, 230) for _ in range(3))
-            d.rectangle([x, yb - rng.randrange(8, 24), x + ww, yb], fill=col)
-            x += ww + rng.randrange(2, 8)
-    for _ in range(rng.randrange(0, 4)):  # gente lá dentro (silhuetas)
-        cx = rng.randrange(10, w - 10)
-        d.ellipse([cx - 5, h * 0.3, cx + 5, h * 0.3 + 10], fill=(30, 26, 24))
-        d.rectangle([cx - 8, h * 0.3 + 10, cx + 8, h], fill=(30, 26, 24))
+    tint = {'quente': (255, 225, 180), 'fria': (225, 240, 255), 'colorida': rng.choice([(255, 150, 200), (150, 210, 255),
+                                                                                        (255, 210, 120), (170, 255, 190)])}[kind]
+    im = interior_image(rng, w, h, 3.0, 3.2, rng.uniform(5.0, 9.0), 'loja', True, tint)
     im.save(path)
     return path
 
@@ -576,6 +670,7 @@ class Facades:
         self.lights = []
         self.lod = 0  # 0 = detalhe completo (perto da praça); 1 = janelas simples
         self.ao = 1.0  # oclusão de contato da peça que está sendo feita
+        self.bevel = 0.0  # chanfro das arestas da frente dos blocos (m)
         self.is_street = None  # (ponto médio, normal) -> a fachada dá para a rua? (senão é empena de divisa)
         self.n_murais = 0
 
@@ -636,7 +731,28 @@ class Facades:
                uv=((0, y0 * s), (depth * s, y0 * s), (depth * s, y1 * s), (0, y1 * s)), face=(-T[0], 0, -T[2]))
 
     def block(self, name, a, t, n, u0, u1, y0, y1, d0, d1, uvs=0.5, back=False):
-        """Caixa encostada na fachada (peitoril, verga, pilastra, mísula, ar-condicionado): u0..u1, y0..y1, d0..d1."""
+        """Caixa encostada na fachada (peitoril, verga, pilastra, mísula, ar-condicionado): u0..u1, y0..y1, d0..d1.
+        Com self.bevel > 0, as arestas da frente saem chanfradas (a quina pega um filete de luz, como nas peças dos
+        jogos; quina viva de 90° é o que dá a cara de "caixa de computador")."""
+        b = self.bevel
+        if b > 0 and d1 - d0 > 2.5 * b and u1 - u0 > 3 * b and y1 - y0 > 3 * b:
+            self._block(name, a, t, n, u0, u1, y0, y1, d0, d1 - b, uvs, back)
+            P, M = self.P, self.m(name)
+            o = [P(a, t, n, u0, y0, d1 - b), P(a, t, n, u1, y0, d1 - b), P(a, t, n, u1, y1, d1 - b), P(a, t, n, u0, y1, d1 - b)]
+            i = [P(a, t, n, u0 + b, y0 + b, d1), P(a, t, n, u1 - b, y0 + b, d1), P(a, t, n, u1 - b, y1 - b, d1),
+                 P(a, t, n, u0 + b, y1 - b, d1)]
+            N = np.array([n[0], 0.0, n[1]])
+            T = np.array([t[0], 0.0, t[1]])
+            Y = np.array([0.0, 1.0, 0.0])
+            M.quad(*i, uv=((u0 * uvs, -y0 * uvs), (u1 * uvs, -y0 * uvs), (u1 * uvs, -y1 * uvs), (u0 * uvs, -y1 * uvs)),
+                   face=tuple(N))
+            for k, side in enumerate((-Y, T, Y, -T)):  # baixo, direita, cima, esquerda
+                j = (k + 1) % 4
+                M.quad(o[k], o[j], i[j], i[k], uv=((0, 0), (1, 0), (1, b), (0, b)), face=tuple(side + N))
+            return
+        self._block(name, a, t, n, u0, u1, y0, y1, d0, d1, uvs, back)
+
+    def _block(self, name, a, t, n, u0, u1, y0, y1, d0, d1, uvs=0.5, back=False):
         P, M = self.P, self.m(name)
         N, T = (n[0], 0, n[1]), (t[0], 0, t[1])
         q = lambda *c: c
@@ -1008,6 +1124,9 @@ class Facades:
                 self.fire_escape(a, t, n, (i0 + 1) * bw, 2 * bw - 0.2, floors[1] if storefront else floors[0] + fh,
                                  fh, len(floors) - 1)
             self.wall_quad(wall, a, t, n, 0, L, y, y1)  # faixa até a cornija
+            if self.lod == 0 and not st.get('cunhais') and floors:  # quina: faixa vertical chanfrada (sem quina viva)
+                for u0q, u1q in ((0.0, 0.3), (L - 0.3, L)):
+                    self.block(wall, a, t, n, u0q, u1q, floors[0], y1 - 0.4, 0.0, 0.07)
             if self.lod == 0 and st.get('cunhais') and floors:  # cunhais: pedras alternadas nas quinas
                 yy, k2 = floors[0], 0
                 while yy + 0.62 < y1 - 0.4:
@@ -1880,7 +1999,9 @@ def build(out, seed, texdir):
                          'cunhais': rng.random() < 0.4,
                          'caixilho': rng.choice(['caixilho', 'caixilho', 'caixilho_branco', 'caixilho_verde'])}
                 fac.lod = 0 if d < 140 else 1
+                fac.bevel = 0.025 if fac.lod == 0 else 0.0
                 top = fac.masonry(body, 0.15, podium, wall, st=style)
+                fac.bevel = 0.0
             else:
                 bldg[(st, k)].extrude_walls(body, 0.15, podium, uv_w=1 / 12.0, uv_h=1 / 14.0)
             if tower > podium:
