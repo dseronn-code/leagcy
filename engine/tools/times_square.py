@@ -575,6 +575,8 @@ class Facades:
         self.obstacles = []
         self.lights = []
         self.lod = 0  # 0 = detalhe completo (perto da praça); 1 = janelas simples
+        self.is_street = None  # (ponto médio, normal) -> a fachada dá para a rua? (senão é empena de divisa)
+        self.n_murais = 0
 
     def m(self, name):
         M = self.mesh.setdefault(name, Mesh())
@@ -854,6 +856,45 @@ class Facades:
                 self.block('faixa_luz', a, t, n, u - 0.12, u + 0.12, y0 + 4.71, y0 + 4.75, 0.55, 0.8)
         self.profile(trim, a, t, n, -0.15, L + 0.15, y0 + ground - 0.32, CORNIJA_SIMPLES, s=1.0)
 
+    def blank_wall(self, a, t, n, L, y0, y1, wall, trim):
+        """Empena cega na divisa do lote (tijolo liso). Acima dos vizinhos baixos aparece: às vezes com anúncio
+        antigo pintado na parede (ghost sign) ou mural, como em Manhattan."""
+        rng = self.rng
+        self.wall_quad(wall, a, t, n, 0, L, y0, y1)
+        self.block(wall, a, t, n, -0.05, L + 0.05, y1, y1 + 0.9, -0.25, 0.0)  # platibanda
+        self.block(trim, a, t, n, -0.08, L + 0.08, y1 + 0.9, y1 + 1.0, -0.3, 0.04)
+        if y1 - y0 > 22 and L > 8 and rng.random() < 0.45:
+            h = min(y1 - y0 - 16, rng.uniform(8, 16), L * 0.9)
+            w = min(L * rng.uniform(0.6, 0.9), h * rng.uniform(0.8, 1.6))
+            u0 = (L - w) / 2
+            yt = y1 - rng.uniform(1.5, 4)
+            self.wall_quad(f'mural{rng.randrange(12)}', a, t, n, u0, u0 + w, yt - h, yt, 0.02, unit=True)
+            self.n_murais += 1
+
+    def blade_sign(self, a, t, n, u, y, k):
+        """Letreiro de lâmina perpendicular à fachada (luminoso dos dois lados) num suporte de ferro."""
+        P, M = self.P, self.m('ferro')
+        D = 0.95
+        H = 3.2  # a placa é 4:1 (texto deitado): o texto corre de baixo para cima, como os letreiros de hotel
+        M.beam(P(a, t, n, u, y + H + 0.08, 0.0), P(a, t, n, u, y + H + 0.08, D + 0.25), 0.05, 0.05)
+        M.beam(P(a, t, n, u, y + H * 0.4, 0.0), P(a, t, n, u, y + H + 0.08, D * 0.7), 0.04, 0.04)
+        S = self.m(f'placa{k}')
+        T = (t[0], 0, t[1])
+        for sgn in (1, -1):  # as duas faces da lâmina
+            uu = u + sgn * 0.06
+            S.quad(P(a, t, n, uu, y, 0.25), P(a, t, n, uu, y, D + 0.2), P(a, t, n, uu, y + H, D + 0.2),
+                   P(a, t, n, uu, y + H, 0.25), uv=((0, 0), (0, 1), (1, 1), (1, 0)) if sgn > 0 else
+                   ((0, 1), (0, 0), (1, 0), (1, 1)), face=(T[0] * sgn, 0, T[2] * sgn))
+        self.block('marquise', a, t, n, u - 0.06, u + 0.06, y - 0.05, y + H + 0.05, 0.22, D + 0.23)
+
+    def drainpipe(self, a, t, n, u, y0, y1):
+        """Calha/condutor de água descendo pela fachada, com as braçadeiras."""
+        P, M = self.P, self.m('ferro')
+        M.tube([P(a, t, n, u, y1 + 0.3, 0.3), P(a, t, n, u, y1, 0.12), P(a, t, n, u, y0 + 0.4, 0.12),
+                P(a, t, n, u, y0, 0.25)], 0.055, seg=6)
+        for yy in np.arange(y0 + 2, y1, 3.0):
+            M.beam(P(a, t, n, u, yy, 0.0), P(a, t, n, u, yy, 0.12), 0.03, 0.03)
+
     def masonry(self, poly, y0, y1, wall, storefront=True, st=None, street_edge=None):
         """Prédio de alvenaria (pré-guerra): térreo de lojas, andares de janelas com moldura, frisos, pilastras,
         escadas de incêndio nas fachadas de tijolo das ruas, cornija grande com mísulas e platibanda."""
@@ -881,9 +922,16 @@ class Facades:
             nb = max(1, int(L // bay))
             bw = L / nb
             yb = y0
+            if self.is_street is not None and not self.is_street((a + b) / 2, n):
+                self.blank_wall(a, t, n, L, y0, y1, wall, trim)  # divisa com o vizinho: empena cega
+                continue
             if storefront and y1 - y0 > 8:
                 self.storefront(st, a, t, n, L, y0, ground, wall, trim, nb, bw)
                 yb = y0 + ground
+                if self.lod == 0 and rng.random() < 0.55:
+                    self.blade_sign(a, t, n, rng.uniform(1.0, max(1.1, L - 1.0)), y0 + ground + 0.6, rng.randrange(16))
+                if rng.random() < 0.4:
+                    self.drainpipe(a, t, n, rng.choice([0.25, L - 0.25]), y0, y1)
                 if st.get('andaime') and abs(n[1]) > 0.7:
                     self.shed(a, t, n, L, y0)
             elif y1 - y0 > 8:
@@ -1046,7 +1094,7 @@ class Gltf:
         return self.tex[uri]
 
     def material(self, name, color=(1, 1, 1), rough=0.8, metal=0.0, tex=None, emissive=None, emissive_tex=None,
-                 strength=1.0, double=False, normal_tex=None, orm_tex=None, normal_scale=1.0):
+                 strength=1.0, double=False, normal_tex=None, orm_tex=None, normal_scale=1.0, mask=None):
         m = {'name': name, 'pbrMetallicRoughness': {'baseColorFactor': list(color) + [1.0], 'metallicFactor': metal,
                                                      'roughnessFactor': rough}}
         if tex:
@@ -1066,6 +1114,9 @@ class Gltf:
                     self.doc['extensionsUsed'].append('KHR_materials_emissive_strength')
         if double:
             m['doubleSided'] = True
+        if mask is not None:  # recorte por alfa (folhas, marcas pintadas, remendos)
+            m['alphaMode'] = 'MASK'
+            m['alphaCutoff'] = mask
         self.doc['materials'].append(m)
         return len(self.doc['materials']) - 1
 
@@ -1153,6 +1204,335 @@ def lots(block, rng):
                 out.append(piece)
         pos += w
     return out
+
+
+# ---------------------------------------------------------------------------------------------------------- detalhes
+# O que faz a rua parecer de verdade não é prédio complicado: é camada sobre camada de informação. Pintura e
+# remendo no asfalto, manchas, placas, letreiros, árvores, lixo, coisas penduradas, paredes laterais pintadas.
+ADS_VELHOS = ['HARLAN & SONS\nFURNITURE', 'GOLDEN STAR\nPIANOS', 'MERCER TONIC\n5 CENTS', 'HOTEL ROYALE\nROOMS $2',
+              'ATLAS STORAGE\nFIREPROOF', 'UNCLE OTTO\nPICKLES', 'BROADWAY\nLAUNDRY', 'NEW ERA\nCIGARS']
+ADS_MURAL = ['THE LAST\nENCORE', 'NOW\nPLAYING', 'SKYLINE\nRADIO 98.1', 'KING\nCOFFEE', 'WEST SIDE\nSTORIES',
+             'NEON\nNIGHTS', 'MIDTOWN\nMUSIC HALL', 'LUCKY 7\nLOTTERY']
+
+
+def mural_texture(path, rng, brick_path, k):
+    """Anúncio pintado na empena de tijolo: metade 'ghost signs' desbotados (letras brancas em fundo escuro, como os
+    do começo do século XX em Nova York), metade murais coloridos; a tinta deixa o tijolo aparecer (desgaste)."""
+    W = 512
+    brick = Image.open(brick_path).convert('RGB').resize((128, 128))
+    base = Image.new('RGB', (W, W))
+    for x in range(0, W, 128):
+        for y in range(0, W, 128):
+            base.paste(brick, (x, y))
+    paint = Image.new('RGB', (W, W))
+    d = ImageDraw.Draw(paint)
+    ghost = k % 2 == 0
+    if ghost:
+        bg = rng.choice([(90, 30, 25), (30, 30, 34), (40, 55, 70), (95, 70, 30)])
+        d.rectangle((0, 0, W, W), fill=bg)
+        d.rectangle((14, 14, W - 14, W - 14), outline=(225, 215, 190), width=6)
+        txt = rng.choice(ADS_VELHOS)
+        col = (230, 222, 200)
+        font = FONT2
+    else:
+        c1 = np.array(rng.choice([(240, 90, 60), (40, 120, 220), (250, 200, 40), (160, 60, 200), (30, 170, 140)]))
+        c2 = np.array(rng.choice([(20, 20, 40), (250, 240, 220), (200, 30, 80), (20, 80, 60)]))
+        yy = np.linspace(0, 1, W)[:, None, None]
+        arr = (c1 * (1 - yy) + c2 * yy) * np.ones((1, W, 1))
+        paint = Image.fromarray(arr.astype(np.uint8))
+        d = ImageDraw.Draw(paint)
+        for _ in range(rng.randrange(2, 5)):  # formas grandes (sol, círculos, faixas)
+            r = rng.randrange(60, 200)
+            cx, cy = rng.randrange(W), rng.randrange(W)
+            d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=tuple(int(v) for v in rng.choice([c2, c1 * 0.6, (255, 255, 255)])))
+        txt = rng.choice(ADS_MURAL)
+        col = (255, 255, 255) if c2.sum() < 300 else (20, 20, 30)
+        font = FONT
+    lines = txt.split('\n')
+    f = ImageFont.truetype(font, 92)
+    for i, line in enumerate(lines):
+        tw = d.textlength(line, font=f)
+        fs = int(92 * min(1.0, (W - 60) / max(tw, 1)))
+        ff = ImageFont.truetype(font, fs)
+        tw = d.textlength(line, font=ff)
+        d.text(((W - tw) / 2, W * (0.28 + 0.3 * i) - fs / 2), line, font=ff, fill=col)
+    # desgaste: a tinta falha em manchas (ruído de baixa frequência) e nas juntas do tijolo
+    n = np.random.default_rng(k).random((32, 32))
+    n = np.asarray(Image.fromarray((n * 255).astype(np.uint8)).resize((W, W), Image.BICUBIC)) / 255.0
+    a = np.clip((0.55 if ghost else 0.85) + 0.5 * (n - 0.5), 0, 1)[..., None]
+    lum = np.asarray(base.convert('L'), np.float32)[..., None] / 255.0
+    out = np.asarray(paint, np.float32) * (0.55 + 0.6 * lum)  # a tinta acompanha a textura do tijolo
+    res = out * a + np.asarray(base, np.float32) * (1 - a)
+    Image.fromarray(np.clip(res, 0, 255).astype(np.uint8)).save(path)
+    return path
+
+
+def decal_texture(path, kind, seed, w=256):
+    """Decalques RGBA (alfa recortado): remendo de asfalto, mancha de óleo, chiclete/sujeira de calçada, folhas."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:w, 0:w] / w - 0.5
+    low = np.asarray(Image.fromarray((rng.random((16, 16)) * 255).astype(np.uint8)).resize((w, w), Image.BICUBIC)) / 255.0
+    hi = rng.random((w, w))
+    if kind == 'remendo':  # retângulo torto de piche mais novo
+        edge = np.maximum(np.abs(xx) / rng.uniform(0.3, 0.46), np.abs(yy) / rng.uniform(0.3, 0.46))
+        m = edge + 0.25 * (low - 0.5) < 1.0
+        v = 22 + 10 * hi + 8 * low
+        rgb = np.stack([v, v, v * 1.03], -1)
+    elif kind == 'oleo':
+        r = np.hypot(xx, yy * 1.4)
+        m = r + 0.18 * (low - 0.5) < 0.32
+        m &= hi > r * 1.6
+        v = 8 + 6 * low
+        rgb = np.stack([v, v * 0.95, v * 0.9], -1)
+    elif kind == 'sujeira':  # chicletes e manchas pretas da calçada de Nova York
+        m = (hi > 0.993) | ((low > 0.72) & (hi > 0.6))
+        v = 30 + 30 * low
+        rgb = np.stack([v, v, v], -1)
+    else:  # 'folhas': grupo de folhas para a copa das árvores
+        img = Image.new('RGBA', (w, w), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        pr = random.Random(seed)
+        for _ in range(420):
+            cx, cy = pr.gauss(w / 2, w / 5), pr.gauss(w / 2, w / 5)
+            r = pr.uniform(5, 11)
+            g = pr.uniform(0.6, 1.0)
+            d.ellipse((cx - r, cy - r * 0.6, cx + r, cy + r * 0.6),
+                      fill=(int(40 * g), int(85 * g + pr.uniform(0, 25)), int(25 * g), 255))
+        img.save(path)
+        return path
+    a = np.where(m, 255, 0)
+    Image.fromarray(np.dstack([np.clip(rgb, 0, 255), a]).astype(np.uint8), 'RGBA').save(path)
+    return path
+
+
+def text_decal(path, text, w=512, h=256, color=(240, 240, 235)):
+    """Pintura de solo (ONLY, BUS ONLY, STOP): letras alongadas no sentido da via, com tinta gasta."""
+    img = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(FONT, int(h * 0.8))
+    tw = d.textlength(text, font=f)
+    d.text(((w - tw) / 2, h * 0.05), text, font=f, fill=color + (255,))
+    img = img.resize((w, h))
+    a = np.asarray(img).copy()
+    wear = np.random.default_rng(len(text)).random((h, w)) < 0.18
+    a[wear, 3] = 0
+    Image.fromarray(a, 'RGBA').save(path)
+    return path
+
+
+def sign_texture(path, text, bg=(10, 95, 50), fg=(245, 245, 240), w=512, h=128):
+    img = Image.new('RGB', (w, h), bg)
+    d = ImageDraw.Draw(img)
+    d.rectangle((4, 4, w - 5, h - 5), outline=fg, width=4)
+    f = ImageFont.truetype(FONT, int(h * 0.62))
+    tw = d.textlength(text, font=f)
+    if tw > w - 30:
+        f = ImageFont.truetype(FONT, int(h * 0.62 * (w - 30) / tw))
+        tw = d.textlength(text, font=f)
+    d.text(((w - tw) / 2, h * 0.14), text, font=f, fill=fg)
+    img.save(path)
+    return path
+
+
+def flat(mesh, cx, cz, w, h, rot, y, flip_v=False):
+    """Decalque deitado no chão, centrado em (cx, cz), w ao longo de rot, h na perpendicular."""
+    c, s = math.cos(rot), math.sin(rot)
+    P = lambda u, v: (cx + u * c - v * s, y, cz + u * s + v * c)
+    uv = ((0, 1), (1, 1), (1, 0), (0, 0)) if not flip_v else ((1, 0), (0, 0), (0, 1), (1, 1))
+    mesh.quad(P(-w / 2, -h / 2), P(w / 2, -h / 2), P(w / 2, h / 2), P(-w / 2, h / 2), uv=uv, face=(0, 1, 0))
+
+
+def tree(trunk, leaves, x, z, y, rng):
+    """Árvore de rua (plátano de Nova York): tronco afunilado, galhos curvos e copa de cartões de folhas cruzados."""
+    hgt = rng.uniform(4.5, 7.5)
+    trunk.frustum((x, z), 0.17, 0.11, y, y + hgt * 0.45, seg=9)
+    tops = []
+    for i in range(rng.randrange(4, 7)):
+        ang = rng.uniform(0, 2 * math.pi)
+        out = rng.uniform(1.2, 2.4)
+        y0 = y + hgt * rng.uniform(0.38, 0.45)
+        pts = [(x + math.cos(ang) * out * f * f, y0 + (hgt - (y0 - y)) * rng.uniform(0.7, 1.0) * f,
+                z + math.sin(ang) * out * f * f) for f in np.linspace(0, 1, 5)]
+        trunk.tube(pts, 0.07, seg=6)
+        tops.append(pts[-1])
+        tops.append(pts[2])
+    for (px, py, pz) in tops:
+        r = rng.uniform(0.9, 1.5)
+        for k in range(3):  # três cartões cruzados por cacho
+            a = k * math.pi / 3 + rng.uniform(0, 0.5)
+            dx, dz = math.cos(a) * r, math.sin(a) * r
+            tilt = rng.uniform(-0.3, 0.3)
+            leaves.quad((px - dx, py - r + tilt, pz - dz), (px + dx, py - r - tilt, pz + dz),
+                        (px + dx, py + r - tilt, pz + dz), (px - dx, py + r + tilt, pz - dz),
+                        uv=((0, 1), (1, 1), (1, 0), (0, 0)))
+        leaves.quad((px - r, py + 0.1, pz - r), (px + r, py + 0.1, pz - r), (px + r, py + 0.1, pz + r),
+                    (px - r, py + 0.1, pz + r), uv=((0, 1), (1, 1), (1, 0), (0, 0)), face=(0, 1, 0))
+
+
+def street_details(g, pbr, rng, road, sidewalk, plaza, near_plaza, obstacles, tex, rel, texdir):
+    """Camada de rua: marcações e remendos no asfalto, manchas, árvores com canteiro, sacos de lixo, placas com o
+    nome das ruas, caixas de jornal e de correio. Tudo só perto da praça (até ~260 m), onde a câmera anda."""
+    near = lambda x, z, r=260: Point(x, z).distance(near_plaza) < r
+    paint = g.material('pintura_solo', color=(0.9, 0.9, 0.86), rough=0.55, tex=rel(text_decal(tex('solo_only.png'), 'ONLY')),
+                       mask=0.5)
+    bus = g.material('pintura_bus', color=(0.9, 0.9, 0.86), rough=0.55,
+                     tex=rel(text_decal(tex('solo_bus.png'), 'BUS ONLY')), mask=0.5)
+    redlane = g.material('faixa_onibus', color=(0.42, 0.08, 0.06), rough=0.6)
+    line = g.material('linha_branca', color=(0.82, 0.82, 0.78), rough=0.55)
+    yellow = g.material('linha_amarela', color=(0.75, 0.55, 0.06), rough=0.55)
+    patches = [g.material(f'remendo{k}', rough=0.45, tex=rel(decal_texture(tex(f'remendo{k}.png'), 'remendo', 10 + k)),
+                          mask=0.5) for k in range(4)]
+    oil = [g.material(f'oleo{k}', rough=0.15, tex=rel(decal_texture(tex(f'oleo{k}.png'), 'oleo', 20 + k)), mask=0.5)
+           for k in range(3)]
+    dirt = g.material('sujeira', rough=0.6, tex=rel(decal_texture(tex('sujeira.png'), 'sujeira', 30)), mask=0.5)
+    M = {k: Mesh() for k in ('only', 'bus', 'red', 'line', 'yellow', 'dirt')}
+    MP = [Mesh() for _ in patches]
+    MO = [Mesh() for _ in oil]
+
+    # Ruas transversais (mão única, para leste ou oeste): linha tracejada entre as faixas, faixa de retenção antes
+    # das avenidas, "ONLY" com seta nas aproximações.
+    for n in range(40, 51):
+        z, w = street_z(n), street_width(n)
+        for x in np.arange(-290, 325, 9.0):
+            if any(abs(x - ax) < 17 for ax in AVE_X.values()) or abs(x - BWAY_K * z) < 17 or not near(x, z):
+                continue
+            flat(M['line'], x, z, 3.0, 0.12, 0.0, 0.012)
+        for ax in AVE_X.values():
+            for sx in (-1, 1):
+                xs = ax + sx * 17.5
+                if not near(xs, z):
+                    continue
+                flat(M['line'], xs, z, 0.45, w - (12 if n == 42 else 8) - 0.3, 0.0, 0.012)
+                if rng.random() < 0.6:
+                    flat(M['only'], xs + sx * 6, z - 1.3 * rng.choice([-1, 1]), 3.2, 1.6, math.pi / 2 * sx, 0.012)
+    # Avenidas (várias faixas, mão única): tracejados, faixa de ônibus vermelha junto à calçada com "BUS ONLY".
+    for name, ax in AVE_X.items():
+        for z in np.arange(-500, 500, 9.0):
+            if any(abs(z - street_z(n)) < 13 for n in range(40, 51)) or not near(ax, z):
+                continue
+            for off in (-5.4, -1.8, 1.8):
+                flat(M['line'], ax + off, z, 0.12, 3.0, 0.0, 0.012)
+            flat(M['red'], ax + 7.4, z, 3.2, 9.0, 0.0, 0.011)
+            if int(z / 9) % 5 == 0:
+                flat(M['bus'], ax + 7.4, z, 4.5, 2.2, -math.pi / 2, 0.013)
+        for z in np.arange(-500, 500, 3.0):
+            if near(ax, z) and not any(abs(z - street_z(n)) < 13 for n in range(40, 51)):
+                flat(M['yellow'], ax - 8.6, z, 0.1, 3.0, 0.0, 0.012)  # borda amarela do lado esquerdo
+    # Remendos, manchas de óleo (no meio das faixas, onde pinga dos carros parados) e sujeira das calçadas.
+    minx, minz, maxx, maxz = road.bounds
+    placed = 0
+    while placed < 700:
+        x, z = rng.uniform(minx, maxx), rng.uniform(minz, maxz)
+        if not near(x, z) or not road.contains(Point(x, z)):
+            continue
+        k = rng.randrange(4)
+        flat(MP[k], x, z, rng.uniform(1.0, 4.5), rng.uniform(0.8, 3.0), rng.uniform(0, math.pi), 0.008 + 0.0005 * k)
+        if rng.random() < 0.7:
+            flat(MO[rng.randrange(3)], x + rng.uniform(-3, 3), z + rng.uniform(-3, 3), rng.uniform(0.6, 1.6),
+                 rng.uniform(0.6, 1.4), rng.uniform(0, math.pi), 0.0105)
+        placed += 1
+    walk = unary_union([sidewalk, plaza])
+    minx, minz, maxx, maxz = walk.bounds
+    placed = 0
+    while placed < 900:
+        x, z = rng.uniform(minx, maxx), rng.uniform(minz, maxz)
+        if not near(x, z) or not walk.contains(Point(x, z)):
+            continue
+        flat(M['dirt'], x, z, rng.uniform(1.5, 4), rng.uniform(1.5, 4), rng.uniform(0, math.pi), 0.157)
+        placed += 1
+    for key, mat in (('only', paint), ('bus', bus), ('red', redlane), ('line', line), ('yellow', yellow), ('dirt', dirt)):
+        g.add_mesh('solo_' + key, M[key], mat)
+    for k, (mesh, mat) in enumerate(zip(MP, patches)):
+        g.add_mesh(f'solo_remendo{k}', mesh, mat)
+    for k, (mesh, mat) in enumerate(zip(MO, oil)):
+        g.add_mesh(f'solo_oleo{k}', mesh, mat)
+
+    # Árvores nas calçadas das ruas transversais, com canteiro de ferro baixo; sacos de lixo empilhados no meio-fio
+    # (a coleta em Nova York é à noite: as pilhas de sacos pretos fazem parte da paisagem).
+    bark = pbr('casca', 'raw_plank_wall', tint=(0.35, 0.3, 0.26), normal=0.6)
+    leaf = g.material('folhas', rough=0.6, tex=rel(decal_texture(tex('folhas.png'), 'folhas', 40)), mask=0.4,
+                      double=True)
+    soil = g.material('terra', color=(0.08, 0.06, 0.04), rough=0.95)
+    bagm = g.material('saco_lixo', color=(0.015, 0.015, 0.018), rough=0.22)
+    bagw = g.material('saco_lixo_claro', color=(0.55, 0.55, 0.5), rough=0.3)
+    trunk, leaves, pits, fences, bags, bags2 = Mesh(), Mesh(), Mesh(), Mesh(), Mesh(), Mesh()
+    poles_x = set(round(x) for x in np.arange(-280, 320, 32.0))
+    for n in range(40, 51):
+        z, w = street_z(n), street_width(n)
+        side = 6.0 if n == 42 else 4.0
+        for sgn in (-1, 1):  # 1 m para dentro da calçada a partir da guia
+            zt = z + sgn * (w / 2 - side + 1.0)
+            x = -285.0
+            while x < 320:
+                x += rng.uniform(8, 12)
+                if (any(abs(x - ax) < 22 for ax in AVE_X.values()) or abs(x - BWAY_K * zt) < 22 or not near(x, zt, 230)
+                        or any(abs(x - px) < 2.5 for px in poles_x)):
+                    continue
+                if rng.random() < 0.72:
+                    tree(trunk, leaves, x, zt, 0.15, rng)
+                    pits.box((x, 0.16, zt), (0.75, 0.01, 0.75))
+                    for (ax0, az0, ax1, az1) in ((-0.8, -0.8, 0.8, -0.8), (0.8, -0.8, 0.8, 0.8), (0.8, 0.8, -0.8, 0.8),
+                                                 (-0.8, 0.8, -0.8, -0.8)):
+                        fences.beam((x + ax0, 0.45, zt + az0), (x + ax1, 0.45, zt + az1), 0.03, 0.03)
+                    for (ax0, az0) in ((-0.8, -0.8), (0.8, -0.8), (0.8, 0.8), (-0.8, 0.8)):
+                        fences.beam((x + ax0, 0.15, zt + az0), (x + ax0, 0.47, zt + az0), 0.035, 0.035)
+                    obstacles.append((x, zt, 1.1))
+                elif rng.random() < 0.5:  # pilha de sacos de lixo
+                    for _ in range(rng.randrange(3, 9)):
+                        bx, bz = x + rng.uniform(-1.2, 1.2), zt + rng.uniform(-0.5, 0.5)
+                        r = rng.uniform(0.28, 0.42)
+                        (bags if rng.random() < 0.8 else bags2).sphere((bx, 0.15 + r * 0.75 + rng.uniform(0, 0.3), bz), r,
+                                                                       10, sy=rng.uniform(0.75, 1.1))
+                    obstacles.append((x, zt, 1.4))
+    g.add_mesh('rua_troncos', trunk, bark)
+    g.add_mesh('rua_folhas', leaves, leaf)
+    g.add_mesh('rua_canteiros', pits, soil)
+    g.add_mesh('rua_grades', fences, g.material('grade_canteiro', color=(0.03, 0.03, 0.03), rough=0.4, metal=1.0))
+    g.add_mesh('rua_sacos', bags, bagm)
+    g.add_mesh('rua_sacos_claros', bags2, bagw)
+
+    # Placas com o nome das ruas (verdes, nas esquinas) e caixas de jornal/correio perto das esquinas.
+    signs = Mesh()
+    sign_meshes = {}
+    for n in range(41, 49):
+        z, w = street_z(n), street_width(n)
+        for name, ax in AVE_X.items():
+            if not near(ax, z):
+                continue
+            for sx, sz in ((1, -1), (-1, 1)):
+                px, pz = ax + sx * 14.6, z + sz * (w / 2 + 0.6)
+                signs.cylinder((px, pz), 0.05, 0.15, 3.4, seg=8)
+                for label, along_x in ((f'W {n} ST', True), (f'{name[:-2]} AV', False)):
+                    key = label
+                    if key not in sign_meshes:
+                        sign_meshes[key] = (Mesh(), g.material('placa_' + label.replace(' ', '_'),
+                                                               tex=rel(sign_texture(tex('rua_' + label.replace(' ', '_') + '.png'), label)),
+                                                               rough=0.4))
+                    m = sign_meshes[key][0]
+                    yy = 3.15 if along_x else 2.9
+                    if along_x:
+                        for f in (1, -1):
+                            m.quad((px - 0.7, yy - 0.15, pz + 0.02 * f), (px + 0.7, yy - 0.15, pz + 0.02 * f),
+                                   (px + 0.7, yy + 0.15, pz + 0.02 * f), (px - 0.7, yy + 0.15, pz + 0.02 * f),
+                                   uv=((0, 1), (1, 1), (1, 0), (0, 0)) if f > 0 else ((1, 1), (0, 1), (0, 0), (1, 0)),
+                                   face=(0, 0, f))
+                    else:
+                        for f in (1, -1):
+                            m.quad((px + 0.02 * f, yy - 0.15, pz + 0.7), (px + 0.02 * f, yy - 0.15, pz - 0.7),
+                                   (px + 0.02 * f, yy + 0.15, pz - 0.7), (px + 0.02 * f, yy + 0.15, pz + 0.7),
+                                   uv=((0, 1), (1, 1), (1, 0), (0, 0)) if f > 0 else ((1, 1), (0, 1), (0, 0), (1, 0)),
+                                   face=(f, 0, 0))
+            for k in range(rng.randrange(2, 5)):  # caixas de jornal coloridas em fila, perto da esquina
+                bx = ax + rng.choice([-1, 1]) * rng.uniform(16.5, 20)
+                bz = z + rng.choice([-1, 1]) * (w / 2 - 0.5)
+                col = rng.randrange(5)
+                sign_meshes.setdefault(f'_caixa{col}', (Mesh(), g.material(f'caixa_jornal{col}', color=[
+                    (0.6, 0.05, 0.04), (0.05, 0.15, 0.45), (0.85, 0.75, 0.1), (0.9, 0.9, 0.88), (0.05, 0.3, 0.12)][col],
+                    rough=0.35)))[0].box((bx, 0.65, bz), (0.25, 0.5, 0.22))
+                obstacles.append((bx, bz, 0.5))
+    g.add_mesh('rua_postes_placas', signs, g.material('poste_placa', color=(0.05, 0.05, 0.05), rough=0.4, metal=1.0))
+    for key, (m, mat) in sign_meshes.items():
+        g.add_mesh('rua_placa_' + key, m, mat)
 
 
 # ---------------------------------------------------------------------------------------------------------- PBR
@@ -1256,6 +1636,9 @@ def build(out, seed, texdir):
                                               emissive=(0.25, 0.25, 0.25), emissive_tex=rel(e), strength=0.3)
     roof = pbr('telhado', 'brushed_concrete', tint=(0.35, 0.34, 0.33))
     fac = Facades(rng)
+    from shapely.prepared import prep
+    blocks_p = prep(blocks)
+    fac.is_street = lambda mid, nrm: not blocks_p.contains(Point(mid[0] + nrm[0] * 2.5, mid[1] + nrm[1] * 2.5))
     WALLS = {'tijolo': ['tijolo0', 'tijolo1', 'tijolo2', 'tijolo3', 'tijolo4'], 'pedra': ['pedra0', 'pedra1', 'pedra2'],
              'reboco': ['reboco0', 'reboco1'], 'concreto': ['concreto0']}
     TRIMS = ['cornija', 'cornija', 'cornija_branca', 'cornija_escura']
@@ -1416,6 +1799,10 @@ def build(out, seed, texdir):
         c, e = curtain_texture(tex(f'cortina{k}'), rng)
         fmat[f'cortina{k}'] = g.material(f'cortina{k}', rough=0.06, metal=0.3, tex=rel(c), emissive=(1, 1, 1),
                                          emissive_tex=rel(e), strength=0.6)
+    brick_src = os.path.join(texdir, 'large_red_bricks', 'cor.jpg')
+    for k in range(12):  # anúncios pintados e murais nas empenas
+        r = rel(mural_texture(tex(f'mural{k:02d}.png'), rng, brick_src, k))
+        fmat[f'mural{k}'] = g.material(f'mural{k}', tex=r, rough=0.85)
     for name, mesh in fac.mesh.items():
         g.add_mesh('fachada_' + name, mesh, fmat[name])
     for pos, col, inten, rr in fac.lights:
@@ -1569,6 +1956,10 @@ def build(out, seed, texdir):
     with open(os.path.join(out, 'vapor.json'), 'w') as f:
         json.dump(steam_points, f)
     with open(os.path.join(out, 'obstaculos.json'), 'w') as f:
+        json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles + fac.obstacles], f)
+
+    street_details(g, pbr, rng, road, sidewalk, plaza, near_plaza, obstacles, tex, rel, texdir)
+    with open(os.path.join(out, 'obstaculos.json'), 'w') as f:  # de novo: árvores, lixo e caixas entraram
         json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles + fac.obstacles], f)
 
     # Postes: luz de rua (sódio/LED quente) a cada ~30 m nas calçadas; KHR_lights_punctual.
