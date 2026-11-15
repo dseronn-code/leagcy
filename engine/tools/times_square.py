@@ -1588,6 +1588,132 @@ def tree(trunk, leaves, x, z, y, rng):
                     (px - r, py + 0.1, pz + r), uv=((0, 1), (1, 1), (1, 0), (0, 0)), face=(0, 1, 0))
 
 
+def mobiliario(g, pbr, rng, plaza, sidewalk, near_plaza, obstacles, steam_points, tex, rel):
+    """Mobiliário da Times Square de verdade (medidas da pesquisa, marcas fictícias): carrinhos de comida com guarda-sol,
+    luz e fumaça; chaminés de vapor listradas laranja e branco (o vapor sai pela cena: vapor.json); quiosques de Wi-Fi
+    com tela; lixeiras solares; barreiras azuis de contenção; abrigos de ônibus com anúncio iluminado; estações de
+    bicicleta compartilhada."""
+    near = lambda x, z, r=200: Point(x, z).distance(near_plaza) < r
+    M = {k: Mesh() for k in ('aco', 'carrinho', 'guarda_sol', 'luz_quente', 'listra_l', 'listra_b', 'quiosque', 'tela',
+                             'lixeira', 'painel_solar', 'barreira', 'vidro', 'bike', 'bike_quadro', 'anuncio_abrigo')}
+    # carrinhos de comida (1,5 x 3 m, guarda-sol listrado, lâmpada pendurada, fumaça da chapa)
+    walk = unary_union([plaza, sidewalk])
+    minx, minz, maxx, maxz = walk.bounds
+    feitos = 0
+    while feitos < 22:
+        x, z = rng.uniform(minx, maxx), rng.uniform(minz, maxz)
+        if not near(x, z, 160) or not walk.contains(Point(x, z).buffer(2.0)):
+            continue
+        rot = rng.choice([0.0, math.pi / 2])
+        M['carrinho'].box((x, 0.85, z), (0.75, 0.55, 1.5), rot=rot)
+        M['aco'].box((x, 1.42, z), (0.78, 0.02, 1.52), rot=rot)
+        for dx, dz in ((-0.6, -1.3), (0.6, -1.3), (-0.6, 1.3), (0.6, 1.3)):
+            M['aco'].cylinder((x + dx, z + dz), 0.17, 0.15, 0.3, seg=10)
+        M['aco'].cylinder((x, z), 0.025, 1.42, 2.6, seg=6)
+        M['guarda_sol'].frustum((x, z), 1.5, 0.05, 2.35, 2.75, seg=12)
+        M['luz_quente'].sphere((x, 2.2, z), 0.07, 8)
+        g.light((x, 2.15, z), (1.0, 0.75, 0.45), 60.0, 6.0)
+        steam_points.append((float(x + 0.3), float(z)))
+        obstacles.append((x, z, 1.8))
+        feitos += 1
+    # chaminés de vapor (laranja e branco, ~3 m) sobre bueiros nas ruas transversais e avenidas
+    for k in range(10):
+        n = rng.randrange(41, 48)
+        z = street_z(n) + rng.uniform(-2.5, 2.5)
+        x = rng.choice([-120.0, -60.0, 60.0, 120.0, 200.0]) + rng.uniform(-10, 10)
+        if not near(x, z, 220):
+            continue
+        for j in range(6):  # faixas alternadas
+            M['listra_l' if j % 2 == 0 else 'listra_b'].frustum((x, z), 0.32, 0.3, 0.02 + j * 0.5, 0.02 + (j + 1) * 0.5, seg=14,
+                                                                 cap=(j == 5))
+        steam_points.append((float(x), float(z)))
+        obstacles.append((x, z, 0.8))
+    # quiosques de Wi-Fi (0,89 x 0,28 x 2,9 m, tela dos dois lados) e lixeiras solares (1,26 m) nas calçadas
+    for n in range(41, 49):
+        z0, w = street_z(n), street_width(n)
+        for ax in AVE_X.values():
+            for sx, sz in ((1, 1), (-1, -1)):
+                x, z = ax + sx * 13.2, z0 + sz * (w / 2 + 4.0)
+                if not near(x, z):
+                    continue
+                if rng.random() < 0.6:
+                    M['quiosque'].box((x, 1.45, z), (0.14, 1.45, 0.445))
+                    for f in (-1, 1):
+                        M['tela'].quad((x + f * 0.142, 0.9, z - 0.36), (x + f * 0.142, 0.9, z + 0.36),
+                                       (x + f * 0.142, 2.6, z + 0.36), (x + f * 0.142, 2.6, z - 0.36),
+                                       uv=((0, 1), (1, 1), (1, 0), (0, 0)), face=(f, 0, 0))
+                    obstacles.append((x, z, 0.6))
+                bx = x + sx * 1.6
+                M['lixeira'].box((bx, 0.63, z), (0.33, 0.48, 0.3))
+                M['painel_solar'].box((bx, 1.16, z), (0.35, 0.05, 0.32))
+                obstacles.append((bx, z, 0.5))
+    # barreiras azuis de contenção (2,4 m) em fila perto da praça (eventos)
+    for k in range(5):
+        zc = street_z(rng.randrange(43, 47)) + rng.uniform(-30, 30)
+        xc = BWAY_K * zc + rng.choice([-6.0, 6.0])
+        if not plaza.contains(Point(xc, zc).buffer(3.0)):
+            continue
+        for j in range(rng.randrange(3, 7)):
+            zz = zc + j * 2.45
+            M['barreira'].box((xc, 1.0, zz), (0.04, 0.08, 1.2))
+            M['barreira'].box((xc, 0.55, zz), (0.025, 0.4, 1.15))
+            for dz in (-1.0, 1.0):
+                M['barreira'].box((xc, 0.15, zz + dz), (0.35, 0.03, 0.03))
+            obstacles.append((xc, zz, 1.0))
+    # abrigos de ônibus nas avenidas: estrutura, teto, vidro e painel de anúncio iluminado numa ponta
+    for k in range(6):
+        ax = rng.choice(list(AVE_X.values()))
+        z = rng.uniform(-200, 200)
+        if any(abs(z - street_z(n)) < 20 for n in range(40, 51)) or not near(ax, z):
+            continue
+        x = ax + rng.choice([-1, 1]) * 11.6
+        for dz in (-2.4, 2.4):
+            M['aco'].box((x, 1.3, z + dz), (0.05, 1.3, 0.05))
+        M['aco'].box((x, 2.62, z), (0.75, 0.04, 2.6))
+        M['vidro'].quad((x + 0.6, 0.2, z - 2.4), (x + 0.6, 0.2, z + 2.4), (x + 0.6, 2.4, z + 2.4), (x + 0.6, 2.4, z - 2.4),
+                        face=(1, 0, 0))
+        M['anuncio_abrigo'].box((x, 1.3, z + 2.45), (0.6, 1.0, 0.04))
+        obstacles.append((x, z, 2.4))
+    # estações de bicicleta: base, 10 bicicletas azuis (rodas em tubo) e o totem
+    for k in range(4):
+        n = rng.randrange(41, 48)
+        z = street_z(n) + rng.choice([-1, 1]) * (street_width(n) / 2 - 5.3)
+        x0 = rng.uniform(40, 200) * rng.choice([-1, 1])
+        if not near(x0, z):
+            continue
+        M['aco'].box((x0 + 6, 0.05, z), (6.5, 0.05, 0.3))
+        M['quiosque'].box((x0 - 1.0, 1.0, z), (0.25, 1.0, 0.2))
+        for j in range(10):
+            bx = x0 + 0.5 + j * 1.2
+            for dz in (-0.55, 0.55):
+                M['bike'].tube([(bx + 0.33 * math.cos(a) * 0, 0.35 + 0.33 * math.sin(a), z + dz + 0.33 * math.cos(a))
+                                for a in np.linspace(0, 2 * math.pi, 13)], 0.025, seg=5)
+            M['bike_quadro'].beam((bx, 0.35, z - 0.55), (bx, 0.75, z + 0.2), 0.05, 0.05)
+            M['bike_quadro'].beam((bx, 0.75, z + 0.2), (bx, 0.35, z + 0.55), 0.05, 0.05)
+            M['bike_quadro'].beam((bx, 0.75, z - 0.3), (bx, 0.78, z + 0.25), 0.05, 0.05)
+            M['aco'].beam((bx - 0.25, 0.95, z + 0.5), (bx + 0.25, 0.95, z + 0.5), 0.03, 0.03)
+        obstacles.append((x0 + 6, z, 6.5))
+    mats = {
+        'aco': g.material('mob_aco', color=(0.55, 0.57, 0.6), rough=0.3, metal=1.0),
+        'carrinho': g.material('mob_carrinho', color=(0.82, 0.82, 0.84), rough=0.25, metal=1.0),
+        'guarda_sol': g.material('mob_guarda_sol', color=(0.9, 0.75, 0.1), rough=0.6, double=True),
+        'luz_quente': g.material('mob_luz', color=(1, 1, 1), emissive=(1.0, 0.8, 0.5), strength=40.0),
+        'listra_l': g.material('mob_vapor_laranja', color=(0.95, 0.35, 0.03), rough=0.5),
+        'listra_b': g.material('mob_vapor_branco', color=(0.9, 0.9, 0.88), rough=0.5),
+        'quiosque': g.material('mob_quiosque', color=(0.12, 0.12, 0.13), rough=0.35, metal=0.8),
+        'tela': g.material('mob_tela', color=(0.2, 0.4, 0.9), emissive=(0.25, 0.5, 1.0), strength=12.0),
+        'lixeira': g.material('mob_lixeira', color=(0.05, 0.25, 0.12), rough=0.5, metal=0.4),
+        'painel_solar': g.material('mob_solar', color=(0.05, 0.07, 0.15), rough=0.1, metal=0.5),
+        'barreira': g.material('mob_barreira', color=(0.08, 0.22, 0.65), rough=0.45, metal=0.3),
+        'vidro': g.material('mob_vidro', color=(0.8, 0.85, 0.9), rough=0.05, metal=0.0, double=True),
+        'bike': g.material('mob_pneu', color=(0.02, 0.02, 0.02), rough=0.8),
+        'bike_quadro': g.material('mob_bike', color=(0.05, 0.35, 0.8), rough=0.35, metal=0.4),
+        'anuncio_abrigo': g.material('mob_anuncio', color=(1, 1, 1), emissive=(1.0, 0.95, 0.85), strength=8.0),
+    }
+    for k, mesh in M.items():
+        g.add_mesh('mob_' + k, mesh, mats[k])
+
+
 def street_details(g, pbr, rng, road, sidewalk, plaza, near_plaza, obstacles, tex, rel, texdir):
     """Camada de rua: marcações e remendos no asfalto, manchas, árvores com canteiro, sacos de lixo, placas com o
     nome das ruas, caixas de jornal e de correio. Tudo só perto da praça (até ~260 m), onde a câmera anda."""
@@ -2388,6 +2514,9 @@ def build(out, seed, texdir):
         json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles + fac.obstacles], f)
 
     street_details(g, pbr, rng, road, sidewalk, plaza, near_plaza, obstacles, tex, rel, texdir)
+    mobiliario(g, pbr, rng, plaza, sidewalk, near_plaza, obstacles, steam_points, tex, rel)
+    with open(os.path.join(out, 'vapor.json'), 'w') as f:  # de novo: carrinhos e chaminés soltam vapor
+        json.dump(steam_points, f)
     with open(os.path.join(out, 'obstaculos.json'), 'w') as f:  # de novo: árvores, lixo e caixas entraram
         json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles + fac.obstacles], f)
 
