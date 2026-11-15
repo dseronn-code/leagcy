@@ -1458,13 +1458,21 @@ bool buildDemoSceneDefaults(Scene& scene, Camera& camera, const DemoOptions& opt
 
 bool buildDemoScene(Scene& scene, Camera& camera, const DemoOptions& opt) {
   if (!buildDemoSceneDefaults(scene, camera, opt)) return false;
+  // Cenas em arquivo (.json) não passam pelos construtores acima: a noite pedida ("noite": true ou --night) apaga o
+  // sol aqui (antes, a cena .json ficava de dia mesmo com "noite": true).
+  const bool jsonScene = opt.name.size() > 5 && opt.name.compare(opt.name.size() - 5, 5, ".json") == 0;
+  if (jsonScene && opt.night) {
+    scene.sunDirection = sunFrom(-10.0f, 140.0f);
+    scene.sunIlluminance = 0.0f;
+    scene.moonIlluminance = opt.moon ? (opt.rain > 0.0f ? 0.05f : 0.25f) : 0.0f;  // com chuva, a lua mal passa
+  }
   if (opt.clouds >= 0.0f) scene.cloudCoverage = std::min(opt.clouds, 1.0f);
   if (opt.fog >= 0.0f) scene.fogDensity = opt.fog;
   if (opt.rain > 0.0f) {
     scene.wetness = std::min(opt.rain * 1.5f, 1.0f);  // molha antes de empoçar
     scene.puddles = std::min(opt.rain, 1.0f);
     scene.rain = std::min(opt.rain, 1.0f);
-    if (opt.clouds < 0.0f && scene.sunIlluminance > 0.0f)  // chuva vem com céu fechado
+    if (opt.clouds < 0.0f && (scene.sunIlluminance > 0.0f || jsonScene))  // chuva vem com céu fechado
       scene.cloudCoverage = std::max(scene.cloudCoverage, 0.5f + 0.4f * scene.rain);
     scene.addEmitter(kParticleRain, glm::vec3(0.0f), 0.0f, scene.rain, uint32_t(40000.0f * scene.rain));  // pingos
     scene.addEmitter(kParticleSplash, glm::vec3(0.0f), 0.0f, scene.rain, uint32_t(4000.0f * scene.rain));  // respingos

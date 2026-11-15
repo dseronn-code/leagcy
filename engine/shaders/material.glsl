@@ -112,12 +112,17 @@ void applyWetness(inout Surface s, vec3 P, vec3 N) {
   float porosity = clamp((1.0 - dot(s.f0, vec3(0.333)) * 4.0) * (0.3 + 0.7 * s.roughness), 0.0, 1.0);
   s.diffuseColor *= mix(1.0, 0.35, wet * porosity);  // água nos poros: menos luz espalhada de volta
   s.roughness = mix(s.roughness, min(s.roughness, 0.25), wet * 0.8);
+  // Chão encharcado (asfalto e calçada sob chuva forte): a película d'água cobre os poros e fica quase
+  // lisa — o reflexo das luzes vira um rastro comprido no chão. Metade do relevo da textura some sob a água.
+  float film = smoothstep(0.85, 0.95, N.y) * wet * frame.weather.y;
+  s.roughness = mix(s.roughness, 0.07, film * 0.85);
+  s.normal = normalize(mix(s.normal, N, film * 0.5));
   // Poças: só em superfícies quase horizontais viradas para cima.
   float up = smoothstep(0.92, 0.98, N.y);
   if (up <= 0.0 || frame.weather.y <= 0.0) return;
   up *= rainExposure(P);
   float n = fbm(P.xz * 0.35, 3) * 0.75 + fbm(P.xz * 2.1, 2) * 0.25;
-  float puddle = up * smoothstep(1.0 - frame.weather.y * 0.6, 1.08 - frame.weather.y * 0.6, n + 0.15);
+  float puddle = up * smoothstep(1.0 - frame.weather.y * 0.75, 1.08 - frame.weather.y * 0.75, n + 0.15);
   if (puddle <= 0.0) return;
   s.diffuseColor *= mix(1.0, 0.25, puddle);  // a água por cima absorve e espelha
   s.f0 = mix(s.f0, vec3(0.02), puddle);

@@ -205,6 +205,7 @@ struct Options {
 Options parseArgs(int argc, char** argv) {
   bool noGiProbes = false;
   bool qualityGiven = false;
+  bool evGiven = false;
   Options o;
   bool noFireflyClamp = false;
   int sppOverride = 0, candOverride = 0, neighOverride = -1;  // medição: substituem o preset (--spp, --restir-*)
@@ -287,7 +288,7 @@ Options parseArgs(int argc, char** argv) {
       qualityGiven = true;
     }
     else if (a == "--exposure") o.render.manualEV100 = float(std::atof(next()));
-    else if (a == "--ev") o.render.exposureCompensation = float(std::atof(next()));
+    else if (a == "--ev") o.render.exposureCompensation = float(std::atof(next())), evGiven = true;
     else if (a == "--dof") o.render.depthOfField = true;
     else if (a == "--focus") o.render.dofFocusDistance = float(std::atof(next()));
     else if (a == "--no-denoiser") o.render.denoiser = false;
@@ -482,6 +483,9 @@ Options parseArgs(int argc, char** argv) {
     if (!o.scene.night && text.find("\"noite\": true") != std::string::npos) o.scene.night = true;
     if (o.scene.rain <= 0.0f && number("\"chuva\"", v)) o.scene.rain = v;
     if (o.scene.fog < 0.0f && number("\"nevoa\"", v)) o.scene.fog = v;
+    // "exposicao_ev": compensação da auto-exposição pedida pela cena (à noite o olho não clareia tudo: a rua fica
+    // escura e as luzes brilham); --ev na linha de comando vale mais.
+    if (!evGiven && number("\"exposicao_ev\"", v)) o.render.exposureCompensation = v;
   }
   // A cena pode pedir um preset ("qualidade": "alto" no .json); --quality na linha de comando vale mais.
   if (!qualityGiven && o.scene.name.size() > 5 && o.scene.name.substr(o.scene.name.size() - 5) == ".json") {

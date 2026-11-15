@@ -18,8 +18,9 @@ void main() {
   const float TOP = 400.0;  // m acima da câmera
   vec3 origin = vec3(xz.x, frame.cameraPos.y + TOP, xz.y);
   HitInfo hit;
-  // Inclinado como a chuva (vento), para a "sombra" de chuva cair do lado certo dos prédios.
-  vec3 dir = normalize(vec3(0.6, -9.0, 0.25));
+  // Quase vertical: um pouco inclinado como a chuva com vento, mas pouco — com 0,6/9 uma torre de 250 m (Times Square)
+  // deixava 17 m de rua "seca" na sombra de chuva, a rua inteira; perto do chão o vento entre prédios espalha a chuva.
+  vec3 dir = normalize(vec3(0.08, -9.0, 0.03));
   float h = -1e4;
   if (traceHit(origin, dir, 2.0 * TOP + 1e3, hit)) h = hit.P.y;
   imageStore(occlusionOut, id, vec4(h, 0.0, 0.0, 1.0));

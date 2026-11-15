@@ -5,6 +5,7 @@
  "noite": true,
  "chuva": 0.8,
  "nevoa": 0.004,
+ "exposicao_ev": -2.5,
  "camera": {
   "posicao": [
    14,
