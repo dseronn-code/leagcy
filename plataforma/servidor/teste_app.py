@@ -12,7 +12,7 @@ import app as servidor  # noqa: E402
 
 c = TestClient(servidor.app)
 enviados = []
-servidor.enviar_email = lambda para, assunto, texto: enviados.append((para, texto))
+servidor.enviar_email = lambda para, assunto, texto, html=None: enviados.append((para, texto))
 
 
 def codigo():

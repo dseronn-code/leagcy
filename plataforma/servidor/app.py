@@ -43,6 +43,49 @@ SESSAO_VALIDADE = 30 * 24 * 3600
 USERNAME_RE = re.compile(r'^[A-Za-z0-9_]{3,16}$')
 EMAIL_RE = re.compile(r'^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$')
 
+LOGO_URL = 'https://legacyengine.com.br/img/icone-180.png'
+
+
+def email_html(titulo: str, frase: str, codigo: str, aviso: str) -> str:
+    """E-mail com a cara da Legacy: tabelas e estilos embutidos (o que Gmail, Outlook e celulares entendem)."""
+    digitos = ''.join(
+        f'<td style="padding:0 4px"><div style="width:44px;height:56px;line-height:56px;border-radius:10px;'
+        f'background:#f3f4f7;border:1px solid #e3e5ec;font:700 30px/56px \'Courier New\',monospace;color:#16110a;'
+        f'text-align:center">{d}</div></td>' for d in codigo)
+    return f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta name="color-scheme" content="light"><title>{titulo}</title></head>
+<body style="margin:0;padding:0;background:#0b0c10">
+<div style="display:none;max-height:0;overflow:hidden">Seu código Legacy: {codigo}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b0c10;padding:32px 12px">
+<tr><td align="center">
+ <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px">
+  <tr><td style="padding:0 4px 22px">
+   <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+    <td><img src="{LOGO_URL}" width="36" height="36" alt="Legacy" style="display:block;border-radius:9px"></td>
+    <td style="padding-left:12px;font:700 15px Arial,sans-serif;letter-spacing:5px;color:#f1f2f6">LEGACY</td>
+   </tr></table>
+  </td></tr>
+  <tr><td style="background:#ffffff;border-radius:16px;overflow:hidden">
+   <div style="height:5px;background:#ff8a5c;background-image:linear-gradient(90deg,#ffb547,#ff5e7a)"></div>
+   <div style="padding:36px 32px 32px;font-family:Arial,Helvetica,sans-serif">
+    <h1 style="margin:0 0 12px;font:700 24px Arial,sans-serif;color:#0b0c10">{titulo}</h1>
+    <p style="margin:0 0 26px;font-size:15px;line-height:1.6;color:#4a4f5c">{frase}</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 26px"><tr>{digitos}</tr></table>
+    <p style="margin:0 0 6px;font-size:13px;color:#6b7080;text-align:center">O código vale por <b>15 minutos</b>.</p>
+    <div style="margin:26px 0 0;padding:16px 18px;border-radius:10px;background:#fff7f0;border:1px solid #ffe2cc;
+         font-size:13px;line-height:1.5;color:#7a4b2a">{aviso}</div>
+   </div>
+  </td></tr>
+  <tr><td style="padding:22px 8px 0;font:12px/1.6 Arial,sans-serif;color:#7d8394;text-align:center">
+   Nunca pedimos sua senha ou este código por mensagem, ligação ou rede social.<br>
+   <a href="https://legacyengine.com.br" style="color:#ffb547;text-decoration:none">legacyengine.com.br</a> ·
+   <a href="mailto:equipe@legacyengine.com.br" style="color:#ffb547;text-decoration:none">equipe@legacyengine.com.br</a><br>
+   Legacy Global Desenvolvimento de Software Ltda. · São Paulo/SP
+  </td></tr>
+ </table>
+</td></tr></table></body></html>"""
+
+
 class FalhaEmail(Exception):
     """O e-mail com o código não saiu (chave, Resend fora do ar, SMTP...). Vira 503 com mensagem clara."""
 
@@ -196,7 +239,7 @@ def limite(request: Request, chave: str, max_por_min: int):
     _pedidos[(ip, chave)] = lista
 
 
-def enviar_email(para: str, assunto: str, texto: str):
+def enviar_email(para: str, assunto: str, texto: str, html: str | None = None):
     modo = os.environ.get('LEGACY_EMAIL', 'console')
     if modo == 'resend':
         chave = os.environ.get('RESEND_API_KEY', '')
@@ -206,7 +249,8 @@ def enviar_email(para: str, assunto: str, texto: str):
         req = urllib.request.Request(
             'https://api.resend.com/emails', method='POST',
             data=json.dumps({'from': os.environ.get('LEGACY_EMAIL_FROM', 'Legacy <equipe@legacyengine.com.br>'),
-                             'to': [para], 'subject': assunto, 'text': texto}).encode(),
+                             'to': [para], 'subject': assunto, 'text': texto,
+                             **({'html': html} if html else {})}).encode(),
             # User-Agent próprio: sem ele a API do Resend (atrás da Cloudflare) recusa a chamada do Python (403).
             headers={'Authorization': 'Bearer ' + chave, 'Content-Type': 'application/json',
                      'User-Agent': 'legacy-conta/1.0 (+https://legacyengine.com.br)'})
@@ -226,6 +270,8 @@ def enviar_email(para: str, assunto: str, texto: str):
         m['To'] = para
         m['Subject'] = assunto
         m.set_content(texto)
+        if html:
+            m.add_alternative(html, subtype='html')
         porta = int(os.environ.get('LEGACY_SMTP_PORTA', '465'))
         host = os.environ.get('LEGACY_SMTP_HOST', 'smtp.hostinger.com')
         try:
@@ -249,13 +295,20 @@ def novo_codigo(con, email: str, finalidade: str = 'cadastro'):
     con.execute('INSERT OR REPLACE INTO codigos (email, hash, expira, tentativas, enviado) VALUES (?,?,?,0,?)',
                 (email, hash_token(finalidade + ':' + email + ':' + codigo), time.time() + CODIGO_VALIDADE, time.time()))
     if finalidade == 'senha':
-        enviar_email(email, f'Redefinir a senha Legacy: {codigo}',
+        enviar_email(email, f'{codigo} é o seu código para criar uma senha nova',
                      f'Use o código {codigo} para criar uma senha nova na sua conta Legacy. Ele vale por 15 minutos.\n\n'
-                     'Se não foi você, ignore este e-mail: sua senha continua a mesma.')
+                     'Se não foi você, ignore este e-mail: sua senha continua a mesma.',
+                     email_html('Criar uma senha nova', 'Recebemos um pedido para trocar a senha da sua conta Legacy. '
+                                'Digite este código no Legacy Launcher:', codigo,
+                                '<b>Não foi você?</b> Ignore este e-mail: sua senha continua a mesma e ninguém entra na sua conta sem este código.'))
     else:
-        enviar_email(email, f'Seu código Legacy: {codigo}',
+        enviar_email(email, f'{codigo} é o seu código Legacy',
                      f'Use o código {codigo} para confirmar sua conta Legacy. Ele vale por 15 minutos.\n\n'
-                     'Se não foi você, ignore este e-mail.')
+                     'Se não foi você, ignore este e-mail.',
+                     email_html('Confirme seu e-mail', 'Falta só um passo para criar sua conta Legacy. '
+                                'Digite este código no Legacy Launcher:', codigo,
+                                '<b>Não foi você?</b> Alguém digitou este e-mail por engano. Pode ignorar: '
+                                'sem o código a conta não é criada.'))
 
 
 def codigo_ou_erro(con, email: str, codigo: str, finalidade: str):
