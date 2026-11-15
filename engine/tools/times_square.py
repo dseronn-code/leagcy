@@ -979,7 +979,7 @@ class Facades:
         # Loja de verdade (interior 3D) atrás de alguns vãos: só perto da praça, com fachada larga e prédio fundo.
         loja = set()
         if self.loja_ok and self.lojas_restantes > 0 and self._poly is not None and rng.random() < 0.45:
-            tipo, Wi, Di = rng.choices([('conveniencia', 10.0, 12.0), ('joalheria', 12.0, 14.0)], [2, 1])[0]
+            tipo, Wi, Di = rng.choices([('conveniencia', 10.0, 12.0), ('joalheria', 12.0, 14.0), ('lanchonete', 10.0, 12.0), ('roupas', 10.0, 12.0)], [2, 1, 2, 2])[0]
             m = int(Wi // bw)
             if m >= 2 and nb >= m:
                 i0 = rng.randrange(0, nb - m + 1)
@@ -2402,14 +2402,104 @@ def build(out, seed, texdir):
     for k, (cor, mesh) in enumerate(zip(NEON_CORES, tubos)):
         g.add_mesh(f'neon_tubo{k}', mesh, g.material(f'neon_tubo{k}', color=cor, emissive=cor, strength=30.0))
 
-    # Arquibancada vermelha iluminada (Duffy Square, ao norte da 46th, no meio da gravata).
-    zs = street_z(46) - 9 - 18
+    # Arquibancada vermelha (Duffy Square, na 47th): 27 degraus de vidro com LED vermelho por dentro, a largura
+    # afinando de 13,7 m embaixo para 9,75 m em cima (como a real); a face de cima de cada degrau é vidro escuro
+    # brilhante e o espelho (a frente) acende vermelho. Corrimãos de aço dos lados.
+    zs = street_z(46) - 9 - 16
     xs = BWAY_K * zs
-    red = g.material('degraus', color=(0.7, 0.05, 0.05), rough=0.25, emissive=(1.0, 0.08, 0.06), strength=1.5)
-    m = Mesh()
-    for k in range(14):
-        m.box((xs, 0.15 + 0.2 * k + 0.1, zs - 0.45 * k), (7.5, 0.1 + 0.2 * k / 2 + 0.0, 0.45))
-    g.add_mesh('arquibancada', m, red)
+    vidro_d = g.material('degraus_vidro', color=(0.12, 0.01, 0.01), rough=0.04, metal=0.0)
+    led = g.material('degraus_led', color=(1, 0.05, 0.04), emissive=(1.0, 0.04, 0.03), strength=3.5)
+    aco_d = g.material('degraus_aco', color=(0.6, 0.62, 0.64), rough=0.25, metal=1.0)
+    topo, frente, corr = Mesh(), Mesh(), Mesh()
+    n_deg, alt, prof = 27, 0.17, 0.42
+    for k in range(n_deg):
+        hw = (13.7 - (13.7 - 9.75) * k / (n_deg - 1)) / 2
+        y0, y1 = 0.15 + alt * k, 0.15 + alt * (k + 1)
+        z0, z1 = zs - prof * k, zs - prof * (k + 1)
+        topo.quad((xs - hw, y1, z0), (xs + hw, y1, z0), (xs + hw, y1, z1), (xs - hw, y1, z1), face=(0, 1, 0))
+        frente.quad((xs - hw, y0, z0), (xs + hw, y0, z0), (xs + hw, y1, z0), (xs - hw, y1, z0), face=(0, 0, 1))
+        for sx in (-1, 1):  # laterais fechadas (vidro escuro)
+            topo.quad((xs + sx * hw, 0.15, z0), (xs + sx * hw, 0.15, z1), (xs + sx * hw, y1, z1), (xs + sx * hw, y1, z0),
+                      face=(sx, 0, 0))
+    for sx in (-1, 1):
+        hw0, hw1 = 13.7 / 2 + 0.15, 9.75 / 2 + 0.15
+        pts = [(xs + sx * (hw0 + (hw1 - hw0) * f), 0.15 + 1.0 + alt * n_deg * f, zs - prof * n_deg * f)
+               for f in np.linspace(0, 1, 8)]
+        corr.tube(pts, 0.035, seg=8)
+        for f in np.linspace(0, 1, 6):
+            x = xs + sx * (hw0 + (hw1 - hw0) * f)
+            yb = 0.15 + alt * n_deg * f
+            corr.cylinder((x, zs - prof * n_deg * f), 0.025, yb, yb + 1.0, seg=8)
+    g.add_mesh('arquibancada_topo', topo, vidro_d)
+    g.add_mesh('arquibancada_led', frente, led)
+    g.add_mesh('arquibancada_corrimao', corr, aco_d)
+
+    # Marquises de teatro (o "Theater District" em volta da 44th/45th, a oeste da praça): caixa saliente sobre a
+    # calçada com o nome do teatro e o espetáculo em letreiros acesos dos 3 lados e a moldura de lâmpadas (as
+    # "chaser lights"), luz quente embaixo. Nomes e espetáculos fictícios.
+    TEATROS = ['THE AURORA', 'HALCYON', 'THE MERIDIAN', 'STARLIGHT', 'THE VELVET', 'CRESCENT', 'BELMONT', 'THE GILDED',
+               'SILVER BELL', 'THE CARDINAL', 'EVERGREEN', 'THE ROSEWOOD']
+    SHOWS = ['MIDNIGHT ECHO', 'QUEEN OF HEARTS', 'THE LAST WALTZ', 'NEON DREAMS', 'CITY OF STARS', 'BROKEN CLOCK',
+             'GOLDEN HOUR', 'THE LONG RAIN', 'PAPER MOON', 'WILD LIGHTS', 'BLUE VELVET', 'HEARTBEAT']
+
+    def placa_teatro(path, nome, show, w=1024, h=256):
+        im = Image.new('RGB', (w, h), (12, 10, 14))
+        d = ImageDraw.Draw(im)
+        cor = random.Random(nome).choice([(255, 210, 120), (255, 240, 220), (255, 120, 150), (140, 220, 255)])
+        for txt, y, sz, fnt in ((nome, 0.06, 0.38, FONT2), (show, 0.55, 0.32, FONT)):
+            f = ImageFont.truetype(fnt, int(h * sz))
+            tw = d.textlength(txt, font=f)
+            if tw > w * 0.94:
+                f = ImageFont.truetype(fnt, int(h * sz * w * 0.94 / tw))
+                tw = d.textlength(txt, font=f)
+            d.text(((w - tw) / 2, h * y), txt, font=f, fill=cor)
+        im.save(path)
+        return path
+
+    caixa_t = g.material('teatro_caixa', color=(0.05, 0.04, 0.035), rough=0.3, metal=0.6)
+    lampadas = g.material('teatro_lampadas', color=(1, 0.9, 0.6), emissive=(1.0, 0.82, 0.5), strength=35.0)
+    luz_baixo = g.material('teatro_luz', color=(1, 1, 1), emissive=(1.0, 0.88, 0.7), strength=18.0)
+    m_caixa, m_lamp, m_luz = Mesh(), Mesh(), Mesh()
+    feitos = 0
+    for k in range(40):
+        if feitos >= 12:
+            break
+        n = rng.choice([44, 45])
+        z, w = street_z(n), street_width(n)
+        x = rng.uniform(-225, -30)
+        if abs(x - BWAY_K * z) < 30:
+            continue
+        sz = rng.choice([-1, 1])
+        zf = z + sz * (w / 2 + 0.3)  # linha da fachada
+        L, D, H, yb = rng.uniform(8, 12), 2.8, 1.6, 4.0
+        zc = zf - sz * D / 2
+        m_caixa.box((x, yb + H / 2, zc), (L / 2, H / 2, D / 2))
+        img_t = rel(placa_teatro(tex(f'teatro{feitos:02d}.png'), TEATROS[feitos], SHOWS[feitos]))
+        mat = g.material(f'teatro{feitos}', tex=img_t, emissive=(1, 1, 1), emissive_tex=img_t, strength=6.0)
+        pl = Mesh()
+        zfr = zf - sz * (D + 0.01)  # face voltada para a rua
+        pl.quad((x - L / 2 + 0.2, yb + 0.2, zfr), (x + L / 2 - 0.2, yb + 0.2, zfr), (x + L / 2 - 0.2, yb + H - 0.2, zfr),
+                (x - L / 2 + 0.2, yb + H - 0.2, zfr), uv=((0, 1), (1, 1), (1, 0), (0, 0)) if sz < 0 else
+                ((1, 1), (0, 1), (0, 0), (1, 0)), face=(0, 0, -sz))
+        for sx in (-1, 1):  # laterais
+            xx = x + sx * (L / 2 + 0.01)
+            pl.quad((xx, yb + 0.2, zf - sz * 0.3), (xx, yb + 0.2, zf - sz * (D - 0.2)), (xx, yb + H - 0.2, zf - sz * (D - 0.2)),
+                    (xx, yb + H - 0.2, zf - sz * 0.3), uv=((0, 1), (0.35, 1), (0.35, 0), (0, 0)), face=(sx, 0, 0))
+        g.add_mesh(f'teatro_placa{feitos}', pl, mat)
+        # moldura de lâmpadas: em cima e embaixo da frente e das laterais
+        for yy in (yb + 0.08, yb + H - 0.08):
+            for u in np.arange(-L / 2 + 0.1, L / 2, 0.22):
+                m_lamp.sphere((x + u, yy, zfr - sz * 0.03), 0.045, 6)
+            for sx in (-1, 1):
+                for v in np.arange(0.2, D, 0.22):
+                    m_lamp.sphere((x + sx * (L / 2 + 0.03), yy, zf - sz * v), 0.045, 6)
+        # luz embaixo da marquise (iluminando a entrada)
+        m_luz.box((x, yb - 0.01, zc), (L / 2 - 0.3, 0.01, D / 2 - 0.3))
+        g.light((x, yb - 0.4, zc), (1.0, 0.85, 0.65), 400.0, 12.0)
+        feitos += 1
+    g.add_mesh('teatro_caixas', m_caixa, caixa_t)
+    g.add_mesh('teatro_lampadas', m_lamp, lampadas)
+    g.add_mesh('teatro_luz_baixo', m_luz, luz_baixo)
 
     # ---- mobiliário urbano: semáforos, hidrantes, lixeiras, frades (pilaretes) na praça, entradas de metrô com os
     # globos verdes, bancas, tampas de bueiro, bancos e floreiras na praça.
@@ -2433,6 +2523,7 @@ def build(out, seed, texdir):
     pr = props
     steam_points = []
     obstacles = []  # (x, z, raio): a multidão desvia (cenas/times_square.json, "obstaculos")
+    obstacles.append((xs, zs - prof * n_deg / 2, 6.5))  # a arquibancada vermelha
     for n in range(41, 49):
         z, w = street_z(n), street_width(n)
         for ax in (AVE_X['7th'], BWAY_K * z):

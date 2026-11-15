@@ -5,6 +5,7 @@ build_*/
 assets/
 *.png
 !docs/screenshots/*.png
+!cenas/**/*.png
 __pycache__/
 resultados_pc/
 texcache/

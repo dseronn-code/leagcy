@@ -695,6 +695,232 @@ def joalheria(out, texdir, seed, g=None, pbr=None):
     return path
 
 
+def textura_xadrez(path, w=512):
+    """Piso de lanchonete: ladrilho preto e branco em xadrez (30 cm), com um pouco de desgaste."""
+    rng = np.random.default_rng(4)
+    yy, xx = np.mgrid[0:w, 0:w]
+    c = ((xx // (w // 4) + yy // (w // 4)) % 2) * 205 + 25
+    v = c + 10 * rng.random((w, w))
+    junta = ((xx % (w // 4)) < 2) | ((yy % (w // 4)) < 2)
+    v[junta] = 120
+    Image.fromarray(np.clip(np.stack([v, v, v * 0.98], -1), 0, 255).astype(np.uint8)).save(path)
+    return path
+
+
+def textura_cardapio(path, seed, w=1024, h=384):
+    """Painel de cardápio aceso (fundo escuro, itens e preços fictícios em colunas)."""
+    rng = random.Random(seed)
+    im = Image.new('RGB', (w, h), (18, 16, 14))
+    d = ImageDraw.Draw(im)
+    itens = ['BURGER', 'CHEESE FRIES', 'HOT DOG', 'PANCAKES', 'BLT', 'COFFEE', 'MILKSHAKE', 'APPLE PIE', 'OMELETTE',
+             'CLUB SANDWICH', 'SODA', 'ONION RINGS', 'TUNA MELT', 'BAGEL', 'ICED TEA']
+    f_t = ImageFont.truetype(FONT2, 44)
+    d.text((24, 12), 'LUCKY STAR DINER', font=f_t, fill=(255, 200, 90))
+    f = ImageFont.truetype(FONT, 26)
+    for i in range(3):
+        for j in range(5):
+            item = itens[(i * 5 + j) % len(itens)]
+            x, y = 24 + i * 340, 80 + j * 58
+            d.text((x, y), item, font=f, fill=(245, 240, 230))
+            d.text((x + 250, y), f'{rng.randint(2, 14)}.{rng.choice(["00", "50", "95"])}', font=f, fill=(255, 210, 120))
+    im.save(path)
+    return path
+
+
+def lanchonete(out, texdir, seed, g=None, pbr=None):
+    """Lanchonete estilo diner de Nova York (10 × 12 × 3,4 m): piso xadrez, balcão comprido com bancos giratórios
+    cromados de assento vermelho, cafeteiras e expositor de tortas, sofás (booths) vermelhos com mesas e luminárias
+    pendentes, cardápio aceso na parede do fundo, letreiro de neon "OPEN 24H", lambri de madeira."""
+    rng = random.Random(seed)
+    os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
+    tex = lambda n: os.path.join(out, 'tex', 'int_' + n)
+    embed = g is not None
+    if not embed:
+        g = Gltf()
+        pbr = Pbr(g, texdir, out)
+    W, D, H = 10.0, 12.0, 3.4
+    M = {k: Mesh() for k in ('piso', 'parede', 'lambri', 'teto', 'cromo', 'estofado', 'mesa', 'balcao', 'cardapio',
+                             'neon', 'luz', 'vidro', 'torta', 'xicara', 'escuro')}
+    M['piso'].quad((-W / 2, 0, 0), (W / 2, 0, 0), (W / 2, 0, D), (-W / 2, 0, D),
+                   uv=((-W / 1.2, 0), (W / 1.2, 0), (W / 1.2, D / 1.2), (-W / 1.2, D / 1.2)), face=(0, 1, 0))
+    for (a, b, f) in (((-W / 2, 0, D), (W / 2, 0, D), (0, 0, -1)), ((-W / 2, 0, 0), (-W / 2, 0, D), (1, 0, 0)),
+                      ((W / 2, 0, D), (W / 2, 0, 0), (-1, 0, 0))):
+        L = math.dist(a, b)
+        M['lambri'].quad(a, b, (b[0], 1.1, b[2]), (a[0], 1.1, a[2]), uv=((0, 0), (L, 0), (L, 1.1), (0, 1.1)), face=f)
+        M['parede'].quad((a[0], 1.1, a[2]), (b[0], 1.1, b[2]), (b[0], H, b[2]), (a[0], H, a[2]),
+                         uv=((0, 0), (L / 2, 0), (L / 2, H / 2), (0, H / 2)), face=f)
+    M['teto'].quad((-W / 2, H, 0), (W / 2, H, 0), (W / 2, H, D), (-W / 2, H, D), face=(0, -1, 0))
+    lights = []
+    # balcão comprido ao longo da parede da direita, com bancos
+    bx = W / 2 - 2.2
+    abox(M['balcao'], (bx - 0.35, 0, 1.5), (bx + 0.35, 1.0, D - 1.5))
+    abox(M['cromo'], (bx - 0.42, 1.0, 1.4), (bx + 0.42, 1.06, D - 1.4))
+    abox(M['cromo'], (bx - 0.37, 0.05, 1.5), (bx - 0.35, 0.25, D - 1.5))  # rodapé cromado
+    for z in np.arange(2.0, D - 1.6, 0.9):
+        M['cromo'].cylinder((bx - 0.8, z), 0.05, 0.0, 0.7, seg=10)
+        M['cromo'].cylinder((bx - 0.8, z), 0.22, 0.0, 0.03, seg=14)
+        M['estofado'].cylinder((bx - 0.8, z), 0.21, 0.7, 0.8, seg=16)
+    # atrás do balcão: bancada, cafeteiras, expositor de tortas, prateleira de xícaras
+    abox(M['cromo'], (W / 2 - 0.7, 0, 1.5), (W / 2, 0.95, D - 1.5))
+    for z in (3.0, 3.6, 7.5):
+        abox(M['cromo'], (W / 2 - 0.55, 0.95, z - 0.2), (W / 2 - 0.15, 1.5, z + 0.2))
+        M['escuro'].cylinder((W / 2 - 0.35, z - 0.05), 0.08, 1.0, 1.25, seg=10)
+    for z in (5.0, 6.2):  # expositor de tortas com cúpula de vidro
+        M['cromo'].cylinder((bx, z), 0.25, 1.06, 1.1, seg=16)
+        for k in range(3):
+            M['torta'].cylinder((bx + 0.1 * math.cos(k * 2.1), z + 0.1 * math.sin(k * 2.1)), 0.09, 1.1, 1.16, seg=10)
+        M['vidro'].sphere((bx, 1.1, z), 0.27, 14, sy=1.1)
+    for k, z in enumerate(np.arange(2.0, D - 2.0, 0.25)):
+        for yy in (1.7, 2.0):
+            M['xicara'].cylinder((W / 2 - 0.2, z), 0.045, yy, yy + 0.09, seg=8)
+    abox(M['cromo'], (W / 2 - 0.3, 1.66, 1.8), (W / 2, 1.7, D - 1.8))
+    abox(M['cromo'], (W / 2 - 0.3, 1.96, 1.8), (W / 2, 2.0, D - 1.8))
+    # sofás (booths) na parede da esquerda: dois bancos de encosto alto e mesa, luminária pendente
+    for z in np.arange(1.8, D - 1.2, 2.2):
+        x0 = -W / 2
+        for dz in (-0.75, 0.75):
+            abox(M['estofado'], (x0, 0, z + dz - 0.3), (x0 + 1.5, 0.45, z + dz + 0.3))
+            back = z + dz + (0.3 if dz > 0 else -0.3)
+            abox(M['estofado'], (x0, 0.45, min(back, back - 0.18 * (1 if dz > 0 else -1))),
+                 (x0 + 1.5, 1.15, max(back, back - 0.18 * (1 if dz > 0 else -1))))
+        abox(M['mesa'], (x0 + 0.1, 0.72, z - 0.4), (x0 + 1.3, 0.76, z + 0.4))
+        abox(M['cromo'], (x0 + 0.1, 0.7, z - 0.4), (x0 + 1.3, 0.72, z + 0.4))
+        M['cromo'].cylinder((x0 + 0.7, z), 0.04, 0.0, 0.72, seg=8)
+        abox(M['cromo'], (x0 + 0.3, 0.76, z - 0.06), (x0 + 0.42, 0.9, z + 0.06))  # porta-guardanapo
+        M['escuro'].beam((x0 + 0.75, H, z), (x0 + 0.75, H - 0.9, z), 0.01, 0.01)
+        M['cromo'].frustum((x0 + 0.75, z), 0.22, 0.03, H - 1.15, H - 0.9, seg=12)
+        M['luz'].cylinder((x0 + 0.75, z), 0.15, H - 1.16, H - 1.15, seg=12)
+        lights.append((x0 + 0.75, H - 1.3, z))
+    # cardápio aceso e neon na parede do fundo
+    M['cardapio'].quad((-3.0, 2.0, D - 0.02), (3.0, 2.0, D - 0.02), (3.0, 3.2, D - 0.02), (-3.0, 3.2, D - 0.02),
+                       uv=((1, 1), (0, 1), (0, 0), (1, 0)), face=(0, 0, -1))
+    M['neon'].tube([(x, 2.65, 0.4) for x in np.linspace(-1.2, 1.2, 2)], 0.03, seg=6)
+    for x in np.linspace(-2.5, 2.5, 4):
+        luminaria_tubo(M['cromo'], M['luz'], x + 1.5, H - 0.2, 6.0, comp=1.0, larg=0.25)
+        lights.append((x + 1.5, H - 0.4, 6.0))
+    t_piso = os.path.relpath(textura_xadrez(tex('xadrez.png')), out)
+    t_menu = os.path.relpath(textura_cardapio(tex('cardapio.png'), seed), out)
+    mats = {
+        'piso': g.material('lanch_piso', tex=t_piso, rough=0.25),
+        'parede': g.material('lanch_parede', color=(0.85, 0.78, 0.62), rough=0.7),
+        'lambri': pbr('lanch_lambri', 'wood_table_001', tint=(0.55, 0.38, 0.28), rough=0.6),
+        'teto': g.material('lanch_teto', color=(0.75, 0.73, 0.68), rough=0.6),
+        'cromo': g.material('lanch_cromo', color=(0.85, 0.86, 0.88), rough=0.12, metal=1.0),
+        'estofado': g.material('lanch_estofado', color=(0.55, 0.04, 0.05), rough=0.35),
+        'mesa': g.material('lanch_mesa', color=(0.92, 0.9, 0.85), rough=0.2),
+        'balcao': g.material('lanch_balcao', color=(0.6, 0.06, 0.07), rough=0.3),
+        'cardapio': g.material('lanch_cardapio', tex=t_menu, emissive=(1, 1, 1), emissive_tex=t_menu, strength=4.0),
+        'neon': g.material('lanch_neon', color=(1, 0.2, 0.3), emissive=(1.0, 0.15, 0.3), strength=30.0),
+        'luz': g.material('lanch_luz', color=(1, 1, 1), emissive=(1.0, 0.9, 0.75), strength=25.0),
+        'vidro': vidro(g, 'lanch_vidro'),
+        'torta': g.material('lanch_torta', color=(0.8, 0.5, 0.25), rough=0.6),
+        'xicara': g.material('lanch_xicara', color=(0.95, 0.95, 0.93), rough=0.15),
+        'escuro': g.material('lanch_escuro', color=(0.04, 0.04, 0.045), rough=0.4),
+    }
+    ids = [g.add_mesh('lanchonete_' + k, mesh, mats[k], scene_node=not embed) for k, mesh in M.items()]
+    luzes = [((x, y, z), (1.0, 0.86, 0.66), 90.0, 8.0) for (x, y, z) in lights]
+    if embed:
+        return [i for i in ids if i is not None], luzes, W
+    for pos, col, inten, rr in luzes:
+        g.light(pos, col, inten, rr)
+    path = os.path.join(out, 'lanchonete.gltf')
+    g.write(path)
+    print(path, sum(m.nv for m in M.values()), 'vértices')
+    return path
+
+
+def roupas(out, texdir, seed, g=None, pbr=None):
+    """Loja de roupas (10 × 12 × 3,6 m): piso de madeira, araras de parede com roupas penduradas (camisas, casacos,
+    vestidos em cores sorteadas), mesas no meio com pilhas de roupa dobrada, manequins vestidos, espelhos, balcão
+    com caixa, trilhos de spots no teto."""
+    rng = random.Random(seed)
+    os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
+    embed = g is not None
+    if not embed:
+        g = Gltf()
+        pbr = Pbr(g, texdir, out)
+    W, D, H = 10.0, 12.0, 3.6
+    CORES = [(0.05, 0.05, 0.06), (0.85, 0.85, 0.82), (0.55, 0.08, 0.1), (0.1, 0.18, 0.4), (0.6, 0.5, 0.35),
+             (0.25, 0.35, 0.2), (0.75, 0.55, 0.6), (0.4, 0.4, 0.42)]
+    M = {k: Mesh() for k in ('piso', 'parede', 'teto', 'metal', 'mesa', 'manequim', 'espelho', 'luz', 'balcao')}
+    R = [Mesh() for _ in CORES]
+    M['piso'].quad((-W / 2, 0, 0), (W / 2, 0, 0), (W / 2, 0, D), (-W / 2, 0, D),
+                   uv=((-W / 2, 0), (W / 2, 0), (W / 2, D / 2), (-W / 2, D / 2)), face=(0, 1, 0))
+    for (a, b, f) in (((-W / 2, 0, D), (W / 2, 0, D), (0, 0, -1)), ((-W / 2, 0, 0), (-W / 2, 0, D), (1, 0, 0)),
+                      ((W / 2, 0, D), (W / 2, 0, 0), (-1, 0, 0))):
+        M['parede'].quad(a, b, (b[0], H, b[2]), (a[0], H, a[2]), face=f)
+    M['teto'].quad((-W / 2, H, 0), (W / 2, H, 0), (W / 2, H, D), (-W / 2, H, D), face=(0, -1, 0))
+    lights = []
+    # araras de parede (esquerda e direita): barra cromada e roupas penduradas uma ao lado da outra
+    for sx in (-1, 1):
+        xw = sx * (W / 2 - 0.35)
+        for yb, comp in ((1.75, 1.0), (0.95, 0.65)) if sx < 0 else ((1.6, 1.15),):
+            M['metal'].tube([(xw, yb, 1.2), (xw, yb, D - 1.2)], 0.015, seg=6)
+            z = 1.3
+            while z < D - 1.3:
+                cor = rng.randrange(len(CORES))
+                for _ in range(rng.randrange(3, 7)):
+                    if z > D - 1.3:
+                        break
+                    largura = 0.5 if comp < 1.1 else 0.55
+                    abox(R[cor], (xw - largura / 2, yb - comp, z), (xw + largura / 2, yb - 0.04, z + 0.035))
+                    z += 0.06
+                z += 0.12
+    # mesas no meio com pilhas de roupa dobrada
+    for (x, z) in ((-1.2, 4.0), (1.2, 4.0), (-1.2, 7.5), (1.2, 7.5)):
+        abox(M['mesa'], (x - 0.7, 0.75, z - 0.45), (x + 0.7, 0.8, z + 0.45))
+        for dx, dz in ((-0.4, -0.2), (0.0, -0.2), (0.4, -0.2), (-0.4, 0.2), (0.0, 0.2), (0.4, 0.2)):
+            cor = rng.randrange(len(CORES))
+            hh = rng.uniform(0.08, 0.22)
+            abox(R[cor], (x + dx - 0.15, 0.8, z + dz - 0.12), (x + dx + 0.15, 0.8 + hh, z + dz + 0.12))
+        for dx in (-0.6, 0.6):
+            for dz in (-0.38, 0.38):
+                M['metal'].beam((x + dx, 0.0, z + dz), (x + dx, 0.75, z + dz), 0.04, 0.04)
+    # manequins (corpo estilizado branco brilhante, com a roupa no tronco)
+    for (x, z) in ((-2.6, 1.6), (2.6, 1.6), (0.0, 9.8), (-0.8, 9.8)):
+        M['manequim'].cylinder((x, z), 0.18, 0.0, 0.02, seg=14)
+        M['manequim'].cylinder((x, z), 0.02, 0.02, 0.95, seg=8)
+        cor = rng.randrange(len(CORES))
+        R[cor].frustum((x, z), 0.17, 0.2, 0.9, 1.45, seg=14)
+        R[cor].sphere((x, 1.45, z), 0.2, 12, sy=0.5)
+        M['manequim'].cylinder((x, z), 0.05, 1.5, 1.6, seg=10)
+        M['manequim'].sphere((x, 1.72, z), 0.11, 12, sy=1.25)
+    # espelho no fundo, balcão com caixa perto da entrada, spots no teto
+    M['espelho'].quad((-1.0, 0.2, D - 0.02), (1.0, 0.2, D - 0.02), (1.0, 2.2, D - 0.02), (-1.0, 2.2, D - 0.02), face=(0, 0, -1))
+    abox(M['balcao'], (2.4, 0, 2.5), (4.2, 1.0, 3.2))
+    abox(M['metal'], (3.2, 1.0, 2.75), (3.6, 1.12, 3.05))
+    for x in (-2.0, 0.0, 2.0):
+        M['metal'].tube([(x, H - 0.1, 1.0), (x, H - 0.1, D - 1.0)], 0.02, seg=6)
+        for z in np.arange(1.8, D - 1.0, 1.6):
+            M['metal'].frustum((x, z), 0.06, 0.04, H - 0.32, H - 0.1, seg=10)
+            M['luz'].cylinder((x, z), 0.05, H - 0.33, H - 0.32, seg=10)
+            lights.append((x, H - 0.45, z))
+    mats = {
+        'piso': pbr('roupas_piso', 'laminate_floor_02', tint=(0.85, 0.8, 0.75), rough=0.5),
+        'parede': g.material('roupas_parede', color=(0.9, 0.9, 0.88), rough=0.6),
+        'teto': g.material('roupas_teto', color=(0.12, 0.12, 0.13), rough=0.7),
+        'metal': g.material('roupas_metal', color=(0.8, 0.8, 0.82), rough=0.15, metal=1.0),
+        'mesa': pbr('roupas_mesa', 'wood_table_001', tint=(0.8, 0.7, 0.6), rough=0.5),
+        'manequim': g.material('roupas_manequim', color=(0.92, 0.92, 0.9), rough=0.15),
+        'espelho': g.material('roupas_espelho', color=(0.95, 0.95, 0.95), rough=0.01, metal=1.0),
+        'luz': g.material('roupas_luz', color=(1, 1, 1), emissive=(1.0, 0.95, 0.88), strength=40.0),
+        'balcao': g.material('roupas_balcao', color=(0.1, 0.1, 0.1), rough=0.3),
+    }
+    ids = [g.add_mesh('roupas_' + k, mesh, mats[k], scene_node=not embed) for k, mesh in M.items()]
+    for k, (cor, mesh) in enumerate(zip(CORES, R)):
+        ids.append(g.add_mesh(f'roupas_tecido{k}', mesh, pbr(f'roupas_tecido{k}', 'rough_linen', tint=cor),
+                              scene_node=not embed))
+    luzes = [((x, y, z), (1.0, 0.95, 0.88), 45.0, 6.0) for (x, y, z) in lights]
+    if embed:
+        return [i for i in ids if i is not None], luzes, W
+    for pos, col, inten, rr in luzes:
+        g.light(pos, col, inten, rr)
+    path = os.path.join(out, 'roupas.gltf')
+    g.write(path)
+    print(path, sum(m.nv for m in M.values()) + sum(m.nv for m in R), 'vértices')
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--saida', default=os.path.join('cenas', 'interiores'))
@@ -713,6 +939,10 @@ def main():
         conveniencia(a.saida, a.texturas, a.semente)
     if a.tipo in ('joalheria', 'todos'):
         joalheria(a.saida, a.texturas, a.semente)
+    if a.tipo in ('lanchonete', 'todos'):
+        lanchonete(a.saida, a.texturas, a.semente)
+    if a.tipo in ('roupas', 'todos'):
+        roupas(a.saida, a.texturas, a.semente)
 
 
 if __name__ == '__main__':
