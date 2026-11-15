@@ -7,7 +7,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const API = process.env.LEGACY_API || 'https://conta.legacyengine.com.br';
+const API = process.env.LEGACY_API || 'https://account.legacyengine.com.br';
 const pastaLegacy = () => path.join(app.getPath('appData'), 'Legacy');
 const arquivoSessao = () => path.join(pastaLegacy(), 'sessao.bin');
 

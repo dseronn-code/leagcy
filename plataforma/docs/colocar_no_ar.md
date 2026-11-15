@@ -1,6 +1,6 @@
 # Colocar a conta Legacy no ar (grátis, sem cartão)
 
-O launcher, o Legacy Engine e os jogos falam com o servidor de contas em `https://conta.legacyengine.com.br`.
+O launcher, o Legacy Engine e os jogos falam com o servidor de contas em `https://account.legacyengine.com.br`.
 Enquanto ele não estiver no ar, o launcher mostra "Sem conexão" (e deixa jogar offline o que já estiver instalado).
 São 3 serviços gratuitos, todos com login pelo GitHub e **sem cartão de crédito**:
 
@@ -38,7 +38,7 @@ plano grátis do Render pode bloquear o envio por SMTP; se os e-mails não chega
    Cole e clique em **Apply**. (O segredo dos códigos, `LEGACY_PEPPER`, ele cria sozinho.)
 4. Quando ficar **Live**, abra `https://legacy-conta.onrender.com/saude` (o endereço aparece no topo): tem que
    mostrar `{"ok":true,"banco":"postgres"}`.
-5. **Settings** → **Custom Domains** → **Add** → `conta.legacyengine.com.br`. Ele mostra um destino tipo
+5. **Settings** → **Custom Domains** → **Add** → `account.legacyengine.com.br`. Ele mostra um destino tipo
    `legacy-conta.onrender.com` para um registro **CNAME**.
 
 ## 4. DNS do domínio
@@ -46,11 +46,11 @@ Como o site e o e-mail estão na Hostinger, o DNS deve estar lá: hPanel → **D
 **DNS / Nameservers** → **Gerenciar registros DNS**. (Se não estiver, fica no Registro.br → DNS → Editar zona.)
 Não apague os registros que já existem (são os do site e da caixa de e-mail). Só adicione:
 - os registros do **Resend** (passo 2.3), exatamente como ele mostra;
-- **CNAME** `conta` → o destino do Render (passo 3.5).
+- **CNAME** `account` → o destino do Render (passo 3.5).
 
-Pronto: `https://conta.legacyengine.com.br/saude` responde, e o launcher funciona em qualquer PC.
+Pronto: `https://account.legacyengine.com.br/saude` responde, e o launcher funciona em qualquer PC.
 
 ## Opcional: servidor sempre acordado
 No plano grátis o Render dorme sem uso, e o primeiro acesso depois disso leva ~1 min (o launcher mostra
-"Acordando o servidor..."). Para evitar: cron-job.org (grátis) → chamar `https://conta.legacyengine.com.br/saude`
+"Acordando o servidor..."). Para evitar: cron-job.org (grátis) → chamar `https://account.legacyengine.com.br/saude`
 a cada 10 minutos.

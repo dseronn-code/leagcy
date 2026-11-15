@@ -7,7 +7,7 @@
 //      (POST /sessao/trocar), sem senha nem token na linha de comando.
 //   2. Aberto direto: usa a sessão guardada da última vez (Windows: protegida pelo DPAPI, só o usuário do Windows lê);
 //      senão, o editor pede e-mail e senha da conta Legacy.
-// Servidor: LEGACY_API (padrão https://conta.legacyengine.com.br).
+// Servidor: LEGACY_API (padrão https://account.legacyengine.com.br).
 #include <string>
 
 namespace conta {

@@ -182,7 +182,7 @@ const Conta& atual() { return g; }
 
 std::string api() {
   const char* e = std::getenv("LEGACY_API");
-  return e && *e ? e : "https://conta.legacyengine.com.br";
+  return e && *e ? e : "https://account.legacyengine.com.br";
 }
 
 bool trocarCodigo(const std::string& codigo, const std::string& app, std::string& erro) {
