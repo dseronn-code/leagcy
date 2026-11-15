@@ -5,3 +5,6 @@ engine/cena_salva.json
 
 # Instaladores gerados (engine/tools/gerar_instaladores.py)
 /dist/
+
+# Resultados dos testes no Colab (plataforma/colab/legacy_gpu.ipynb)
+engine/resultados/
