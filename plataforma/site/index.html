@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legacy — Times Square, Legacy Engine e Legacy Launcher</title>
+<meta name="description" content="Baixe o Legacy Launcher: a Times Square à noite na chuva, grátis, e o Legacy Engine, um motor com ray tracing em todo pixel. Uma conta para tudo.">
+<meta property="og:title" content="Legacy">
+<meta property="og:description" content="Times Square como você nunca viu antes. Grátis no Legacy Launcher.">
+<meta property="og:image" content="img/ts_praca.jpg">
+<link rel="icon" href="img/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+
+<header class="topo" id="topo">
+  <a class="marca" href="#" aria-label="Legacy, início"><span class="logo-l">L</span><span class="marca-nome">LEGACY</span></a>
+  <nav class="menu" id="menu" aria-label="Principal">
+    <a href="#times-square">Times Square</a>
+    <a href="#legacy-engine">Legacy Engine</a>
+    <a href="#launcher">Launcher</a>
+    <a href="#perguntas">Perguntas frequentes</a>
+    <a href="mailto:equipe@legacyengine.com.br">Ajuda</a>
+  </nav>
+  <div class="topo-acoes">
+    <a class="botao baixar" href="https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe" data-baixar>Baixar</a>
+    <button class="hamburguer" id="hamburguer" aria-label="Abrir menu" aria-expanded="false" aria-controls="menu"><span></span><span></span><span></span></button>
+  </div>
+</header>
+
+<main>
+  <!-- ======================================================= ABERTURA: 3 painéis -->
+  <section class="paineis" aria-label="Destaques">
+    <a class="painel" href="#times-square" style="--img: url(img/ts_praca.jpg)">
+      <span class="painel-etiqueta">Grátis</span>
+      <span class="painel-titulo">TIMES<br>SQUARE</span>
+      <span class="painel-sub">Noite, chuva, telões e milhares de pessoas.</span>
+    </a>
+    <a class="painel" href="#legacy-engine" style="--img: url(img/eng_luzes.jpg)">
+      <span class="painel-etiqueta">Motor</span>
+      <span class="painel-titulo">LEGACY<br>ENGINE</span>
+      <span class="painel-sub">Ray tracing em todo pixel, medido contra a física.</span>
+    </a>
+    <a class="painel janela" href="#launcher">
+      <img class="painel-janela" src="img/launcher.jpg" alt="">
+      <span class="painel-etiqueta">Windows</span>
+      <span class="painel-titulo">LEGACY<br>LAUNCHER</span>
+      <span class="painel-sub">Uma conta. Seus jogos. Sempre atualizados.</span>
+    </a>
+  </section>
+
+  <!-- ======================================================= FAIXA DE DOWNLOAD -->
+  <section class="faixa-baixar">
+    <div>
+      <h2>Comece pelo Legacy Launcher</h2>
+      <p>É por ele que você baixa a Times Square e o Legacy Engine, entra com a sua conta Legacy e recebe as
+        atualizações sozinho.</p>
+    </div>
+    <div class="faixa-cta">
+      <a class="botao grande primario" href="https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe" data-baixar>Baixar o Legacy Launcher</a>
+      <span class="miudo">Grátis · Windows 10 e 11 · 83 MB</span>
+    </div>
+  </section>
+
+  <!-- ======================================================= TIMES SQUARE -->
+  <section class="secao" id="times-square">
+    <div class="titulo-secao">
+      <span class="sobretitulo">TIMES SQUARE · GRÁTIS</span>
+      <h2>Times Square como você<br>nunca viu antes.</h2>
+      <p class="lead">Ande pela praça mais iluminada do mundo numa noite de chuva. Cada telão, cada letreiro de neon e
+        cada poste é uma luz de verdade, e o asfalto molhado reflete tudo.</p>
+    </div>
+    <div class="galeria">
+      <figure class="foto grande"><img src="img/ts_praca.jpg" alt="Times Square à noite, com telões e o chão molhado refletindo as luzes" loading="lazy"><figcaption>A praça na chuva</figcaption></figure>
+      <figure class="foto"><img src="img/ts_loja.jpg" alt="Lojas com interior em 3D vistas da calçada" loading="lazy"><figcaption>Lojas com interior em 3D</figcaption></figure>
+      <figure class="foto"><img src="img/ts_lanchonete.jpg" alt="Fachada de uma lanchonete à noite" loading="lazy"><figcaption>Lanchonetes, joalherias, lojas de roupa</figcaption></figure>
+      <figure class="foto"><img src="img/ts_rua.jpg" alt="Rua lateral com árvores e neon" loading="lazy"><figcaption>Ruas laterais</figcaption></figure>
+      <figure class="foto"><img src="img/ts_joalheria.jpg" alt="Interior de uma joalheria com vitrines de vidro" loading="lazy"><figcaption>Vitrines de vidro de verdade</figcaption></figure>
+    </div>
+    <ul class="destaques">
+      <li><b>130 telões</b>e 60 letreiros de neon acesos</li>
+      <li><b>914 postes</b>cada um é uma luz com sombra</li>
+      <li><b>Lojas por dentro</b>conveniência, lanchonete, joalheria e roupas</li>
+      <li><b>Chuva de verdade</b>poças e reflexos traçados por raios de luz</li>
+    </ul>
+    <p class="nota">Imagens capturadas no Legacy Engine, numa NVIDIA RTX 3070 Ti, qualidade Alto. A Times Square está em
+      desenvolvimento: novas áreas e melhorias chegam pelo launcher.</p>
+  </section>
+
+  <!-- ======================================================= LEGACY ENGINE -->
+  <section class="secao escura" id="legacy-engine">
+    <div class="titulo-secao">
+      <span class="sobretitulo">LEGACY ENGINE</span>
+      <h2>Luz de verdade.<br>Medida.</h2>
+      <p class="lead">Um motor em C++ e Vulkan com ray tracing em todo pixel. Cada sistema de luz é comparado
+        automaticamente com uma simulação física de referência (path tracing); se desviar, o teste falha.</p>
+    </div>
+    <div class="numeros">
+      <div><b>60 q/s</b><span>ray tracing completo em 1080p numa RTX 3070 Ti¹</span></div>
+      <div><b>6%</b><span>de distância da referência por path tracing, a 60 q/s¹</span></div>
+      <div><b>76.000</b><span>triângulos emissivos iluminando a cena, cada um com sombra²</span></div>
+      <div><b>151 mi</b><span>triângulos num quadro, desenhados em 4,1 ms³</span></div>
+    </div>
+    <div class="recursos">
+      <article class="recurso">
+        <img src="img/eng_luzes.jpg" alt="Cena com centenas de luzes coloridas" loading="lazy">
+        <h3>Mil luzes, todas com sombra</h3>
+        <p>Todo objeto que emite luz ilumina a cena de verdade, sem pré-cálculo e sem limite de quantidade.</p>
+      </article>
+      <article class="recurso">
+        <img src="img/eng_geometria.jpg" alt="Campo com milhões de rochas" loading="lazy">
+        <h3>Geometria densa</h3>
+        <p>Milhões de triângulos por quadro, com nível de detalhe automático, e as sombras e reflexos continuam vendo cada triângulo.</p>
+      </article>
+      <article class="recurso">
+        <img src="img/eng_editor.jpg" alt="Editor visual do Legacy Engine" loading="lazy">
+        <h3>Sem bake</h3>
+        <p>Arraste o sol, acenda uma luz, derrube uma parede: sombras, reflexos e luz global se atualizam no mesmo quadro.</p>
+      </article>
+    </div>
+    <div class="chips" aria-label="O que vem no motor">
+      <span>Editor visual</span><span>Scripts Lua</span><span>Script visual</span><span>Materiais por nós</span>
+      <span>Física Jolt</span><span>Veículos</span><span>Ragdoll</span><span>Áudio 3D</span><span>IA e navegação</span>
+      <span>Multijogador</span><span>Mundo aberto</span><span>Multidões</span><span>Cabelo fio a fio</span><span>Exportação de jogos</span>
+    </div>
+    <p class="nota">¹ Cena Bistro (Amazon Lumberyard, CC BY 4.0), 1920×1080, preset Médio, RTX 3070 Ti: 16,7 ms por quadro;
+      erro = diferença média de luminância contra path tracing de 512 quadros. ² Bistro à noite, luzes de malha.
+      ³ Campo de rochas: G-buffer em 4,1 ms contra 24,7 ms da malha completa, RTX 3070 Ti.
+      Requer placa de vídeo com ray tracing (NVIDIA RTX 20xx ou mais nova, AMD RX 6000 ou mais nova, Intel Arc) e conta Legacy.</p>
+  </section>
+
+  <!-- ======================================================= LAUNCHER -->
+  <section class="secao" id="launcher">
+    <div class="launcher-grade">
+      <div>
+        <span class="sobretitulo">LEGACY LAUNCHER</span>
+        <h2>Uma conta.<br>Tudo num lugar.</h2>
+        <ul class="lista-recursos">
+          <li><b>Conta Legacy única.</b> O mesmo nome e as mesmas configurações no launcher, nos jogos e no Legacy Engine.</li>
+          <li><b>Atualiza sozinho.</b> Quando sai uma versão nova, o launcher baixa só os arquivos que mudaram.</li>
+          <li><b>Sua biblioteca.</b> Instale, jogue, atualize e desinstale com um clique.</li>
+          <li><b>Sem internet?</b> O que já está instalado continua jogável offline.</li>
+          <li><b>Entre como visitante</b> e jogue a Times Square sem criar conta.</li>
+        </ul>
+        <a class="botao grande primario" href="https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe" data-baixar>Baixar o Legacy Launcher</a>
+      </div>
+      <figure class="launcher-foto"><img src="img/launcher.jpg" alt="Tela do Legacy Launcher com a loja e a Times Square" loading="lazy"></figure>
+    </div>
+  </section>
+
+  <!-- ======================================================= PERGUNTAS -->
+  <section class="secao estreita" id="perguntas">
+    <h2>Perguntas frequentes</h2>
+    <details><summary>É grátis?</summary><p>Sim. O Legacy Launcher e a Times Square são gratuitos.</p></details>
+    <details><summary>Qual computador eu preciso?</summary><p>Windows 10 ou 11 de 64 bits e uma placa de vídeo com ray
+      tracing: NVIDIA RTX 20xx ou mais nova, AMD RX 6000 ou mais nova, ou Intel Arc. Para a Times Square na qualidade Média
+      em 1080p, a referência é uma RTX 3070 Ti (cerca de 36 quadros por segundo).</p></details>
+    <details><summary>Preciso criar conta?</summary><p>Para jogar a Times Square, não: entre como visitante. A conta Legacy
+      (só e-mail, senha e um username) guarda sua biblioteca e suas configurações em qualquer computador e é necessária
+      para o Legacy Engine.</p></details>
+    <details><summary>Como funcionam as atualizações?</summary><p>Automáticas. O launcher se atualiza sozinho e, quando um jogo
+      tem versão nova, baixa só os arquivos que mudaram. Seus saves e configurações não são tocados.</p></details>
+    <details><summary>O que vocês fazem com os meus dados?</summary><p>Guardamos só o necessário para a conta funcionar (e-mail,
+      username e as configurações que você salvar). Não vendemos dados. Você pode apagar a conta e tudo dela a qualquer
+      momento no próprio launcher. Detalhes na <a href="privacidade.html">Política de Privacidade</a>.</p></details>
+    <details><summary>O Windows avisou que o arquivo é desconhecido. É seguro?</summary><p>O aviso aparece com programas novos que
+      ainda não têm assinatura digital paga. Baixe sempre por este site (o arquivo vem do GitHub oficial do projeto). Na
+      janela do aviso, clique em "Mais informações" e depois em "Executar assim mesmo".</p></details>
+    <details><summary>Como falo com vocês?</summary><p>Escreva para <a href="mailto:equipe@legacyengine.com.br">equipe@legacyengine.com.br</a>.</p></details>
+  </section>
+</main>
+
+<footer class="rodape">
+  <div class="rodape-topo">
+    <a class="marca" href="#"><span class="logo-l">L</span><span class="marca-nome">LEGACY</span></a>
+    <a class="botao" href="#topo">Voltar ao topo ↑</a>
+  </div>
+  <div class="colunas">
+    <div><h3>Jogos</h3><a href="#times-square">Times Square</a></div>
+    <div><h3>Ferramentas</h3><a href="#legacy-engine">Legacy Engine</a></div>
+    <div><h3>Plataforma</h3><a href="#launcher">Legacy Launcher</a><a href="#perguntas">Conta Legacy</a>
+      <a href="https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe" data-baixar>Download</a></div>
+    <div><h3>Ajuda</h3><a href="#perguntas">Perguntas frequentes</a><a href="mailto:equipe@legacyengine.com.br">Fale conosco</a></div>
+    <div><h3>Legal</h3><a href="termos.html">Termos de Uso</a><a href="privacidade.html">Política de Privacidade</a></div>
+  </div>
+  <p class="copyright">© 2026 Legacy. Todos os direitos reservados. Legacy, Legacy Engine e Legacy Launcher são nomes da
+    Legacy. NVIDIA e RTX são marcas da NVIDIA Corporation. Nomes de lojas, marcas e espetáculos na Times Square do jogo são fictícios.</p>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>
