@@ -123,8 +123,13 @@ def launcher():
     npx = os.path.join(pasta_node, 'npx.cmd')
     lan = os.path.join(RAIZ, 'plataforma', 'launcher')
     rodar([npm, 'install', '--no-audit', '--no-fund'], cwd=lan, env=env, shell=False)
-    rodar([npm, 'pkg', 'set', 'version=' + versao()], cwd=lan, env=env)
-    rodar([npx, 'electron-builder', '--win', 'nsis', '--publish', 'never'], cwd=lan, env=env)
+    # A versão vai no package.json só durante a montagem: depois ele volta ao que está no git (se ficasse mudado, o
+    # agente do PC recusaria atualizar a pasta na próxima rodada).
+    try:
+        rodar([npm, 'pkg', 'set', 'version=' + versao()], cwd=lan, env=env)
+        rodar([npx, 'electron-builder', '--win', 'nsis', '--publish', 'never'], cwd=lan, env=env)
+    finally:
+        subprocess.run(['git', 'checkout', '--', 'package.json'], cwd=lan)
     shutil.copyfile(os.path.join(lan, 'dist', 'Legacy-Setup.exe'), os.path.join(SAIDA, 'Legacy-Setup.exe'))
     for extra in ('latest.yml', 'Legacy-Setup.exe.blockmap'):  # autoatualização do launcher
         if os.path.isfile(os.path.join(lan, 'dist', extra)):

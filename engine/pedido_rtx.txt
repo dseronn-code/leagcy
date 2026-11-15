@@ -1,4 +1,4 @@
-# Rodada 40: launcher que se atualiza sozinho (electron-updater) e jogos que atualizam baixando só os arquivos que
+# Rodada 41 (a 40 não rodou: o package.json ficou mudado no PC pela montagem anterior; corrigido): launcher que se atualiza sozinho (electron-updater) e jogos que atualizam baixando só os arquivos que
 # mudaram (manifesto por produto). Esta é a 1ª Release com manifesto: sobe todos os arquivos comprimidos uma vez
 # (~200 MB); as próximas sobem só o que mudar.
 [10] python tools\gerar_instaladores.py --jogos

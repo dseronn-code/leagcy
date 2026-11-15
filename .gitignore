@@ -8,3 +8,9 @@ engine/cena_salva.json
 
 # Resultados dos testes no Colab (plataforma/colab/legacy_gpu.ipynb)
 engine/resultados/
+
+# gerados no PC ao montar o launcher
+plataforma/launcher/package-lock.json
+plataforma/launcher/node_modules/
+plataforma/launcher/dist/
+engine/leagcy/
