@@ -1,0 +1,98 @@
+name: Windows - instaladores Legacy
+
+# Compila o Legacy Engine no Windows (sem GPU: só compila e empacota) e gera os 3 instaladores:
+#   - Legacy-Setup (o launcher), TimesSquare-Setup, LegacyEngine-Setup
+# Roda a cada push no ramo de trabalho que mexa no motor, nas cenas ou na plataforma.
+on:
+  push:
+    branches: [ccr-5423dd89-y3br6e]
+    paths:
+      - 'engine/src/**'
+      - 'engine/shaders/**'
+      - 'engine/CMakeLists.txt'
+      - 'engine/cenas/**'
+      - 'engine/tools/empacotar.py'
+      - 'plataforma/**'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VERSAO: 0.1.${{ github.run_number }}
+  VULKAN_VERSAO: 1.3.296.0
+
+jobs:
+  motor:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vulkan SDK
+        shell: pwsh
+        run: |
+          $url = "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSAO/windows/VulkanSDK-$env:VULKAN_VERSAO-Installer.exe"
+          Invoke-WebRequest $url -OutFile vksdk.exe
+          Start-Process -Wait -FilePath .\vksdk.exe -ArgumentList '--root','C:\VulkanSDK','--accept-licenses','--default-answer','--confirm-command','install'
+          "VULKAN_SDK=C:\VulkanSDK" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "C:\VulkanSDK\Bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Cache das dependências (FetchContent)
+        uses: actions/cache@v4
+        with:
+          path: engine/build/_deps
+          key: deps-${{ hashFiles('engine/CMakeLists.txt') }}
+
+      - name: Compilar (Release, sem DLSS/FSR: o SDK do DLSS tem 1,6 GB e pede aviso à NVIDIA antes de distribuir)
+        shell: pwsh
+        working-directory: engine
+        run: |
+          cmake -S . -B build -DLEGACY_DLSS=OFF -DLEGACY_FSR=OFF
+          cmake --build build --config Release --parallel
+
+      - name: Exportar Times Square e Legacy Engine
+        shell: pwsh
+        working-directory: engine
+        run: |
+          python tools/empacotar.py --cena cenas/times_square.json --saida ../dist/TimesSquare --qualidade medio
+          python tools/empacotar.py --cena cenas/vale/vale.json --cena cenas/parque.json --cena cenas/fisica.json --cena cenas/carro.json --saida ../dist/LegacyEngine
+          if ($LASTEXITCODE -ne 0) { Write-Host "avisos do exportador acima" }
+          exit 0
+
+      - name: Instaladores (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc /DOrigem="$PWD\dist\TimesSquare" /DVersao=$env:VERSAO /O"$PWD\saida" plataforma\instaladores\TimesSquare.iss
+          & $iscc /DOrigem="$PWD\dist\LegacyEngine" /DVersao=$env:VERSAO /O"$PWD\saida" plataforma\instaladores\LegacyEngine.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instaladores-jogos-${{ env.VERSAO }}
+          path: saida/*.exe
+          retention-days: 30
+
+  launcher:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Instalador do launcher (electron-builder, NSIS)
+        shell: pwsh
+        working-directory: plataforma/launcher
+        run: |
+          npm install --no-audit --no-fund
+          npm pkg set version=$env:VERSAO
+          npx electron-builder --win nsis --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instalador-launcher-${{ env.VERSAO }}
+          path: plataforma/launcher/dist/*.exe
+          retention-days: 30
