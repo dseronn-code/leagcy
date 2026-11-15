@@ -6,6 +6,8 @@
 #include <basisu_transcoder.h>
 #include <draco/compression/decode.h>
 #include <memory>
+#include <atomic>
+#include <thread>
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_ONLY_PNG
 #define STBI_ONLY_JPEG
@@ -350,12 +352,29 @@ struct Loader {
                                                                                       : "alvo" + std::to_string(k));
         }
         if (!nrm) computeNormals(md);
-        if (!tan || scene.ignoreFileTangents) computeTangentsMikk(md);  // o que o glTF manda quando o arquivo não traz TANGENT
+        // Sem TANGENT no arquivo: MikkTSpace (o que o glTF manda), feito depois, em paralelo, para todas as malhas.
+        if (!tan || scene.ignoreFileTangents) needTangents.push_back({mi, meshPrims[mi].size()});
         uint32_t material = prim.material ? materialMap[size_t(prim.material - data->materials)] : defaultMaterial;
         meshPrims[mi].push_back({std::move(md), material, -1});
       }
     }
+    // MikkTSpace é o passo mais lento da carga (uma cidade inteira: minutos numa thread só). Cada malha é independente:
+    // todas as threads, as maiores primeiro, e o resultado fica no cache (texcache/*.tan) para a próxima carga.
+    std::sort(needTangents.begin(), needTangents.end(), [&](const auto& a, const auto& b) {
+      return meshPrims[a.first][a.second].data.indices.size() > meshPrims[b.first][b.second].data.indices.size();
+    });
+    std::atomic<size_t> next{0};
+    auto work = [&] {
+      for (size_t k = next++; k < needTangents.size(); k = next++)
+        computeTangentsMikk(meshPrims[needTangents[k].first][needTangents[k].second].data);
+    };
+    const unsigned n = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+    std::vector<std::thread> pool;
+    for (unsigned t = 1; t < n && t < needTangents.size(); ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
   }
+  std::vector<std::pair<size_t, size_t>> needTangents;
 
   // Hierarquia, esqueletos e clipes — só para arquivos animados.
   void loadModel(const glm::mat4& root) {

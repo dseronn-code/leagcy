@@ -145,6 +145,9 @@ void computeTangents(MeshData& mesh);
 // o vértice é separado (cor e pesos de skin copiados), como fazem as ferramentas que geram os modelos. `origin`
 // (opcional) recebe o vértice original de cada vértice de saída. Para assets glTF sem TANGENT.
 void computeTangentsMikk(MeshData& mesh, std::vector<uint32_t>* origin = nullptr);
+// Pasta do cache das tangentes MikkTSpace (as tangentes de cada malha sem TANGENT no arquivo ficam guardadas pelo
+// conteúdo da malha: a primeira carga calcula, as outras só leem). Vazio desliga o cache. Padrão: "texcache".
+void setTangentCacheDir(const std::string& dir);
 // Normais suaves ponderadas por área (para malhas sem NORMAL, ex.: Fox do glTF-Sample-Assets).
 void computeNormals(MeshData& mesh);
 

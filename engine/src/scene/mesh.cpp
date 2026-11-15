@@ -15,6 +15,10 @@
 #include <cmath>
 #include <unordered_map>
 #include <unordered_set>
+#include <mutex>
+#include <cstddef>
+#include <atomic>
+#include <thread>
 
 #include <glm/gtc/constants.hpp>
 #include <meshoptimizer.h>
@@ -460,6 +464,52 @@ void mikkSet(const SMikkTSpaceContext* c, const float t[], float sign, int face,
 }  // namespace
 #endif
 
+namespace {
+std::string g_tangentCacheDir = "texcache";
+std::mutex g_tangentCacheMutex;
+
+uint64_t fnvBytes(const void* p, size_t n, uint64_t h) {
+  const uint8_t* b = static_cast<const uint8_t*>(p);
+  for (size_t i = 0; i < n; ++i) h = (h ^ b[i]) * 1099511628211ull;
+  return h;
+}
+
+// Arquivo do cache: "LTAN" + versão + número de cantos + os cantos (vec4 por índice).
+constexpr uint32_t kTangentCacheVersion = 1;
+
+bool loadTangentCache(const std::filesystem::path& f, std::vector<glm::vec4>& corner) {
+  std::ifstream in(f, std::ios::binary);
+  if (!in) return false;
+  uint32_t head[3] = {};
+  in.read(reinterpret_cast<char*>(head), sizeof(head));
+  if (!in || head[0] != 0x4e41544cu || head[1] != kTangentCacheVersion || head[2] != corner.size()) return false;
+  in.read(reinterpret_cast<char*>(corner.data()), std::streamsize(corner.size() * sizeof(glm::vec4)));
+  return bool(in);
+}
+
+void saveTangentCache(const std::filesystem::path& f, const std::vector<glm::vec4>& corner) {
+  std::error_code ec;
+  std::filesystem::create_directories(f.parent_path(), ec);
+  std::filesystem::path tmp = f;
+  tmp += ".tmp" + std::to_string(std::hash<std::thread::id>()(std::this_thread::get_id()));
+  {
+    std::ofstream out(tmp, std::ios::binary);
+    if (!out) return;
+    const uint32_t head[3] = {0x4e41544cu, kTangentCacheVersion, uint32_t(corner.size())};
+    out.write(reinterpret_cast<const char*>(head), sizeof(head));
+    out.write(reinterpret_cast<const char*>(corner.data()), std::streamsize(corner.size() * sizeof(glm::vec4)));
+    if (!out) return;
+  }
+  std::filesystem::rename(tmp, f, ec);  // atômico: um cache pela metade nunca é lido
+  if (ec) std::filesystem::remove(tmp, ec);
+}
+}  // namespace
+
+void setTangentCacheDir(const std::string& dir) {
+  std::lock_guard<std::mutex> lock(g_tangentCacheMutex);
+  g_tangentCacheDir = dir;
+}
+
 void computeTangentsMikk(MeshData& m, std::vector<uint32_t>* origin) {
   if (origin) {
     origin->resize(m.vertices.size());
@@ -471,17 +521,36 @@ void computeTangentsMikk(MeshData& m, std::vector<uint32_t>* origin) {
 #else
   if (m.indices.size() < 3) return;
   MikkContext ctx{&m, std::vector<glm::vec4>(m.indices.size() / 3 * 3, glm::vec4(0.0f))};
-  SMikkTSpaceInterface in{};
-  in.m_getNumFaces = mikkFaces;
-  in.m_getNumVerticesOfFace = mikkFaceVerts;
-  in.m_getPosition = mikkPosition;
-  in.m_getNormal = mikkNormal;
-  in.m_getTexCoord = mikkUV;
-  in.m_setTSpaceBasic = mikkSet;
-  SMikkTSpaceContext c{&in, &ctx};
-  if (!genTangSpaceDefault(&c)) {  // sem memória: fica a aproximação
-    computeTangents(m);
-    return;
+  // Cache pelo conteúdo (posição, normal e UV de cada canto usado): o MikkTSpace é lento (minutos numa cidade inteira).
+  std::string cacheDir;
+  {
+    std::lock_guard<std::mutex> lock(g_tangentCacheMutex);
+    cacheDir = g_tangentCacheDir;
+  }
+  std::filesystem::path cacheFile;
+  if (!cacheDir.empty() && ctx.corner.size() >= 3000) {
+    uint64_t h = 1469598103934665603ull;
+    h = fnvBytes(&kTangentCacheVersion, sizeof(kTangentCacheVersion), h);
+    for (const Vertex& v : m.vertices) h = fnvBytes(&v, offsetof(Vertex, tangent), h);  // sem a tangente (lixo/padrão)
+    h = fnvBytes(m.indices.data(), ctx.corner.size() * sizeof(uint32_t), h);
+    char name[40];
+    std::snprintf(name, sizeof(name), "%016llx.tan", static_cast<unsigned long long>(h));
+    cacheFile = std::filesystem::path(cacheDir) / name;
+  }
+  if (cacheFile.empty() || !loadTangentCache(cacheFile, ctx.corner)) {
+    SMikkTSpaceInterface in{};
+    in.m_getNumFaces = mikkFaces;
+    in.m_getNumVerticesOfFace = mikkFaceVerts;
+    in.m_getPosition = mikkPosition;
+    in.m_getNormal = mikkNormal;
+    in.m_getTexCoord = mikkUV;
+    in.m_setTSpaceBasic = mikkSet;
+    SMikkTSpaceContext c{&in, &ctx};
+    if (!genTangSpaceDefault(&c)) {  // sem memória: fica a aproximação
+      computeTangents(m);
+      return;
+    }
+    if (!cacheFile.empty()) saveTangentCache(cacheFile, ctx.corner);
   }
   // Primeiro canto de cada vértice define a tangente dele; um canto que discorda ganha uma cópia do vértice (as
   // cópias com a mesma tangente são reaproveitadas).
