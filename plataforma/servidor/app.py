@@ -416,6 +416,11 @@ def trocar_senha(dados: TrocaSenha, request: Request, s: Sessao = Depends(conta_
     return {'ok': True}
 
 
+@app.get('/')
+def inicio():
+    return {'servico': 'Conta Legacy', 'ok': True, 'site': 'https://legacyengine.com.br'}
+
+
 @app.get('/saude')
 def saude():
     """Para o serviço de hospedagem e para o launcher acordar o servidor (o plano grátis dorme sem uso)."""
