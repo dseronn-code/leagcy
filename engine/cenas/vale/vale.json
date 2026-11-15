@@ -2,6 +2,8 @@
 // guarda quando ele está perto, Esc pausa. Junte os 5 cristais (scripts visuais) sem ser pego pelo guarda.
 // --scene cenas/vale/vale.json
 {
+ "carregamento": "marca/legacy_engine_carregamento.png",
+ "icone": "marca/legacy_engine_icone.png",
  "sol": {
   "elevacao": 28,
   "azimute": 140,

@@ -20,8 +20,11 @@
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#include <stb_image.h>
 
+#include "core/carregamento.h"
 #include "core/conta.h"
+#include "core/tela_carregamento.h"
 #include "editor/editor.h"
 #include "game/network.h"
 #include "game/world.h"
@@ -790,6 +793,28 @@ int runWindowed(const Options& opt) {
   VK_CHECK(glfwCreateWindowSurface(ctx.instance, window, nullptr, &surface));
   ctx.createDevice(surface);
 
+  // Ícone da janela (barra de tarefas): o da cena (.json "icone") ou o padrão da Legacy ao lado do executável.
+  {
+    std::string icone = carregamento::imagemDaCena(opt.scene.name, "icone");
+    if (icone.empty() && std::filesystem::exists("icone.png")) icone = "icone.png";
+    int iw = 0, ih = 0, in = 0;
+    if (!icone.empty())
+      if (unsigned char* px = stbi_load(icone.c_str(), &iw, &ih, &in, 4)) {
+        GLFWimage img{iw, ih, px};
+        glfwSetWindowIcon(window, 1, &img);
+        stbi_image_free(px);
+      }
+  }
+  // A janela ganha imagem já aqui: a tela de carregamento é desenhada enquanto a cena carrega (antes, a janela ficava
+  // branca e o Windows marcava "Não está respondendo" até a cena terminar).
+  int fbw, fbh;
+  glfwGetFramebufferSize(window, &fbw, &fbh);
+  rhi::Swapchain swapchain;
+  swapchain.create(ctx, surface, {uint32_t(fbw), uint32_t(fbh)}, opt.vsync);
+  TelaCarregamento tela;
+  tela.iniciar(ctx, swapchain, surface, window, carregamento::imagemDaCena(opt.scene.name, "carregamento"), opt.vsync);
+  carregamento::ligar([&](float f) { tela.desenhar(f); });
+
   scene::Scene scene;
   scene::Camera camera;
   // Monta a cena (no início e quando o editor pede para recarregar depois de criar ou apagar entidades).
@@ -814,12 +839,11 @@ int runWindowed(const Options& opt) {
     camera.lookAt(opt.cameraTarget);
   }
 
-  int fbw, fbh;
-  glfwGetFramebufferSize(window, &fbw, &fbh);
-  rhi::Swapchain swapchain;
-  swapchain.create(ctx, surface, {uint32_t(fbw), uint32_t(fbh)}, opt.vsync);
+  carregamento::progresso(0.96f);
   renderer::Renderer r;
   r.init(ctx, scene, swapchain.extent, swapchain.format, opt.render);
+  carregamento::desligar();
+  tela.encerrar();
 
   std::array<FrameSync, renderer::Renderer::kFramesInFlight> frames;
   for (auto& f : frames) {

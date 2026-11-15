@@ -1,6 +1,8 @@
 // Times Square à noite, com chuva (parte 3). A cidade sai de tools/times_square.py; o protagonista, de
 // tools/humano.py (MakeHuman, CC0); as animações, do 100STYLE (CC BY 4.0, Mason et al. 2022) por tools/mocap.py.
 {
+ "carregamento": "marca/times_square_carregamento.png",
+ "icone": "marca/times_square_icone.png",
  "qualidade": "medio",
  "noite": true,
  "chuva": 0.8,

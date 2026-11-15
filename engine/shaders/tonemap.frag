@@ -34,7 +34,9 @@ vec3 brightBloom(vec2 uv, float exposure) {
   return textureLod(bloomIn, clamp(uv, 0.0, 1.0), 0.0).rgb * pc.bloomNorm * exposure;
 }
 vec3 chromatic(vec2 uv, vec2 dir, float exposure) {
-  const float D = 0.006;
+  // Separação de cor pequena: só uma franja nas bordas. Com 0,006 os canais saíam inteiros um do lado do outro e
+  // cada fantasma virava três pontinhos (vermelho, verde, azul).
+  const float D = 0.0015;
   return vec3(brightBloom(uv - dir * D, exposure).r, brightBloom(uv, exposure).g, brightBloom(uv + dir * D, exposure).b);
 }
 vec3 lensFlare(vec2 uv, float exposure) {
@@ -42,10 +44,13 @@ vec3 lensFlare(vec2 uv, float exposure) {
   vec2 ghostVec = (vec2(0.5) - flipped) * 0.35;
   vec2 dir = normalize(ghostVec + 1e-6);
   vec3 sum = vec3(0.0);
+  // Cada fantasma com um tom suave (como o revestimento das lentes de verdade: âmbar, azulado, rosado...).
+  const vec3 TOM[6] = vec3[6](vec3(1.0, 0.85, 0.65), vec3(0.7, 0.85, 1.0), vec3(1.0, 0.75, 0.85),
+                              vec3(0.85, 1.0, 0.8), vec3(1.0, 0.9, 0.75), vec3(0.75, 0.8, 1.0));
   for (int i = 0; i < 6; ++i) {
     vec2 p = fract(flipped + ghostVec * float(i));
     float w = pow(1.0 - clamp(length(vec2(0.5) - p) / 0.7071, 0.0, 1.0), 6.0);  // fantasmas fortes perto do centro
-    sum += chromatic(p, dir, exposure) * w * 0.004;
+    sum += chromatic(p, dir, exposure) * TOM[i] * w * 0.003;
   }
   vec2 haloP = flipped + dir * 0.45;
   float hw = pow(1.0 - clamp(length(vec2(0.5) - fract(haloP)) / 0.7071, 0.0, 1.0), 5.0);

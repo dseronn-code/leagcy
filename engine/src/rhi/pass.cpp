@@ -1,4 +1,5 @@
 #include "rhi/pass.h"
+#include "core/carregamento.h"
 
 #include <algorithm>
 
@@ -70,6 +71,7 @@ void ComputePass::init(Context& ctx, const char* shader, VkDescriptorSetLayout g
   if (specConstants && specCount) ci.stage.pSpecializationInfo = &spec;
   ci.layout = layout.pipelineLayout;
   VK_CHECK(vkCreateComputePipelines(ctx.device, VK_NULL_HANDLE, 1, &ci, nullptr, &pipeline_));
+  carregamento::pulso();  // a compilação dos shaders na 1ª abertura demora: a tela de carregamento segue viva
   vkDestroyShaderModule(ctx.device, m, nullptr);
 }
 

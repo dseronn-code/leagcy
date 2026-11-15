@@ -36,6 +36,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/matrix_decompose.hpp>
 
+#include "core/carregamento.h"
 #include "scene/scene.h"
 
 namespace scene {
@@ -365,8 +366,10 @@ struct Loader {
     });
     std::atomic<size_t> next{0};
     auto work = [&] {
-      for (size_t k = next++; k < needTangents.size(); k = next++)
+      for (size_t k = next++; k < needTangents.size(); k = next++) {
         computeTangentsMikk(meshPrims[needTangents[k].first][needTangents[k].second].data);
+        carregamento::pulso();  // só a thread principal redesenha a tela de carregamento
+      }
     };
     const unsigned n = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
     std::vector<std::thread> pool;
@@ -776,6 +779,7 @@ bool loadGltf(Scene& scene, const std::string& path, const glm::mat4& rootTransf
   LOG_INFO("glTF: %s (%zu nós, %zu materiais, %zu esqueletos, %zu animações, %u luzes)", path.c_str(), data->nodes_count,
            data->materials_count, data->skins_count, data->animations_count, lights);
   cgltf_free(data);
+  carregamento::modeloCarregado();
   return true;
 }
 

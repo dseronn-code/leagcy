@@ -16,8 +16,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
-SetupIconFile=..\marca\legacy.ico
-UninstallDisplayIcon={app}\legacy.exe
+SetupIconFile=..\marca\legacy_engine.ico
+UninstallDisplayIcon={app}\legacy_engine.ico
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 [Languages]
@@ -25,9 +25,10 @@ Name: "pt"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "{#Origem}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\marca\legacy_engine.ico"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
-Name: "{group}\Legacy Engine"; Filename: "{app}\legacy.exe"; Parameters: "--editor --scene cenas\vale\vale.json"; WorkingDir: "{app}"
-Name: "{autodesktop}\Legacy Engine"; Filename: "{app}\legacy.exe"; Parameters: "--editor --scene cenas\vale\vale.json"; WorkingDir: "{app}"; Tasks: atalho
+Name: "{group}\Legacy Engine"; Filename: "{app}\legacy.exe"; Parameters: "--editor --scene cenas\vale\vale.json"; WorkingDir: "{app}"; IconFilename: "{app}\legacy_engine.ico"
+Name: "{autodesktop}\Legacy Engine"; Filename: "{app}\legacy.exe"; Parameters: "--editor --scene cenas\vale\vale.json"; WorkingDir: "{app}"; IconFilename: "{app}\legacy_engine.ico"; Tasks: atalho
 [Tasks]
 Name: "atalho"; Description: "Criar atalho na área de trabalho"
 [Run]

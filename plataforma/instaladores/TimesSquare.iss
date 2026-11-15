@@ -16,8 +16,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
-SetupIconFile=..\marca\legacy.ico
-UninstallDisplayIcon={app}\legacy.exe
+SetupIconFile=..\marca\times_square.ico
+UninstallDisplayIcon={app}\times_square.ico
 DisableProgramGroupPage=yes
 ; o motor grava o cache das texturas (texcache/) ao lado do jogo: a pasta precisa ser gravável pelo usuário
 PrivilegesRequired=lowest
@@ -26,9 +26,10 @@ Name: "pt"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "{#Origem}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\marca\times_square.ico"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
-Name: "{group}\Times Square"; Filename: "{app}\legacy.exe"; Parameters: "--scene cenas\times_square.json --fullscreen"; WorkingDir: "{app}"
-Name: "{autodesktop}\Times Square"; Filename: "{app}\legacy.exe"; Parameters: "--scene cenas\times_square.json --fullscreen"; WorkingDir: "{app}"; Tasks: atalho
+Name: "{group}\Times Square"; Filename: "{app}\legacy.exe"; Parameters: "--scene cenas\times_square.json --fullscreen"; WorkingDir: "{app}"; IconFilename: "{app}\times_square.ico"
+Name: "{autodesktop}\Times Square"; Filename: "{app}\legacy.exe"; Parameters: "--scene cenas\times_square.json --fullscreen"; WorkingDir: "{app}"; IconFilename: "{app}\times_square.ico"; Tasks: atalho
 [Tasks]
 Name: "atalho"; Description: "Criar atalho na área de trabalho"
 [Run]

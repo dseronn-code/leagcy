@@ -1,5 +1,7 @@
 #include "scene/scene.h"
 
+#include "core/carregamento.h"
+
 #include <chrono>
 
 #include "scene/texture_compress.h"
@@ -1384,7 +1386,10 @@ void Scene::upload(rhi::Context& ctx) {
     gm.meshletBlockBase = prepared[i].fields.meshletBlockBase;
     return std::move(prepared[i].blob);
   };
+  const size_t etapasTotal = cpuMeshes_.size() + cpuTextures_.size();
+  size_t etapasFeitas = 0;
   for (auto& data : cpuMeshes_) {
+    carregamento::etapa(etapasFeitas++, etapasTotal);
     GpuMesh gm;
     const size_t meshIndex = meshes.size();
     if (meshCellPending_[meshIndex] >= 0) {
@@ -1552,6 +1557,7 @@ void Scene::upload(rhi::Context& ctx) {
     }
   };
   for (auto& t : cpuTextures_) {
+    carregamento::etapa(etapasFeitas++, etapasTotal);
     textureWrap.push_back({t.wrapU, t.wrapV});
     const double raw = double(t.width) * t.height * 4.0 * 4.0 / 3.0;  // RGBA8 com a cadeia de mips
     bytesRaw += raw;

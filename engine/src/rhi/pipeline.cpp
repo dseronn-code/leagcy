@@ -1,4 +1,5 @@
 #include "rhi/pipeline.h"
+#include "core/carregamento.h"
 
 #include <filesystem>
 #include <fstream>
@@ -145,6 +146,7 @@ VkPipeline createGraphicsPipeline(Context& ctx, const GraphicsPipelineDesc& d) {
   pi.layout = d.layout;
   VkPipeline p;
   VK_CHECK(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pi, nullptr, &p));
+  carregamento::pulso();  // a compilação dos shaders na 1ª abertura demora: a tela de carregamento segue viva
   for (const auto& st : stages) vkDestroyShaderModule(ctx.device, st.module, nullptr);
   return p;
 }

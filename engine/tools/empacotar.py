@@ -122,6 +122,9 @@ class Pacote:
         menu = doc.get('menu', 'scripts/menu_padrao.lua')  # menu de pausa: o padrão do motor, outro ou nenhum
         if isinstance(menu, str):
             self.exigir(menu, f'{rel} (menu)', pasta)
+        for chave in ('carregamento', 'icone'):  # tela de carregamento e ícone da janela (src/core/carregamento.cpp)
+            if isinstance(doc.get(chave), str):
+                self.exigir(doc[chave], f'{rel} ({chave})', pasta, os.path.join(MOTOR, 'cenas'))
         for e in doc.get('entidades', []):
             quem = f'{rel} ({e.get("nome", "sem nome")})'
             if 'modelo' in e:
