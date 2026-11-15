@@ -207,6 +207,7 @@ while ($true) {
   }
   if ($LASTEXITCODE -ne 0) {
     "!!! A pasta tem mudanças locais ou divergiu do GitHub: não atualizei nem rodei nada." | Out-File -Encoding utf8 $saida
+    $naoMarcar = $true  # tenta de novo depois que a pasta for arrumada (não perde o pedido)
     git status --short | Out-File -Append -Encoding utf8 $saida
   } else {
     Write-Host "[$(Agora)] compilando..."
@@ -246,5 +247,6 @@ while ($true) {
     continue
   }
   if (Publicar $commit) { Write-Host "[$(Agora)] Resultados enviados." } else { Write-Host "[$(Agora)] Falha ao enviar os resultados." }
+  if ($naoMarcar) { $naoMarcar = $false; Start-Sleep 300; continue }  # avisa 1 vez a cada 5 min, sem perder o pedido
   Set-Content $Estado $pedido
 }
