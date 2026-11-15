@@ -134,7 +134,30 @@ async function mostrarBiblioteca() {
     el.className = 'jogo';
     el.innerHTML = `<img src="${IMAGENS[p.id]}" alt=""><div><b></b><button class="botao primario">Instalar</button></div>`;
     $('b', el).textContent = p.nome;
-    $('button', el).addEventListener('click', () => aviso(p.download ? 'Baixando...' : 'O instalador fica pronto em breve.'));
+    const botao = $('button', el);
+    const pronto = window.legacy && (await window.legacy.instalado(p.id));
+    botao.textContent = pronto ? 'Jogar' : 'Instalar';
+    botao.addEventListener('click', async () => {
+      if (!window.legacy) return aviso('Instale o Legacy Launcher no Windows para baixar e jogar.');
+      botao.disabled = true;
+      try {
+        if (!(await window.legacy.instalado(p.id))) {
+          if (!p.download) throw new Error('O instalador fica pronto em breve.');
+          botao.textContent = 'Baixando...';
+          await window.legacy.instalar(p.id, p.download);
+          botao.textContent = 'Jogar';
+        } else {
+          const { codigo } = await chamar('POST', '/sessao/codigo-troca');  // o jogo entra na mesma conta Legacy
+          await window.legacy.jogar(p.id, codigo);
+          aviso('Abrindo ' + p.nome + '...');
+        }
+      } catch (err) {
+        aviso(err.message);
+        botao.textContent = (await window.legacy.instalado(p.id)) ? 'Jogar' : 'Instalar';
+      } finally {
+        botao.disabled = false;
+      }
+    });
     lista.appendChild(el);
   }
 }
@@ -185,6 +208,15 @@ async function sair(destino) {
   $('#entrada').hidden = false;
   passo(destino);
 }
+
+if (window.legacy) window.legacy.aoProgresso((id, p) => {
+  const b = $$('.jogo button').find((x) => x.textContent.startsWith('Baixando'));
+  if (b) b.textContent = 'Baixando ' + Math.round(p * 100) + '%';
+});
+
+// Termos e privacidade: abrem no navegador (o processo principal manda links para fora do app)
+$('#link-termos').addEventListener('click', (e) => { e.preventDefault(); window.open('https://legacyengine.com.br/termos'); });
+$('#link-privacidade').addEventListener('click', (e) => { e.preventDefault(); window.open('https://legacyengine.com.br/privacidade'); });
 
 // comparador antes/depois
 const comp = $('#comparador');

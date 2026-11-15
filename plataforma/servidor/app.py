@@ -206,6 +206,8 @@ def cadastro(dados: Cadastro, request: Request):
     if len(dados.senha) < 8:
         raise HTTPException(400, 'A senha precisa ter pelo menos 8 caracteres.')
     with db() as con:
+        # cadastros nunca confirmados somem depois de 30 dias (política de privacidade)
+        con.execute('DELETE FROM contas WHERE verificada=0 AND criada < ?', (time.time() - 30 * 24 * 3600,))
         c = con.execute('SELECT verificada FROM contas WHERE email=?', (email,)).fetchone()
         if c and c['verificada']:
             raise HTTPException(409, 'Já existe uma conta com este e-mail. Faça login.')
