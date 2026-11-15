@@ -2,3 +2,6 @@
 # Cena temporária do editor (criar/apagar entidades)
 engine/.editor_cena.json
 engine/cena_salva.json
+
+# Instaladores gerados (engine/tools/gerar_instaladores.py)
+/dist/

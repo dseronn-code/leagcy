@@ -2,18 +2,10 @@ name: Windows - instaladores Legacy
 
 # Compila o Legacy Engine no Windows (sem GPU: só compila e empacota) e gera os 3 instaladores:
 #   - Legacy-Setup (o launcher), TimesSquare-Setup, LegacyEngine-Setup
-# Roda a cada push no ramo de trabalho que mexa no motor, nas cenas ou na plataforma.
+# Hoje só roda à mão (veja abaixo).
 on:
-  push:
-    branches: [main, ccr-5423dd89-y3br6e]
-    paths:
-      - 'engine/src/**'
-      - 'engine/shaders/**'
-      - 'engine/CMakeLists.txt'
-      - 'engine/cenas/**'
-      - 'engine/tools/empacotar.py'
-      - 'plataforma/**'
-      - '.github/workflows/windows.yml'
+  # Só manual: o GitHub Actions da conta está bloqueado pela cobrança; os instaladores saem do PC com a RTX
+  # (engine/tools/gerar_instaladores.py, pelo agente). Fica aqui para quando o Actions voltar.
   workflow_dispatch:
 
 concurrency:
