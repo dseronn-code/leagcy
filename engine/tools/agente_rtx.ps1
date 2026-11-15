@@ -55,6 +55,15 @@ function SinalDeVida([string]$Estado, [switch]$Forcar) {
   Pop-Location
 }
 
+# Escreve uma linha na saída. Logo depois de matar um comando, o Windows pode levar alguns segundos para soltar o
+# arquivo (o programa morto ainda o segurava): tenta por até 30 s e, se não der, grava em anotacoes.txt.
+function Anotar([string]$Arquivo, [string]$Texto) {
+  for ($t = 0; $t -lt 30; $t++) {
+    try { [IO.File]::AppendAllText($Arquivo, $Texto); return } catch { Start-Sleep 1 }
+  }
+  try { [IO.File]::AppendAllText("$Pasta\resultados_pc\anotacoes.txt", $Texto) } catch { }
+}
+
 # Roda um comando do pedido vigiando-o (a saída vai para resultados_pc\saida.txt). Devolve:
 #   o código de saída do programa; -999 = passou do limite; -998 = travado (sem saída nova e sem usar CPU por
 #   $MinTravado min); -997 = o pedido mudou no GitHub no meio (rodada cancelada para rodar a nova).
@@ -214,20 +223,20 @@ while ($true) {
         $rotulo = "rodando $($commit.Substring(0, 7)) ($i/$($comandos.Count))"
         Write-Host "[$(Agora)] ($i/$($comandos.Count)) [limite $lim min] $c"
         SinalDeVida $rotulo -Forcar
-        [IO.File]::AppendAllText($saida, "`n>>> $c`n")
+        Anotar $saida "`n>>> $c`n"
         $code = RodarComLimite $c $lim $i $rotulo $pedido
-        if ($code -eq -997) { [IO.File]::AppendAllText($saida, "!!! pedido novo no GitHub: rodada cancelada`n"); $cancelada = $true; break }
+        if ($code -eq -997) { Anotar $saida "!!! pedido novo no GitHub: rodada cancelada`n"; $cancelada = $true; break }
         if ($code -eq -999 -or $code -eq -998) {
           # Falhou por tempo: tenta uma segunda vez (descarta travamento de uma vez só, ex.: driver, disco, antivírus).
           $motivo = if ($code -eq -999) { "passou de $lim min" } else { "travou (sem saída nem CPU por $MinTravado min)" }
-          [IO.File]::AppendAllText($saida, "!!! $motivo; diagnóstico em diagnostico_$i.txt; tentando de novo`n>>> (2ª tentativa) $c`n")
+          Anotar $saida "!!! $motivo; diagnóstico em diagnostico_$i.txt; tentando de novo`n>>> (2ª tentativa) $c`n"
           $code = RodarComLimite $c $lim (100 + $i) "$rotulo 2a tentativa" $pedido
-          if ($code -eq -997) { [IO.File]::AppendAllText($saida, "!!! pedido novo no GitHub: rodada cancelada`n"); $cancelada = $true; break }
-          if ($code -eq -999 -or $code -eq -998) { [IO.File]::AppendAllText($saida, "!!! falhou de novo da mesma forma (diagnostico_$(100 + $i).txt); seguindo para o próximo`n") }
-          elseif ($code -ne 0) { [IO.File]::AppendAllText($saida, "!!! código $code`n") }
-          else { [IO.File]::AppendAllText($saida, "(2ª tentativa ok)`n") }
+          if ($code -eq -997) { Anotar $saida "!!! pedido novo no GitHub: rodada cancelada`n"; $cancelada = $true; break }
+          if ($code -eq -999 -or $code -eq -998) { Anotar $saida "!!! falhou de novo da mesma forma (diagnostico_$(100 + $i).txt); seguindo para o próximo`n" }
+          elseif ($code -ne 0) { Anotar $saida "!!! código $code`n" }
+          else { Anotar $saida "(2ª tentativa ok)`n" }
         }
-        elseif ($code -ne 0) { [IO.File]::AppendAllText($saida, "!!! código $code`n") }
+        elseif ($code -ne 0) { Anotar $saida "!!! código $code`n" }
       }
     }
   }
