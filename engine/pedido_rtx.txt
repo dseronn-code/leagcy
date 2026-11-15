@@ -1,6 +1,6 @@
-# Rodada 39: instaladores novos — launcher completo (esqueci a senha, trocar senha, atualizar/desinstalar jogos,
-# modo offline, termos dentro do app, aviso de versão nova) e a Times Square com a carga rápida (tangentes em cache)
-# e as correções das fotos. Publica uma Release nova no GitHub.
+# Rodada 40: launcher que se atualiza sozinho (electron-updater) e jogos que atualizam baixando só os arquivos que
+# mudaram (manifesto por produto). Esta é a 1ª Release com manifesto: sobe todos os arquivos comprimidos uma vez
+# (~200 MB); as próximas sobem só o que mudar.
 [10] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher
-[5] python tools\gerar_instaladores.py --publicar
+[30] python tools\gerar_instaladores.py --publicar

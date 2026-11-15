@@ -12,6 +12,8 @@ instalados só para o usuário (sem administrador) na primeira vez. A publicaç�
 (`git credential fill`), o mesmo que o agente usa para enviar os resultados.
 """
 import argparse
+import gzip
+import hashlib
 import glob
 import json
 import os
@@ -19,6 +21,7 @@ import shutil
 import time
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 import zipfile
 
@@ -122,8 +125,10 @@ def launcher():
     rodar([npm, 'install', '--no-audit', '--no-fund'], cwd=lan, env=env, shell=False)
     rodar([npm, 'pkg', 'set', 'version=' + versao()], cwd=lan, env=env)
     rodar([npx, 'electron-builder', '--win', 'nsis', '--publish', 'never'], cwd=lan, env=env)
-    exe = max(glob.glob(os.path.join(lan, 'dist', '*.exe')), key=os.path.getmtime)
-    shutil.copyfile(exe, os.path.join(SAIDA, 'Legacy-Setup.exe'))
+    shutil.copyfile(os.path.join(lan, 'dist', 'Legacy-Setup.exe'), os.path.join(SAIDA, 'Legacy-Setup.exe'))
+    for extra in ('latest.yml', 'Legacy-Setup.exe.blockmap'):  # autoatualização do launcher
+        if os.path.isfile(os.path.join(lan, 'dist', extra)):
+            shutil.copyfile(os.path.join(lan, 'dist', extra), os.path.join(SAIDA, extra))
 
 
 def token_git():
@@ -143,24 +148,93 @@ def api(metodo, url, token, dados=None, tipo='application/json'):
         return json.load(r)
 
 
+# Atualização pelo launcher, baixando só o que mudou: cada produto ganha um manifesto (todos os arquivos com sha256,
+# tamanho e endereço). Um arquivo igual ao da versão anterior reaproveita o endereço antigo (não sobe de novo); um
+# novo ou mudado sobe comprimido como "<produto>-<sha256>.gz" nesta Release. Por isso as Releases antigas NÃO
+# podem ser apagadas: os manifestos novos apontam para arquivos delas. (plataforma/launcher/atualizador.js)
+PRODUTOS_DIST = (('times-square', 'TimesSquare'), ('legacy-engine', 'LegacyEngine'))
+RELEASES = f'https://github.com/{REPO}/releases'
+
+
+def sha256(arq):
+    h = hashlib.sha256()
+    with open(arq, 'rb') as f:
+        for bloco in iter(lambda: f.read(1 << 20), b''):
+            h.update(bloco)
+    return h.hexdigest()
+
+
+def manifesto_anterior(produto):
+    try:
+        with urllib.request.urlopen(f'{RELEASES}/latest/download/manifesto-{produto}.json', timeout=60) as r:
+            return json.load(r)
+    except Exception:  # noqa: BLE001 - primeira vez (ainda não há manifesto publicado)
+        return {'arquivos': []}
+
+
+def montar_manifesto(produto, pasta, tag, anterior, saida_gz):
+    """Devolve (manifesto, [(arquivo .gz a subir, nome do asset)])."""
+    antes = {a['sha256']: a for a in anterior.get('arquivos', [])}
+    arquivos, subir = [], []
+    os.makedirs(saida_gz, exist_ok=True)
+    for raiz, _, nomes in os.walk(pasta):
+        for n in sorted(nomes):
+            arq = os.path.join(raiz, n)
+            rel = os.path.relpath(arq, pasta).replace(os.sep, '/')
+            h, tam = sha256(arq), os.path.getsize(arq)
+            if h in antes:  # igual a um arquivo já publicado (nesta versão ou numa anterior): mesmo endereço
+                url, comp = antes[h]['url'], antes[h].get('comprimido', tam)
+            else:
+                nome = f'{produto}-{h}.gz'
+                gz = os.path.join(saida_gz, nome)
+                with open(arq, 'rb') as f, gzip.open(gz, 'wb', compresslevel=6) as g:
+                    shutil.copyfileobj(f, g)
+                url, comp = f'{RELEASES}/download/{tag}/{nome}', os.path.getsize(gz)
+                subir.append((gz, nome))
+                antes[h] = {'url': url, 'comprimido': comp}  # arquivo repetido no produto: sobe uma vez só
+            arquivos.append({'caminho': rel, 'sha256': h, 'tamanho': tam, 'comprimido': comp, 'url': url})
+    arquivos.sort(key=lambda a: a['caminho'])
+    return {'produto': produto, 'versao': tag, 'arquivos': arquivos}, subir
+
+
 def publicar():
     arquivos = [os.path.join(SAIDA, n) for n in ('Legacy-Setup.exe', 'TimesSquare-Setup.exe', 'LegacyEngine-Setup.exe')]
     faltam = [a for a in arquivos if not os.path.isfile(a)]
     if faltam:
         sys.exit('Faltam instaladores: ' + ', '.join(faltam))
+    # O autoatualizador do launcher (electron-updater) lê latest.yml; o .blockmap permite baixar só o que mudou.
+    arquivos += [a for a in (os.path.join(SAIDA, 'latest.yml'), os.path.join(SAIDA, 'Legacy-Setup.exe.blockmap'))
+                 if os.path.isfile(a)]
     token = token_git()
     v = versao()
+    tag = f'v{v}'
+    envios = [(a, os.path.basename(a)) for a in arquivos]
+    for produto, pasta in PRODUTOS_DIST:
+        man, subir = montar_manifesto(produto, os.path.join(DIST, pasta), tag, manifesto_anterior(produto),
+                                      os.path.join(DIST, 'atualizacao', produto))
+        novos = sum(os.path.getsize(g) for g, _ in subir)
+        print(f'{produto}: {len(man["arquivos"])} arquivos, {len(subir)} novos ou mudados ({novos / 1e6:.1f} MB comprimidos)',
+              flush=True)
+        caminho = os.path.join(DIST, 'atualizacao', f'manifesto-{produto}.json')
+        with open(caminho, 'w', encoding='utf-8') as f:
+            json.dump(man, f)
+        envios += subir + [(caminho, f'manifesto-{produto}.json')]
+    # Rascunho primeiro: só vira a "mais nova" depois de todos os arquivos subirem (o launcher nunca vê um
+    # manifesto apontando para um arquivo que ainda não existe).
     rel = api('POST', f'https://api.github.com/repos/{REPO}/releases', token, json.dumps({
-        'tag_name': f'v{v}', 'name': f'Legacy {v}', 'make_latest': 'true',
+        'tag_name': tag, 'name': f'Legacy {v}', 'draft': True,
         'target_commitish': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=RAIZ, capture_output=True, text=True).stdout.strip(),
-        'body': 'Legacy Launcher, Times Square e Legacy Engine para Windows (gerados no PC com a RTX).'}).encode())
-    for a in arquivos:
-        nome = os.path.basename(a)
-        print('enviando', nome, f'{os.path.getsize(a) / 1e6:.0f} MB', flush=True)
-        up = rel['upload_url'].split('{')[0] + '?name=' + nome
+        'body': 'Legacy Launcher, Times Square e Legacy Engine para Windows (gerados no PC com a RTX). '
+                'O launcher atualiza sozinho e baixa só os arquivos que mudaram.'}).encode())
+    for k, (a, nome) in enumerate(envios):
+        if os.path.getsize(a) > 5e6 or k % 50 == 0:
+            print(f'enviando {nome} ({k + 1}/{len(envios)}, {os.path.getsize(a) / 1e6:.1f} MB)', flush=True)
+        up = rel['upload_url'].split('{')[0] + '?name=' + urllib.parse.quote(nome)
         with open(a, 'rb') as f:
             api('POST', up, token, f.read(), 'application/octet-stream')
-    print('Release publicada:', rel['html_url'])
+    api('PATCH', f'https://api.github.com/repos/{REPO}/releases/{rel["id"]}', token,
+        json.dumps({'draft': False, 'make_latest': 'true'}).encode())
+    print('Release publicada:', f'{RELEASES}/tag/{tag}', flush=True)
 
 
 def main():

@@ -148,6 +148,7 @@ function abrirApp() {
   $('#nome-usuario').textContent = nome;
   $('#avatar').textContent = nome[0].toUpperCase();
   pagina(location.hash.slice(1) || 'loja');
+  autoAtualizarProdutos();
 }
 
 function pagina(nome) {
@@ -164,6 +165,7 @@ const IMAGENS = { 'times-square': 'img/ts_hero.jpg', 'legacy-engine': 'img/eng_h
 let catalogo = null;
 let ultimaVersao = null;  // tag da Release mais nova (ex.: v0.1.282): a versão dos instaladores do catálogo
 const ocupado = new Set();  // produtos baixando/instalando
+const atualizando = new Set();  // produtos atualizando por arquivos (o progresso mostra "Atualizando")
 
 async function lerCatalogo() {
   if (!catalogo) catalogo = await chamar('GET', '/catalogo');
@@ -226,6 +228,11 @@ async function cartaoProduto(p) {
   return el;
 }
 
+function tamanho(bytes) {
+  return bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : bytes >= 1e6 ? Math.max(1, Math.round(bytes / 1e6)) + ' MB'
+    : Math.max(1, Math.round(bytes / 1e3)) + ' KB';
+}
+
 function versaoMaior(a, b) {  // "v0.1.282" > "v0.1.278"?
   const n = (v) => String(v || '').replace(/^v/, '').split('.').map((x) => parseInt(x, 10) || 0);
   const x = n(a), y = n(b);
@@ -247,19 +254,63 @@ async function atualizarCartao(el, p, ocupadoTexto) {
   if (!info.instalado) {
     botao.textContent = 'Instalar';
     estado.textContent = p.tamanho ? `Download de ${p.tamanho}` : '';
-  } else if (ultimaVersao && info.versao && versaoMaior(ultimaVersao, info.versao)) {
+  } else if (ultimaVersao && (!info.versao || versaoMaior(ultimaVersao, info.versao))) {
     botao.textContent = 'Atualizar';
-    estado.textContent = `Versão ${info.versao} instalada · nova: ${ultimaVersao}`;
+    estado.textContent = `${info.versao ? 'Versão ' + info.versao + ' instalada · ' : ''}nova: ${ultimaVersao}`;
+    if (window.legacy.verificar) {  // quanto falta baixar (só os arquivos que mudaram)
+      window.legacy.verificar(p.id).then((v) => {
+        if (!v || ocupado.has(p.id)) return;
+        if (v.arquivos === 0) { botao.textContent = 'Jogar'; estado.textContent = 'Versão ' + v.versao; return; }
+        botao.textContent = `Atualizar (${tamanho(v.bytes)})`;
+      }).catch(() => {});
+    }
   } else {
     botao.textContent = 'Jogar';
     estado.textContent = info.versao ? `Versão ${info.versao}` : 'Instalado';
   }
 }
 
+// Atualiza baixando só os arquivos que mudaram. Sem manifesto na Release (versões antigas), cai no instalador.
+async function atualizarProduto(p, el, silencioso = false) {
+  if (ocupado.has(p.id)) return;
+  ocupado.add(p.id);
+  atualizando.add(p.id);
+  if (el) { $('.barra', el).hidden = false; await atualizarCartao(el, p, 'Atualizando…'); }
+  try {
+    const r = await window.legacy.atualizar(p.id);
+    if (r.arquivos || !silencioso) aviso(`${p.nome} atualizado para ${r.versao}` + (r.arquivos ? ` (${r.arquivos} arquivo${r.arquivos > 1 ? 's' : ''}).` : '.'));
+  } catch (err) {
+    if (/não tem atualização pelo launcher/.test(err.message) && p.download && !silencioso) {
+      atualizando.delete(p.id);
+      try {
+        await window.legacy.instalar(p.id, p.download, ultimaVersao);
+        aviso(p.nome + ' atualizado.');
+      } catch (e2) { aviso(e2.message); }
+    } else if (!silencioso || /Feche o jogo/.test(err.message)) {
+      aviso(err.message);
+    }
+  }
+  ocupado.delete(p.id);
+  atualizando.delete(p.id);
+  const cartao = el || $(`.jogo[data-id="${p.id}"]`);
+  if (cartao) { $('.barra', cartao).hidden = true; await atualizarCartao(cartao, p); }
+}
+
+// Ao abrir o launcher: o que está instalado e tem versão nova se atualiza sozinho (como na Epic).
+async function autoAtualizarProdutos() {
+  if (!window.legacy || !window.legacy.atualizar || !ultimaVersao) return;
+  let cat;
+  try { cat = await lerCatalogo(); } catch { return; }
+  for (const p of cat.produtos) {
+    const info = await window.legacy.info(p.id);
+    if (info.instalado && (!info.versao || versaoMaior(ultimaVersao, info.versao))) await atualizarProduto(p, null, true);
+  }
+}
+
 async function acaoPrincipal(el, p) {
   if (!window.legacy) return aviso('Instale o Legacy Launcher no Windows para baixar e jogar.');
   const info = await window.legacy.info(p.id);
-  const atualizar = info.instalado && ultimaVersao && info.versao && versaoMaior(ultimaVersao, info.versao);
+  const atualizar = info.instalado && ultimaVersao && (!info.versao || versaoMaior(ultimaVersao, info.versao));
   if (info.instalado && !atualizar) {
     try {
       // o jogo entra na mesma conta Legacy (código de uso único); sem servidor, abre sem conta
@@ -271,6 +322,7 @@ async function acaoPrincipal(el, p) {
     }
     return;
   }
+  if (atualizar && window.legacy.atualizar) return atualizarProduto(p, el);
   if (!p.download) return aviso('O instalador fica pronto em breve.');
   ocupado.add(p.id);
   $('.barra', el).hidden = false;
@@ -363,7 +415,8 @@ if (window.legacy) window.legacy.aoProgresso((id, p) => {
     $('.barra span', el).style.width = '100%';
     return;
   }
-  $('.principal', el).textContent = 'Baixando ' + Math.round(p * 100) + '%';
+  $('.principal', el).textContent = (atualizando.has(id) ? 'Atualizando ' : 'Baixando ')
+    + Math.round(p * 100) + '%';
   $('.barra span', el).style.width = (p * 100).toFixed(1) + '%';
 });
 
@@ -404,16 +457,43 @@ async function mostrarOffline() {
 }
 $('#btn-tentar').addEventListener('click', () => iniciar());
 
+let launcherSeAtualiza = false;  // launcher com electron-updater: o banner só aparece quando a versão nova já baixou
 async function verAtualizacoes() {
   if (!window.legacy) return;
   ultimaVersao = await window.legacy.ultimaVersao();
   if (!$('#pg-biblioteca').hidden) mostrarBiblioteca();  // os cartões já na tela passam a mostrar "Atualizar"
-  if (ultimaVersao && versaoMaior(ultimaVersao, versaoLauncher)) {
+  if (!$('#app').hidden) autoAtualizarProdutos();
+  if (!launcherSeAtualiza && ultimaVersao && versaoMaior(ultimaVersao, versaoLauncher)) {
     $('#versao-nova').textContent = ultimaVersao;
     $('#banner-atualizacao').hidden = false;
   }
 }
+if (window.legacy && window.legacy.aoAtualizarLauncher) {
+  launcherSeAtualiza = true;
+  window.legacy.aoAtualizarLauncher((estado, valor) => {
+    const banner = $('#banner-atualizacao'), texto = $('span', banner), botao = $('#btn-atualizar-launcher');
+    if (estado === 'baixando') { banner.hidden = false; botao.hidden = true; texto.textContent = `Baixando a versão ${valor} do Legacy Launcher…`; }
+    if (estado === 'progresso') texto.textContent = `Baixando a versão nova do Legacy Launcher… ${Math.round(valor)}%`;
+    if (estado === 'pronta') {
+      banner.hidden = false;
+      botao.hidden = false;
+      botao.textContent = 'Reiniciar agora';
+      botao.dataset.reiniciar = '1';
+      texto.textContent = `A versão ${valor} do Legacy Launcher está pronta. Ela instala sozinha quando você fechar o launcher.`;
+    }
+    if (estado === 'erro') {  // falhou: volta ao aviso com download manual
+      launcherSeAtualiza = false;
+      botao.hidden = false;
+      if (ultimaVersao && versaoMaior(ultimaVersao, versaoLauncher)) {
+        texto.innerHTML = 'Há uma versão nova do Legacy Launcher (<b></b>).';
+        $('b', texto).textContent = ultimaVersao;
+        banner.hidden = false;
+      } else banner.hidden = true;
+    }
+  });
+}
 $('#btn-atualizar-launcher').addEventListener('click', async () => {
+  if ($('#btn-atualizar-launcher').dataset.reiniciar) return window.legacy.reiniciarLauncher();
   const url = (catalogo && catalogo.launcher) || 'https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe';
   await window.legacy.abrirExterno(url);
   aviso('O download do instalador novo começou no navegador. Feche o launcher e rode o instalador.');

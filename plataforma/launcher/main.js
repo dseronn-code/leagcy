@@ -6,6 +6,7 @@ const { spawn } = require('child_process');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const atualizador = require('./atualizador');
 
 const API = process.env.LEGACY_API || 'https://account.legacyengine.com.br';
 const pastaLegacy = () => path.join(app.getPath('appData'), 'Legacy');
@@ -119,6 +120,16 @@ ipcMain.handle('produto:instalar', async (e, id, url, versao) => {
   return true;
 });
 
+// Atualizar só o que mudou (manifesto da Release). info = {versao, arquivos, bytes} ou null (sem manifesto).
+ipcMain.handle('produto:verificar', async (_e, id) => {
+  if (!PRODUTOS[id] || !fs.existsSync(exeProduto(id))) return null;
+  return atualizador.verificar(id, pastaProduto(id));
+});
+ipcMain.handle('produto:atualizar', async (e, id) => {
+  if (!PRODUTOS[id] || !fs.existsSync(exeProduto(id))) throw new Error('Não está instalado.');
+  return atualizador.atualizar(id, pastaProduto(id), (p) => e.sender.send('produto:progresso', id, p));
+});
+
 ipcMain.handle('produto:desinstalar', async (_e, id) => {
   if (!PRODUTOS[id]) throw new Error('Produto desconhecido.');
   if (fs.existsSync(desinstalador(id))) await rodar(desinstalador(id), ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART']);
@@ -142,5 +153,28 @@ app.on('second-instance', () => {
   const w = BrowserWindow.getAllWindows()[0];
   if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
 });
-app.whenReady().then(criarJanela);
+app.whenReady().then(() => {
+  criarJanela();
+  autoAtualizar();
+});
+
+// O launcher se atualiza sozinho (electron-updater lendo latest.yml da Release mais nova no GitHub): baixa em
+// segundo plano, só a parte que mudou (blockmap), e instala ao fechar — ou na hora, se a pessoa clicar em
+// "Reiniciar". Só no launcher instalado (não em "npm start").
+function autoAtualizar() {
+  if (!app.isPackaged) return;
+  let autoUpdater;
+  try { ({ autoUpdater } = require('electron-updater')); } catch { return; }
+  const avisar = (canal, ...a) => BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(canal, ...a));
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-available', (i) => avisar('launcher:atualizacao', 'baixando', i.version));
+  autoUpdater.on('download-progress', (p) => avisar('launcher:atualizacao', 'progresso', p.percent));
+  autoUpdater.on('update-downloaded', (i) => avisar('launcher:atualizacao', 'pronta', i.version));
+  autoUpdater.on('error', () => avisar('launcher:atualizacao', 'erro'));
+  const checar = () => autoUpdater.checkForUpdates().catch(() => {});
+  checar();
+  setInterval(checar, 4 * 3600 * 1000);  // launcher aberto o dia todo: confere de 4 em 4 horas
+  ipcMain.handle('launcher:reiniciar', () => autoUpdater.quitAndInstall(true, true));
+}
 app.on('window-all-closed', () => app.quit());

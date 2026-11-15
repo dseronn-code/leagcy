@@ -15,9 +15,31 @@
   "build": {
     "appId": "br.com.legacyengine.launcher",
     "productName": "Legacy",
-    "files": ["main.js", "preload.js", "ui/**"],
-    "win": { "target": "nsis" },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true,
-              "shortcutName": "Legacy" }
+    "files": [
+      "main.js",
+      "preload.js",
+      "atualizador.js",
+      "ui/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "Legacy-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Legacy"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "dseronn-code",
+        "repo": "leagcy"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "6.3.9"
   }
 }
