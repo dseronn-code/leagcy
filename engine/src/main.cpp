@@ -1192,11 +1192,15 @@ int runWindowed(const Options& opt) {
 #ifdef _WIN32
 // Console do Windows em UTF-8 (acentos das mensagens), sem incluir <windows.h>.
 extern "C" __declspec(dllimport) int __stdcall SetConsoleOutputCP(unsigned int codePage);
+// Sem o "fantasma" do Windows: um trecho longo da carga que não atende a janela por 5 s não troca mais a tela de
+// carregamento pela janela cinza de "Não está respondendo" (a tela continua com o último quadro desenhado).
+extern "C" __declspec(dllimport) void __stdcall DisableProcessWindowsGhosting(void);
 #endif
 
 int main(int argc, char** argv) {
 #ifdef _WIN32
   SetConsoleOutputCP(65001);
+  DisableProcessWindowsGhosting();
 #endif
   Options opt = parseArgs(argc, argv);
   if (!opt.tangentTest.empty()) return scene::tangentTest(opt.tangentTest);

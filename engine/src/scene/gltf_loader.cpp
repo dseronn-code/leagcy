@@ -184,6 +184,7 @@ struct Loader {
 
   void loadMaterials() {
     for (size_t i = 0; i < data->materials_count; ++i) {
+      carregamento::dentroDoModelo(0.5f * float(i) / float(data->materials_count));  // texturas: a parte lenta
       const cgltf_material& src = data->materials[i];
       Material m;
       if (src.has_pbr_specular_glossiness) {
@@ -287,6 +288,7 @@ struct Loader {
   void loadMeshes() {
     meshPrims.resize(data->meshes_count);
     for (size_t mi = 0; mi < data->meshes_count; ++mi) {
+      carregamento::dentroDoModelo(0.5f + 0.3f * float(mi) / float(data->meshes_count));
       const cgltf_mesh& mesh = data->meshes[mi];
       for (size_t pi = 0; pi < mesh.primitives_count; ++pi) {
         const cgltf_primitive& prim = mesh.primitives[pi];
@@ -368,14 +370,10 @@ struct Loader {
     auto work = [&] {
       for (size_t k = next++; k < needTangents.size(); k = next++) {
         computeTangentsMikk(meshPrims[needTangents[k].first][needTangents[k].second].data);
-        carregamento::pulso();  // só a thread principal redesenha a tela de carregamento
+        carregamento::pulso();  // só a thread principal redesenha (nas outras não faz nada)
       }
     };
-    const unsigned n = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
-    std::vector<std::thread> pool;
-    for (unsigned t = 1; t < n && t < needTangents.size(); ++t) pool.emplace_back(work);
-    work();
-    for (std::thread& t : pool) t.join();
+    carregamento::emParalelo(work, std::max<size_t>(1, needTangents.size()));
   }
   std::vector<std::pair<size_t, size_t>> needTangents;
 

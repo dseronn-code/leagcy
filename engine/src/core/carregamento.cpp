@@ -1,14 +1,18 @@
 #include "core/carregamento.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #include <nlohmann/json.hpp>
+
+#include "core/log.h"
 
 namespace carregamento {
 namespace {
@@ -22,6 +26,10 @@ void talvezDesenhar(bool forcar) {
   if (!g_desenho || std::this_thread::get_id() != g_thread) return;
   const auto agora = std::chrono::steady_clock::now();
   if (!forcar && agora - g_ultimo < std::chrono::milliseconds(33)) return;
+  // Trecho da carga que passou muito tempo sem atender a janela: aparece no log para achar o laço que falta avisar.
+  const double parado = std::chrono::duration<double>(agora - g_ultimo).count();
+  if (g_ultimo.time_since_epoch().count() && parado > 2.0)
+    LOG_INFO("Tela de carregamento: %.1f s sem redesenhar (em %.0f%%)", parado, 100.0 * g_fracao);
   g_ultimo = agora;
   g_desenho(g_fracao);
 }
@@ -32,6 +40,7 @@ void ligar(Desenho desenho) {
   g_thread = std::this_thread::get_id();
   g_fracao = 0.0f;
   g_modelos = 0;
+  g_ultimo = {};
   talvezDesenhar(true);
 }
 
@@ -58,6 +67,32 @@ void modeloCarregado() {
 void etapa(size_t i, size_t n) { progresso(0.5f + 0.45f * (n ? float(i) / float(n) : 1.0f)); }
 
 void pulso() { talvezDesenhar(false); }
+
+void dentroDoModelo(float f) {
+  if (!g_desenho || std::this_thread::get_id() != g_thread) return;
+  const auto base = [](size_t n) { return 0.03f + 0.47f * (1.0f - std::exp(-float(n) / 25.0f)); };
+  progresso(base(g_modelos) + (base(g_modelos + 1) - base(g_modelos)) * std::clamp(f, 0.0f, 0.95f));
+}
+
+void emParalelo(const std::function<void()>& trabalho, size_t itens) {
+  const size_t n = std::min<size_t>(itens, std::max(1u, std::min(16u, std::thread::hardware_concurrency())));
+  // Com a tela ligada, a thread principal só desenha (um item enorme nela travaria a janela); sem tela, trabalha junto.
+  const bool tela = g_desenho && std::this_thread::get_id() == g_thread;
+  std::atomic<size_t> prontas{0};
+  std::vector<std::thread> pool;
+  for (size_t t = tela ? 0 : 1; t < n; ++t)
+    pool.emplace_back([&] {
+      trabalho();
+      ++prontas;
+    });
+  if (!tela) trabalho();
+  if (tela)
+    while (prontas.load() < pool.size()) {
+      talvezDesenhar(false);
+      std::this_thread::sleep_for(std::chrono::milliseconds(15));
+    }
+  for (std::thread& t : pool) t.join();
+}
 
 std::string imagemDaCena(const std::string& cena, const char* chave) {
   namespace fs = std::filesystem;

@@ -1,4 +1,5 @@
 #include "game/world.h"
+#include "core/carregamento.h"
 #include "game/navigation.h"
 #include "game/scripting.h"
 #include "game/visual_script.h"
@@ -1204,7 +1205,9 @@ void World::start() {
       for (uint32_t i : mesh.indices) idx.push_back(base + i);
     }
     if (!idx.empty()) {
-      m.bodyId = physics->addStaticMesh(verts, idx, m.friction);
+      // Milhões de triângulos (a cidade): segundos montando a árvore do Jolt. Numa thread à parte, com a tela de
+      // carregamento viva na principal.
+      carregamento::emParalelo([&] { m.bodyId = physics->addStaticMesh(verts, idx, m.friction); }, 1);
       LOG_INFO("Física: colisão de %s com %zu triângulos", m.path.c_str(), idx.size() / 3);
     }
   }

@@ -1282,16 +1282,27 @@ void Scene::upload(rhi::Context& ctx) {
         if (l != ~0u)
           for (uint32_t f = 0; f < c.frames; ++f) keep[l + f] = 1;
     }
+    std::vector<size_t> fila;  // cada malha é independente: em paralelo (a cidade tem malhas enormes)
     for (size_t i = 0; i < cpuMeshes_.size(); ++i) {
-      MeshData& md = cpuMeshes_[i];
+      const MeshData& md = cpuMeshes_[i];
       if (keep[i] || md.skinModel >= 0 || !md.joints.empty() || md.clothWidth > 0 || md.hairStrands > 0 ||
           md.indices.size() / 3 < 8 * kMeshletMaxTriangles)
         continue;
-      reorderForClusters(md);
+      fila.push_back(i);
     }
+    std::atomic<size_t> next{0};
+    carregamento::emParalelo(
+        [&] {
+          for (size_t k = next++; k < fila.size(); k = next++) reorderForClusters(cpuMeshes_[fila[k]]);
+        },
+        std::max<size_t>(1, fila.size()));
   }
-  if (meshLights) buildMeshLights();
-  buildHlod();  // depois das luzes de malha: o proxy não é luz (os membros continuam no ray tracing)
+  carregamento::emParalelo(  // segundos na cidade: numa thread à parte, com a tela de carregamento viva
+      [&] {
+        if (meshLights) buildMeshLights();
+        buildHlod();  // depois das luzes de malha: o proxy não é luz (os membros continuam no ray tracing)
+      },
+      1);
   // LODs: malhas estáticas com mais de 3 mil triângulos ganham versões com 1/4 e 1/16 dos triângulos.
   std::vector<std::array<int, 2>> lodOf(cpuMeshes_.size(), {-1, -1});
   std::vector<float> meshRadius(cpuMeshes_.size(), 0.0f);
@@ -1328,6 +1339,7 @@ void Scene::upload(rhi::Context& ctx) {
         hi = glm::max(hi, v.position);
       }
       meshRadius[i] = 0.5f * glm::length(hi - lo);
+      carregamento::pulso();
       MeshData l1 = simplifyMesh(md, tris / 4);
       MeshData l2 = simplifyMesh(md, tris / 16);  // antes de addMesh: ele faz cpuMeshes_ crescer e invalida `md`
       lodOf[i][0] = int(addMesh(std::move(l1)));
@@ -1372,11 +1384,7 @@ void Scene::upload(rhi::Context& ctx) {
       for (size_t i = next++; i < cpuMeshes_.size(); i = next++)
         prepared[i].blob = meshletBlob(ctx, prepared[i].fields, cpuMeshes_[i], clusterLod, textureCacheDir);
     };
-    const unsigned n = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
-    std::vector<std::thread> pool;
-    for (unsigned t = 1; t < n; ++t) pool.emplace_back(work);
-    work();
-    for (std::thread& t : pool) t.join();
+    carregamento::emParalelo(work);
   }
   auto takeMeshlets = [&](size_t i, GpuMesh& gm) {
     gm.meshletCount = prepared[i].fields.meshletCount;
