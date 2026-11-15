@@ -845,7 +845,9 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
                   }
                 }
               }
-            const float half = a.L.width * 0.5f + 0.6f;
+            // Desvio só dentro da faixa (+20 cm): com +60 cm, quem desviava encostava na fachada e aparecia "dentro" das
+            // vitrines das lojas.
+            const float half = a.L.width * 0.5f + 0.2f;
             if (push != 0.0f) a.side = glm::clamp(a.side + glm::clamp(push * 4.0f, -1.0f, 1.0f) * step, -half, half);
             else a.side += (a.baseSide - a.side) * std::min(1.0f, 0.3f * step);
           }

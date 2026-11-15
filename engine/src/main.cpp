@@ -189,6 +189,7 @@ struct Options {
   bool pause = false;      // congela animações (medições de ruído com cena estática)
   bool streamSync = false;       // streaming: espera cada leitura do disco no mesmo frame (referência determinística)
   bool textureStreaming = true;  // mips finos das texturas sob demanda (--no-texture-streaming: tudo no início)
+  bool textureStreamingSet = false;  // escolhido na linha de comando
   uint32_t pauseAt = 0;    // > 0: as animações rodam N frames e congelam (referência no mesmo instante da cena)
   bool compressTextures = true;
   bool ignoreTangents = false;   // --ignore-tangents  // texturas em BC7 (--no-texture-compression = RGBA8)
@@ -355,8 +356,8 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--restir-neighbors") neighOverride = int(std::atoi(next()));
     else if (a == "--no-restir-bias-rays") noBiasRays = true;
     else if (a == "--stream-sync") o.streamSync = true;
-    else if (a == "--no-texture-streaming") o.textureStreaming = false;
-    else if (a == "--texture-streaming") o.textureStreaming = true;
+    else if (a == "--no-texture-streaming") o.textureStreaming = false, o.textureStreamingSet = true;
+    else if (a == "--texture-streaming") o.textureStreaming = true, o.textureStreamingSet = true;
     else if (a == "--no-radiance-cache") o.render.radianceCache = false;
     else if (a == "--no-virtual-motion") o.render.virtualMotion = false;  // medição do SVGF
     else if (a == "--reference" || a == "--reference-pt") {  // verdade por acumulação: sem denoiser, TAA, upscaling nem blur
@@ -510,6 +511,9 @@ Options parseArgs(int argc, char** argv) {
       }
     }
   }
+  // Foto parada (--headless): poucos quadros não dão tempo de o streaming trazer os mips finos (a foto saía com
+  // vidros e interiores em blocos de 128 texels). Tudo inteiro desde o começo, a menos que se peça o contrário.
+  if (o.headless && !o.textureStreamingSet) o.textureStreaming = false;
   return o;
 }
 

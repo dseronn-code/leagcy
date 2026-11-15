@@ -1,10 +1,9 @@
-# Rodada 37: fotos da Times Square. A trava das rodadas 34-36 era o cálculo das tangentes (MikkTSpace) de toda a cidade
-# numa thread só a cada carga (>20 min). Agora é em paralelo e fica em cache (texcache/*.tan): a 1ª carga calcula
-# (~3 min), as outras levam segundos. Instaladores já publicados na v0.1.282.
-[8] build\Release\legacy.exe --headless --scene cenas\times_square.json --width 640 --height 360 --frames 4 --out resultados_pc\ts_cache.png
+# Rodada 38: as fotos da 37 saíram, com 3 defeitos corrigidos: (1) texturas em blocos de 128 texels (o streaming
+# não dava tempo numa foto; agora --headless carrega tudo inteiro), (2) pedestres "dentro" das vitrines (desviavam
+# até a fachada), (3) gente em movimento virando fantasma na foto acumulada (agora --pause-at 8 congela a cena).
 [3] build\Release\legacy.exe --scene cenas\times_square.json --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --screenshot resultados_pc\ts_jogo.png
-[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 6,1.2,-20 --look -4,5,-110 --out resultados_pc\ts_praca.png
-[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 33,1.6,-5.8 --look 28.5,1.3,-16 --out resultados_pc\ts_loja.png
-[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 55,1.7,-84 --look 110,5,-80 --out resultados_pc\ts_rua.png
-[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 22,1.6,-158 --look 25,1.3,-144 --out resultados_pc\ts_lanchonete.png
-[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 14,1.6,-62 --look -6,2.0,-110 --out resultados_pc\ts_mobiliario.png
+[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --pause-at 8 --cam 6,1.2,-20 --look -4,5,-110 --out resultados_pc\ts_praca.png
+[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --pause-at 8 --cam 33,1.6,-5.8 --look 28.5,1.3,-16 --out resultados_pc\ts_loja.png
+[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --pause-at 8 --cam 55,1.7,-84 --look 110,5,-80 --out resultados_pc\ts_rua.png
+[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --pause-at 8 --cam 22,1.6,-158 --look 25,1.3,-144 --out resultados_pc\ts_lanchonete.png
+[2] build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --pause-at 8 --cam 14,1.6,-62 --look -6,2.0,-110 --out resultados_pc\ts_mobiliario.png
