@@ -1,9 +1,9 @@
 # Termos de Uso — Legacy
 
-*Rascunho para revisão. Última atualização: 15/11/2026. Preencha os campos entre colchetes antes de publicar.*
+*Última atualização: 15 de novembro de 2026.*
 
 Estes termos valem para o Legacy Launcher, a conta Legacy, o Legacy Engine, a Times Square e os demais jogos e
-serviços Legacy ("Serviços"), oferecidos por [nome completo ou razão social], [CPF/CNPJ] ("Legacy").
+serviços Legacy ("Serviços"), oferecidos por Legacy Global Desenvolvimento de Software Ltda., CNPJ 60.808.475/0001-30, com sede em São Paulo/SP ("Legacy").
 
 ## 1. A conta Legacy
 - Uma conta Legacy dá acesso a todos os Serviços: o mesmo username e as mesmas configurações em todos eles.

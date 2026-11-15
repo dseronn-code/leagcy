@@ -1,12 +1,11 @@
 # Política de Privacidade — Legacy
 
-*Rascunho para revisão. Última atualização: 15/11/2026. Antes de publicar, preencha os campos entre colchetes e, se
-possível, peça a revisão de um advogado.*
+*Última atualização: 15 de novembro de 2026.*
 
 Esta política explica como a Legacy ("nós") trata os dados pessoais de quem usa o Legacy Launcher, o Legacy Engine, a
 Times Square e o site legacyengine.com.br, conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018, LGPD).
 
-**Responsável pelos dados (controlador):** [nome completo ou razão social], [CPF/CNPJ], [cidade/UF].
+**Responsável pelos dados (controlador):** Legacy Global Desenvolvimento de Software Ltda., CNPJ 60.808.475/0001-30, São Paulo/SP.
 **Contato para assuntos de privacidade:** equipe@legacyengine.com.br.
 
 ## 1. Quais dados coletamos
