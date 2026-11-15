@@ -29,8 +29,19 @@ void dentroDoModelo(float f);
 // continua redesenhando a tela (antes ela ficava parada no join() e o Windows dava "Não está respondendo").
 void emParalelo(const std::function<void()>& trabalho, size_t itens = ~size_t(0));
 
+// "Cozinhar" o conteúdo (como o cook da Unreal): com a variável de ambiente LEGACY_COZINHAR=<arquivo>, cada arquivo
+// do cache (texcache/: BC7, tangentes, geometria virtualizada) que a carga usar é anotado nesse arquivo, um por linha.
+// O gerador de instaladores roda cada cena uma vez assim e manda só esses arquivos no download: o jogador já recebe a
+// carga pronta (sem isso, a 1ª abertura depois de instalar ou atualizar calculava tudo no PC dele).
+void cacheUsado(const std::string& nome);
+// Pasta do cache: "texcache" (ao lado de onde o jogo roda) ou a de LEGACY_CACHE (a cozinha usa o cache quente do
+// motor no PC que gera os instaladores, sem copiar nada).
+std::string pastaCache();
+
 // Da cena .json: imagem da tela de carregamento e ícone da janela ("carregamento" e "icone", caminhos relativos à
 // pasta do motor ou à pasta da cena). Vazio se a cena não define.
 std::string imagemDaCena(const std::string& cena, const char* chave);
+// Texto de uma chave da cena .json (ex.: "titulo", o nome da janela e da barra de tarefas). Vazio se não houver.
+std::string textoDaCena(const std::string& cena, const char* chave);
 
 }  // namespace carregamento

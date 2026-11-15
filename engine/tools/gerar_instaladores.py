@@ -100,6 +100,49 @@ def node():
     return os.path.dirname(exe[0])
 
 
+def cozinhar(produto, cenas):
+    """O "cook" da Unreal: abre cada cena uma vez, sem janela, e manda no instalador (texcache/) só os arquivos de
+    cache que a carga usou (texturas BC7, tangentes, geometria virtualizada). O jogador recebe a carga pronta em vez
+    de calcular tudo na 1ª abertura. A cozinha é o texcache do motor neste PC (LEGACY_CACHE): já está quente, então
+    cada versão nova só calcula o que mudou."""
+    pasta = os.path.join(DIST, produto)
+    tc = os.path.join(pasta, 'texcache')
+    cozinha = os.path.join(MOTOR, 'texcache')
+    os.makedirs(cozinha, exist_ok=True)
+    lista = os.path.join(DIST, f'cozinha_{produto}.txt')
+    if os.path.exists(lista):
+        os.remove(lista)
+    antes = {os.path.join(r, n) for r, _, ns in os.walk(pasta) for n in ns}
+    exe = os.path.join(pasta, 'legacy.exe' if os.name == 'nt' else 'legacy')
+    foto = os.path.join(DIST, 'cozinha_quadro.png')
+    for cena in cenas:
+        t = time.time()
+        r = subprocess.run([exe, '--headless', '--scene', cena, '--frames', '1', '--out', foto], cwd=pasta,
+                           env=dict(os.environ, LEGACY_COZINHAR=lista, LEGACY_CACHE=cozinha), capture_output=True,
+                           text=True, encoding='utf-8', errors='replace', timeout=3600)
+        for linha in r.stdout.splitlines():  # os tempos de cada fase da carga, para o relatório
+            if 'Carga:' in linha or 'BC7/BC5' in linha or 'Cena:' in linha:
+                print('   ', linha, flush=True)
+        print(f'cozinhado {produto} {cena}: {time.time() - t:.0f} s (código {r.returncode})', flush=True)
+    for r, _, ns in os.walk(pasta):  # o que a execução deixou na pasta (log, save) não vai no instalador
+        for n in ns:
+            if os.path.join(r, n) not in antes:
+                os.remove(os.path.join(r, n))
+    usados = set()
+    if os.path.exists(lista):
+        with open(lista, encoding='utf-8') as f:
+            usados = {l.strip() for l in f if l.strip()}
+    os.makedirs(tc, exist_ok=True)
+    tam = 0
+    for n in sorted(usados):
+        if os.path.isfile(os.path.join(cozinha, n)):
+            shutil.copy2(os.path.join(cozinha, n), os.path.join(tc, n))
+            tam += os.path.getsize(os.path.join(tc, n))
+    if not usados:
+        print(f'AVISO: {produto}: a carga não anotou nenhum arquivo do cache; vai sem cache', flush=True)
+    print(f'{produto}: cache pronto com {len(usados)} arquivos ({tam / 1e6:.0f} MB)', flush=True)
+
+
 def jogos():
     os.makedirs(SAIDA, exist_ok=True)
     v = versao()
@@ -109,6 +152,8 @@ def jogos():
                     '--qualidade', 'medio'], cwd=MOTOR)  # avisos (licença do DLSS) não param a montagem
     subprocess.run([py, exp, '--cena', 'cenas/vale/vale.json', '--cena', 'cenas/parque.json', '--cena', 'cenas/fisica.json',
                     '--cena', 'cenas/carro.json', '--saida', os.path.join(DIST, 'LegacyEngine')], cwd=MOTOR)
+    cozinhar('TimesSquare', ['cenas/times_square.json'])
+    cozinhar('LegacyEngine', ['cenas/vale/vale.json', 'cenas/parque.json', 'cenas/fisica.json', 'cenas/carro.json'])
     comp = iscc()
     for nome, origem in (('TimesSquare', 'TimesSquare'), ('LegacyEngine', 'LegacyEngine')):
         rodar([comp, f'/DOrigem={os.path.join(DIST, origem)}', f'/DVersao={v}', f'/O{SAIDA}', f'/F{nome}-Setup',

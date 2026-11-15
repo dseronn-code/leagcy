@@ -1,4 +1,5 @@
 #include "scene/texture_compress.h"
+#include "core/carregamento.h"
 
 #include <algorithm>
 #include <atomic>
@@ -198,6 +199,7 @@ CompressedTexture compressTexture(const uint8_t* rgba, uint32_t width, uint32_t 
   char name[32];
   std::snprintf(name, sizeof(name), "%016llx.bc7", static_cast<unsigned long long>(hash));
   const std::filesystem::path file = std::filesystem::path(cacheDir) / name;
+  carregamento::cacheUsado(name);
 
   CompressedTexture t;
   if (loadCache(file, t)) return t;

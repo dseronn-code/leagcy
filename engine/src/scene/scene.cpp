@@ -1384,8 +1384,12 @@ void Scene::upload(rhi::Context& ctx) {
       for (size_t i = next++; i < cpuMeshes_.size(); i = next++)
         prepared[i].blob = meshletBlob(ctx, prepared[i].fields, cpuMeshes_[i], clusterLod, textureCacheDir);
     };
+    const auto t0 = std::chrono::steady_clock::now();
     carregamento::emParalelo(work);
+    LOG_INFO("Carga: meshlets e geometria virtualizada em %.1f s",
+             std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
   }
+  const auto tMalhas = std::chrono::steady_clock::now();
   auto takeMeshlets = [&](size_t i, GpuMesh& gm) {
     gm.meshletCount = prepared[i].fields.meshletCount;
     gm.meshletVertexBase = prepared[i].fields.meshletVertexBase;
@@ -1526,6 +1530,8 @@ void Scene::upload(rhi::Context& ctx) {
     skinScratch = rhi::createBuffer(ctx, scratchTotal, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                                     rhi::MemoryUsage::GpuOnly);
 
+  LOG_INFO("Carga: malhas na GPU (vértices, BLAS) em %.1f s",
+           std::chrono::duration<double>(std::chrono::steady_clock::now() - tMalhas).count());
   size_t texels = 0;
   VkFormatProperties bc7{};
   vkGetPhysicalDeviceFormatProperties(ctx.gpu, VK_FORMAT_BC7_SRGB_BLOCK, &bc7);

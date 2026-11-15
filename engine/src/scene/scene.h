@@ -9,6 +9,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "core/carregamento.h"
 #include "rhi/accel.h"
 #include "scene/mesh.h"
 #include "scene/texture_compress.h"
@@ -408,7 +409,7 @@ class Scene {
   float hlodCellSize = 0.0f, hlodDistance = 0.0f;
   TerrainLayers terrainLayers;
   std::vector<HlodCell> hlodCells;
-  std::string textureCacheDir = "texcache";  // cache dos BC7 (só a primeira carga comprime)
+  std::string textureCacheDir = carregamento::pastaCache();  // cache dos BC7 (só a primeira carga comprime)
 
   uint32_t addMesh(MeshData data) { cpuMeshes_.push_back(std::move(data)); return uint32_t(cpuMeshes_.size() - 1); }
   // Dados de uma malha na CPU (válidos antes do upload; usados, p.ex., para a colisão da física).

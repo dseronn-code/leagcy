@@ -1,4 +1,5 @@
 #include "scene/mesh.h"
+#include "core/carregamento.h"
 
 #ifdef LEGACY_MIKKTSPACE
 #include <mikktspace.h>
@@ -465,7 +466,7 @@ void mikkSet(const SMikkTSpaceContext* c, const float t[], float sign, int face,
 #endif
 
 namespace {
-std::string g_tangentCacheDir = "texcache";
+std::string g_tangentCacheDir = carregamento::pastaCache();
 std::mutex g_tangentCacheMutex;
 
 uint64_t fnvBytes(const void* p, size_t n, uint64_t h) {
@@ -536,6 +537,7 @@ void computeTangentsMikk(MeshData& m, std::vector<uint32_t>* origin) {
     char name[40];
     std::snprintf(name, sizeof(name), "%016llx.tan", static_cast<unsigned long long>(h));
     cacheFile = std::filesystem::path(cacheDir) / name;
+    carregamento::cacheUsado(name);
   }
   if (cacheFile.empty() || !loadTangentCache(cacheFile, ctx.corner)) {
     SMikkTSpaceInterface in{};
@@ -1064,6 +1066,7 @@ MeshletData buildClusterLodCached(const MeshData& mesh, std::vector<MeshletLod>&
   char name[40];
   std::snprintf(name, sizeof(name), "%016llx.lod", static_cast<unsigned long long>(h));
   const std::filesystem::path file = std::filesystem::path(cacheDir) / name;
+  carregamento::cacheUsado(name);
   struct Header {
     char magic[4];
     uint32_t version;

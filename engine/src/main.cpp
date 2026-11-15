@@ -782,7 +782,9 @@ int runWindowed(const Options& opt) {
     winH = mode->height;
     glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
   }
-  GLFWwindow* window = glfwCreateWindow(winW, winH, "Legacy Engine", monitor, nullptr);
+  std::string titulo = carregamento::textoDaCena(opt.scene.name, "titulo");
+  if (titulo.empty() || opt.editor) titulo = "Legacy Engine";  // o editor é sempre o Legacy Engine
+  GLFWwindow* window = glfwCreateWindow(winW, winH, titulo.c_str(), monitor, nullptr);
   if (!window) FATAL("Falha ao criar janela");
 
   uint32_t extCount = 0;

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
+#include <mutex>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -94,7 +96,20 @@ void emParalelo(const std::function<void()>& trabalho, size_t itens) {
   for (std::thread& t : pool) t.join();
 }
 
-std::string imagemDaCena(const std::string& cena, const char* chave) {
+std::string pastaCache() {
+  const char* p = std::getenv("LEGACY_CACHE");
+  return p && *p ? p : "texcache";
+}
+
+void cacheUsado(const std::string& nome) {
+  static const char* lista = std::getenv("LEGACY_COZINHAR");
+  if (!lista || !*lista) return;
+  static std::mutex m;
+  std::lock_guard<std::mutex> trava(m);
+  std::ofstream(lista, std::ios::app) << nome << '\n';
+}
+
+std::string textoDaCena(const std::string& cena, const char* chave) {
   namespace fs = std::filesystem;
   if (fs::path(cena).extension() != ".json") return {};
   std::ifstream f(cena);
@@ -103,7 +118,13 @@ std::string imagemDaCena(const std::string& cena, const char* chave) {
   ss << f.rdbuf();
   const nlohmann::json doc = nlohmann::json::parse(ss.str(), nullptr, false, true);  // aceita comentários
   if (doc.is_discarded() || !doc.contains(chave) || !doc[chave].is_string()) return {};
-  const std::string rel = doc[chave].get<std::string>();
+  return doc[chave].get<std::string>();
+}
+
+std::string imagemDaCena(const std::string& cena, const char* chave) {
+  namespace fs = std::filesystem;
+  const std::string rel = textoDaCena(cena, chave);
+  if (rel.empty()) return {};
   for (const fs::path& base : {fs::path(cena).parent_path(), fs::path("cenas"), fs::path(".")}) {
     std::error_code ec;
     if (fs::exists(base / rel, ec)) return (base / rel).string();

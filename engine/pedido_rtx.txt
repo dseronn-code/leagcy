@@ -1,6 +1,6 @@
-# Rodada 45: tela de carregamento sem "Não está respondendo" (a thread principal só desenha enquanto as outras
-# trabalham; colisão da cidade e luzes de malha em thread à parte; sem o fantasma do Windows) + launcher sem o texto
-# do servidor. Compila, gera e publica uma Release nova.
-[10] python tools\gerar_instaladores.py --jogos
+# Rodada 46: conteúdo "cozinhado" (como o cook da Unreal). Ao gerar os instaladores, cada cena abre uma vez sem
+# janela e o cache da carga (texturas BC7, tangentes, geometria virtualizada) vai junto no download: o jogador não
+# calcula mais nada na 1ª abertura. O relatório traz o tempo de cada fase da carga na RTX. Título da janela pela cena.
+[45] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher
-[30] python tools\gerar_instaladores.py --publicar
+[45] python tools\gerar_instaladores.py --publicar
