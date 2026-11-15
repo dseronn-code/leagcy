@@ -9,7 +9,7 @@
 
 struct GLFWwindow;
 namespace rhi {
-struct Swapchain;
+class Swapchain;
 }
 
 class TelaCarregamento {
