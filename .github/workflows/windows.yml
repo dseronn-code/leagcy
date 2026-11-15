@@ -46,7 +46,8 @@ jobs:
           path: engine/build/_deps
           key: deps-${{ hashFiles('engine/CMakeLists.txt') }}
 
-      - name: Compilar (Release, sem DLSS/FSR: o SDK do DLSS tem 1,6 GB e pede aviso à NVIDIA antes de distribuir)
+      # sem DLSS/FSR: o SDK do DLSS tem 1,6 GB e pede aviso à NVIDIA antes de distribuir
+      - name: Compilar (Release)
         shell: pwsh
         working-directory: engine
         run: |

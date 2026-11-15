@@ -60,3 +60,14 @@ def test_sair_e_apagar():
     h = {'Authorization': 'Bearer ' + tok}
     assert c.delete('/conta', headers=h).status_code == 200
     assert c.get('/eu', headers=h).status_code == 401
+
+
+def test_codigo_de_troca():
+    c.post('/conta/cadastro', json={'email': 'duda@exemplo.com', 'senha': 'duda12345'})
+    tok = c.post('/conta/verificar', json={'email': 'duda@exemplo.com', 'codigo': codigo()}).json()['token']
+    h = {'Authorization': 'Bearer ' + tok}
+    c.post('/conta/username', json={'username': 'Duda'}, headers=h)
+    cod = c.post('/sessao/codigo-troca', headers=h).json()['codigo']
+    r = c.post('/sessao/trocar', json={'codigo': cod, 'app': 'times-square'})
+    assert r.status_code == 200 and r.json()['perfil']['username'] == 'Duda'
+    assert c.post('/sessao/trocar', json={'codigo': cod}).status_code == 401  # uso único

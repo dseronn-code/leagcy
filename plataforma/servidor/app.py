@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS sessoes (
   token TEXT PRIMARY KEY, conta_id INTEGER, visitante INTEGER NOT NULL DEFAULT 0, criada REAL NOT NULL,
   expira REAL NOT NULL, app TEXT);
 CREATE TABLE IF NOT EXISTS configuracoes (conta_id INTEGER PRIMARY KEY, dados TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS trocas (codigo TEXT PRIMARY KEY, conta_id INTEGER, visitante INTEGER NOT NULL,
+  expira REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS biblioteca (conta_id INTEGER NOT NULL, produto TEXT NOT NULL, adicionado REAL NOT NULL,
   PRIMARY KEY (conta_id, produto));
 """
@@ -277,6 +279,36 @@ def visitante(request: Request):
     limite(request, 'visitante', 10)
     with db() as con:
         return {'token': nova_sessao(con, None, visitante=True), 'perfil': None}
+
+
+class Troca(BaseModel):
+    codigo: str
+    app: str | None = None
+
+
+@app.post('/sessao/codigo-troca')
+def codigo_troca(s: Sessao = Depends(sessao_atual)):
+    """O launcher pede um código de uso único (vale 2 minutos) e passa para o jogo ou para o Legacy Engine ao abrir
+    (como o "exchange code" da Epic): o app troca o código pela própria sessão, sem senha e sem token na linha de
+    comando."""
+    codigo = secrets.token_urlsafe(24)
+    with db() as con:
+        con.execute('DELETE FROM trocas WHERE expira < ?', (time.time(),))
+        con.execute('INSERT INTO trocas (codigo, conta_id, visitante, expira) VALUES (?,?,?,?)',
+                    (hash_token(codigo), s.conta_id, int(s.visitante), time.time() + 120))
+    return {'codigo': codigo, 'expira_em': 120}
+
+
+@app.post('/sessao/trocar')
+def trocar(dados: Troca, request: Request):
+    limite(request, 'trocar', 20)
+    with db() as con:
+        t = con.execute('SELECT * FROM trocas WHERE codigo=?', (hash_token(dados.codigo),)).fetchone()
+        if not t or t['expira'] < time.time():
+            raise HTTPException(401, 'Código de troca inválido ou expirado. Abra pelo Legacy Launcher.')
+        con.execute('DELETE FROM trocas WHERE codigo=?', (hash_token(dados.codigo),))  # uso único
+        token = nova_sessao(con, t['conta_id'], visitante=bool(t['visitante']), app_nome=dados.app)
+        return {'token': token, 'perfil': perfil(con, t['conta_id']) if t['conta_id'] else None}
 
 
 @app.post('/sessao/sair')
