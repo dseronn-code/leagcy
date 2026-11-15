@@ -154,7 +154,10 @@ function Publicar([string]$ResumoCommit) {
   git init -q
   git checkout -q -b resultados
   git add -A
-  git -c user.name=agente-rtx -c user.email=agente-rtx@localhost commit -q -m "Resultados da RTX ($ResumoCommit)"
+  # Mensagem por arquivo: aspas no assunto do commit (ex.: "Não está respondendo") quebravam o -m no PowerShell.
+  $msg = Join-Path $env:TEMP "legacy_resultados_msg.txt"
+  "Resultados da RTX ($ResumoCommit)" | Out-File -Encoding utf8 $msg
+  git -c user.name=agente-rtx -c user.email=agente-rtx@localhost commit -q -F $msg
   git push -q --force $url HEAD:refs/heads/resultados-rtx
   $ok = $LASTEXITCODE -eq 0
   Pop-Location
