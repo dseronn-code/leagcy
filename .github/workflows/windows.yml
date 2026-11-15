@@ -5,7 +5,7 @@ name: Windows - instaladores Legacy
 # Roda a cada push no ramo de trabalho que mexa no motor, nas cenas ou na plataforma.
 on:
   push:
-    branches: [ccr-5423dd89-y3br6e]
+    branches: [main, ccr-5423dd89-y3br6e]
     paths:
       - 'engine/src/**'
       - 'engine/shaders/**'
