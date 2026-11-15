@@ -14,8 +14,12 @@
 # com 60 s de aviso na tela ("cancelar", ou shutdown /a no PC, desiste).
 #
 # Sinal de vida: a cada 10 min (e a cada etapa) o agente publica engine/status.txt no branch "status-rtx" com a hora e
-# o que está fazendo, para quem está longe saber se o PC está ligado. Cada comando do pedido tem limite de 20 min:
-# passou disso, é encerrado e o agente segue.
+# o que está fazendo; com um comando rodando, a cada minuto (tempo decorrido e última linha da saída).
+# Vigia: cada linha do pedido pode dizer quanto deve demorar ("[5] comando" = uns 5 min, limite = o dobro; sem isso,
+# 20 min). Se passar do limite, ou ficar 6 min sem saída nova e sem usar CPU (travado), o agente grava um diagnóstico
+# (fim da saída, processos, GPU, memória), encerra o comando e tenta de novo uma vez; se falhar de novo, segue.
+# Se o pedido mudar no GitHub no meio da rodada, ela é cancelada e a nova começa. Se este próprio arquivo mudar no
+# GitHub, o agente se reinicia sozinho com a versão nova.
 param(
   [string]$Branch = "ccr-5423dd89-y3br6e",
   [int]$Intervalo = 30
@@ -48,15 +52,82 @@ function SinalDeVida([string]$Estado, [switch]$Forcar) {
   Pop-Location
 }
 
-# Roda um comando do pedido com limite de tempo (a saída vai para resultados_pc\saida.txt).
-function RodarComLimite([string]$Comando, [int]$Minutos = 20) {
+# Roda um comando do pedido vigiando-o (a saída vai para resultados_pc\saida.txt). Devolve:
+#   o código de saída do programa; -999 = passou do limite; -998 = travado (sem saída nova e sem usar CPU por
+#   $MinTravado min); -997 = o pedido mudou no GitHub no meio (rodada cancelada para rodar a nova).
+# A cada minuto publica o sinal de vida com o tempo decorrido e a última linha da saída, para quem está longe ver
+# exatamente onde está. Quando encerra por limite ou trava, grava um diagnóstico (fim da saída, processos, GPU,
+# memória) em resultados_pc\diagnostico_N.txt antes de matar o processo.
+$MinTravado = 6
+function Diagnostico([string]$Motivo, [int]$N, $Proc) {
+  $f = "$Pasta\resultados_pc\diagnostico_$N.txt"
+  "=== $Motivo ($(Agora)) ===" | Out-File -Encoding utf8 $f
+  "--- fim da saída ---" | Out-File -Append -Encoding utf8 $f
+  Get-Content "$Pasta\resultados_pc\saida.txt" -Tail 60 -ErrorAction SilentlyContinue | Out-File -Append -Encoding utf8 $f
+  "--- processos do comando ---" | Out-File -Append -Encoding utf8 $f
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ParentProcessId -eq $Proc.Id -or $_.ProcessId -eq $Proc.Id } |
+    ForEach-Object { "{0} pid={1} mem={2:N0} MB" -f $_.Name, $_.ProcessId, ($_.WorkingSetSize / 1MB) } | Out-File -Append -Encoding utf8 $f
+  Get-Process legacy, python, node -ErrorAction SilentlyContinue |
+    ForEach-Object { "{0} pid={1} cpu={2:N0}s mem={3:N0} MB respondendo={4}" -f $_.Name, $_.Id, $_.CPU, ($_.WorkingSet64 / 1MB), $_.Responding } |
+    Out-File -Append -Encoding utf8 $f
+  "--- GPU ---" | Out-File -Append -Encoding utf8 $f
+  cmd /c "nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv 2>&1" | Out-File -Append -Encoding utf8 $f
+  "--- memória livre ---" | Out-File -Append -Encoding utf8 $f
+  $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
+  if ($os) { "{0:N0} MB livres de {1:N0} MB" -f ($os.FreePhysicalMemory / 1KB), ($os.TotalVisibleMemorySize / 1KB) | Out-File -Append -Encoding utf8 $f }
+}
+
+function CpuDaArvore($Proc) {
+  # CPU somada do comando e de todos os descendentes (python -> node -> electron-builder, etc.).
+  $todos = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+  $ids = @($Proc.Id); $k = 0
+  while ($k -lt $ids.Count) {
+    $pai = $ids[$k]; $k++
+    $ids += @($todos | Where-Object { $_.ParentProcessId -eq $pai -and $ids -notcontains $_.ProcessId } | ForEach-Object { $_.ProcessId })
+  }
+  $t = 0.0
+  foreach ($i in $ids) { $q = Get-Process -Id $i -ErrorAction SilentlyContinue; if ($q -and $q.CPU) { $t += $q.CPU } }
+  return $t
+}
+
+function RodarComLimite([string]$Comando, [int]$Minutos, [int]$N, [string]$Rotulo, [string]$Pedido) {
+  $saidaTxt = "$Pasta\resultados_pc\saida.txt"
   $p = Start-Process -FilePath cmd.exe -ArgumentList "/c $Comando >> resultados_pc\saida.txt 2>&1" -NoNewWindow -PassThru
   $null = $p.Handle  # sem isso o ExitCode pode vir vazio no Windows PowerShell
-  if (-not $p.WaitForExit($Minutos * 60 * 1000)) {
-    cmd /c "taskkill /T /F /PID $($p.Id)" | Out-Null
-    return -999
+  $inicio = Get-Date
+  $ultTam = -1; $ultCpu = -1.0; $parado = Get-Date
+  while (-not $p.WaitForExit(60 * 1000)) {
+    $min = [int]((Get-Date) - $inicio).TotalMinutes
+    $tam = (Get-Item $saidaTxt -ErrorAction SilentlyContinue).Length
+    $cpu = CpuDaArvore $p
+    if ($tam -ne $ultTam -or [math]::Abs($cpu - $ultCpu) -gt 2.0) { $parado = Get-Date }
+    $ultTam = $tam; $ultCpu = $cpu
+    $linha = (Get-Content $saidaTxt -Tail 1 -ErrorAction SilentlyContinue)
+    if ($linha) { $linha = $linha.Substring(0, [math]::Min(80, $linha.Length)) }
+    SinalDeVida "$Rotulo $min/$Minutos min | $linha" -Forcar
+    $motivo = $null; $code = 0
+    if ($min -ge $Minutos) { $motivo = "passou de $Minutos min"; $code = -999 }
+    elseif (((Get-Date) - $parado).TotalMinutes -ge $MinTravado) { $motivo = "travado: $MinTravado min sem saída nova e sem usar CPU"; $code = -998 }
+    else {
+      git fetch -q origin $Branch 2>$null
+      $agora = (git rev-parse "origin/${Branch}:engine/pedido_rtx.txt" 2>$null)
+      if ($agora -and $agora -ne $Pedido) { $motivo = "pedido novo no GitHub: rodada cancelada"; $code = -997 }
+    }
+    if ($motivo) {
+      Write-Host "[$(Agora)] $motivo; encerrando"
+      Diagnostico $motivo $N $p
+      cmd /c "taskkill /T /F /PID $($p.Id)" | Out-Null
+      return $code
+    }
   }
   return $p.ExitCode
+}
+
+# Tempo esperado de uma linha do pedido: "[5] comando" quer dizer "uns 5 min"; o limite é o dobro (mínimo 4 min).
+# Sem o prefixo, o limite é 20 min.
+function LimiteDe([string]$Linha) {
+  if ($Linha -match '^\s*\[(\d+)\]\s*(.*)$') { return @([math]::Max(4, 2 * [int]$Matches[1]), $Matches[2]) }
+  return @(20, $Linha.Trim())
 }
 
 function Publicar([string]$ResumoCommit) {
@@ -107,13 +178,21 @@ while ($true) {
   if (-not $pedido -or $pedido -eq $ultimo) { Start-Sleep $Intervalo; continue }
 
   $commit = (git log -1 --format="%h %s" "origin/$Branch")
+  $cancelada = $false
   Write-Host "[$(Agora)] Pedido novo: $commit"
   if (Test-Path resultados_pc) { Remove-Item -Recurse -Force resultados_pc }
   New-Item -ItemType Directory resultados_pc | Out-Null
   $saida = "$Pasta\resultados_pc\saida.txt"
 
+  $antes = (Get-FileHash $PSCommandPath).Hash
   git checkout -q $Branch
   git merge -q --ff-only "origin/$Branch"
+  if ($LASTEXITCODE -eq 0 -and (Get-FileHash $PSCommandPath).Hash -ne $antes) {
+    Write-Host "[$(Agora)] O agente foi atualizado no GitHub: reiniciando com a versão nova"
+    SinalDeVida "agente atualizado; reiniciando" -Forcar
+    & powershell -ExecutionPolicy Bypass -File $PSCommandPath -Branch $Branch -Intervalo $Intervalo
+    exit
+  }
   if ($LASTEXITCODE -ne 0) {
     "!!! A pasta tem mudanças locais ou divergiu do GitHub: não atualizei nem rodei nada." | Out-File -Encoding utf8 $saida
     git status --short | Out-File -Append -Encoding utf8 $saida
@@ -125,16 +204,34 @@ while ($true) {
     } else {
       $comandos = Get-Content -Encoding UTF8 pedido_rtx.txt | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") }
       $i = 0
-      foreach ($c in $comandos) {
+      $cancelada = $false
+      foreach ($linhaPedido in $comandos) {
         $i++
-        Write-Host "[$(Agora)] ($i/$($comandos.Count)) $c"
-        SinalDeVida "rodando $commit ($i/$($comandos.Count))" -Forcar
+        $lim, $c = LimiteDe $linhaPedido
+        $rotulo = "rodando $($commit.Substring(0, 7)) ($i/$($comandos.Count))"
+        Write-Host "[$(Agora)] ($i/$($comandos.Count)) [limite $lim min] $c"
+        SinalDeVida $rotulo -Forcar
         [IO.File]::AppendAllText($saida, "`n>>> $c`n")
-        $code = RodarComLimite $c
-        if ($code -eq -999) { [IO.File]::AppendAllText($saida, "!!! passou de 20 min: encerrado`n") }
+        $code = RodarComLimite $c $lim $i $rotulo $pedido
+        if ($code -eq -997) { [IO.File]::AppendAllText($saida, "!!! pedido novo no GitHub: rodada cancelada`n"); $cancelada = $true; break }
+        if ($code -eq -999 -or $code -eq -998) {
+          # Falhou por tempo: tenta uma segunda vez (descarta travamento de uma vez só, ex.: driver, disco, antivírus).
+          $motivo = if ($code -eq -999) { "passou de $lim min" } else { "travou (sem saída nem CPU por $MinTravado min)" }
+          [IO.File]::AppendAllText($saida, "!!! $motivo; diagnóstico em diagnostico_$i.txt; tentando de novo`n>>> (2ª tentativa) $c`n")
+          $code = RodarComLimite $c $lim (100 + $i) "$rotulo 2a tentativa" $pedido
+          if ($code -eq -997) { [IO.File]::AppendAllText($saida, "!!! pedido novo no GitHub: rodada cancelada`n"); $cancelada = $true; break }
+          if ($code -eq -999 -or $code -eq -998) { [IO.File]::AppendAllText($saida, "!!! falhou de novo da mesma forma (diagnostico_$(100 + $i).txt); seguindo para o próximo`n") }
+          elseif ($code -ne 0) { [IO.File]::AppendAllText($saida, "!!! código $code`n") }
+          else { [IO.File]::AppendAllText($saida, "(2ª tentativa ok)`n") }
+        }
         elseif ($code -ne 0) { [IO.File]::AppendAllText($saida, "!!! código $code`n") }
       }
     }
+  }
+  if ($cancelada) {
+    # Publica o parcial e NÃO marca o pedido como rodado; a volta seguinte do laço pega o pedido novo.
+    Publicar "$commit (cancelada: pedido novo)" | Out-Null
+    continue
   }
   if (Publicar $commit) { Write-Host "[$(Agora)] Resultados enviados." } else { Write-Host "[$(Agora)] Falha ao enviar os resultados." }
   Set-Content $Estado $pedido
