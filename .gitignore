@@ -14,3 +14,4 @@ plataforma/launcher/package-lock.json
 plataforma/launcher/node_modules/
 plataforma/launcher/dist/
 engine/leagcy/
+__pycache__/
