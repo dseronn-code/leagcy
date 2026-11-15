@@ -27,6 +27,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 
@@ -42,9 +43,20 @@ SESSAO_VALIDADE = 30 * 24 * 3600
 USERNAME_RE = re.compile(r'^[A-Za-z0-9_]{3,16}$')
 EMAIL_RE = re.compile(r'^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$')
 
+class FalhaEmail(Exception):
+    """O e-mail com o código não saiu (chave, Resend fora do ar, SMTP...). Vira 503 com mensagem clara."""
+
+
 app = FastAPI(title='Legacy', version='0.1.0')
 # O launcher (Electron, página local) e o site chamam a API de outra origem; a sessão vai no cabeçalho Authorization,
 # não em cookie, então liberar as origens não expõe nada.
+@app.exception_handler(FalhaEmail)
+def _falha_email(request: Request, exc: FalhaEmail):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=503, content={'detail': 'Não conseguimos enviar o e-mail com o código agora. '
+                                                            'Tente de novo em alguns minutos.'})
+
+
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
 _lock = threading.Lock()
 
@@ -187,12 +199,25 @@ def limite(request: Request, chave: str, max_por_min: int):
 def enviar_email(para: str, assunto: str, texto: str):
     modo = os.environ.get('LEGACY_EMAIL', 'console')
     if modo == 'resend':
+        chave = os.environ.get('RESEND_API_KEY', '')
+        if not chave.startswith('re_'):
+            print('[e-mail] RESEND_API_KEY ausente ou inválida no servidor', flush=True)
+            raise FalhaEmail('sem chave')
         req = urllib.request.Request(
             'https://api.resend.com/emails', method='POST',
-            data=json.dumps({'from': os.environ['LEGACY_EMAIL_FROM'], 'to': [para], 'subject': assunto,
-                             'text': texto}).encode(),
-            headers={'Authorization': 'Bearer ' + os.environ['RESEND_API_KEY'], 'Content-Type': 'application/json'})
-        urllib.request.urlopen(req, timeout=15).read()
+            data=json.dumps({'from': os.environ.get('LEGACY_EMAIL_FROM', 'Legacy <equipe@legacyengine.com.br>'),
+                             'to': [para], 'subject': assunto, 'text': texto}).encode(),
+            # User-Agent próprio: sem ele a API do Resend (atrás da Cloudflare) recusa a chamada do Python (403).
+            headers={'Authorization': 'Bearer ' + chave, 'Content-Type': 'application/json',
+                     'User-Agent': 'legacy-conta/1.0 (+https://legacyengine.com.br)'})
+        try:
+            urllib.request.urlopen(req, timeout=15).read()
+        except urllib.error.HTTPError as e:
+            print(f'[e-mail] Resend recusou ({e.code}): {e.read()[:500]!r}', flush=True)
+            raise FalhaEmail(str(e.code))
+        except OSError as e:
+            print(f'[e-mail] sem conexão com o Resend: {e}', flush=True)
+            raise FalhaEmail('conexão')
     elif modo == 'smtp':  # caixa de e-mail própria (ex.: equipe@legacyengine.com.br na Hostinger)
         import smtplib
         from email.message import EmailMessage
@@ -203,11 +228,15 @@ def enviar_email(para: str, assunto: str, texto: str):
         m.set_content(texto)
         porta = int(os.environ.get('LEGACY_SMTP_PORTA', '465'))
         host = os.environ.get('LEGACY_SMTP_HOST', 'smtp.hostinger.com')
-        with (smtplib.SMTP_SSL(host, porta, timeout=20) if porta == 465 else smtplib.SMTP(host, porta, timeout=20)) as srv:
-            if porta != 465:
-                srv.starttls()
-            srv.login(os.environ['LEGACY_SMTP_USUARIO'], os.environ['LEGACY_SMTP_SENHA'])
-            srv.send_message(m)
+        try:
+            with (smtplib.SMTP_SSL(host, porta, timeout=20) if porta == 465 else smtplib.SMTP(host, porta, timeout=20)) as srv:
+                if porta != 465:
+                    srv.starttls()
+                srv.login(os.environ['LEGACY_SMTP_USUARIO'], os.environ['LEGACY_SMTP_SENHA'])
+                srv.send_message(m)
+        except (OSError, smtplib.SMTPException) as e:
+            print(f'[e-mail] SMTP falhou: {e}', flush=True)
+            raise FalhaEmail('smtp')
     else:  # desenvolvimento: o código vai para o log do servidor
         print(f'[e-mail para {para}] {assunto}\n{texto}', flush=True)
 
