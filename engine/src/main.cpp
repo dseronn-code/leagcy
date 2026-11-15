@@ -21,6 +21,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "core/conta.h"
 #include "editor/editor.h"
 #include "game/network.h"
 #include "game/world.h"
@@ -157,6 +158,7 @@ void applyGameOptions(game::World& w, renderer::Settings& s) {
 
 
 struct Options {
+  std::string legacyCodigo;  // --legacy-codigo: código de uso único do Legacy Launcher (conta Legacy)
   bool headless = false;
   bool validation = false;
   bool rayTracing = true;
@@ -230,6 +232,7 @@ Options parseArgs(int argc, char** argv) {
     else if (a == "--quit-after") o.quitAfter = std::max(0.0f, float(std::atof(next())));
     else if (a == "--save-world") o.saveWorld = next();
     else if (a == "--editor") o.editor = true;
+    else if (a == "--legacy-codigo") o.legacyCodigo = next();
     else if (a == "--screenshot") o.screenshot = next();
     else if (a == "--select") o.select = next();
     else if (a == "--grafo") o.graph = next();
@@ -833,6 +836,17 @@ int runWindowed(const Options& opt) {
   glfwSetWindowUserPointer(window, &resized);
   glfwSetFramebufferSizeCallback(window, [](GLFWwindow* w, int, int) { *static_cast<bool*>(glfwGetWindowUserPointer(w)) = true; });
 
+  // Conta Legacy: o launcher passa um código de uso único; aberto direto, usa a sessão guardada. O editor sem conta
+  // pede login (src/editor/editor.cpp); os jogos rodam como visitante se não houver conta.
+  {
+    std::string app = opt.editor ? "legacy-engine" : std::filesystem::path(opt.scene.name).stem().string();
+    std::string erro;
+    if (!opt.legacyCodigo.empty()) {
+      if (!conta::trocarCodigo(opt.legacyCodigo, app, erro)) LOG_WARN("Conta Legacy: %s", erro.c_str());
+    } else {
+      conta::carregarSessao(app);
+    }
+  }
   editor::Editor ed;
   // Cena de jogo (.json) sem o editor: só a interface de jogo (HUD dos scripts).
   if (opt.editor || game::currentWorld())

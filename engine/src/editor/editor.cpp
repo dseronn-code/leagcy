@@ -1,5 +1,9 @@
 #include "editor/editor.h"
 
+#include <cstring>
+
+#include "core/conta.h"
+
 #define GLM_ENABLE_EXPERIMENTAL  // glm/gtx (decompose)
 #include <algorithm>
 #include <cmath>
@@ -82,6 +86,31 @@ void Editor::init(rhi::Context& ctx, GLFWwindow* window, VkFormat format, uint32
   else if (panels_) LOG_INFO("Editor ligado: clique num objeto para selecionar; F1 alterna mover/girar");
 }
 
+bool Editor::contaOk() {
+  static const bool semConta = std::getenv("LEGACY_SEM_CONTA") != nullptr;  // testes automáticos e CI
+  if (semConta || (conta::atual().logada && !conta::atual().visitante)) return true;
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(ImVec2(vp->Size.x * 0.5f, vp->Size.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(ImVec2(380, 0));
+  ImGui::Begin("Entrar com a conta Legacy", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                                                      ImGuiWindowFlags_NoMove);
+  ImGui::TextWrapped("O Legacy Engine usa a sua conta Legacy. Entre com o e-mail e a senha da conta.");
+  ImGui::Spacing();
+  ImGui::InputText("E-mail", loginEmail_, sizeof(loginEmail_));
+  ImGui::InputText("Senha", loginSenha_, sizeof(loginSenha_), ImGuiInputTextFlags_Password);
+  if (ImGui::Button("Entrar", ImVec2(-1, 0))) {
+    std::string erro;
+    if (conta::login(loginEmail_, loginSenha_, "legacy-engine", erro)) loginErro_.clear();
+    else loginErro_ = erro;
+    std::memset(loginSenha_, 0, sizeof(loginSenha_));
+  }
+  if (!loginErro_.empty()) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.55f, 1.0f), "%s", loginErro_.c_str());
+  ImGui::Spacing();
+  ImGui::TextDisabled("Não tem conta? Crie no Legacy Launcher.");
+  ImGui::End();
+  return false;
+}
+
 void Editor::shutdown() {
   if (!ready_) return;
   ImGui_ImplVulkan_Shutdown();
@@ -102,6 +131,7 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
   ImGuizmo::BeginFrame();
   if (world) drawHud(*world, extent);
   if (!panels_) return;
+  if (!contaOk()) return;  // o Legacy Engine abre pedindo a conta Legacy (como a Unreal pede a conta Epic)
   if (ImGui::IsKeyPressed(ImGuiKey_F1)) gizmoOperation_ = 1 - gizmoOperation_;
   // Teste sem mouse (LEGACY_EDITOR_TESTE=caixa): no 3º quadro, aperta "+ Caixa" uma vez.
   static int frameNo = 0;
@@ -116,6 +146,11 @@ void Editor::frame(game::World* world, scene::Scene& scene, const scene::Camera&
   ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
   ImGui::Begin("Legacy Engine");
   ImGui::Text("%.2f ms  (%.0f quadros/s)", frameMs, frameMs > 0.0f ? 1000.0f / frameMs : 0.0f);
+  if (conta::atual().logada) {  // a conta é a conta Legacy: as configurações dela ficam no servidor, não no motor
+    ImGui::TextDisabled("Conta Legacy: %s", conta::atual().username.c_str());
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Conta")) conta::abrirPaginaConta();
+  }
   if (world) {
     // Modo de edição: o editor abre com a física parada. Jogar guarda as poses; Parar volta a elas.
     if (!editModeSet_) {

@@ -304,6 +304,9 @@ target_include_directories(legacy SYSTEM PRIVATE ${cgltf_SOURCE_DIR} ${stb_SOURC
 target_link_libraries(legacy PRIVATE Vulkan::Vulkan GPUOpen::VulkanMemoryAllocator glm::glm glfw NRD NRI bc7enc
                                      EnTT::EnTT nlohmann_json::nlohmann_json Jolt legacy_imgui legacy_lua ${CMAKE_DL_LIBS}
                                      RecastNavigation::Recast RecastNavigation::Detour legacy_enet meshoptimizer legacy_basisu draco::draco)
+if(WIN32)
+  target_link_libraries(legacy PRIVATE winhttp crypt32)  # conta Legacy: HTTPS e DPAPI (src/core/conta.cpp)
+endif()
 # Os cabeçalhos do Draco incluem draco/draco_features.h, gerado no build dele.
 target_include_directories(legacy SYSTEM PRIVATE ${draco_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 target_include_directories(legacy SYSTEM PRIVATE ${miniaudio_SOURCE_DIR})

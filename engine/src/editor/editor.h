@@ -78,6 +78,10 @@ class Editor {
   std::string reload_;
   void requestReload(game::World& world);
   void graphTest();
+  bool contaOk();  // tela de login da conta Legacy enquanto não houver conta
+  char loginEmail_[128] = {};
+  char loginSenha_[128] = {};
+  std::string loginErro_;
 };
 
 }  // namespace editor
