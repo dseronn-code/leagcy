@@ -44,4 +44,4 @@ O tratamento dos seus dados segue a Política de Privacidade.
 ## 9. Lei e foro
 Estes termos seguem as leis do Brasil. Fica eleito o foro do domicílio do consumidor.
 
-**Contato:** [e-mail de contato].
+**Contato:** equipe@legacyengine.com.br.

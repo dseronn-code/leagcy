@@ -10,7 +10,8 @@ Variáveis de ambiente:
     DATABASE_URL           Postgres (produção, ex.: Neon); sem ela, SQLite local
     LEGACY_DB              arquivo SQLite (padrão: legacy.db ao lado deste arquivo)
     LEGACY_PEPPER          segredo extra misturado aos códigos de e-mail (obrigatório em produção)
-    LEGACY_EMAIL           "console" (padrão: o código aparece no log, para desenvolvimento) ou "resend"
+    LEGACY_EMAIL           "console" (padrão: o código aparece no log, para desenvolvimento), "resend" ou "smtp"
+    LEGACY_SMTP_HOST/PORTA/USUARIO/SENHA   caixa de e-mail própria (ex.: Hostinger: smtp.hostinger.com, 465)
     RESEND_API_KEY         chave do Resend (quando LEGACY_EMAIL=resend)
     LEGACY_EMAIL_FROM      remetente, ex.: "Legacy <conta@seu-dominio>"
 
@@ -192,6 +193,21 @@ def enviar_email(para: str, assunto: str, texto: str):
                              'text': texto}).encode(),
             headers={'Authorization': 'Bearer ' + os.environ['RESEND_API_KEY'], 'Content-Type': 'application/json'})
         urllib.request.urlopen(req, timeout=15).read()
+    elif modo == 'smtp':  # caixa de e-mail própria (ex.: equipe@legacyengine.com.br na Hostinger)
+        import smtplib
+        from email.message import EmailMessage
+        m = EmailMessage()
+        m['From'] = os.environ.get('LEGACY_EMAIL_FROM', os.environ['LEGACY_SMTP_USUARIO'])
+        m['To'] = para
+        m['Subject'] = assunto
+        m.set_content(texto)
+        porta = int(os.environ.get('LEGACY_SMTP_PORTA', '465'))
+        host = os.environ.get('LEGACY_SMTP_HOST', 'smtp.hostinger.com')
+        with (smtplib.SMTP_SSL(host, porta, timeout=20) if porta == 465 else smtplib.SMTP(host, porta, timeout=20)) as srv:
+            if porta != 465:
+                srv.starttls()
+            srv.login(os.environ['LEGACY_SMTP_USUARIO'], os.environ['LEGACY_SMTP_SENHA'])
+            srv.send_message(m)
     else:  # desenvolvimento: o código vai para o log do servidor
         print(f'[e-mail para {para}] {assunto}\n{texto}', flush=True)
 

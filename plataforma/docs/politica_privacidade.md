@@ -7,7 +7,7 @@ Esta política explica como a Legacy ("nós") trata os dados pessoais de quem us
 Times Square e o site legacyengine.com.br, conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018, LGPD).
 
 **Responsável pelos dados (controlador):** [nome completo ou razão social], [CPF/CNPJ], [cidade/UF].
-**Contato para assuntos de privacidade:** [e-mail de contato, ex.: privacidade@legacyengine.com.br].
+**Contato para assuntos de privacidade:** equipe@legacyengine.com.br.
 
 ## 1. Quais dados coletamos
 
@@ -55,7 +55,7 @@ contratuais dos próprios fornecedores).
 
 Você pode, a qualquer momento: confirmar se tratamos seus dados, acessá-los, corrigi-los, pedir a portabilidade e
 **apagar a conta**. Apagar a conta está disponível no próprio Legacy Launcher (Conta → Apagar conta) e remove na hora
-a conta, as sessões, as configurações e a biblioteca. Para os demais pedidos, escreva para [e-mail de contato];
+a conta, as sessões, as configurações e a biblioteca. Para os demais pedidos, escreva para equipe@legacyengine.com.br;
 respondemos em até 15 dias.
 
 Você também pode reclamar à Autoridade Nacional de Proteção de Dados (ANPD).

@@ -26,6 +26,11 @@ Ordem: Neon → Resend → Render → DNS. Uns 20 minutos no total.
 4. **API Keys** → **Create API Key** → permissão **Sending access** → copie a chave (começa com `re_`). Também vai
    direto no Render.
 
+**Alternativa sem o Resend:** mandar pela caixa `equipe@legacyengine.com.br` da Hostinger. No Render, em
+**Environment**, troque `LEGACY_EMAIL` para `smtp` e crie `LEGACY_SMTP_USUARIO` = `equipe@legacyengine.com.br` e
+`LEGACY_SMTP_SENHA` = a senha dessa caixa (servidor `smtp.hostinger.com`, porta 465, já são o padrão). Atenção: o
+plano grátis do Render pode bloquear o envio por SMTP; se os e-mails não chegarem, use o Resend.
+
 ## 3. Render (servidor)
 1. Entre em render.com → **Get Started** → **GitHub**.
 2. **New** → **Blueprint** → escolha o repositório `dseronn-code/leagcy` → ele lê o `render.yaml` sozinho.
@@ -37,9 +42,9 @@ Ordem: Neon → Resend → Render → DNS. Uns 20 minutos no total.
    `legacy-conta.onrender.com` para um registro **CNAME**.
 
 ## 4. DNS do domínio
-O DNS fica onde os "servidores DNS" do domínio apontam: no **Registro.br** (registro.br → Domínios →
-legacyengine.com.br → DNS → **Editar zona**) ou, se o site foi feito num construtor que mudou os DNS (Wix,
-Hostinger...), no painel desse construtor. Adicione:
+Como o site e o e-mail estão na Hostinger, o DNS deve estar lá: hPanel → **Domínios** → legacyengine.com.br →
+**DNS / Nameservers** → **Gerenciar registros DNS**. (Se não estiver, fica no Registro.br → DNS → Editar zona.)
+Não apague os registros que já existem (são os do site e da caixa de e-mail). Só adicione:
 - os registros do **Resend** (passo 2.3), exatamente como ele mostra;
 - **CNAME** `conta` → o destino do Render (passo 3.5).
 

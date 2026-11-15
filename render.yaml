@@ -24,4 +24,4 @@ services:
       - key: RESEND_API_KEY
         sync: false
       - key: LEGACY_EMAIL_FROM
-        value: "Legacy <conta@legacyengine.com.br>"
+        value: "Legacy <equipe@legacyengine.com.br>"
