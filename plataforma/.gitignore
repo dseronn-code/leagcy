@@ -1,0 +1,3 @@
+servidor/legacy.db
+servidor/__pycache__/
+servidor/.pytest_cache/

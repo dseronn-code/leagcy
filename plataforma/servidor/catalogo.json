@@ -1,0 +1,23 @@
+{
+  "produtos": [
+    {
+      "id": "times-square",
+      "nome": "Times Square",
+      "chamada": "Times Square como você nunca viu antes",
+      "botao": "Conheça já",
+      "tipo": "jogo",
+      "precisa_conta": false,
+      "versao": "0.1.0",
+      "download": null
+    },
+    {
+      "id": "legacy-engine",
+      "nome": "Legacy Engine",
+      "chamada": "",
+      "tipo": "ferramenta",
+      "precisa_conta": true,
+      "versao": "0.1.0",
+      "download": null
+    }
+  ]
+}
