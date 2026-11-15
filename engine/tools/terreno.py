@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+os.environ.setdefault('LEGACY_SEM_CONTA', '1')  # testes automáticos: o editor não pede a conta Legacy
 
 FPS = 30
 

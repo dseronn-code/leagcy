@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+os.environ.setdefault('LEGACY_SEM_CONTA', '1')  # testes automáticos: o editor não pede a conta Legacy
 
 FPS = 30
 

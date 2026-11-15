@@ -17,6 +17,7 @@ import time
 
 import numpy as np
 from PIL import Image
+os.environ.setdefault('LEGACY_SEM_CONTA', '1')  # testes automáticos: o editor não pede a conta Legacy
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, AQUI)
