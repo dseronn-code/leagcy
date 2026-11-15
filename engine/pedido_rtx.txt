@@ -1,5 +1,5 @@
-# Rodada 42: logo nova da Legacy (L em degradê com o "pixel aceso") no legacy.exe (ícone do Windows), nos
-# instaladores e no launcher. Gera e publica uma Release nova (o launcher instalado se atualiza sozinho).
+# Rodada 43: tela de carregamento (fim da janela branca) e marcas novas do Legacy Engine (cubo) e do Times Square
+# (prédios com telão) no Windows: ícone da janela, atalhos e instaladores. Compila, gera e publica uma Release nova.
 [10] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher
 [30] python tools\gerar_instaladores.py --publicar
