@@ -1,0 +1,21 @@
+# Site legacyengine.com.br na Netlify (grátis): publica a pasta plataforma/site como está, sem etapa de build.
+# A Netlify lê este arquivo sozinha ao importar o repositório; cada push no main atualiza o site.
+[build]
+  base = "plataforma/site"
+  publish = "."
+  command = ""
+
+[[headers]]
+  for = "/img/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[redirects]]
+  from = "/termos"
+  to = "/termos.html"
+  status = 200
+
+[[redirects]]
+  from = "/privacidade"
+  to = "/privacidade.html"
+  status = 200
