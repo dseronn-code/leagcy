@@ -1,6 +1,12 @@
-# Rodada 33 (parte 3): Times Square com fachadas em geometria, telões animados, mobiliário de rua, vapor nos bueiros
-# e a multidão de 2.000 pessoas, à noite com chuva.
-# 1) Os vídeos em 1080p no modo cinema (resultados_pc\trailer\*.mp4).
-python tools\trailer.py --so times_square,times_square_multidao
-# 2) Tempo por quadro da cena jogável (preset Médio, pedido pela cena).
+# Rodada 34: instaladores do Legacy (sem GitHub Actions) e a primeira medição da Times Square nova na RTX.
+# 1) Instaladores: Times Square e Legacy Engine (Inno Setup), Legacy Launcher (electron-builder), publicados numa
+#    Release do GitHub (download direto: https://github.com/dseronn-code/leagcy/releases/latest/download/<nome>.exe).
+python tools\gerar_instaladores.py --jogos
+python tools\gerar_instaladores.py --launcher
+python tools\gerar_instaladores.py --publicar
+# 2) Tempo por quadro da cena jogável (preset Médio, noite com chuva, 1080p) e uma foto.
 build\Release\legacy.exe --scene cenas\times_square.json --width 1920 --height 1080 --warmup 90 --quit-after 10 --no-vsync --screenshot resultados_pc\ts_jogo.png
+# 3) Fotos paradas da cidade (sem a multidão), qualidade Alto, 1080p, para o launcher e o site.
+build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 6,1.2,-20 --look -4,5,-110 --out resultados_pc\ts_praca.png
+build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 33,1.6,-5.8 --look 28.5,1.3,-16 --out resultados_pc\ts_loja.png
+build\Release\legacy.exe --headless --scene cenas\times_square.json --quality alto --width 1920 --height 1080 --frames 64 --cam 55,1.7,-84 --look 110,5,-80 --out resultados_pc\ts_rua.png
