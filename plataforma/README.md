@@ -1,6 +1,6 @@
 # Plataforma Legacy
 
-O ecossistema Legacy gira em torno de **uma conta só** (como a conta Epic para o Fortnite e a Unreal):
+O ecossistema Legacy gira em torno de **uma conta só**: a mesma conta entra no launcher, nos jogos e no Legacy Engine.
 
 - `servidor/` — servidor de contas: cadastro com código por e-mail, login, visitante, username, perfil,
   configurações e biblioteca de jogos. Todos os apps falam com ele; nenhum guarda conta por conta própria.

@@ -1,13 +1,7 @@
 # Motor completo: a camada de jogo
 
-Parte 2 do projeto: completar o Legacy como motor de jogo, além do renderizador. As fases:
-
-| Fase | O que entra | Situação |
-|---|---|---|
-| 1. Núcleo | Entidades e componentes (EnTT), cenas em arquivo (.json), física (Jolt), personagem, modelos glTF com colisão | ✅ |
-| 2. Editor visual | Dear ImGui + ImGuizmo: entidades, propriedades, alças, seleção por clique, Jogar/Parar, criar/duplicar/apagar, salvar | ✅ |
-| 3. Scripts | Lua 5.4 (sol2) por entidade, com recarga a quente | ✅ |
-| 4. Sistemas de jogo | Áudio 3D ✅, veículos ✅, navegação e IA ✅, interface (HUD) ✅, exportar o jogo ✅, animação avançada ✅, entrada (teclado, mouse, controle), menus, pausa e salvar ✅, partículas de jogo ✅, multijogador ✅ | ✅ |
+A camada de jogo do Legacy Engine, além do renderizador: entidades e cenas, editor, scripts, física, animação,
+navegação, áudio, interface, rede e ferramentas de mundo aberto.
 
 ## Arquitetura
 

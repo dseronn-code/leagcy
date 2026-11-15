@@ -1,155 +1,127 @@
 # Legacy Engine
 
-Motor gráfico em **C++20 + Vulkan 1.3** com **ray tracing em tempo real**.
+Motor de jogos em **C++20 + Vulkan 1.3** com **ray tracing em tempo real**: renderizador físico, editor visual,
+física, áudio, scripts, rede e ferramentas de mundo aberto num executável só. É nele que roda o **Times Square**,
+uma Nova York à noite, com chuva, neons, trânsito e multidão.
 
-![Dia 3 — carro com faróis, personagens animados e luzes em movimento](docs/screenshots/dia03_carro.png)
-
-Vídeos (Dia 3): [Sponza à noite com personagens](docs/videos/dia03_sponza_noite.mp4) · [cena externa com carro](docs/videos/dia03_externa.mp4)
-
-![Dia 2 — Sponza à noite com 512 luzes (ReSTIR)](docs/screenshots/dia02_sponza_noite.png)
+![Times Square na RTX 3070 Ti](docs/screenshots/rtx_ts_rua.jpg)
 
 | | |
 |---|---|
-| ![Dia 2 — Sponza de dia](docs/screenshots/dia02_sponza_dia.png) | ![Dia 2 — profundidade de campo com autofoco](docs/screenshots/dia02_dof.png) |
-| Sponza de dia: sol entrando no átrio + GI | Profundidade de campo com autofoco + bloom |
+| ![Praça da Times Square](docs/screenshots/rtx_ts_praca.jpg) | ![Interior de loja](docs/screenshots/rtx_ts_loja.jpg) |
+| A praça à noite: telões, neons e chuva | Interior de loja com luz e reflexos traçados |
+| ![Vale dos Cristais](docs/screenshots/vale_dos_cristais.png) | ![Geometria virtualizada](docs/screenshots/nanite_campo.png) |
+| Vale dos Cristais, o jogo de demonstração | Geometria virtualizada: milhões de triângulos com LOD por pixel |
 
-[Dia 1](docs/screenshots/dia01.png)
+## Desempenho
 
-## O que já tem
+Medido numa **RTX 3070 Ti em 1080p** (preset Médio), com a imagem comparada a uma referência por path tracing:
 
-| Sistema | Técnica | Onde |
-|---|---|---|
-| RHI Vulkan moderno | Dynamic rendering, synchronization2, push descriptors, texturas bindless, VMA | `src/rhi/` |
-| Assets | glTF 2.0 (cgltf): JPG/PNG comprimidos em BC7/BC5 (cache em disco) e DDS BC7 (`MSFT_texture_dds`); luzes `KHR_lights_punctual` (pontual, spot, direcional); câmera; samplers; `doubleSided`; oclusão; mips de recorte por alfa com cobertura preservada | `src/scene/gltf_loader.cpp` |
-| Renderização | Deferred: G-buffer + iluminação em compute | `src/renderer/` |
-| Cena dinâmica | Transformações por frame, vetores de movimento por objeto, TLAS reconstruído na GPU, luzes móveis | `src/renderer/renderer.cpp` |
-| Animação esquelética | Esqueletos e clipes glTF, skinning em compute, refit de BLAS (sombras/reflexos seguem a pose) | `shaders/skinning.comp` |
-| Ray tracing | BLAS/TLAS + `VK_KHR_ray_query`, com teste de alfa (folhagem, grades) | `shaders/raytracing.glsl` |
-| Sombras | Traçadas por raio, penumbra física (sol e luzes) | `shaders/lighting.glsl` |
-| Milhares de luzes | **ReSTIR DI**: RIS + reuso temporal e espacial + visibilidade; BVH de luzes; **luzes de malha** (cada triângulo emissivo é uma luz, como no RTXDI) | `shaders/restir*.glsl` |
-| Iluminação global | 1 rebote difuso traçado + reflexões VNDF (GGX) | `shaders/lighting.glsl` |
-| Denoiser | **DLSS Ray Reconstruction** (padrão em RTX); sem RTX, **SVGF** próprio (ou NRD ReLAX/ReBLUR) | `shaders/svgf_*.comp`, `src/renderer/upscaler.cpp` |
-| Anti-aliasing / upscaling | **TAAU** próprio (reconstrução gaussiana, Catmull-Rom, clipping YCoCg, nitidez RCAS) ou **NVIDIA DLSS 4** / **AMD FSR 3** (`--upscaler`), com volta automática ao TAAU | `shaders/taa.comp`, `src/renderer/upscaler.cpp` |
-| Pós-processamento | Auto-exposição por histograma, bloom físico (COD:AW), DOF com autofoco, motion blur, ACES | `shaders/` |
-| Materiais | PBR glTF (metálico/rugosidade, especular/glossiness, KHR specular/ior); GGX com compensação de energia (Turquin), difuso com conservação de energia, AA especular; **vidro** (`KHR_materials_transmission`, por ray tracing); **pintura de carro** (verniz `KHR_materials_clearcoat` + flocos metálicos) | `shaders/brdf.glsl`, `shaders/lighting.glsl` |
-| Céu | Atmosfera física Rayleigh/Mie/ozônio + sky-view LUT (Hillaire 2020); à noite, lua (luz e disco) e estrelas | `shaders/atmosphere.glsl`, `shaders/frame.glsl` |
-| Câmera | Reverse-Z com plano distante infinito; exposição física em EV100 | `src/scene/camera.h` |
-| Unidades físicas | Sol em lux, luzes em candela, emissão em nits, pré-exposição dos alvos HDR | `shaders/frame.glsl` |
+| Cena | Tempo de GPU por quadro |
+|---|---|
+| Sponza | 9,6 ms |
+| Bistro (1,75 milhão de triângulos, 97 luzes) | 16,7 ms |
+| Vale dos Cristais (preset Alto) | 9,8 ms |
 
-Pipeline de um frame:
+## Renderização
 
-```
-Cena dinâmica (skinning, refit BLAS, TLAS) → Sky LUT → G-buffer → ReSTIR temporal → ReSTIR espacial → Iluminação RT (difuso | especular)
-→ SVGF temporal → à-trous ×4 / ×2 → Composição (céu, névoa) → TAAU
-→ Auto-exposição → DOF → Motion blur → Bloom → Tonemap ACES
-```
+| Sistema | Como funciona |
+|---|---|
+| Ray tracing | BLAS/TLAS reconstruídos na GPU a cada quadro, `VK_KHR_ray_query`, teste de alfa (folhagem, grades) |
+| Milhares de luzes | **ReSTIR DI** (reuso temporal e espacial), BVH de luzes, **luzes de malha** (cada triângulo emissivo é uma luz) |
+| Iluminação global | Rebotes difusos traçados + cache de radiância; sem ray tracing, **sondas de irradiância** assadas |
+| Reflexos | Traçados por raio (GGX, amostragem VNDF), com reflexo de reflexo pelo cache |
+| Sombras | Traçadas por raio, penumbra física do sol e de cada luz |
+| Denoiser | **DLSS Ray Reconstruction** em RTX; **NRD ReLAX/ReBLUR** ou **SVGF** próprio nas outras placas |
+| Upscaling | **DLSS 4**, **FSR 3** ou **TAAU** próprio (reconstrução gaussiana, clipping YCoCg, RCAS) |
+| Materiais | PBR glTF completo: metal/rugosidade, especular, IOR, compensação de energia, **vidro** traçado, **pintura de carro** com verniz e flocos metálicos, **materiais por nós** |
+| Pele, cabelo, tecido | Pele com espalhamento subsuperficial, cabelo **por fios** com física, tecido com colisão consigo mesmo |
+| Céu e clima | Atmosfera física (Rayleigh, Mie, ozônio), lua e estrelas, **nuvens volumétricas**, névoa com god rays, **chuva** com superfícies molhadas, poças com reflexo e respingos |
+| Água | Oceano com ondas na geometria |
+| Pós-processamento | Auto-exposição por histograma, bloom físico, profundidade de campo com autofoco, motion blur, lens flare, tonemap ACES |
+| Unidades físicas | Sol em lux, luzes em candela, emissão em nits, exposição em EV100 |
+
+## Escala de mundo aberto
+
+| Sistema | Como funciona |
+|---|---|
+| Geometria virtualizada | DAG de clusters com LOD escolhido por erro em pixel, desenhado com **mesh shaders** |
+| Culling | Oclusão HiZ em duas fases; HLOD de quarteirões distantes num objeto só |
+| Mundo aberto | Células carregadas e descarregadas pela distância, **terreno de quilômetros**, origem flutuante |
+| Streaming | Texturas por mip conforme a câmera, cópia para a GPU fora da thread principal |
+| Multidão | Milhares de pessoas sem clones, com LOD e impostores |
+| Conteúdo pronto | Texturas BC7/BC5, tangentes e geometria virtualizada são preparadas na geração da versão e vão prontas no download |
+
+## Camada de jogo
+
+| Sistema | Como funciona |
+|---|---|
+| Mundo | Entidades (EnTT) e cenas em JSON |
+| Editor visual | Dear ImGui com gizmos, hierarquia, propriedades, editor de nós e de terreno |
+| Scripts | **Lua** com recarga a quente e **script visual** por nós |
+| Física | **Jolt**: corpos rígidos, colisão por malha, **veículos**, **ragdoll** e ragdoll ativo |
+| Animação | Esqueletos glTF com skinning na GPU, máquinas de estado, mistura, retargeting entre esqueletos, expressões faciais |
+| NPCs | Navegação Recast/Detour e comportamentos (patrulhar, perseguir, procurar, fugir, seguir) |
+| Cinema | Sequenciador de cutscenes em linha do tempo e câmera de cinema |
+| Áudio | Som 3D (miniaudio) |
+| Interface | HUD, menus clicáveis, pausa, opções, salvar e carregar o jogo, controle (gamepad), idiomas |
+| Partículas | Fogo, fumaça, faíscas e respingos por cena ou script |
+| Multijogador | Rede com ENet |
+| Assets | glTF 2.0 com meshopt e Draco, texturas PNG/JPG/DDS/KTX2, luzes `KHR_lights_punctual` |
+| Exportação | `tools/empacotar.py` gera a pasta do jogo pronta para distribuir |
+
+Detalhes de cada sistema, com exemplos de cena e de script: [docs/motor_completo.md](docs/motor_completo.md).
 
 ## Compilar
 
-Requisitos: **CMake 3.30+**, compilador C++20, [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) (traz o `glslangValidator`) e Git.
-VMA, GLM, GLFW, cgltf, stb e o **NVIDIA NRD** (denoiser, com NRI, ShaderMake e o compilador DXC) são baixados
-automaticamente na primeira configuração (~60 MB), além do **SDK do DLSS** (~1,6 GB, com bibliotecas de todas as
-plataformas; `-DLEGACY_DLSS=OFF` pula) e, no Windows, do **AMD FidelityFX SDK** para o FSR 3 (~470 MB; `-DLEGACY_FSR=OFF`
-pula). Licenças e obrigações em [docs/licencas.md](docs/licencas.md) — o NRD exige crédito à NVIDIA nos créditos,
-e o DLSS exige o logo da NVIDIA na tela de abertura e avisar a NVIDIA antes de um lançamento comercial.
+Requisitos: **CMake 3.30+**, compilador C++20, [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) e Git. As bibliotecas
+(VMA, GLM, GLFW, cgltf, stb, Jolt, EnTT, Lua, Dear ImGui, Recast, miniaudio, ENet, NVIDIA NRD, SDK do DLSS e, no
+Windows, AMD FidelityFX) são baixadas na primeira configuração. Licenças e créditos em
+[docs/licencas.md](docs/licencas.md).
 
 ```bash
 cd engine
-cmake -P tools/fetch_assets.cmake   # baixa Sponza, DamagedHelmet, Fox e CesiumMan (~57 MB, uma vez só)
+cmake -P tools/fetch_assets.cmake   # cenas de teste (Sponza, Bistro e outras), uma vez só
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release -j
 ```
 
-No Windows, com Visual Studio 2022 instalado, os mesmos comandos funcionam (o executável fica em `build/Release/legacy.exe`).
+No Windows, com o Visual Studio 2022 ("Desenvolvimento para desktop com C++"), os mesmos comandos funcionam no
+"Developer PowerShell for VS 2022"; o executável fica em `build\Release\legacy.exe`.
 
-GPU recomendada para ray tracing: NVIDIA RTX 20xx+, AMD RX 6000+ ou Intel Arc.
-
-### Windows (passo a passo)
-
-1. Instale (todos gratuitos): **Visual Studio 2022 Community** com a carga "Desenvolvimento para desktop com C++",
-   **Git** (git-scm.com), o **Vulkan SDK** (vulkan.lunarg.com/sdk/home — marque os componentes padrão) e o
-   **Python 3** (python.org — marque "Add python.exe to PATH"; só para os testes).
-   O CMake que vem no Visual Studio 2022 17.12+ já é 3.30+; em versões mais antigas instale o CMake de cmake.org.
-   Driver da GPU atualizado (NVIDIA: 550 ou mais novo).
-2. No "Developer PowerShell for VS 2022":
-
-```powershell
-git clone -b ccr-5423dd89-y3br6e https://github.com/dseronn-code/leagcy.git
-cd leagcy\engine
-cmake -P tools/fetch_assets.cmake          # ~2,5 GB (Bistro incluído), uma vez só
-cmake -S . -B build
-cmake --build build --config Release
-.\build\Release\legacy.exe
-```
-
-O console mostra, a cada 3 segundos, o tempo de GPU de cada passe (ms).
-
-Bateria completa de testes no seu PC (10-20 min; gera `resultados_pc/relatorio.txt` e imagens de comparação):
-
-```powershell
-pip install numpy pillow
-python tools\teste_pc.py
-```
+Placa de vídeo para ray tracing: NVIDIA RTX 20xx ou mais nova, AMD RX 6000 ou mais nova, ou Intel Arc. Sem ray
+tracing, o motor usa as sondas de irradiância.
 
 ## Rodar
 
 ```bash
-./build/legacy                             # Sponza, de dia, janela interativa
-./build/legacy --night                     # noite: 512 luzes coloridas com sombra (ReSTIR)
-./build/legacy --scene outdoor --dof       # cena externa com profundidade de campo
-./build/legacy --lights 4000 --night       # teste de estresse de luzes
-./build/legacy --quality cinema            # presets: baixo | medio | alto | ultra (padrão) | cinema
-./build/legacy --quality alto              # 30+ FPS em 1080p numa RTX 3070 Ti em cenas como a Sponza (25 ms)
-./build/legacy --quality medio             # 30+ FPS em cenas densas como o Bistro (29,6 ms)
-./build/legacy --fullscreen                # tela cheia na resolução nativa do monitor
-./build/legacy --scale 0.5                 # resolução interna menor (mais FPS, o TAAU reconstrói)
-./build/legacy --scale 0.67               # DLSS qualidade em RTX (padrão automático); --scale 1 = DLAA
-./build/legacy --upscaler fsr --scale 0.67 # AMD FSR 3; --upscaler taau = sempre o TAA do motor
-./build/legacy --night --denoiser dlss-rr  # DLSS Ray Reconstruction (RTX): denoiser + upscaler da NVIDIA
-./build/legacy --validation                # camadas de validação do Vulkan (debug)
-./build/legacy --headless --frames 32 --width 1920 --height 1080 --out shot.png
-./build/legacy --scene outdoor --sun-elevation 3   # pôr do sol (atmosfera física)
-./build/legacy --scene shadows --debug-view sol     # depuração: valor cru (sol, sol-luz, nl, normal, luzes, luzes-ref)
-./build/legacy --help                      # todas as opções
+./build/legacy --scene cenas/times_square.json      # Times Square
+./build/legacy --scene cenas/vale/vale.json         # Vale dos Cristais (jogo de demonstração)
+./build/legacy --editor --scene cenas/vale/vale.json  # editor visual
+./build/legacy --night                              # Sponza à noite com 512 luzes
+./build/legacy --quality medio                      # baixo | medio | alto | ultra | cinema
+./build/legacy --upscaler fsr --scale 0.67          # FSR 3 (ou dlss, taau)
+./build/legacy --fullscreen
+./build/legacy --headless --frames 32 --width 1920 --height 1080 --out foto.png
+./build/legacy --help                               # todas as opções
 ```
 
-Testes de regressão (precisa de `pip install numpy pillow`): `python tools/testes.py` roda validação Vulkan em
-todos os presets e cenas, fornalha branca, atmosfera contra path tracing, cintilação e pixels inválidos, e diz o
-que passou ou falhou (`--rapido` para uma versão curta).
+Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sobe · **Shift** rápido · **Esc** pausa.
 
-Controles: **botão direito + mouse** olha · **WASD** move · **Q/E** desce/sobe · **Shift** rápido ·
-**setas** movem o sol · **+/-** compensação de exposição · **F** liga/desliga DOF · **M** motion blur · **Esc** sai.
-
-## Limitações conhecidas
-
-- FSR 3 só no build do Windows; XeSS não existe para Vulkan.
-- Materiais com transparência (`BLEND`) são tratados como recorte por alfa; vidro com volume (refração, `KHR_materials_volume`) ainda não.
-- Tangentes: aproximação do MikkTSpace quando o arquivo não traz tangentes (a biblioteca de referência espera aprovação).
-- Sem ray tracing (`--no-rt`) não há sombras; shadow maps em cascata entram depois.
-- Animação: morph targets ainda não suportados; interpolação CUBICSPLINE usa só os valores-chave.
-- Cada personagem tem sua própria cópia da malha deformável (multidões instanciadas vêm depois).
-- Desempenho medido numa RTX 3070 Ti (`tools/teste_pc.py`); a otimização vem depois da paridade visual.
+Testes automáticos: `python tools/testes.py` (validação Vulkan em todos os presets e cenas, fornalha branca,
+atmosfera contra path tracing, cintilação) e `python tools/fisica.py`.
 
 ## Arquitetura
 
 ```
 src/
-  rhi/        camada fina sobre Vulkan (contexto, recursos, passes com push descriptors, swapchain, BLAS/TLAS)
-  scene/      malhas, materiais, luzes, câmera, carregador glTF, cenas de demonstração
-  renderer/   organização dos passes do frame
-  util/       PNG
-shaders/      GLSL -> SPIR-V compilado no build (variantes *_rt com ray tracing)
-tools/        fetch_assets.cmake
+  rhi/        camada sobre Vulkan: contexto, recursos, passes, swapchain, BLAS/TLAS
+  scene/      malhas, materiais, luzes, câmera, carregador glTF, geometria virtualizada, compressão de texturas
+  renderer/   passes do quadro, ReSTIR, denoisers, upscalers, oceano
+  game/       mundo de entidades, física, áudio, scripts, navegação, rede, materiais por nós
+  editor/     editor visual e editor de grafos
+  core/       carregamento, conta Legacy, caminhos
+shaders/      GLSL compilado para SPIR-V no build
+cenas/        cenas JSON (Times Square, Vale dos Cristais e testes)
+tools/        geradores de cidade e personagens, empacotador, testes
 ```
-
-## Roadmap
-
-- [x] **Dia 1**: RHI Vulkan, ray tracing, PBR, atmosfera física
-- [x] **Dia 2**: denoiser + TAAU, glTF e texturas, pós-processamento de cinema, ReSTIR DI (milhares de luzes)
-- [x] **Dia 3**: cena dinâmica (TLAS por frame, vetores de movimento por objeto, luzes móveis), animação esquelética na GPU
-- [ ] Escala de mundo aberto: GPU-driven rendering, culling, LOD, streaming
-- [ ] Atmosfera viva: nuvens volumétricas, clima, chuva e superfícies molhadas
-- [ ] Água: oceano FFT, rios, espuma, cena subaquática
-- [ ] Personagens AAA: pele com SSS, cabelo por fios, tecido
-- [x] DLSS 4 / FSR 3
-- [ ] Texturas BC7, shadow maps em cascata (fallback sem RT)
