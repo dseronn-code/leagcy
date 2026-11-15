@@ -658,7 +658,7 @@ class Facades:
     condensadores no telhado. Cada prédio sorteia o estilo; cada janela sorteia detalhes. Malhas agrupadas por
     material (self.mesh[nome]); cor por vértice com o tom do prédio e a sujeira (base e topo mais escuros)."""
 
-    PLAIN = ('escorrido', 'mural', 'grafite', 'cartaz', 'umidade', 'sala', 'vitrine', 'caixilho', 'ferro', 'faixa_luz', 'toldo', 'luz_', 'placa', 'ar_cond', 'montante',
+    PLAIN = ('vidro_loja', 'escorrido', 'mural', 'grafite', 'cartaz', 'umidade', 'sala', 'vitrine', 'caixilho', 'ferro', 'faixa_luz', 'toldo', 'luz_', 'placa', 'ar_cond', 'montante',
              'cortina', 'coroa', 'tapume', 'andaime', 'aco_teto', 'condensador', 'caixa_agua')
 
     def __init__(self, rng):
@@ -672,6 +672,10 @@ class Facades:
         self.ao = 1.0  # oclusão de contato da peça que está sendo feita
         self.bevel = 0.0  # chanfro das arestas da frente dos blocos (m)
         self.is_street = None  # (ponto médio, normal) -> a fachada dá para a rua? (senão é empena de divisa)
+        self.lojas = []  # (tipo, posição da porta, giro): interiores 3D a encaixar atrás das vitrines
+        self.lojas_restantes = 0
+        self.loja_ok = False  # o prédio atual pode ter loja com interior 3D (perto da praça)
+        self._poly = None
         self.n_murais = 0
 
     def m(self, name):
@@ -972,9 +976,32 @@ class Facades:
         """Térreo: vitrines (ou portas de enrolar) entre pilastras, faixa de letreiro, toldo ou marquise."""
         rng = self.rng
         lit_store = st['loja_luz']
+        # Loja de verdade (interior 3D) atrás de alguns vãos: só perto da praça, com fachada larga e prédio fundo.
+        loja = set()
+        if self.loja_ok and self.lojas_restantes > 0 and self._poly is not None and rng.random() < 0.45:
+            tipo, Wi, Di = rng.choices([('conveniencia', 10.0, 12.0), ('joalheria', 12.0, 14.0)], [2, 1])[0]
+            m = int(Wi // bw)
+            if m >= 2 and nb >= m:
+                i0 = rng.randrange(0, nb - m + 1)
+                uc = (i0 + m / 2) * bw
+                cantos = [self.P(a, t, n, uc + su * Wi / 2, 0, -(Di + 0.6)) for su in (-1, 1)]
+                if all(self._poly.contains(Point(c[0], c[2])) for c in cantos):
+                    loja = set(range(i0, i0 + m))
+                    x, _, z = self.P(a, t, n, uc, 0, -0.34)
+                    self.lojas.append((tipo, (x, y0, z), math.atan2(-n[0], -n[1])))
+                    self.lojas_restantes -= 1
         for i in range(nb):
             u0, u1 = i * bw + 0.35, (i + 1) * bw - 0.35
             yt = y0 + 3.6
+            if i in loja:  # vitrine de vidro de verdade: o interior 3D aparece atrás
+                self.wall_quad('vidro_loja', a, t, n, u0, u1, y0 + 0.45, yt, -0.3)
+                self.recess(a, t, n, u0, u1, y0 + 0.45, yt, 0.3, 'caixilho')
+                self.block('caixilho', a, t, n, u0, u1, yt - 0.08, yt, -0.3, -0.22)
+                self.block(trim, a, t, n, i * bw, u0, y0, y0 + ground, 0.0, 0.12)
+                self.block(trim, a, t, n, u1, (i + 1) * bw, y0, y0 + ground, 0.0, 0.12)
+                self.block(trim, a, t, n, u0, u1, y0, y0 + 0.45, 0.0, 0.06)
+                self.wall_quad(wall, a, t, n, u0, u1, yt, y0 + ground)
+                continue
             kind = rng.randrange(6) if rng.random() < lit_store else 5
             self.wall_quad(f'vitrine{kind}', a, t, n, u0, u1, y0 + 0.45, yt, -0.3, unit=True)
             if kind == 5 and rng.random() < 0.75:  # porta de enrolar fechada: pichada
@@ -1075,6 +1102,7 @@ class Facades:
         pil = st.get('pilastras', rng.random() < 0.3)
         escape = st.get('incendio', 'tijolo' in wall and rng.random() < 0.6)
         self.grime = (y0, 3.0, 0.4, y1)
+        self._poly = poly
         for a, b, L, t, n in self.edges(poly):
             nb = max(1, int(L // bay))
             bw = L / nb
@@ -1301,9 +1329,17 @@ class Gltf:
         self.doc['materials'].append(m)
         return len(self.doc['materials']) - 1
 
-    def add_mesh(self, name, mesh, mat):
+    def instance(self, mesh_ids, pos, yaw):
+        """Mais uma cópia (nó do glTF) das malhas já gravadas, girada yaw rad em torno de y: o motor desenha as
+        cópias por instância (uma BLAS por malha), sem duplicar vértices."""
+        q = [0.0, math.sin(yaw / 2), 0.0, math.cos(yaw / 2)]
+        for mi in mesh_ids:
+            self.doc['nodes'].append({'mesh': mi, 'translation': [float(v) for v in pos], 'rotation': q})
+            self.doc['scenes'][0]['nodes'].append(len(self.doc['nodes']) - 1)
+
+    def add_mesh(self, name, mesh, mat, scene_node=True):
         if not mesh.idx:
-            return
+            return None
         P = np.frombuffer(mesh.p, np.float32).reshape(-1, 3)
         N = np.frombuffer(mesh.n, np.float32).reshape(-1, 3)
         T = np.frombuffer(mesh.uv, np.float32).reshape(-1, 2)
@@ -1315,8 +1351,10 @@ class Gltf:
         if len(C) == len(P) and np.abs(C - 1.0).max() > 1e-3:  # tom/sujeira por vértice só quando há
             prim['attributes']['COLOR_0'] = self.acc(np.clip(C, 0, 1), 'VEC3', 5126, 34962)
         self.doc['meshes'].append({'name': name, 'primitives': [prim]})
-        self.doc['nodes'].append({'name': name, 'mesh': len(self.doc['meshes']) - 1})
-        self.doc['scenes'][0]['nodes'].append(len(self.doc['nodes']) - 1)
+        if scene_node:
+            self.doc['nodes'].append({'name': name, 'mesh': len(self.doc['meshes']) - 1})
+            self.doc['scenes'][0]['nodes'].append(len(self.doc['nodes']) - 1)
+        return len(self.doc['meshes']) - 1
 
     def light(self, pos, color, intensity, rng_m=40.0):
         ext = self.doc.setdefault('extensions', {}).setdefault('KHR_lights_punctual', {'lights': []})
@@ -1962,6 +2000,7 @@ def build(out, seed, texdir):
                                               emissive=(0.25, 0.25, 0.25), emissive_tex=rel(e), strength=0.3)
     roof = pbr('telhado', 'brushed_concrete', tint=(0.35, 0.34, 0.33))
     fac = Facades(rng)
+    fac.lojas_restantes = 18
     from shapely.prepared import prep
     blocks_p = prep(blocks)
     fac.is_street = lambda mid, nrm: not blocks_p.contains(Point(mid[0] + nrm[0] * 2.5, mid[1] + nrm[1] * 2.5))
@@ -1999,6 +2038,7 @@ def build(out, seed, texdir):
                          'cunhais': rng.random() < 0.4,
                          'caixilho': rng.choice(['caixilho', 'caixilho', 'caixilho_branco', 'caixilho_verde'])}
                 fac.lod = 0 if d < 140 else 1
+                fac.loja_ok = d < 90 and rng.random() < 0.5
                 fac.bevel = 0.025 if fac.lod == 0 else 0.0
                 top = fac.masonry(body, 0.15, podium, wall, st=style)
                 fac.bevel = 0.0
@@ -2144,8 +2184,30 @@ def build(out, seed, texdir):
     for k in range(12):  # anúncios pintados e murais nas empenas
         r = rel(mural_texture(tex(f'mural{k:02d}.png'), rng, brick_src, k))
         fmat[f'mural{k}'] = g.material(f'mural{k}', tex=r, rough=0.85)
+    m_v = g.material('vidro_loja', color=(0.95, 0.97, 0.98), rough=0.02, double=True)
+    g.doc['materials'][m_v]['extensions'] = {'KHR_materials_transmission': {'transmissionFactor': 0.92},
+                                             'KHR_materials_ior': {'ior': 1.5}}
+    for ext in ('KHR_materials_transmission', 'KHR_materials_ior'):
+        if ext not in g.doc['extensionsUsed']:
+            g.doc['extensionsUsed'].append(ext)
+    fmat['vidro_loja'] = m_v
     for name, mesh in fac.mesh.items():
         g.add_mesh('fachada_' + name, mesh, fmat[name])
+    # Interiores 3D (tools/interiores.py): cada tipo de loja é gravado uma vez e instanciado atrás das vitrines.
+    if fac.lojas:
+        import interiores
+        feitos = {}
+        for tipo, pos, yaw in fac.lojas:
+            if tipo not in feitos:
+                feitos[tipo] = getattr(interiores, tipo)(out, texdir, 7 + len(feitos), g=g, pbr=pbr)
+            ids, luzes, _ = feitos[tipo]
+            g.instance(ids, pos, yaw)
+            c, sn = math.cos(yaw), math.sin(yaw)
+            for (lx, ly, lz), col, inten, rr in luzes:  # gira (x, z) por yaw em torno de y e soma a posição
+                g.light((pos[0] + lx * c + lz * sn, pos[1] + ly, pos[2] - lx * sn + lz * c), col, inten, rr)
+        print(f'{len(fac.lojas)} lojas com interior 3D:', {k: sum(1 for l in fac.lojas if l[0] == k) for k in feitos})
+        for tipo, pos, yaw in fac.lojas:
+            print('  ', tipo, [round(v, 1) for v in pos], round(math.degrees(yaw)))
     for pos, col, inten, rr in fac.lights:
         g.light(pos, col, inten, rr)
 
