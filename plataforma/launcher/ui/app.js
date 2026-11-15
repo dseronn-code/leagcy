@@ -52,8 +52,7 @@ async function acordarServidor() {
     } catch (e) {
       if (!e.rede) return true;  // respondeu (mesmo com erro): está acordado
       const s = Math.round((Date.now() - inicio) / 1000);
-      $('#texto-conectando').textContent = s < 8 ? 'Falando com o servidor Legacy.'
-        : `Acordando o servidor Legacy (${s} s)… isso só acontece na primeira vez depois de um tempo sem uso.`;
+      $('#texto-conectando').textContent = s < 10 ? '' : 'Quase lá…';
       await new Promise((ok) => setTimeout(ok, 3000));
     }
   }
