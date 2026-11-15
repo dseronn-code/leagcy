@@ -1,6 +1,13 @@
+# Rodada 36 (a 35 rodou no agente antigo, que não entende "[N]"): a 1ª linha troca o agente antigo pelo novo
+# sozinha; o novo roda o pedido inteiro.
+powershell -ExecutionPolicy Bypass -File tools\atualizar_agente.ps1
 # Rodada 35: refaz a 34 com a cidade completa (as 240 texturas PNG da cidade não estavam no repositório) e com o
 # agente novo que vigia cada comando. "[N]" na frente = tempo esperado em minutos; o limite é o dobro. Se passar,
 # ou travar (6 min sem saída e sem CPU), o agente grava resultados_pc\diagnostico_N.txt, encerra e tenta de novo uma vez.
+# 0) Diagnóstico da trava da rodada 34 (as 4 execuções da cidade pararam logo depois de carregar as texturas, sem
+#    erro): uma cena simples (o motor está bem?) e a cidade pequena com a camada de validação do Vulkan.
+[2] build\Release\legacy.exe --headless --scene cenas\parque.json --width 640 --height 360 --frames 8 --out resultados_pc\diag_parque.png
+[4] build\Release\legacy.exe --headless --validation --scene cenas\times_square.json --width 640 --height 360 --frames 4 --out resultados_pc\diag_ts.png
 # 1) Instaladores (Times Square, Legacy Engine, Legacy Launcher) e a Release no GitHub.
 [10] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher

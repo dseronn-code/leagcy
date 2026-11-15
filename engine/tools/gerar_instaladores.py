@@ -16,6 +16,7 @@ import glob
 import json
 import os
 import shutil
+import time
 import subprocess
 import sys
 import urllib.request
@@ -26,7 +27,6 @@ RAIZ = os.path.dirname(MOTOR)
 DIST = os.path.join(RAIZ, 'dist')
 SAIDA = os.path.join(DIST, 'instaladores')
 LOCAL = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
-INNO_URL = 'https://jrsoftware.org/download.php/is.exe'
 NODE_URL = 'https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip'
 REPO = 'dseronn-code/leagcy'
 
@@ -47,15 +47,43 @@ def versao():
     return f'0.1.{n or 0}'
 
 
+INNO_URLS = ['https://jrsoftware.org/download.php/is.exe', 'https://files.jrsoftware.org/is/6/innosetup-6.4.3.exe',
+             'https://github.com/jrsoftware/issrc/releases/download/is-6_4_3/innosetup-6.4.3.exe']
+ISCC_LOCAIS = [os.path.join(LOCAL, 'InnoSetup6', 'ISCC.exe'), os.path.join(LOCAL, 'Programs', 'Inno Setup 6', 'ISCC.exe'),
+               r'C:\Program Files (x86)\Inno Setup 6\ISCC.exe', r'C:\Program Files\Inno Setup 6\ISCC.exe']
+
+
 def iscc():
-    for p in (os.path.join(LOCAL, 'InnoSetup6', 'ISCC.exe'), r'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
-              r'C:\Program Files\Inno Setup 6\ISCC.exe'):
-        if os.path.isfile(p):
-            return p
-    inst = os.path.join(os.environ.get('TEMP', '.'), 'innosetup.exe')
-    baixar(INNO_URL, inst)
-    rodar([inst, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/DIR=' + os.path.join(LOCAL, 'InnoSetup6')])
-    return os.path.join(LOCAL, 'InnoSetup6', 'ISCC.exe')
+    """Acha o compilador do Inno Setup; se não houver, instala (só para o usuário, sem admin). Tenta cada link e
+    confere o arquivo baixado (um .exe de verdade, > 1 MB) antes de rodar; se nada der, tenta o winget."""
+    achar = lambda: next((p for p in ISCC_LOCAIS if os.path.isfile(p)), None)
+    if achar():
+        return achar()
+    pasta = os.path.join(LOCAL, 'legacy-inno')
+    os.makedirs(pasta, exist_ok=True)
+    for k, url in enumerate(INNO_URLS):
+        inst = os.path.join(pasta, f'innosetup_{k}_{int(time.time())}.exe')  # nome novo: nunca reaproveita download estragado
+        try:
+            baixar(url, inst)
+            with open(inst, 'rb') as f:
+                ok = f.read(2) == b'MZ' and os.path.getsize(inst) > 1_000_000
+            if not ok:
+                print('download inválido (não é um .exe):', url, flush=True)
+                continue
+            rodar([inst, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER',
+                   '/DIR=' + os.path.join(LOCAL, 'InnoSetup6')])
+            if achar():
+                return achar()
+        except Exception as e:  # noqa: BLE001 - tenta o próximo caminho
+            print('falhou:', url, '->', e, flush=True)
+    try:
+        rodar(['winget', 'install', '--id', 'JRSoftware.InnoSetup', '-e', '--silent', '--scope', 'user',
+               '--accept-package-agreements', '--accept-source-agreements'])
+    except Exception as e:  # noqa: BLE001
+        print('winget falhou:', e, flush=True)
+    if achar():
+        return achar()
+    sys.exit('Não consegui instalar o Inno Setup (veja as mensagens acima).')
 
 
 def node():

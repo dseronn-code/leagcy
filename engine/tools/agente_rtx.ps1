@@ -22,8 +22,11 @@
 # GitHub, o agente se reinicia sozinho com a versão nova.
 param(
   [string]$Branch = "ccr-5423dd89-y3br6e",
-  [int]$Intervalo = 30
+  [int]$Intervalo = 30,
+  [int]$Atraso = 0   # segundos de espera ao ligar (usado quando o agente antigo se troca por este)
 )
+$env:LEGACY_AGENTE_VERSAO = "2"   # os comandos do pedido sabem que estão no agente novo (ver tools/atualizar_agente.ps1)
+if ($Atraso -gt 0) { Start-Sleep $Atraso }
 
 $Pasta = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path   # a pasta engine
 $Estado = Join-Path $env:LOCALAPPDATA "legacy_agente_rtx.txt"  # último pedido rodado (fora do repositório)
