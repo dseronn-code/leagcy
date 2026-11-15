@@ -29,6 +29,7 @@ import urllib.request
 from contextlib import contextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -40,6 +41,9 @@ USERNAME_RE = re.compile(r'^[A-Za-z0-9_]{3,16}$')
 EMAIL_RE = re.compile(r'^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$')
 
 app = FastAPI(title='Legacy', version='0.1.0')
+# O launcher (Electron, página local) e o site chamam a API de outra origem; a sessão vai no cabeçalho Authorization,
+# não em cookie, então liberar as origens não expõe nada.
+app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], allow_headers=['*'])
 _lock = threading.Lock()
 
 

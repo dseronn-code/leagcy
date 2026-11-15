@@ -1,0 +1,23 @@
+{
+  "name": "legacy-launcher",
+  "productName": "Legacy",
+  "version": "0.1.0",
+  "description": "Legacy Launcher: conta Legacy, loja, biblioteca e o Legacy Engine",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "br.com.legacyengine.launcher",
+    "productName": "Legacy",
+    "files": ["main.js", "preload.js", "ui/**"],
+    "win": { "target": "nsis" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true,
+              "shortcutName": "Legacy" }
+  }
+}
