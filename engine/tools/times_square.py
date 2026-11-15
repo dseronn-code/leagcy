@@ -2010,7 +2010,7 @@ def build(out, seed, texdir):
     bldg = {k: Mesh() for k in facade_mats}
     roofs = Mesh()
     near_plaza = LineString([(BWAY_K * street_z(41), street_z(41)), (BWAY_K * street_z(48), street_z(48))])
-    screens, neons = [], []
+    screens, neons, neon_verticais = [], [], []
     blocks_list = polys(blocks)
     for blk in blocks_list:
         for lot in lots(blk, rng):
@@ -2108,6 +2108,8 @@ def build(out, seed, texdir):
                         y += hgt + rng.uniform(0.5, 3)
                     if rng.random() < 0.7:  # letreiro de neon baixo, acima da faixa de letreiros das lojas
                         neons.append((mid, (nx, nz), (b - a) / L, 5.4, min(L * 0.8, 9), 1.4))
+                    if rng.random() < 0.3 and podium > 14:  # tubo de neon vertical na quina do pódio
+                        neon_verticais.append((a[0] + nx * 0.25, 6.5, a[1] + nz * 0.25, podium - 9.0))
     for k, mesh in bldg.items():
         g.add_mesh(f'predios_{k[0]}{k[1]}', mesh, facade_mats[k])
     g.add_mesh('telhados', roofs, roof)
@@ -2240,9 +2242,15 @@ def build(out, seed, texdir):
         m.quad(A, B, B + [0, hgt, 0], A + [0, hgt, 0], uv=((0, 1), (1, 1), (1, 0), (0, 0)))  # v do glTF: 0 em cima
         frame = Mesh()
         g.add_mesh(f'telao{i:03d}', m, mat)
+    # Neon de verdade: a placa com o letreiro (texto luminoso forte, o bloom faz o halo) e, em volta, um tubo de
+    # vidro aceso de cor viva — geometria emissiva que vira luz de malha e se reflete no asfalto molhado, como nos
+    # letreiros de Manhattan à noite. Mais tubos verticais nas quinas dos pódios da praça.
+    NEON_CORES = [(1.0, 0.12, 0.45), (0.1, 0.85, 1.0), (1.0, 0.55, 0.05), (0.35, 1.0, 0.25), (1.0, 0.15, 0.08),
+                  (0.75, 0.25, 1.0)]
+    tubos = [Mesh() for _ in NEON_CORES]
     for i, (mid, (nx, nz), t, y, wid, hgt) in enumerate(neons):
         p = neon_texture(tex(f'neon{i:03d}.png'), rng)
-        mat = g.material(f'neon{i:03d}', tex=rel(p), emissive=(1, 1, 1), emissive_tex=rel(p), strength=3.0)
+        mat = g.material(f'neon{i:03d}', tex=rel(p), emissive=(1, 1, 1), emissive_tex=rel(p), strength=9.0)
         m = Mesh()
         o = np.array([mid[0] + nx * 0.6, 0, mid[1] + nz * 0.6])
         tx = np.array([t[0], 0, t[1]]) * wid / 2
@@ -2251,6 +2259,22 @@ def build(out, seed, texdir):
             A, B = B, A
         m.quad(A, B, B + [0, hgt, 0], A + [0, hgt, 0], uv=((0, 1), (1, 1), (1, 0), (0, 0)))  # v do glTF: 0 em cima
         g.add_mesh(f'neon{i:03d}', m, mat)
+        # moldura de tubo de neon (cantos arredondados), 8 cm à frente da placa
+        n3 = np.array([nx, 0.0, nz]) * 0.08
+        # contorno simples e robusto: retângulo com cantos chanfrados
+        tt = np.array([t[0], 0.0, t[1]])
+        P0 = A + n3 + [0, y, 0]
+        W = float(np.linalg.norm(B - A))
+        sgn = (B - A) / max(W, 1e-6)
+        q = lambda u, v: P0 + sgn * u + np.array([0.0, v, 0.0])
+        c = 0.15
+        contorno = [q(c, -0.1), q(W - c, -0.1), q(W + 0.1, c), q(W + 0.1, hgt - c), q(W - c, hgt + 0.1), q(c, hgt + 0.1),
+                    q(-0.1, hgt - c), q(-0.1, c), q(c, -0.1)]
+        tubos[i % len(NEON_CORES)].tube(contorno, 0.03, seg=6)
+    for bx, by, bz, h in neon_verticais:
+        tubos[rng.randrange(len(NEON_CORES))].tube([(bx, by, bz), (bx, by + h, bz)], 0.05, seg=8)
+    for k, (cor, mesh) in enumerate(zip(NEON_CORES, tubos)):
+        g.add_mesh(f'neon_tubo{k}', mesh, g.material(f'neon_tubo{k}', color=cor, emissive=cor, strength=30.0))
 
     # Arquibancada vermelha iluminada (Duffy Square, ao norte da 46th, no meio da gravata).
     zs = street_z(46) - 9 - 18

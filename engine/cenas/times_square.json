@@ -6,6 +6,7 @@
  "chuva": 0.8,
  "nevoa": 0.004,
  "exposicao_ev": -2.5,
+ "bloom": 0.09,
  "camera": {
   "posicao": [
    14,

@@ -489,6 +489,8 @@ Options parseArgs(int argc, char** argv) {
     // "exposicao_ev": compensação da auto-exposição pedida pela cena (à noite o olho não clareia tudo: a rua fica
     // escura e as luzes brilham); --ev na linha de comando vale mais.
     if (!evGiven && number("\"exposicao_ev\"", v)) o.render.exposureCompensation = v;
+    // "bloom": força do brilho em volta das luzes (padrão 0,05; a noite de neon pede mais).
+    if (number("\"bloom\"", v)) o.render.bloomStrength = std::clamp(v, 0.0f, 0.3f);
   }
   // A cena pode pedir um preset ("qualidade": "alto" no .json); --quality na linha de comando vale mais.
   if (!qualityGiven && o.scene.name.size() > 5 && o.scene.name.substr(o.scene.name.size() - 5) == ".json") {
