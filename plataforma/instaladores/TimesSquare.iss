@@ -16,6 +16,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
+SetupIconFile=..\marca\legacy.ico
+UninstallDisplayIcon={app}\legacy.exe
 DisableProgramGroupPage=yes
 ; o motor grava o cache das texturas (texcache/) ao lado do jogo: a pasta precisa ser gravável pelo usuário
 PrivilegesRequired=lowest

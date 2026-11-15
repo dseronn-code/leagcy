@@ -16,6 +16,8 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
+SetupIconFile=..\marca\legacy.ico
+UninstallDisplayIcon={app}\legacy.exe
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 [Languages]

@@ -23,8 +23,7 @@ h1, h2, h3 { font-family: 'Space Grotesk', Inter, sans-serif; letter-spacing: -0
 .topo { position: sticky; top: 0; z-index: 20; height: 68px; display: flex; align-items: center; gap: 28px;
   padding: 0 28px; background: rgba(11, 12, 16, .86); backdrop-filter: blur(14px); border-bottom: 1px solid var(--linha); }
 .marca { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-.logo-l { width: 34px; height: 34px; border-radius: 9px; background: var(--grad); color: #16110a; display: grid;
-  place-items: center; font: 700 20px 'Space Grotesk', sans-serif; }
+.logo-l { width: 34px; height: 34px; display: block; border-radius: 9px; }
 .marca-nome { font: 700 15px 'Space Grotesk', sans-serif; letter-spacing: .32em; }
 .menu { display: flex; gap: 26px; flex: 1; }
 .menu a { text-decoration: none; font-weight: 600; font-size: 15px; color: #dfe2ea; }

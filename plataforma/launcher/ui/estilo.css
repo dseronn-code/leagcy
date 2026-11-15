@@ -19,11 +19,10 @@ button { font: inherit; }
 
 /* ---------- marca */
 .marca { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
-.logo-l { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 10px; font: 700 26px "Space Grotesk";
-  color: #111; background: linear-gradient(135deg, var(--destaque), var(--destaque2)); }
+.logo-l { width: 44px; height: 44px; display: block; border-radius: 10px; }
 .marca-nome { font: 700 22px "Space Grotesk"; letter-spacing: 0.32em; }
 .marca.pequena { margin: 4px 0 28px 6px; }
-.marca.pequena .logo-l { width: 34px; height: 34px; font-size: 20px; }
+.marca.pequena .logo-l { width: 34px; height: 34px; }
 .marca.pequena .marca-nome { font-size: 16px; }
 
 /* ---------- botões */

@@ -1,0 +1,2 @@
+// Ícone do legacy.exe no Windows (Explorer, barra de tarefas, atalhos).
+IDI_LEGACY ICON "legacy.ico"

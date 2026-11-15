@@ -21,7 +21,7 @@ MOLDE = '''<!doctype html>
 </head>
 <body>
 <header class="topo">
-  <a class="marca" href="index.html" aria-label="Legacy, início"><span class="logo-l">L</span><span class="marca-nome">LEGACY</span></a>
+  <a class="marca" href="index.html" aria-label="Legacy, início"><img class="logo-l" src="img/logo.svg" alt=""><span class="marca-nome">LEGACY</span></a>
   <div class="topo-acoes">
     <a class="botao baixar" href="https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe">Baixar</a>
   </div>

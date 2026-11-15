@@ -1,6 +1,5 @@
-# Rodada 41 (a 40 não rodou: o package.json ficou mudado no PC pela montagem anterior; corrigido): launcher que se atualiza sozinho (electron-updater) e jogos que atualizam baixando só os arquivos que
-# mudaram (manifesto por produto). Esta é a 1ª Release com manifesto: sobe todos os arquivos comprimidos uma vez
-# (~200 MB); as próximas sobem só o que mudar.
+# Rodada 42: logo nova da Legacy (L em degradê com o "pixel aceso") no legacy.exe (ícone do Windows), nos
+# instaladores e no launcher. Gera e publica uma Release nova (o launcher instalado se atualiza sozinho).
 [10] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher
 [30] python tools\gerar_instaladores.py --publicar

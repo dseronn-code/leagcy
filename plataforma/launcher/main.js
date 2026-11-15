@@ -14,7 +14,7 @@ const arquivoSessao = () => path.join(pastaLegacy(), 'sessao.bin');
 
 function criarJanela() {
   const win = new BrowserWindow({
-    width: 1360, height: 840, minWidth: 1100, minHeight: 680, backgroundColor: '#07080b', title: 'Legacy',
+    width: 1360, height: 840, minWidth: 1100, minHeight: 680, backgroundColor: '#07080b', title: 'Legacy', icon: path.join(__dirname, 'ui', 'img', 'icone.png'),
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
