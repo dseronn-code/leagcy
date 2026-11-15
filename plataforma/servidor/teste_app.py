@@ -3,7 +3,8 @@ import os
 import re
 import tempfile
 
-os.environ['LEGACY_DB'] = os.path.join(tempfile.mkdtemp(), 'teste.db')
+if not os.environ.get('DATABASE_URL'):
+    os.environ['LEGACY_DB'] = os.path.join(tempfile.mkdtemp(), 'teste.db')
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -71,3 +72,42 @@ def test_codigo_de_troca():
     r = c.post('/sessao/trocar', json={'codigo': cod, 'app': 'times-square'})
     assert r.status_code == 200 and r.json()['perfil']['username'] == 'Duda'
     assert c.post('/sessao/trocar', json={'codigo': cod}).status_code == 401  # uso único
+
+
+def test_esqueci_e_trocar_senha():
+    c.post('/conta/cadastro', json={'email': 'eva@exemplo.com', 'senha': 'eva123456'})
+    tok_antigo = c.post('/conta/verificar', json={'email': 'eva@exemplo.com', 'codigo': codigo()}).json()['token']
+    # mesma resposta exista a conta ou não (não revela quem tem conta)
+    assert c.post('/conta/esqueci', json={'email': 'ninguem@exemplo.com'}).json()['ok']
+    n = len(enviados)
+    assert c.post('/conta/esqueci', json={'email': 'eva@exemplo.com'}).json()['ok']
+    assert len(enviados) == n + 1
+    # o código de cadastro não serve para senha (finalidades separadas)
+    r = c.post('/conta/redefinir', json={'email': 'eva@exemplo.com', 'codigo': '999999' if codigo() != '999999' else '888888',
+                                          'senha': 'novasenha1'})
+    assert r.status_code == 400
+    r = c.post('/conta/redefinir', json={'email': 'eva@exemplo.com', 'codigo': codigo(), 'senha': 'novasenha1'})
+    assert r.status_code == 200, r.text
+    h = {'Authorization': 'Bearer ' + r.json()['token']}
+    assert c.get('/eu', headers={'Authorization': 'Bearer ' + tok_antigo}).status_code == 401  # sessões antigas caem
+    assert c.post('/sessao/login', json={'email': 'eva@exemplo.com', 'senha': 'eva123456'}).status_code == 401
+    assert c.post('/eu/senha', json={'atual': 'errada000', 'nova': 'outra12345'}, headers=h).status_code == 401
+    assert c.post('/eu/senha', json={'atual': 'novasenha1', 'nova': 'outra12345'}, headers=h).status_code == 200
+    assert c.get('/eu', headers=h).status_code == 200  # a sessão que trocou continua
+    assert c.post('/sessao/login', json={'email': 'eva@exemplo.com', 'senha': 'outra12345'}).status_code == 200
+
+
+def test_cinco_tentativas_bloqueiam_o_codigo():
+    servidor._pedidos.clear()
+    c.post('/conta/cadastro', json={'email': 'fabio@exemplo.com', 'senha': 'fabio1234'})
+    certo = codigo()
+    errado = '000000' if certo != '000000' else '111111'
+    for _ in range(5):
+        assert c.post('/conta/verificar', json={'email': 'fabio@exemplo.com', 'codigo': errado}).status_code == 400
+    # depois de 5 erros, nem o código certo vale mais (precisa pedir outro)
+    r = c.post('/conta/verificar', json={'email': 'fabio@exemplo.com', 'codigo': certo})
+    assert r.status_code == 400 and 'expirado' in r.json()['detail']
+
+
+def test_saude():
+    assert c.get('/saude').json()['ok']

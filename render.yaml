@@ -1,0 +1,27 @@
+# Servidor de contas Legacy no Render (plano grátis). Como usar: no painel do Render, "New" -> "Blueprint" ->
+# escolher este repositório. O banco é o Postgres grátis do Neon (o Render grátis não guarda arquivos):
+# cole a "connection string" do Neon em DATABASE_URL quando o Render pedir. Guia: plataforma/docs/colocar_no_ar.md
+services:
+  - type: web
+    name: legacy-conta
+    runtime: python
+    plan: free
+    region: ohio
+    rootDir: plataforma/servidor
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips "*"
+    healthCheckPath: /saude
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DATABASE_URL
+        sync: false
+      - key: LEGACY_PEPPER
+        generateValue: true
+      - key: LEGACY_EMAIL
+        value: resend
+      - key: RESEND_API_KEY
+        sync: false
+      - key: LEGACY_EMAIL_FROM
+        value: "Legacy <conta@legacyengine.com.br>"

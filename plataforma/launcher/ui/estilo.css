@@ -139,3 +139,47 @@ h2 { font: 700 30px "Space Grotesk"; margin: 30px 0 18px; }
 /* imagens dos heróis (a política de segurança da página não deixa estilo inline) */
 .hero.ts { --img: url(img/ts_hero.jpg); }
 .hero.engine { --img: url(img/eng_hero.jpg); }
+
+/* ---- conectando / offline */
+.carregando { height: 4px; background: var(--linha); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.carregando span { display: block; height: 100%; width: 35%; background: var(--destaque); border-radius: 4px;
+  animation: vai 1.2s ease-in-out infinite; }
+@keyframes vai { 0% { transform: translateX(-100%); } 100% { transform: translateX(300%); } }
+#lista-offline .botao { margin-bottom: 10px; }
+
+/* ---- aviso de versão nova do launcher */
+.banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 18px 56px 0;
+  padding: 14px 18px; background: var(--painel2); border: 1px solid var(--linha); border-radius: var(--raio); }
+
+/* ---- cartões da biblioteca */
+.jogo .jogo-corpo { padding: 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.jogo .jogo-corpo > div:first-child { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.jogo .estado { color: var(--suave); font-size: 12px; }
+.jogo .barra { height: 4px; background: var(--linha); border-radius: 4px; overflow: hidden; margin-top: 6px; }
+.jogo .barra span { display: block; height: 100%; width: 0; background: var(--destaque); transition: width .2s; }
+.jogo .jogo-acoes { display: flex; gap: 8px; position: relative; padding: 0; }
+.jogo .mais { padding: 12px 14px; }
+.jogo .menu { position: absolute; right: 0; bottom: 52px; background: var(--painel2); border: 1px solid var(--linha);
+  border-radius: 10px; padding: 6px; display: flex; flex-direction: column; min-width: 160px; z-index: 5; }
+.jogo .menu[hidden] { display: none; }
+.jogo .menu button { background: none; border: 0; color: var(--texto); text-align: left; padding: 10px 12px;
+  border-radius: 8px; cursor: pointer; font: inherit; }
+.jogo .menu button:hover { background: var(--linha); }
+
+/* ---- conta: trocar senha */
+.form-senha { margin-top: 26px; display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+.form-senha h3 { margin: 0 0 4px; font-size: 15px; }
+.form-senha .botao { align-self: flex-start; }
+
+/* ---- termos e privacidade */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: flex; align-items: center;
+  justify-content: center; z-index: 50; }
+.modal[hidden] { display: none; }
+.modal-caixa { position: relative; width: min(760px, 90vw); max-height: 82vh; overflow: auto; background: var(--painel);
+  border: 1px solid var(--linha); border-radius: var(--raio); padding: 34px 40px; }
+.modal .fechar { position: absolute; top: 12px; right: 16px; background: none; border: 0; color: var(--suave);
+  font-size: 28px; cursor: pointer; }
+.texto-longo { line-height: 1.6; color: var(--texto); }
+.texto-longo h1 { font-size: 24px; margin-top: 0; }
+.texto-longo h2 { font-size: 17px; margin-top: 26px; }
+.texto-longo p, .texto-longo li { color: #c8ccd6; font-size: 14px; }

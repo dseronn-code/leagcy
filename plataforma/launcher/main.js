@@ -44,39 +44,92 @@ const pastaProduto = (id) => path.join(process.env.LOCALAPPDATA || app.getPath('
                                         PRODUTOS[id].pasta);
 const exeProduto = (id) => path.join(pastaProduto(id), 'legacy.exe');
 
+const arquivoVersao = (id) => path.join(pastaProduto(id), 'versao-legacy.txt');
+const desinstalador = (id) => path.join(pastaProduto(id), 'unins000.exe');
+
 ipcMain.handle('produto:instalado', (_e, id) => (PRODUTOS[id] ? fs.existsSync(exeProduto(id)) : false));
+// Instalado? Qual versão? (a versão é a da Release do GitHub de onde veio o instalador)
+ipcMain.handle('produto:info', (_e, id) => {
+  if (!PRODUTOS[id]) return { instalado: false, versao: null };
+  const instalado = fs.existsSync(exeProduto(id));
+  let versao = null;
+  try { versao = fs.readFileSync(arquivoVersao(id), 'utf8').trim(); } catch {}
+  return { instalado, versao };
+});
+
+// Última versão publicada (Release mais nova do GitHub): é dela que saem os instaladores do catálogo.
+function getJson(url) {
+  return new Promise((ok, falha) => {
+    https.get(url, { headers: { 'User-Agent': 'Legacy-Launcher', Accept: 'application/vnd.github+json' } }, (r) => {
+      let t = '';
+      r.on('data', (c) => (t += c));
+      r.on('end', () => { try { r.statusCode === 200 ? ok(JSON.parse(t)) : falha(new Error('HTTP ' + r.statusCode)); } catch (e) { falha(e); } });
+    }).on('error', falha).setTimeout(15000, function () { this.destroy(new Error('tempo esgotado')); });
+  });
+}
+ipcMain.handle('versao:ultima', async () => {
+  try { return (await getJson('https://api.github.com/repos/dseronn-code/leagcy/releases/latest')).tag_name || null; }
+  catch { return null; }
+});
+ipcMain.handle('abrir:externo', (_e, url) => {
+  if (/^https:\/\//.test(url)) shell.openExternal(url);
+  return true;
+});
+ipcMain.handle('abrir:pasta', (_e, id) => { if (PRODUTOS[id]) shell.openPath(pastaProduto(id)); return true; });
 
 function baixar(url, destino, progresso, voltas = 0) {
   return new Promise((ok, falha) => {
-    https.get(url, (r) => {
-      if ([301, 302, 303, 307, 308].includes(r.statusCode) && voltas < 5)
+    https.get(url, { headers: { 'User-Agent': 'Legacy-Launcher' } }, (r) => {
+      if ([301, 302, 303, 307, 308].includes(r.statusCode) && voltas < 5) {
+        r.resume();
         return baixar(r.headers.location, destino, progresso, voltas + 1).then(ok, falha);
-      if (r.statusCode !== 200) return falha(new Error('Download falhou (' + r.statusCode + ')'));
+      }
+      if (r.statusCode !== 200) { r.resume(); return falha(new Error('Download falhou (erro ' + r.statusCode + ').')); }
       const total = Number(r.headers['content-length'] || 0);
       let feito = 0;
       const f = fs.createWriteStream(destino);
       r.on('data', (c) => { feito += c.length; if (total) progresso(feito / total); });
+      r.on('error', falha);
+      f.on('error', falha);
       r.pipe(f);
-      f.on('finish', () => f.close(ok));
-    }).on('error', falha);
+      f.on('finish', () => f.close(() => (total && feito < total ? falha(new Error('Download incompleto. Tente de novo.')) : ok())));
+    }).on('error', () => falha(new Error('Sem conexão com a internet para baixar.')));
   });
 }
 
-// Instalar: baixa o instalador do catálogo e roda em silêncio (o instalador cria atalhos e desinstalador).
-ipcMain.handle('produto:instalar', async (e, id, url) => {
-  const destino = path.join(app.getPath('temp'), id + '-setup.exe');
-  await baixar(url, destino, (p) => e.sender.send('produto:progresso', id, p));
-  await new Promise((ok, falha) => {
-    const p = spawn(destino, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], { windowsHide: true });
-    p.on('exit', (c) => (c === 0 ? ok() : falha(new Error('O instalador terminou com erro ' + c))));
+function rodar(exe, args) {
+  return new Promise((ok, falha) => {
+    const p = spawn(exe, args, { windowsHide: true });
+    p.on('exit', (c) => (c === 0 ? ok() : falha(new Error('O instalador terminou com erro ' + c + '.'))));
     p.on('error', falha);
   });
-  return fs.existsSync(exeProduto(id));
+}
+
+// Instalar ou atualizar: baixa o instalador do catálogo e roda em silêncio (cria atalhos e desinstalador). Atualizar
+// é o mesmo instalador por cima (o Inno Setup substitui os arquivos e mantém a pasta).
+ipcMain.handle('produto:instalar', async (e, id, url, versao) => {
+  if (!PRODUTOS[id]) throw new Error('Produto desconhecido.');
+  const destino = path.join(app.getPath('temp'), id + '-setup.exe');
+  await baixar(url, destino, (p) => e.sender.send('produto:progresso', id, p));
+  e.sender.send('produto:progresso', id, -1);  // -1 = instalando
+  await rodar(destino, ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER']);
+  try { fs.unlinkSync(destino); } catch {}
+  if (!fs.existsSync(exeProduto(id))) throw new Error('A instalação não terminou. Tente de novo.');
+  if (versao) fs.writeFileSync(arquivoVersao(id), String(versao));
+  return true;
+});
+
+ipcMain.handle('produto:desinstalar', async (_e, id) => {
+  if (!PRODUTOS[id]) throw new Error('Produto desconhecido.');
+  if (fs.existsSync(desinstalador(id))) await rodar(desinstalador(id), ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART']);
+  else fs.rmSync(pastaProduto(id), { recursive: true, force: true });
+  return !fs.existsSync(exeProduto(id));
 });
 
 // Jogar: o launcher pede ao servidor um código de uso único e abre o jogo com ele (--legacy-codigo): o jogo entra
 // na mesma conta Legacy sem senha e sem o token do launcher na linha de comando.
 ipcMain.handle('produto:jogar', (_e, id, codigo) => {
+  if (!PRODUTOS[id] || !fs.existsSync(exeProduto(id))) throw new Error('Não está instalado.');
   const args = [...PRODUTOS[id].args, ...(codigo ? ['--legacy-codigo', codigo] : [])];
   const p = spawn(exeProduto(id), args, { cwd: pastaProduto(id), detached: true, stdio: 'ignore',
                                           env: { ...process.env, LEGACY_API: API } });
@@ -84,5 +137,10 @@ ipcMain.handle('produto:jogar', (_e, id, codigo) => {
   return true;
 });
 
+if (!app.requestSingleInstanceLock()) app.quit();
+app.on('second-instance', () => {
+  const w = BrowserWindow.getAllWindows()[0];
+  if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
+});
 app.whenReady().then(criarJanela);
 app.on('window-all-closed', () => app.quit());

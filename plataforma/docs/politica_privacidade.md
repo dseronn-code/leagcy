@@ -36,8 +36,10 @@ leem arquivos do seu computador além dos deles.
 
 Não vendemos nem alugamos dados. Usamos fornecedores que processam dados em nosso nome, só para operar o serviço:
 
-- **Envio de e-mails:** [Resend / Brevo], para mandar o código de confirmação.
-- **Hospedagem do servidor:** [nome do provedor], onde ficam os dados da conta.
+- **Envio de e-mails:** Resend (EUA), para mandar os códigos de confirmação e de nova senha.
+- **Hospedagem do servidor:** Render (EUA), onde roda o servidor de contas.
+- **Banco de dados:** Neon (EUA), onde ficam os dados da conta.
+- **Downloads:** GitHub (EUA), de onde o launcher baixa os instaladores (não recebe dados da conta).
 
 Esses fornecedores podem ficar fora do Brasil; nesses casos a transferência segue o art. 33 da LGPD (cláusulas
 contratuais dos próprios fornecedores).
@@ -45,7 +47,7 @@ contratuais dos próprios fornecedores).
 ## 4. Por quanto tempo guardamos
 
 - Dados da conta: enquanto a conta existir.
-- Cadastros não confirmados: apagados depois de [30] dias.
+- Cadastros não confirmados: apagados depois de 30 dias.
 - Códigos de confirmação: valem 15 minutos e são apagados quando usados.
 - Sessões: expiram em 30 dias ou quando você sai.
 

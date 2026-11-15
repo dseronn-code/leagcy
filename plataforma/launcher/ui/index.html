@@ -30,8 +30,42 @@
       <label>Senha<input type="password" name="senha" autocomplete="current-password" required></label>
       <p class="erro" aria-live="polite"></p>
       <button class="botao primario largo" type="submit">Entrar</button>
+      <button class="link" type="button" data-ir="passo-esqueci">Esqueci minha senha</button>
       <button class="link" type="button" data-ir="passo-inicio">Voltar</button>
     </form>
+
+    <form id="passo-esqueci" class="passo" hidden>
+      <h1>Esqueci minha senha</h1>
+      <p class="sub">Digite o e-mail da sua conta. Vamos mandar um código para criar uma senha nova.</p>
+      <label>E-mail<input type="email" name="email" autocomplete="email" required></label>
+      <p class="erro" aria-live="polite"></p>
+      <button class="botao primario largo" type="submit">Enviar código</button>
+      <button class="link" type="button" data-ir="passo-login">Voltar</button>
+    </form>
+
+    <form id="passo-redefinir" class="passo" hidden>
+      <h1>Senha nova</h1>
+      <p class="sub">Se existir uma conta com <b id="email-redefinir"></b>, o código chegou por e-mail.</p>
+      <input class="codigo" name="codigo" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" required>
+      <label>Senha nova <small>(mínimo 8 caracteres)</small><input type="password" name="senha" minlength="8" autocomplete="new-password" required></label>
+      <p class="erro" aria-live="polite"></p>
+      <button class="botao primario largo" type="submit">Salvar e entrar</button>
+      <button class="link" type="button" data-ir="passo-esqueci">Pedir outro código</button>
+    </form>
+
+    <div id="passo-conectando" class="passo" hidden>
+      <h1>Conectando…</h1>
+      <p class="sub" id="texto-conectando">Falando com o servidor Legacy.</p>
+      <div class="carregando"><span></span></div>
+    </div>
+
+    <div id="passo-offline" class="passo" hidden>
+      <h1>Sem conexão</h1>
+      <p class="sub">Não foi possível falar com o servidor Legacy. Verifique a internet e tente de novo — ou jogue o que
+        já está instalado.</p>
+      <div id="lista-offline"></div>
+      <button class="botao primario largo" id="btn-tentar">Tentar de novo</button>
+    </div>
 
     <form id="passo-cadastro" class="passo" hidden>
       <h1>Criar conta Legacy</h1>
@@ -75,6 +109,10 @@
   </nav>
 
   <main class="conteudo">
+    <div id="banner-atualizacao" class="banner" hidden>
+      <span>Há uma versão nova do Legacy Launcher (<b id="versao-nova"></b>).</span>
+      <button class="botao primario" id="btn-atualizar-launcher">Baixar e instalar</button>
+    </div>
     <!-- ---------------------------------------------------- LOJA -->
     <div id="pg-loja" class="pagina">
       <header class="hero ts">
@@ -210,7 +248,14 @@
   </main>
 </section>
 
+<div id="modal-texto" class="modal" hidden>
+  <div class="modal-caixa">
+    <button class="fechar" id="fechar-modal" aria-label="Fechar">×</button>
+    <div id="modal-conteudo" class="texto-longo"></div>
+  </div>
+</div>
 <div id="aviso" class="toast" hidden></div>
+<script src="textos.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@ falam com este servidor. Rodar localmente (de plataforma/servidor):
     uvicorn app:app --reload
 
 Variáveis de ambiente:
+    DATABASE_URL           Postgres (produção, ex.: Neon); sem ela, SQLite local
     LEGACY_DB              arquivo SQLite (padrão: legacy.db ao lado deste arquivo)
     LEGACY_PEPPER          segredo extra misturado aos códigos de e-mail (obrigatório em produção)
     LEGACY_EMAIL           "console" (padrão: o código aparece no log, para desenvolvimento) ou "resend"
@@ -66,9 +67,78 @@ CREATE TABLE IF NOT EXISTS biblioteca (conta_id INTEGER NOT NULL, produto TEXT N
 """
 
 
+SCHEMA_PG = """
+CREATE TABLE IF NOT EXISTS contas (
+  id BIGSERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, senha TEXT NOT NULL, username TEXT,
+  verificada INTEGER NOT NULL DEFAULT 0, criada DOUBLE PRECISION NOT NULL);
+CREATE UNIQUE INDEX IF NOT EXISTS contas_username ON contas (lower(username));
+CREATE TABLE IF NOT EXISTS codigos (
+  email TEXT PRIMARY KEY, hash TEXT NOT NULL, expira DOUBLE PRECISION NOT NULL, tentativas INTEGER NOT NULL DEFAULT 0,
+  enviado DOUBLE PRECISION NOT NULL);
+CREATE TABLE IF NOT EXISTS sessoes (
+  token TEXT PRIMARY KEY, conta_id BIGINT, visitante INTEGER NOT NULL DEFAULT 0, criada DOUBLE PRECISION NOT NULL,
+  expira DOUBLE PRECISION NOT NULL, app TEXT);
+CREATE TABLE IF NOT EXISTS configuracoes (conta_id BIGINT PRIMARY KEY, dados TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS trocas (codigo TEXT PRIMARY KEY, conta_id BIGINT, visitante INTEGER NOT NULL,
+  expira DOUBLE PRECISION NOT NULL);
+CREATE TABLE IF NOT EXISTS biblioteca (conta_id BIGINT NOT NULL, produto TEXT NOT NULL,
+  adicionado DOUBLE PRECISION NOT NULL, PRIMARY KEY (conta_id, produto));
+"""
+PG_URL = os.environ.get('DATABASE_URL', '')
+ERROS_UNICOS: tuple = (sqlite3.IntegrityError,)
+if PG_URL:
+    import psycopg
+    from psycopg.rows import dict_row
+    ERROS_UNICOS = (sqlite3.IntegrityError, psycopg.errors.UniqueViolation)
+
+# Chaves primárias para traduzir o "INSERT OR REPLACE" do SQLite em "ON CONFLICT ... DO UPDATE" do Postgres.
+_PK = {'codigos': 'email', 'configuracoes': 'conta_id'}
+
+
+def _sql_pg(sql: str) -> str:
+    m = re.match(r'\s*INSERT OR (REPLACE|IGNORE) INTO (\w+) \(([^)]*)\)(.*)$', sql, re.S)
+    if m:
+        modo, tabela, colunas, resto = m.groups()
+        sql = f'INSERT INTO {tabela} ({colunas}){resto}'
+        if modo == 'IGNORE':
+            sql += ' ON CONFLICT DO NOTHING'
+        else:
+            pk = _PK[tabela]
+            sets = ', '.join(f'{c.strip()}=EXCLUDED.{c.strip()}' for c in colunas.split(',') if c.strip() != pk)
+            sql += f' ON CONFLICT ({pk}) DO UPDATE SET {sets}'
+    return sql.replace('?', '%s')
+
+
+class _ConPg:
+    """O mesmo jeito de usar do sqlite3 (execute com "?", fetchone, linhas como dicionário) sobre o Postgres."""
+    def __init__(self, con):
+        self.con = con
+
+    def execute(self, sql, params=()):
+        return self.con.execute(_sql_pg(sql), params)
+
+
+_pg_pronto = False
+
+
 @contextmanager
 def db():
+    global _pg_pronto
     with _lock:
+        if PG_URL:
+            con = psycopg.connect(PG_URL, row_factory=dict_row, connect_timeout=15)
+            try:
+                if not _pg_pronto:
+                    con.execute(SCHEMA_PG)
+                    _pg_pronto = True
+                yield _ConPg(con)
+                con.commit()
+            except BaseException:
+                con.rollback()
+                raise
+            finally:
+                con.close()
+            return
         con = sqlite3.connect(DB)
         con.row_factory = sqlite3.Row
         try:
@@ -126,16 +196,34 @@ def enviar_email(para: str, assunto: str, texto: str):
         print(f'[e-mail para {para}] {assunto}\n{texto}', flush=True)
 
 
-def novo_codigo(con, email: str):
+def novo_codigo(con, email: str, finalidade: str = 'cadastro'):
     linha = con.execute('SELECT enviado FROM codigos WHERE email=?', (email,)).fetchone()
     if linha and time.time() - linha['enviado'] < 60:
         raise HTTPException(429, 'Já enviamos um código há menos de um minuto.')
     codigo = f'{secrets.randbelow(10 ** 6):06d}'
     con.execute('INSERT OR REPLACE INTO codigos (email, hash, expira, tentativas, enviado) VALUES (?,?,?,0,?)',
-                (email, hash_token(email + ':' + codigo), time.time() + CODIGO_VALIDADE, time.time()))
-    enviar_email(email, f'Seu código Legacy: {codigo}',
-                 f'Use o código {codigo} para confirmar sua conta Legacy. Ele vale por 15 minutos.\n\n'
-                 'Se não foi você, ignore este e-mail.')
+                (email, hash_token(finalidade + ':' + email + ':' + codigo), time.time() + CODIGO_VALIDADE, time.time()))
+    if finalidade == 'senha':
+        enviar_email(email, f'Redefinir a senha Legacy: {codigo}',
+                     f'Use o código {codigo} para criar uma senha nova na sua conta Legacy. Ele vale por 15 minutos.\n\n'
+                     'Se não foi você, ignore este e-mail: sua senha continua a mesma.')
+    else:
+        enviar_email(email, f'Seu código Legacy: {codigo}',
+                     f'Use o código {codigo} para confirmar sua conta Legacy. Ele vale por 15 minutos.\n\n'
+                     'Se não foi você, ignore este e-mail.')
+
+
+def codigo_ou_erro(con, email: str, codigo: str, finalidade: str):
+    """Confere o código do e-mail. Devolve o erro em vez de lançar: a tentativa errada precisa ser gravada (um erro
+    lançado dentro do "with db()" desfaria a gravação e o limite de 5 tentativas nunca chegaria)."""
+    k = con.execute('SELECT * FROM codigos WHERE email=?', (email,)).fetchone()
+    if not k or k['expira'] < time.time() or k['tentativas'] >= 5:
+        return HTTPException(400, 'Código expirado. Peça um novo.')
+    if not hmac.compare_digest(k['hash'], hash_token(finalidade + ':' + email + ':' + codigo.strip())):
+        con.execute('UPDATE codigos SET tentativas=tentativas+1 WHERE email=?', (email,))
+        return HTTPException(400, 'Código incorreto.')
+    con.execute('DELETE FROM codigos WHERE email=?', (email,))
+    return None
 
 
 def nova_sessao(con, conta_id, visitante=False, app_nome=None) -> str:
@@ -237,16 +325,87 @@ def verificar(dados: Verificacao, request: Request):
     limite(request, 'verificar', 10)
     email = dados.email.strip().lower()
     with db() as con:
-        k = con.execute('SELECT * FROM codigos WHERE email=?', (email,)).fetchone()
-        if not k or k['expira'] < time.time() or k['tentativas'] >= 5:
-            raise HTTPException(400, 'Código expirado. Peça um novo.')
-        if not hmac.compare_digest(k['hash'], hash_token(email + ':' + dados.codigo.strip())):
-            con.execute('UPDATE codigos SET tentativas=tentativas+1 WHERE email=?', (email,))
-            raise HTTPException(400, 'Código incorreto.')
-        con.execute('DELETE FROM codigos WHERE email=?', (email,))
-        con.execute('UPDATE contas SET verificada=1 WHERE email=?', (email,))
-        cid = con.execute('SELECT id FROM contas WHERE email=?', (email,)).fetchone()['id']
-        return {'token': nova_sessao(con, cid, app_nome=dados.app), 'perfil': perfil(con, cid)}
+        erro = codigo_ou_erro(con, email, dados.codigo, 'cadastro')
+        if not erro:
+            con.execute('UPDATE contas SET verificada=1 WHERE email=?', (email,))
+            cid = con.execute('SELECT id FROM contas WHERE email=?', (email,)).fetchone()['id']
+            resposta = {'token': nova_sessao(con, cid, app_nome=dados.app), 'perfil': perfil(con, cid)}
+    if erro:
+        raise erro
+    return resposta
+
+
+class EsqueciSenha(BaseModel):
+    email: str
+
+
+class NovaSenha(BaseModel):
+    email: str
+    codigo: str
+    senha: str
+    app: str | None = None
+
+
+class TrocaSenha(BaseModel):
+    atual: str
+    nova: str
+
+
+@app.post('/conta/esqueci')
+def esqueci(dados: EsqueciSenha, request: Request):
+    """Esqueci a senha: manda um código para o e-mail (a resposta é a mesma exista a conta ou não)."""
+    limite(request, 'esqueci', 3)
+    email = dados.email.strip().lower()
+    with db() as con:
+        c = con.execute('SELECT verificada FROM contas WHERE email=?', (email,)).fetchone()
+        if c and c['verificada']:
+            novo_codigo(con, email, 'senha')
+    return {'ok': True, 'mensagem': 'Se existir uma conta com este e-mail, enviamos um código.'}
+
+
+@app.post('/conta/redefinir')
+def redefinir(dados: NovaSenha, request: Request):
+    """Código do e-mail + senha nova: troca a senha, encerra todas as sessões antigas e já entra."""
+    limite(request, 'redefinir', 10)
+    email = dados.email.strip().lower()
+    if len(dados.senha) < 8:
+        raise HTTPException(400, 'A senha precisa ter pelo menos 8 caracteres.')
+    with db() as con:
+        erro = codigo_ou_erro(con, email, dados.codigo, 'senha')
+        if not erro:
+            c = con.execute('SELECT id FROM contas WHERE email=?', (email,)).fetchone()
+            if not c:
+                erro = HTTPException(400, 'Código expirado. Peça um novo.')
+            else:
+                con.execute('UPDATE contas SET senha=? WHERE id=?', (hash_senha(dados.senha), c['id']))
+                con.execute('DELETE FROM sessoes WHERE conta_id=?', (c['id'],))
+                resposta = {'token': nova_sessao(con, c['id'], app_nome=dados.app), 'perfil': perfil(con, c['id'])}
+    if erro:
+        raise erro
+    return resposta
+
+
+@app.post('/eu/senha')
+def trocar_senha(dados: TrocaSenha, request: Request, s: Sessao = Depends(conta_logada)):
+    """Trocar a senha (pedindo a atual). As outras sessões da conta são encerradas; esta continua."""
+    limite(request, 'senha', 5)
+    if len(dados.nova) < 8:
+        raise HTTPException(400, 'A senha nova precisa ter pelo menos 8 caracteres.')
+    with db() as con:
+        c = con.execute('SELECT senha FROM contas WHERE id=?', (s.conta_id,)).fetchone()
+        if not confere_senha(dados.atual, c['senha']):
+            raise HTTPException(401, 'A senha atual está incorreta.')
+        con.execute('UPDATE contas SET senha=? WHERE id=?', (hash_senha(dados.nova), s.conta_id))
+        con.execute('DELETE FROM sessoes WHERE conta_id=? AND token<>?', (s.conta_id, s.token_hash))
+    return {'ok': True}
+
+
+@app.get('/saude')
+def saude():
+    """Para o serviço de hospedagem e para o launcher acordar o servidor (o plano grátis dorme sem uso)."""
+    with db() as con:
+        con.execute('SELECT 1').fetchone()
+    return {'ok': True, 'banco': 'postgres' if PG_URL else 'sqlite'}
 
 
 @app.post('/conta/username')
@@ -257,7 +416,7 @@ def escolher_username(dados: Username, s: Sessao = Depends(conta_logada)):
     with db() as con:
         try:
             con.execute('UPDATE contas SET username=? WHERE id=?', (dados.username, s.conta_id))
-        except sqlite3.IntegrityError:
+        except ERROS_UNICOS:
             raise HTTPException(409, 'Este username já está em uso.')
         return perfil(con, s.conta_id)
 
