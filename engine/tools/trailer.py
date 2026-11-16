@@ -37,6 +37,17 @@ TOMADAS = {
                           '0.8', '--fog', '0.004'], 'times_square.txt', 0.0),
     # A cena jogável com a multidão (cenas/times_square.json: clima, 2.000 pessoas, vapor nos bueiros).
     'times_square_multidao': (15, ['--scene', os.path.join('cenas', 'times_square.json')], 'times_square_multidao.txt', 0.0),
+    # Reveal do Legacy Engine (tools/reveal.py monta o vídeo final com textos, logo e trilha). Sem multidão: só a cidade.
+    'rv_chuva': (7, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain', '0.8',
+                     '--fog', '0.004'], 'rv_chuva.txt', 0.0),
+    'rv_rua': (8, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain', '0.8',
+                   '--fog', '0.004'], 'times_square.txt', 0.0),
+    'rv_luzes': (4, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain', '0.8',
+                     '--debug-view', 'luzes'], 'times_square.txt', 0.0),
+    'rv_rochas': (10, ['--scene', 'nanite', '--rochas', '16', '--rocha-segmentos', '768', '--sun-elevation', '14',
+                       '--sun-azimuth', '200'], 'rv_rochas.txt', 0.0),
+    'rv_aereo': (9, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain', '0.8',
+                     '--fog', '0.004'], 'rv_aereo.txt', 0.0),
 }
 
 

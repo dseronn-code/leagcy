@@ -1,0 +1,4 @@
+# Reveal 1: rente ao asfalto molhado da Times Square, a câmera sobe da poça até a altura dos olhos (7 s).
+0    19.2 0.30 187.0    19.3 0.55 170.0   48
+3.5  19.2 0.70 185.5    19.4 2.50 166.0   52
+7    19.2 1.70 183.5    19.6 6.80 162.0   60
