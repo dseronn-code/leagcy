@@ -195,6 +195,7 @@ struct Object {
   // trocavam secas (16 poses ≈ 14 por segundo: andar picotado, "robótico"). animRate: velocidade do ciclo (o passo
   // acompanha a velocidade de quem anda: o pé não patina).
   float animBlend = 0.0f, prevAnimBlend = 0.0f, animRate = 1.0f;
+  float animClock = 0.0f;  // relógio próprio do ciclo (soma dt × animRate: mudar o ritmo não pula a pose)
   // HLOD: o objeto não se move (a cena garante) e pode ser fundido com os vizinhos num objeto só ao longe.
   bool hlodCandidate = false;
   // HLOD montado no upload: célula em Scene::hlodCells (-1 = nenhuma). Membro = desenhado perto da célula; proxy =

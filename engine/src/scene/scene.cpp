@@ -280,7 +280,8 @@ void Scene::update(float dt) {
   for (uint32_t i : crowdObjects_) {  // multidão: avança a pose (e reenvia o objeto: a pose mudou)
     Object& o = objects[i];
     const CrowdClip& c = crowdClips[o.crowdClip];
-    const float t = std::fmod(time * o.animRate + o.animPhase, c.duration);
+    o.animClock += dt * o.animRate;
+    const float t = std::fmod(o.animClock + o.animPhase, c.duration);
     const float f = (t < 0.0f ? t + c.duration : t) / c.duration * float(c.frames);
     o.prevAnimFrame = o.animFrame;
     o.prevAnimBlend = o.animBlend;

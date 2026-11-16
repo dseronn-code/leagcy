@@ -813,6 +813,9 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           glm::vec2 pos{0.0f}, prevPos{0.0f};
           float yaw = 0.0f;  // direção do corpo, suavizada (vira para onde anda, sem estalo)
           bool started = false;
+          // Temperamento: o ritmo varia devagar em volta da velocidade própria (amplitude e período por pessoa); quem
+          // não consegue passar por alguém logo à frente diminui o passo atrás dele.
+          float s = 0.0f, cur = 0.0f, ritmoAmp = 0.05f, ritmoW = 0.3f, ritmoFase = 0.0f;
         };
         // Obstáculos numa grade de 4 m (2.000 pessoas × 1.100 obstáculos por quadro seria lento).
         auto obsGrid = std::make_shared<std::unordered_map<int64_t, std::vector<glm::vec3>>>();
@@ -838,7 +841,14 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           // O ciclo de passada das capturas (100STYLE) corresponde a ~1,35 m/s: quem anda mais rápido dá o passo mais
           // rápido (o pé fica plantado no chão em vez de patinar).
           for (uint32_t o : objs) scene.objects[o].animRate = glm::clamp(speed / 1.35f, 0.8f, 1.25f);
-          agents->push_back({L, dir, side, side, speed, s0, scale, std::move(objs)});
+          Agent ag{L, dir, side, side, speed, s0, scale, std::move(objs)};
+          ag.s = s0;
+          ag.cur = speed;
+          const bool apressado = speed > vmin + 0.7f * (vmax - vmin);
+          ag.ritmoAmp = apressado ? 0.03f + 0.03f * u(rng) : 0.05f + 0.1f * u(rng);  // quem passeia varia mais
+          ag.ritmoW = 0.15f + 0.35f * u(rng);
+          ag.ritmoFase = 6.2831853f * u(rng);
+          agents->push_back(std::move(ag));
         }
         scene.addAnimator([agents, obsGrid, okey, y, yaw0](scene::Scene& sc, float t, float dt) {
           std::vector<Agent>& A = *agents;
@@ -847,7 +857,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           //    e muda o caminho aos poucos (~0,9 m/s de lado), em vez de ser jogada para a borda ao encostar.
           for (Agent& a : A) {
             const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
-            const float s = std::fmod(a.s0 + a.speed * t, a.L.length);
+            a.s = std::fmod(a.s + a.cur * step, a.L.length);
+            const float s = a.s;
             const glm::vec2 c = a.dir > 0.0f ? a.L.a + d * s : a.L.b - d * s;  // ponto no eixo da faixa
             float alvo = a.side;
             bool desviar = false;
@@ -881,7 +892,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           for (uint32_t i = 0; i < A.size(); ++i) {
             Agent& a = A[i];
             const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
-            float push = 0.0f;
+            float push = 0.0f, frenteVel = 1e9f;
             const int cx = int(std::floor(a.pos.x / 1.5f)), cz = int(std::floor(a.pos.y / 1.5f));
             for (int gx = -1; gx <= 1; ++gx)
               for (int gz = -1; gz <= 1; ++gz) {
@@ -895,10 +906,17 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
                     const float across = glm::dot(r, n);
                     push += (across > 0.0f || (across == 0.0f && i < j) ? -1.0f : 1.0f) * (0.8f - dist);
                   }
+                  // alguém logo à frente, no mesmo sentido e quase na mesma linha: acompanha o passo dele
+                  if (dist < 1.4f && glm::dot(r, f) > 0.3f && std::abs(glm::dot(r, n)) < 0.45f && A[j].dir == a.dir)
+                    frenteVel = std::min(frenteVel, A[j].cur);
                 }
               }
             // Desvio só dentro da faixa (+20 cm): com +60 cm, quem desviava encostava na fachada e aparecia "dentro" das
             // vitrines das lojas.
+            float alvoVel = a.speed * (1.0f + a.ritmoAmp * std::sin(a.ritmoW * t + a.ritmoFase));
+            if (frenteVel < alvoVel) alvoVel = std::max(0.4f, frenteVel * 0.95f);
+            a.cur += (alvoVel - a.cur) * std::min(1.0f, 1.5f * step);
+            for (uint32_t o : a.objs) sc.objects[o].animRate = glm::clamp(a.cur / 1.35f, 0.6f, 1.3f);
             const float half = a.L.width * 0.5f + 0.2f;
             if (push != 0.0f) a.side = glm::clamp(a.side + glm::clamp(push * 4.0f, -1.0f, 1.0f) * step, -half, half);
             else a.side += (a.baseSide - a.side) * std::min(1.0f, 0.3f * step);
