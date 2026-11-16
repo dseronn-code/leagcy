@@ -533,6 +533,37 @@ def interior_image(rng, w, h, room_w, room_h, depth, kind, lit, tint):
         books = (hit == side) & (Z > depth * 0.3) & (Z < depth * 0.75) & (Y < 1.9)
         bk = ((np.floor(Z / 0.05) * 5.1 + np.floor(Y / 0.35) * 3.7) % 1.0)
         img[books] = (np.array([120, 70, 40]) * 0.5 + np.array([200, 150, 90]) * bk[..., None] * 0.6)[books]
+    # Quem mora ali (gerador próprio, derivado do que já foi sorteado: o resto da cidade não muda de lugar): sala com
+    # TV acesa e porta-retratos, cozinha com armários e geladeira, ou quarto com cama e abajur; cortinas e planta.
+    viz = random.Random(hash((round(depth, 5), tuple(round(c, 4) for c in tint), lit, w, h)))
+    tv_glow = None
+    if kind != 'loja':
+        comodo = viz.choice(['sala', 'sala', 'cozinha', 'quarto'])
+        if comodo == 'sala':
+            for _ in range(viz.randrange(1, 4)):  # porta-retratos na lateral
+                zc, yc = viz.uniform(depth * 0.25, depth * 0.8), viz.uniform(1.2, 1.7)
+                fr = ((hit == 3) | (hit == 4)) & (np.abs(Z - zc) < 0.13) & (np.abs(Y - yc) < 0.1)
+                img[fr] = (40, 32, 28)
+                foto = fr & (np.abs(Z - zc) < 0.1) & (np.abs(Y - yc) < 0.075)
+                img[foto] = np.array(viz.choice([(190, 160, 130), (120, 150, 180), (200, 190, 170)]))
+            if viz.random() < 0.45:  # TV acesa na parede do fundo, iluminando o quarto de azul
+                xc = room_w * viz.uniform(0.35, 0.65)
+                tv = (hit == 0) & (np.abs(X - xc) < 0.32) & (np.abs(Y - 1.05) < 0.19)
+                tela = tv & (np.abs(X - xc) < 0.3) & (np.abs(Y - 1.05) < 0.17)
+                img[tv] = (15, 15, 18)
+                img[tela] = np.array(viz.choice([(120, 170, 255), (255, 200, 150), (150, 255, 180), (230, 230, 255)]))
+                tv_glow = (xc, 1.05, depth, tela)
+        elif comodo == 'cozinha':  # armários em cima e embaixo no fundo, bancada, geladeira numa lateral
+            arm = (hit == 0) & (((Y > 1.45) & (Y < 2.0)) | (Y < 0.88))
+            porta = (np.floor(X / 0.4) % 2)
+            img[arm] = (np.array(viz.choice([(225, 222, 215), (150, 110, 75), (90, 110, 120)])) * (0.92 + 0.08 * porta[..., None]))[arm]
+            img[(hit == 0) & (np.abs(Y - 0.9) < 0.025)] = (70, 70, 72)
+            ge = ((hit == 3) | (hit == 4)) & (Z > depth - 0.9) & (Y < 1.8)
+            img[ge] = (205, 208, 210)
+        else:  # quarto: cama baixa com colcha colorida no fundo, abajur quente
+            cama = (hit == 0) & (Y < 0.55)
+            img[cama] = np.array(viz.choice([(170, 60, 60), (60, 90, 140), (200, 190, 170), (90, 120, 80)]))
+            img[(hit == 0) & (Y >= 0.55) & (Y < 0.95) & (np.abs(X - room_w / 2) < room_w * 0.4)] = (110, 85, 60)
     # luz: luminária no teto perto do centro, queda com a distância, cantos mais escuros (oclusão)
     lx, ly, lz = room_w / 2, room_h - 0.05, depth * 0.45
     dist2 = (X - lx) ** 2 + (Y - ly) ** 2 + (Z - lz) ** 2
@@ -549,6 +580,28 @@ def interior_image(rng, w, h, room_w, room_h, depth, kind, lit, tint):
     if not lit:
         light = light * 0.06 + 0.02
     img = img * light[..., None] * (0.92 + 0.16 * noise[..., None])
+    if tv_glow is not None:  # a TV ilumina o quarto (mais ainda com a luz apagada) e a tela não escurece
+        xc, yc, zc, tela = tv_glow
+        g = 1.0 / (1.0 + ((X - xc) ** 2 + (Y - yc) ** 2 + (Z - zc) ** 2) * 1.5)
+        cor = img[tela].mean(0) if tela.any() else np.array([120, 160, 230])
+        img = img + (cor / 255.0 * 90.0 * (1.6 if not lit else 0.6))[None, None, :] * g[..., None]
+        img[tela] = img[tela] * 0 + cor * (1.0 if lit else 0.9)
+    if kind != 'loja' and viz.random() < 0.6:  # cortinas nas bordas da janela, com dobras
+        cw = int(w * viz.uniform(0.12, 0.3))
+        cc = np.array(viz.choice([(200, 190, 170), (150, 40, 45), (60, 80, 120), (210, 205, 200), (120, 110, 80)]), float)
+        cc = cc * (0.9 if lit else 0.12)
+        xs = np.arange(w)
+        dobra = 0.75 + 0.25 * np.sin(xs / max(2, w / 24) * math.pi) ** 2
+        for borda in (0, 1):
+            sl = slice(0, cw) if borda == 0 else slice(w - cw, w)
+            img[:, sl] = cc * dobra[sl][None, :, None]
+    if kind != 'loja' and viz.random() < 0.35:  # planta no canto perto da janela
+        px0 = int(w * viz.choice([0.12, 0.72]))
+        pw = int(w * 0.16)
+        yy, xx = np.mgrid[0:h, 0:w]
+        folha = ((xx - px0 - pw / 2) ** 2 / (pw / 2) ** 2 + (yy - h * 0.62) ** 2 / (h * 0.16) ** 2) < 1
+        img[folha] = np.array([40, 75, 35]) * (0.9 if lit else 0.15)
+        img[(np.abs(xx - px0 - pw / 2) < pw * 0.3) & (yy > h * 0.74) & (yy < h * 0.86)] = (120, 70, 45) if lit else (15, 10, 8)
     im = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8))
     # silhuetas em profundidade (móveis, gente): projetadas pela mesma câmera
     d = ImageDraw.Draw(im)

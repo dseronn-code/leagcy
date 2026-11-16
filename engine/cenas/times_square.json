@@ -984,7 +984,6 @@
   ],
   "quantidade": 160,
   "semente": 3,
-  // abrigos da 7ª Avenida (tools/times_square.py): os ônibus encostam e esperam ~12 s
   "pontos_onibus": "times_square/pontos_onibus.json",
   "velocidade": [
    4,
