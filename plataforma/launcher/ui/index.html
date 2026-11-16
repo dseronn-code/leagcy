@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src *">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https://legacyengine.com.br; media-src https://legacyengine.com.br; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src *">
 <title>Legacy</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
@@ -257,5 +257,11 @@
 <div id="aviso" class="toast" hidden></div>
 <script src="textos.js"></script>
 <script src="app.js"></script>
+<div id="modal-reveal" class="modal-reveal" hidden>
+  <div class="modal-reveal-caixa">
+    <button class="modal-reveal-fechar" id="fechar-reveal" aria-label="Fechar">✕</button>
+    <video id="video-reveal" controls preload="none" poster="https://legacyengine.com.br/video/reveal.jpg"></video>
+  </div>
+</div>
 </body>
 </html>

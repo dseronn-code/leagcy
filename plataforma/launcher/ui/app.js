@@ -435,7 +435,22 @@ $('input', comp).addEventListener('input', (e) => {
   comp.style.setProperty('--pos', e.target.value + '%');
   $('.lado-b', comp).style.clipPath = `inset(0 0 0 ${e.target.value}%)`;
 });
-$('#btn-reveal').addEventListener('click', () => aviso('O vídeo de apresentação está sendo produzido.'));
+// Reveal do Legacy Engine: o vídeo vem do site (não pesa no instalador do launcher).
+const REVEAL = 'https://legacyengine.com.br/video/reveal.mp4';
+function fecharReveal() {
+  const v = $('#video-reveal');
+  v.pause();
+  $('#modal-reveal').hidden = true;
+}
+$('#btn-reveal').addEventListener('click', () => {
+  const v = $('#video-reveal');
+  if (!v.src) v.src = REVEAL;
+  $('#modal-reveal').hidden = false;
+  v.play().catch(() => aviso('Sem conexão: o vídeo precisa de internet.'));
+});
+$('#fechar-reveal').addEventListener('click', fecharReveal);
+$('#modal-reveal').addEventListener('click', (e) => { if (e.target.id === 'modal-reveal') fecharReveal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#modal-reveal').hidden) fecharReveal(); });
 
 // ---------------------------------------------------------------- início
 let versaoLauncher = 'dev';

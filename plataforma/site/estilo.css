@@ -179,3 +179,9 @@ details a { color: var(--destaque); }
   html { scroll-behavior: auto; }
   .painel, .painel::before, .foto img, .botao { transition: none; }
 }
+
+/* Vídeo de reveal do Legacy Engine */
+.reveal { max-width: 1100px; margin: 8px auto 40px; padding: 0 16px; }
+.reveal video { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 16px; background: #000;
+  border: 1px solid var(--linha); box-shadow: 0 30px 80px rgba(0, 0, 0, .55); }
+.reveal .nota { text-align: center; color: var(--texto2, #8b90a0); font-size: 13px; margin-top: 10px; }
