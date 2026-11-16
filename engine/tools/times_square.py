@@ -2083,6 +2083,7 @@ class Pbr:
 
 # ---------------------------------------------------------------------------------------------------------- cena
 def build(out, seed, texdir):
+    import interiores  # rbox/colar_y: móveis de rua com forma (quinas boleadas, estofados)
     rng = random.Random(seed)
     os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
     tex = lambda name: os.path.join(out, 'tex', name)
@@ -2569,12 +2570,25 @@ def build(out, seed, texdir):
                 if any(abs(x - ax) < 20 for ax in AVE_X.values()) or abs(x - BWAY_K * zz) < 20:
                     continue
                 xx = x + rng.uniform(-6, 6)
-                if rng.random() < 0.5:
-                    pr['hidrante'].cylinder((xx, zz), 0.13, 0.15, 0.85)
-                    pr['hidrante'].sphere((xx, 0.85, zz), 0.13, 8)
-                    pr['hidrante'].box((xx, 0.6, zz), (0.24, 0.05, 0.05))
-                else:
-                    pr['lixeira'].cylinder((xx, zz), 0.3, 0.15, 1.05, seg=16)
+                if rng.random() < 0.5:  # hidrante de NY: flange, corpo, anel, bocais laterais com tampa, castelo
+                    H = pr['hidrante']
+                    H.frustum((xx, zz), 0.17, 0.15, 0.15, 0.2, seg=16)
+                    H.cylinder((xx, zz), 0.115, 0.2, 0.72, seg=16)
+                    H.frustum((xx, zz), 0.15, 0.15, 0.62, 0.68, seg=16)
+                    H.frustum((xx, zz), 0.13, 0.1, 0.72, 0.84, seg=16)
+                    H.frustum((xx, zz), 0.045, 0.025, 0.84, 0.92, seg=8)
+                    for dx in (-1, 1):
+                        H.tube([(xx + dx * 0.1, 0.52, zz), (xx + dx * 0.2, 0.52, zz)], 0.045, seg=10)
+                        H.tube([(xx + dx * 0.2, 0.52, zz), (xx + dx * 0.225, 0.52, zz)], 0.055, seg=6)
+                else:  # cesto de lixo de arame: boca alargada, aros e costelas verticais, fundo
+                    L = pr['lixeira']
+                    L.frustum((xx, zz), 0.25, 0.3, 0.15, 0.17, seg=16)
+                    for yy, rr in ((0.18, 0.25), (0.45, 0.27), (0.75, 0.29), (1.02, 0.31)):
+                        L.tube([(xx + rr * math.cos(t), yy, zz + rr * math.sin(t)) for t in np.linspace(0, 2 * math.pi, 25)],
+                               0.012, seg=5)
+                    for t in np.linspace(0, 2 * math.pi, 15)[:-1]:
+                        L.tube([(xx + 0.25 * math.cos(t), 0.18, zz + 0.25 * math.sin(t)),
+                                (xx + 0.31 * math.cos(t), 1.02, zz + 0.31 * math.sin(t))], 0.006, seg=4)
         for x in (-170.0, 130.0):  # bueiros no asfalto (com vapor na cena .json)
             pr['bueiro'].cylinder((x + rng.uniform(-20, 20), z + rng.uniform(-2, 2)), 0.45, 0.0, 0.012, seg=16)
             steam_points.append((float(x), float(z)))
@@ -2583,7 +2597,8 @@ def build(out, seed, texdir):
     for k in np.arange(0, pl_edge.length, 2.4):
         p = pl_edge.interpolate(k)
         if road.distance(p) < 1.0 and rng.random() < 0.9:
-            pr['granito'].cylinder((p.x, p.y), 0.22, 0.15, 1.0, seg=10)
+            pr['granito'].cylinder((p.x, p.y), 0.22, 0.15, 0.92, seg=16, cap=False)
+            pr['granito'].sphere((p.x, 0.92, p.y), 0.22, 16, sy=0.4)
     for zc in np.arange(street_z(46) + 20, street_z(42) - 20, 14.0):
         if any(abs(zc - street_z(n)) < 16 for n in range(42, 48)):
             continue
@@ -2591,13 +2606,26 @@ def build(out, seed, texdir):
         for side in (-1, 1):
             if not plaza.contains(Point(xc + side * 7.5, zc).buffer(2.0)):  # no cruzamento com a 7th, a praça some
                 continue
-            if rng.random() < 0.6:
-                pr['banco'].box((xc + side * 7.5, 0.6, zc), (0.35, 0.05, 1.8), rot=math.atan(BWAY_K))
+            if rng.random() < 0.6:  # banco: base de granito boleada, ripas de madeira no assento e no encosto
+                b_gran, b_mad = Mesh(), Mesh()
+                interiores.rbox(b_gran, (-0.32, 0.15, -1.7), (0.32, 0.42, 1.7), r=0.04)
+                for k in range(5):
+                    xs = -0.3 + k * 0.125
+                    interiores.rbox(b_mad, (xs, 0.42, -1.8), (xs + 0.1, 0.46, 1.8), r=0.012, seg=2)
+                for yy in (0.62, 0.76):  # encosto em ripas sobre suportes de ferro
+                    interiores.rbox(b_mad, (side * 0.31 - 0.02, yy, -1.8), (side * 0.31 + 0.02, yy + 0.1, 1.8), r=0.01, seg=2)
+                for zz in (-1.4, 0.0, 1.4):
+                    pr['escuro'].tube([(xc + side * 7.5 + side * 0.31, 0.46, zc + zz), (xc + side * 7.5 + side * 0.33, 0.88, zc + zz)],
+                                      0.02, seg=6)
+                yaw = -math.atan(BWAY_K)
+                interiores.colar_y(pr['granito'], b_gran, yaw, (xc + side * 7.5, 0.0, zc))
+                interiores.colar_y(pr['banco'], b_mad, yaw, (xc + side * 7.5, 0.0, zc))
                 obstacles.append((xc + side * 7.5, zc, 2.1))
-                pr['granito'].box((xc + side * 7.5, 0.37, zc), (0.3, 0.22, 1.7), rot=math.atan(BWAY_K))
-            else:
-                pr['granito'].box((xc + side * 7.0, 0.55, zc), (0.9, 0.4, 0.9))
-                pr['planta'].sphere((xc + side * 7.0, 1.25, zc), 0.8, 10)
+            else:  # floreira de granito boleada, terra e um arbusto
+                fl = Mesh()
+                interiores.rbox(fl, (-0.9, 0.15, -0.9), (0.9, 0.95, 0.9), r=0.06)
+                interiores.colar_y(pr['granito'], fl, 0.0, (xc + side * 7.0, 0.0, zc))
+                pr['planta'].sphere((xc + side * 7.0, 1.3, zc), 0.8, 14, sy=0.8)
                 obstacles.append((xc + side * 7.0, zc, 1.4))
     # Entradas de metrô (escada com grade e os dois globos verdes acesos) e bancas de jornal.
     for (x, z) in ((-21.0, street_z(42) + 9), (24.0, street_z(42) - 9), (-21.0, street_z(45) + 9), (21.0, street_z(47) - 9)):
@@ -2609,8 +2637,10 @@ def build(out, seed, texdir):
         pr['escuro'].box((x, 0.65, z - 2.6), (1.3, 0.5, 0.04))
         obstacles.append((x, z, 3.2))
     for (x, z) in ((16.5, street_z(43) - 14), (-17.0, street_z(46) + 20), (-17.5, street_z(44) - 25)):
-        pr['banca'].box((x, 1.4, z), (1.2, 1.25, 2.2))
-        pr['banca'].box((x + 0.3, 2.8, z), (1.6, 0.06, 2.5))
+        bc = Mesh()
+        interiores.rbox(bc, (-1.2, 0.15, -2.2), (1.2, 2.65, 2.2), r=0.05)
+        interiores.rbox(bc, (-1.3, 2.74, -2.5), (1.9, 2.86, 2.5), r=0.04)  # toldo
+        interiores.colar_y(pr['banca'], bc, 0.0, (x, 0.0, z))
         pr['banca_luz'].box((x + 1.21, 1.6, z), (0.01, 0.6, 1.9))
         obstacles.append((x, z, 2.8))
     for key, mat in (('aco', steel), ('escuro', dark), ('semaforo', yellow), ('vermelho', red_l), ('verde', green_l),

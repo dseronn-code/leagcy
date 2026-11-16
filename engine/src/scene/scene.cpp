@@ -280,9 +280,12 @@ void Scene::update(float dt) {
   for (uint32_t i : crowdObjects_) {  // multidão: avança a pose (e reenvia o objeto: a pose mudou)
     Object& o = objects[i];
     const CrowdClip& c = crowdClips[o.crowdClip];
-    const float t = std::fmod(time + o.animPhase, c.duration);
+    const float t = std::fmod(time * o.animRate + o.animPhase, c.duration);
+    const float f = (t < 0.0f ? t + c.duration : t) / c.duration * float(c.frames);
     o.prevAnimFrame = o.animFrame;
-    o.animFrame = uint32_t(std::floor(t / c.duration * float(c.frames))) % c.frames;
+    o.prevAnimBlend = o.animBlend;
+    o.animFrame = uint32_t(std::floor(f)) % c.frames;
+    o.animBlend = f - std::floor(f);
     if (o.animFrame != o.prevAnimFrame || dt > 0.0f) setTransform(i, o.transform);
   }
   for (uint32_t i : movedNow_)  // luzes de malha acompanham o objeto

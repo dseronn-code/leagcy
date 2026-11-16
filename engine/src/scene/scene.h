@@ -191,6 +191,10 @@ struct Object {
   // Multidão (animação assada): clipe em Scene::crowdClips e pose deste frame / do anterior. ~0 = objeto comum.
   uint32_t crowdClip = ~0u, animFrame = 0, prevAnimFrame = 0;
   float animPhase = 0.0f;  // s somados ao tempo (cada pessoa num ponto diferente do passo)
+  // Pose interpolada: o shader mistura a pose animFrame com a seguinte (animBlend 0..1). Sem isso as K poses do ciclo
+  // trocavam secas (16 poses ≈ 14 por segundo: andar picotado, "robótico"). animRate: velocidade do ciclo (o passo
+  // acompanha a velocidade de quem anda: o pé não patina).
+  float animBlend = 0.0f, prevAnimBlend = 0.0f, animRate = 1.0f;
   // HLOD: o objeto não se move (a cena garante) e pode ser fundido com os vizinhos num objeto só ao longe.
   bool hlodCandidate = false;
   // HLOD montado no upload: célula em Scene::hlodCells (-1 = nenhuma). Membro = desenhado perto da célula; proxy =

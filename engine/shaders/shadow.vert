@@ -32,7 +32,10 @@ void main() {
   }
   ObjectData o = objects[object];
   vec3 position = aPosition;
-  if (o.anim.x != 0xFFFFFFFFu) position = fetchVertexPosition(VertexData(crowdFrames[o.anim.x + o.anim.y]), uint(gl_VertexIndex));
+  if (o.anim.x != 0xFFFFFFFFu)
+    position = mix(fetchVertexPosition(VertexData(crowdFrames[o.anim.x + crowdPoseA(o.anim.y)]), uint(gl_VertexIndex)),
+                   fetchVertexPosition(VertexData(crowdFrames[o.anim.x + crowdPoseB(o.anim.y)]), uint(gl_VertexIndex)),
+                   crowdPoseBlend(o.anim.y));
   vec4 world = o.model * vec4(position, 1.0);
   if ((m.flags & MATERIAL_FOLIAGE) != 0u) world.xyz += windSway(world.xyz, max(world.y - o.model[3].y, 0.0), frame.night.w);
   gl_Position = frame.shadowMatrices[pc.cascade] * world;

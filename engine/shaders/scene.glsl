@@ -135,6 +135,10 @@ struct ObjectData {  // == ObjectGpu em renderer.cpp
   mat4 prevModel;
   uvec4 anim;  // multidão: x = 1ª pose do clipe em crowdFrames (~0 = objeto comum), y = pose atual, z = anterior
 };
+// Pose da multidão empacotada (renderer.cpp): pose A, a seguinte B e a mistura entre as duas.
+uint crowdPoseA(uint p) { return p & 0xFFu; }
+uint crowdPoseB(uint p) { return (p >> 8) & 0xFFu; }
+float crowdPoseBlend(uint p) { return float(p >> 16) / 65535.0; }
 layout(set = 0, binding = 7, std430) readonly buffer Objects { ObjectData objects[]; };
 
 // Vértice: posição(3) normal(3) uv(2) tangente(4) = 12 floats.

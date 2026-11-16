@@ -1753,8 +1753,15 @@ void Renderer::updateDynamicScene(VkCommandBuffer cmd, uint32_t slot) {
   auto* objs = static_cast<ObjectGpu*>(objectBuffers_[slot].mapped);
   auto writeObject = [&](uint32_t i) {
     const auto& ob = s.objects[i];
+    // Multidão: pose A (8 bits), pose B = a seguinte (8 bits) e a mistura entre elas (16 bits), deste quadro e do
+    // anterior (scene.glsl: crowdPoseA/B/Blend).
+    auto pack = [&](uint32_t a, float blend) {
+      const uint32_t frames = s.crowdClips[ob.crowdClip].frames;
+      return (a & 0xFFu) | (((a + 1) % frames & 0xFFu) << 8) | (uint32_t(glm::clamp(blend, 0.0f, 1.0f) * 65535.0f) << 16);
+    };
     glm::uvec4 anim = ob.crowdClip != ~0u
-                          ? glm::uvec4(crowdFrameBase_[ob.crowdClip], ob.animFrame, historyValid_ ? ob.prevAnimFrame : ob.animFrame, 0)
+                          ? glm::uvec4(crowdFrameBase_[ob.crowdClip], pack(ob.animFrame, ob.animBlend),
+                                       historyValid_ ? pack(ob.prevAnimFrame, ob.prevAnimBlend) : pack(ob.animFrame, ob.animBlend), 0)
                           : glm::uvec4(~0u, 0, 0, 0);
     // Bit 0: streaming (malha fora da memória = objeto oculto no culling); acima: poses do clipe (passo entre níveis).
     anim.w = (s.meshes[ob.mesh].resident && !ob.hidden ? 0u : 1u) | (ob.crowdClip != ~0u ? s.crowdClips[ob.crowdClip].frames << 1 : 0u);

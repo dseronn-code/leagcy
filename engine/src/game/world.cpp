@@ -795,8 +795,19 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           Lane L;
           float dir, baseSide, side, speed, s0, scale;
           std::vector<uint32_t> objs;
-          glm::vec2 pos{0.0f};
+          glm::vec2 pos{0.0f}, prevPos{0.0f};
+          float yaw = 0.0f;  // direção do corpo, suavizada (vira para onde anda, sem estalo)
+          bool started = false;
         };
+        // Obstáculos numa grade de 4 m (2.000 pessoas × 1.100 obstáculos por quadro seria lento).
+        auto obsGrid = std::make_shared<std::unordered_map<int64_t, std::vector<glm::vec3>>>();
+        auto okey = [](int x, int z) { return (int64_t(x) << 32) ^ int64_t(uint32_t(z)); };
+        for (const glm::vec3& o : obstacles) {
+          const int r = int(std::ceil(o.z / 4.0f));
+          const int cx = int(std::floor(o.x / 4.0f)), cz = int(std::floor(o.y / 4.0f));
+          for (int gx = -r; gx <= r; ++gx)
+            for (int gz = -r; gz <= r; ++gz) (*obsGrid)[okey(cx + gx, cz + gz)].push_back(o);
+        }
         auto agents = std::make_shared<std::vector<Agent>>();
         agents->reserve(size_t(count));
         for (int i = 0; i < count; ++i) {
@@ -808,24 +819,43 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           const float speed = vmin + (vmax - vmin) * u(rng), s0 = u(rng) * L.length, scale = 0.94f + 0.12f * u(rng);
           const std::vector<uint32_t>& person = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
           const float phase = 4.0f * u(rng);
-          agents->push_back({L, dir, side, side, speed, s0, scale, spawnCrowdPerson(scene, person, glm::mat4(1.0f), phase, rng)});
+          auto objs = spawnCrowdPerson(scene, person, glm::mat4(1.0f), phase, rng);
+          // O ciclo de passada das capturas (100STYLE) corresponde a ~1,35 m/s: quem anda mais rápido dá o passo mais
+          // rápido (o pé fica plantado no chão em vez de patinar).
+          for (uint32_t o : objs) scene.objects[o].animRate = glm::clamp(speed / 1.35f, 0.8f, 1.25f);
+          agents->push_back({L, dir, side, side, speed, s0, scale, std::move(objs)});
         }
-        scene.addAnimator([agents, obstacles, y, yaw0](scene::Scene& sc, float t, float dt) {
+        scene.addAnimator([agents, obsGrid, okey, y, yaw0](scene::Scene& sc, float t, float dt) {
           std::vector<Agent>& A = *agents;
-          // 1) Posição ao longo da faixa, com o deslocamento lateral atual, e o contorno dos obstáculos.
+          const float step = std::min(dt, 0.1f);
+          // 1) Posição ao longo da faixa e desvio dos obstáculos olhando até 4 m à frente: a pessoa escolhe o lado
+          //    e muda o caminho aos poucos (~0,9 m/s de lado), em vez de ser jogada para a borda ao encostar.
           for (Agent& a : A) {
-            const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x);
+            const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
             const float s = std::fmod(a.s0 + a.speed * t, a.L.length);
-            glm::vec2 p = (a.dir > 0.0f ? a.L.a + d * s : a.L.b - d * s) + n * a.side;
-            for (const glm::vec3& o : obstacles) {  // dentro do raio: empurra para o lado mais perto, pela normal
-              const glm::vec2 r = p - glm::vec2(o.x, o.y);
-              const float dist = glm::length(r);
-              if (dist < o.z) {
-                const float across = glm::dot(r, n);
-                p += n * ((across >= 0.0f ? 1.0f : -1.0f) * o.z - across);  // até a borda do raio
+            const glm::vec2 c = a.dir > 0.0f ? a.L.a + d * s : a.L.b - d * s;  // ponto no eixo da faixa
+            float alvo = a.side;
+            bool desviar = false;
+            const glm::vec2 frente = c + n * a.side + f * 2.0f;
+            const int cx = int(std::floor(frente.x / 4.0f)), cz = int(std::floor(frente.y / 4.0f));
+            for (int gx = -1; gx <= 1; ++gx)
+              for (int gz = -1; gz <= 1; ++gz) {
+                const auto it = obsGrid->find(okey(cx + gx, cz + gz));
+                if (it == obsGrid->end()) continue;
+                for (const glm::vec3& o : it->second) {
+                  const glm::vec2 r = glm::vec2(o.x, o.y) - c;
+                  const float along = glm::dot(r, f), across = glm::dot(r, n), folga = o.z + 0.35f;
+                  if (along < -0.6f || along > 4.0f || std::abs(across - a.side) > folga) continue;
+                  // passa pelo lado mais perto do caminho atual
+                  const float esq = across + folga, dir = across - folga;
+                  const float novo = std::abs(esq - a.side) < std::abs(dir - a.side) ? esq : dir;
+                  if (!desviar || std::abs(novo - a.side) > std::abs(alvo - a.side)) alvo = novo;
+                  desviar = true;
+                }
               }
-            }
-            a.pos = p;
+            if (desviar) a.side += glm::clamp(alvo - a.side, -0.9f * step, 0.9f * step);
+            a.prevPos = a.started ? a.pos : c + n * a.side;
+            a.pos = c + n * a.side;
           }
           // 2) Desvio: quem tem alguém a menos de 0,8 m à frente puxa o lado para longe dele (~1 m/s de lado); sem
           //    ninguém, volta aos poucos para o próprio caminho.
@@ -833,7 +863,6 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           auto key = [](int x, int z) { return (int64_t(x) << 32) ^ int64_t(uint32_t(z)); };
           for (uint32_t i = 0; i < A.size(); ++i)
             grid[key(int(std::floor(A[i].pos.x / 1.5f)), int(std::floor(A[i].pos.y / 1.5f)))].push_back(i);
-          const float step = std::min(dt, 0.1f);
           for (uint32_t i = 0; i < A.size(); ++i) {
             Agent& a = A[i];
             const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
@@ -859,11 +888,17 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             if (push != 0.0f) a.side = glm::clamp(a.side + glm::clamp(push * 4.0f, -1.0f, 1.0f) * step, -half, half);
             else a.side += (a.baseSide - a.side) * std::min(1.0f, 0.3f * step);
           }
-          // 3) Pose de cada pessoa.
-          for (const Agent& a : A) {
+          // 3) Pose de cada pessoa: o corpo vira para onde ela de fato anda (desvio incluído), suavizado (~0,15 s).
+          for (Agent& a : A) {
             const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, f = d * a.dir;
+            const glm::vec2 v = a.pos - a.prevPos;
+            const float alvoYaw = (a.started && glm::length(v) > 0.3f * step) ? std::atan2(v.x, v.y) : std::atan2(f.x, f.y);
+            if (!a.started) a.yaw = alvoYaw;
+            float dy = std::remainder(alvoYaw - a.yaw, 6.2831853f);
+            a.yaw += dy * std::min(1.0f, 7.0f * step);
+            a.started = true;
             glm::mat4 m = glm::translate(glm::mat4(1.0f), {a.pos.x, y, a.pos.y});
-            m = glm::rotate(m, std::atan2(f.x, f.y) + yaw0, glm::vec3(0, 1, 0));
+            m = glm::rotate(m, a.yaw + yaw0, glm::vec3(0, 1, 0));
             for (uint32_t o : a.objs) sc.setTransform(o, glm::scale(m, glm::vec3(a.scale)));
           }
         });

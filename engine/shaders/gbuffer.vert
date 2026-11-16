@@ -69,12 +69,17 @@ void main() {
   if (o.anim.x != 0xFFFFFFFFu) {
     // Poses do nível de detalhe deste lote: os níveis vêm um depois do outro (anim.w >> 1 poses cada).
     uint level = o.anim.x + vLod * (o.anim.w >> 1);
-    VertexData cur = VertexData(crowdFrames[level + o.anim.y]), prv = VertexData(crowdFrames[level + o.anim.z]);
+    // Duas poses vizinhas misturadas (movimento contínuo, não 16 poses secas por ciclo).
+    VertexData curA = VertexData(crowdFrames[level + crowdPoseA(o.anim.y)]);
+    VertexData curB = VertexData(crowdFrames[level + crowdPoseB(o.anim.y)]);
+    VertexData prvA = VertexData(crowdFrames[level + crowdPoseA(o.anim.z)]);
+    VertexData prvB = VertexData(crowdFrames[level + crowdPoseB(o.anim.z)]);
+    float wc = crowdPoseBlend(o.anim.y), wp = crowdPoseBlend(o.anim.z);
     uint vi = uint(gl_VertexIndex);
-    position = fetchVertexPosition(cur, vi);
-    normal = fetchVertexNormal(cur, vi);
-    tangent = vec4(cur.v[vi * 12u + 8u], cur.v[vi * 12u + 9u], cur.v[vi * 12u + 10u], cur.v[vi * 12u + 11u]);
-    prevPosition = fetchVertexPosition(prv, vi);
+    position = mix(fetchVertexPosition(curA, vi), fetchVertexPosition(curB, vi), wc);
+    normal = normalize(mix(fetchVertexNormal(curA, vi), fetchVertexNormal(curB, vi), wc) + vec3(1e-6));
+    tangent = vec4(curA.v[vi * 12u + 8u], curA.v[vi * 12u + 9u], curA.v[vi * 12u + 10u], curA.v[vi * 12u + 11u]);
+    prevPosition = mix(fetchVertexPosition(prvA, vi), fetchVertexPosition(prvB, vi), wp);
   }
   vCoverage = 1.0;
   if ((materials[vMaterial].flags & MATERIAL_HAIR) != 0u) {

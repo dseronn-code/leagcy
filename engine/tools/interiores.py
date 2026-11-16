@@ -408,6 +408,18 @@ def colar(dst, src, giro_x=0.0, pivo=(0, 0, 0)):
     dst.idx.extend(i + base for i in src.idx)
 
 
+def colar_y(dst, src, yaw, pos):
+    """Copia src para dst girada yaw rad em torno de y e transladada para pos (peça montada na origem)."""
+    c, sn = math.cos(yaw), math.sin(yaw)
+    base = dst.nv
+    for i in range(src.nv):
+        x, y, z = src.p[3 * i:3 * i + 3]
+        nx, ny, nz = src.n[3 * i:3 * i + 3]
+        dst.vert((pos[0] + x * c - z * sn, pos[1] + y, pos[2] + x * sn + z * c), (nx * c - nz * sn, ny, nx * sn + nz * c),
+                 src.uv[2 * i:2 * i + 2])
+    dst.idx.extend(i + base for i in src.idx)
+
+
 def textura_couro(path, w=512):
     """Normal map de vinil/couro: granulado fino irregular (o estofado deixa de parecer plástico liso)."""
     rng = np.random.default_rng(11)
