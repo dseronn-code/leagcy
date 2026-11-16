@@ -39,7 +39,46 @@ layout(set = 0, binding = 0) uniform FrameData {
   vec4 shadowParams;          // x = metros por texel da cascata 0, y = 1: usa os shadow maps mesmo com ray tracing
   vec4 water;                 // x = nível do mar (m), y = 1: há oceano
   vec4 ripple;                // ondulações (ripple.comp): xy = canto da grade (m), z = tamanho (m), w = 1 ligadas
+  vec4 storms[4];             // clima localizado: xy = centro da célula no tempo 0, zw = velocidade (m/s)
+  vec4 stormsB[4];            // x = raio, y = intensidade; stormsB[0].z = nº de células (0 = chuva na cena toda)
 } frame;
+
+// ---- Clima localizado: células de chuva que andam pelo mapa ----
+// Quanto chove agora no ponto (0..1, multiplica a chuva da cena). Sem células: 1 em todo lugar.
+float stormRain(vec2 p) {
+  int n = int(frame.stormsB[0].z + 0.5);
+  if (n == 0) return 1.0;
+  float t = frame.night.w, r = 0.0;
+  for (int k = 0; k < n; ++k) {
+    vec2 c = frame.storms[k].xy + frame.storms[k].zw * t;
+    float R = frame.stormsB[k].x, d = distance(p, c);
+    r = max(r, frame.stormsB[k].y * (1.0 - smoothstep(0.65 * R, R, d)));
+  }
+  return r;
+}
+// Quanto o chão ainda está molhado (0..1): 1 sob a chuva; depois que a célula passa, seca em ~tau segundos (o chão e
+// as poças continuam molhados depois da chuva). A passagem da célula pelo ponto é resolvida exatamente: a célula
+// anda em linha reta, então o intervalo em que o ponto ficou dentro dela sai de uma equação do 2º grau.
+float stormWetness(vec2 p, float tau) {
+  int n = int(frame.stormsB[0].z + 0.5);
+  if (n == 0) return 1.0;
+  float t = frame.night.w, w = 0.0;
+  for (int k = 0; k < n; ++k) {
+    vec2 q = p - frame.storms[k].xy, v = frame.storms[k].zw;
+    float R = frame.stormsB[k].x * 0.85, I = frame.stormsB[k].y;
+    float a = dot(v, v), b = -2.0 * dot(q, v), cc = dot(q, q) - R * R;
+    if (a < 1e-6) {  // célula parada
+      w = max(w, cc <= 0.0 ? I : 0.0);
+      continue;
+    }
+    float disc = b * b - 4.0 * a * cc;
+    if (disc < 0.0) continue;  // nunca passou por aqui
+    float sq = sqrt(disc), t1 = (-b - sq) / (2.0 * a), t2 = (-b + sq) / (2.0 * a);
+    if (t < t1) continue;                          // ainda não chegou
+    w = max(w, I * (t <= t2 ? 1.0 : exp(-(t - t2) / tau)));
+  }
+  return w;
+}
 
 layout(set = 0, binding = 23) uniform sampler2D rippleHeight;  // r = altura das ondulações (m)
 

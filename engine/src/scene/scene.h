@@ -572,6 +572,14 @@ class Scene {
   float cloudCoverage = 0.0f;
   // Chuva (0..1): superfícies molhadas (escurecem e brilham), poças nas superfícies planas, respingos nas poças.
   float wetness = 0.0f, puddles = 0.0f, rain = 0.0f;
+  // Clima localizado: até 4 células de chuva que andam pelo mapa (centro no tempo 0, velocidade em m/s, raio,
+  // intensidade). Vazio = a chuva vale para a cena inteira. O chão continua molhado depois que a célula passa
+  // (material.glsl: stormWetness).
+  struct Storm {
+    glm::vec2 center{0.0f}, velocity{0.0f};
+    float radius = 200.0f, intensity = 1.0f;
+  };
+  std::vector<Storm> storms;
   // Oceano (simulação FFT): objetos com material kMaterialWater viram a superfície do mar, que segue a câmera.
   bool ocean = false;
   float seaLevel = 0.0f;  // altura da superfície do mar (m)

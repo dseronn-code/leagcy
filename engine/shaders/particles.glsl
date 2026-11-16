@@ -55,7 +55,7 @@ ParticleState particleState(ParticleEmitter e, uint i, float time) {
     p.position = frame.cameraPos.xyz + rel;
     p.velocity = v;
     p.size = 0.012;
-    p.alpha = 0.22 * e.scale * rainExposure(p.position);  // scale = intensidade da chuva; sob telhado não cai
+    p.alpha = 0.22 * e.scale * rainExposure(p.position) * stormRain(p.position.xz);  // scale = intensidade da chuva; sob telhado não cai
     p.albedo = vec3(1.0);
     p.streak = true;
     return p;

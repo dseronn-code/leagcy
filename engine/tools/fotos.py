@@ -30,8 +30,9 @@ def loja(x, z, yaw_graus, modo):
     d = (math.sin(y), math.cos(y))   # para dentro da loja
     lado = (d[1], -d[0])
     if modo == 'porta':
-        cam = (x - d[0] * 5.0 + lado[0] * 1.2, 1.65, z - d[1] * 5.0 + lado[1] * 1.2)
-        alvo = (x + d[0] * 2.0, 1.7, z + d[1] * 2.0)
+        # entre a fileira de árvores da calçada e a fachada, um pouco de lado: a porta aberta e o interior aparecem
+        cam = (x - d[0] * 2.4 + lado[0] * 2.0, 1.6, z - d[1] * 2.4 + lado[1] * 2.0)
+        alvo = (x + d[0] * 2.5 - lado[0] * 0.5, 1.5, z + d[1] * 2.5 - lado[1] * 0.5)
     else:
         cam = (x + d[0] * 1.6 + lado[0] * 2.8, 1.6, z + d[1] * 1.6 + lado[1] * 2.8)
         alvo = (x + d[0] * 8.0 - lado[0] * 2.0, 1.0, z + d[1] * 8.0 - lado[1] * 2.0)
@@ -44,7 +45,7 @@ FOTOS = {
     'ts_rua': (['--scene', TS], (19.2, 1.7, 183.0), (21.5, 6.0, 163.0), 62, None),
     'ts_praca': (['--scene', TS], (23.1, 1.7, 172.0), (18.1, 2.9, 152.6), 64, None),
     # lojas da cidade atual (tools/times_square.py imprime "tipo [x, y, z] giro")
-    'ts_mobiliario': (['--scene', CIDADE] + NOITE, *loja(37.6, 70.4, 180, 'porta'), 64, None),
+    'ts_mobiliario': (['--scene', CIDADE] + NOITE, *loja(37.6, 70.4, 180, 'porta'), 72, None),
     'ts_lanchonete': (['--scene', CIDADE] + NOITE, *loja(37.6, 70.4, 180, 'dentro'), 70, None),
     'ts_loja': (['--scene', CIDADE] + NOITE, *loja(30.9, 126.5, 97, 'dentro'), 70, None),
     'ts_joalheria': (['--scene', CIDADE] + NOITE, *loja(77.8, -9.6, 180, 'dentro'), 70, None),

@@ -251,6 +251,21 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
   }
   // Geometria virtualizada (tipo Nanite) para a cena inteira: "nanite": true (o --nanite / --no-nanite vale acima).
   if (doc.contains("nanite") && doc["nanite"].is_boolean()) scene.clusterLod = doc["nanite"].get<bool>();
+  // Clima localizado: "tempestades": [{"centro": [x, z], "velocidade": [vx, vz], "raio": 250, "intensidade": 1}, ...]
+  // (até 4). A chuva da cena ("chuva") só cai dentro das células, que andam; o chão continua molhado depois.
+  scene.storms.clear();
+  if (doc.contains("tempestades") && doc["tempestades"].is_array())
+    for (const json& t : doc["tempestades"]) {
+      if (!t.is_object() || scene.storms.size() >= 4) continue;
+      scene::Scene::Storm st;
+      if (t.contains("centro") && t["centro"].is_array() && t["centro"].size() >= 2)
+        st.center = {t["centro"][0].get<float>(), t["centro"][1].get<float>()};
+      if (t.contains("velocidade") && t["velocidade"].is_array() && t["velocidade"].size() >= 2)
+        st.velocity = {t["velocidade"][0].get<float>(), t["velocidade"][1].get<float>()};
+      st.radius = t.value("raio", 250.0f);
+      st.intensity = t.value("intensidade", 1.0f);
+      scene.storms.push_back(st);
+    }
   loadLanguages();
   {
     std::string saved;

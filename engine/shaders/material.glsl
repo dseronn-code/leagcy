@@ -107,7 +107,7 @@ vec3 rainRipples(vec2 p, float t) {
 }
 
 void applyWetness(inout Surface s, vec3 P, vec3 N) {
-  float wet = frame.weather.x * rainExposure(P);
+  float wet = frame.weather.x * rainExposure(P) * stormWetness(P.xz, 900.0);  // seca em ~15 min
   if (wet <= 0.0) return;
   float porosity = clamp((1.0 - dot(s.f0, vec3(0.333)) * 4.0) * (0.3 + 0.7 * s.roughness), 0.0, 1.0);
   s.diffuseColor *= mix(1.0, 0.35, wet * porosity);  // água nos poros: menos luz espalhada de volta
@@ -120,7 +120,7 @@ void applyWetness(inout Surface s, vec3 P, vec3 N) {
   // Poças: só em superfícies quase horizontais viradas para cima.
   float up = smoothstep(0.92, 0.98, N.y);
   if (up <= 0.0 || frame.weather.y <= 0.0) return;
-  up *= rainExposure(P);
+  up *= rainExposure(P) * stormWetness(P.xz, 2400.0);  // poça dura ~40 min
   float n = fbm(P.xz * 0.35, 3) * 0.75 + fbm(P.xz * 2.1, 2) * 0.25;
   float puddle = up * smoothstep(1.0 - frame.weather.y * 0.75, 1.08 - frame.weather.y * 0.75, n + 0.15);
   if (puddle <= 0.0) return;
@@ -129,7 +129,8 @@ void applyWetness(inout Surface s, vec3 P, vec3 N) {
   s.f90 = mix(s.f90, 1.0, puddle);
   s.roughness = mix(s.roughness, 0.02, puddle);
   vec3 flatN = vec3(0.0, 1.0, 0.0);
-  if (rainIntensity() > 0.0) flatN = normalize(flatN + rainRipples(P.xz * 3.0, frame.night.w) * rainIntensity());
+  float chuvaAqui = rainIntensity() * stormRain(P.xz);
+  if (chuvaAqui > 0.0) flatN = normalize(flatN + rainRipples(P.xz * 3.0, frame.night.w) * chuvaAqui);
   s.normal = normalize(mix(s.normal, flatN, puddle));
   s.normalVariance *= 1.0 - puddle;
 }

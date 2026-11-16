@@ -54,8 +54,10 @@ struct FrameUniforms {
   glm::vec4 shadowParams;       // x = m por texel da cascata 0, y = 1: shadow maps mesmo com ray tracing
   glm::vec4 water;              // x = nível do mar (m), y = 1: há oceano (vista subaquática e cáusticas)
   glm::vec4 ripple;             // ondulações: xy = canto da grade (m), z = tamanho (m), w = 1 ligadas
+  glm::vec4 storms[4];          // clima localizado: xy = centro da célula no tempo 0 (m), zw = velocidade (m/s)
+  glm::vec4 stormsB[4];         // x = raio (m), y = intensidade; stormsB[0].z = nº de células (0 = chuva na cena toda)
 };
-static_assert(sizeof(FrameUniforms) == 992);
+static_assert(sizeof(FrameUniforms) == 1120);
 constexpr uint32_t kRippleSize = 256, kMaxDisturbers = 64;
 constexpr float kRippleCell = 0.25f;  // m por texel: grade de 64 m
 constexpr uint32_t kShadowMapSize = 2048;
@@ -1058,6 +1060,16 @@ void Renderer::record(VkCommandBuffer cmd, uint32_t slot, const scene::Camera& c
                         historyValid_ ? prevSceneTime_ : scene_->time);
   prevSceneTime_ = scene_->time;
   u.water = glm::vec4(scene_->seaLevel, scene_->ocean ? 1.0f : 0.0f, 0.0f, 0.0f);
+  for (int k = 0; k < 4; ++k) {
+    u.storms[k] = glm::vec4(0.0f);
+    u.stormsB[k] = glm::vec4(0.0f);
+  }
+  for (size_t k = 0; k < std::min<size_t>(4, scene_->storms.size()); ++k) {
+    const auto& st = scene_->storms[k];
+    u.storms[k] = glm::vec4(st.center, st.velocity);
+    u.stormsB[k] = glm::vec4(st.radius, st.intensity, 0.0f, 0.0f);
+  }
+  u.stormsB[0].z = float(std::min<size_t>(4, scene_->storms.size()));
   // Ondulações: a grade anda com a câmera em passos de um texel (só com a cena andando: parada, o estado fica).
   rippleDt_ = rippleValid_ ? std::max(scene_->time - rippleTime_, 0.0f) : 0.0f;
   rippleTime_ = scene_->time;

@@ -1,0 +1,14 @@
+// Teste do clima localizado: uma célula de chuva de 12 m de raio passa pelo chão de leste para oeste a 2 m/s.
+// O chão por onde ela já passou continua molhado (poças e reflexo); à frente dela o chão está seco.
+{
+  "sol": {"elevacao": 25, "azimute": 200, "iluminancia": 60000},
+  "chuva": 0.9,
+  "camera": {"posicao": [0, 9, 22], "alvo": [0, 0, 0], "fov": 60},
+  "tempestades": [{"centro": [0, 0], "velocidade": [-2.0, 0], "raio": 12, "intensidade": 1}],
+  "materiais": {"asfalto": {"cor": [0.25, 0.25, 0.26], "rugosidade": 0.85}},
+  "menu": false,
+  "entidades": [
+    {"nome": "chao", "forma": "caixa", "meia_extensao": [40, 0.25, 40], "posicao": [0, -0.25, 0], "material": "asfalto",
+     "fisica": {"tipo": "estatico"}}
+  ]
+}
