@@ -51,7 +51,7 @@ FOTOS = {
     'ts_loja': (['--scene', CIDADE] + NOITE, *loja(40.7, 208.3, 97, 'dentro'), 70, None),
     'ts_joalheria': (['--scene', CIDADE] + NOITE, *loja(106.6, -9.6, 180, 'dentro'), 70, None),
     'ts_conveniencia': (['--scene', CIDADE] + NOITE, *loja(70.1, -89.6, 180, 'dentro', -1), 70, None),
-    'ts_cafe': (['--scene', CIDADE] + NOITE, *loja(62.0, -9.6, 180, 'dentro'), 70, None),
+    'ts_cafe': (['--scene', CIDADE] + NOITE, *loja(-43.9, 169.6, 0, 'dentro'), 70, None),
     'ts_farmacia': (['--scene', CIDADE] + NOITE, *loja(-35.3, -89.6, 180, 'dentro'), 70, None),
     'eng_hero': (['--scene', BISTRO, '--night'], None, None, 0, None),
     'eng_luzes': (['--night'], None, None, 0, None),
