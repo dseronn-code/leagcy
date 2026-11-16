@@ -1042,6 +1042,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         }
         if (file.find("van") != std::string::npos) t.length = 5.3f;
         if (file.find("hatch") != std::string::npos) t.length = 4.1f;
+        if (file.find("onibus") != std::string::npos) t.length = 12.2f;
         templates.push_back(t);
       }
       // Semáforo: cada faixa pode ter "paradas" (distâncias, em m desde o início da faixa, das linhas de parada) e

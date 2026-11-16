@@ -947,7 +947,8 @@
    "times_square/carros/taxi_seda.gltf",
    "times_square/carros/taxi_suv.gltf",
    "times_square/carros/taxi_seda.gltf",
-   "times_square/carros/taxi_suv.gltf"
+   "times_square/carros/taxi_suv.gltf",
+   "times_square/carros/onibus.gltf"
   ],
   "quantidade": 160,
   "semente": 3,

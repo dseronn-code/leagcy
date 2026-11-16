@@ -217,7 +217,121 @@ def build_car(m, taxi=False):
                 placa=plate)
 
 
-def write_gltf(path, parts, paint):
+def build_bus():
+    """Ônibus urbano de piso baixo (12,2 x 2,6 x 3,2 m): seção de laterais retas com a quina do teto boleada, varrida
+    no comprimento (quinas da planta arredondadas), faixa de janelas, portas de vidro no lado da calçada (-x),
+    para-brisa grande, letreiro de destino aceso, faixa de cor na saia, rodas grandes com balanços longos."""
+    body, glass, dark, chrome, head, tail, sign, plate, stripe = (Mesh() for _ in range(9))
+    L, W, H, r = 12.2, 2.6, 3.15, 0.5
+    hw = W / 2
+    wheels = (L / 2 - 2.6, -L / 2 + 3.4)
+    floor, belt, top_w = 0.32, 1.22, 2.62  # assoalho, base e topo das janelas
+
+    def plan(zz):  # cantos da planta com raio de ~0,35 m
+        e = max(0.0, abs(zz) - (L / 2 - 0.35)) / 0.36
+        return math.sqrt(max(0.0, 1.0 - e * e)) * 0.12 + 0.88 if e > 0 else 1.0
+
+    def bottom(zz):
+        yb = floor
+        for zw in wheels:
+            d = zz - zw
+            R = r + 0.08
+            if abs(d) < R:
+                yb = max(yb, r + 0.02 + math.sqrt(R * R - d * d))
+        return yb
+
+    def section(zz):
+        w = hw * plan(zz)
+        yb = bottom(zz)
+        pts = [(w * 0.94, yb, 0), (w, yb + 0.08, 0)]
+        for k in range(1, 4):
+            pts.append((w, yb + 0.08 + (belt - yb - 0.08) * k / 3, 0))
+        pts += [(w * 0.995, belt + 0.05, 1), (w * 0.99, top_w, 1), (w * 0.99, top_w + 0.04, 0), (w * 0.99, H - 0.25, 0)]
+        for k in range(1, 7):  # quina do teto boleada (raio 0,25) até o centro
+            a = k / 6 * math.pi / 2
+            pts.append((w * 0.99 - 0.25 + 0.25 * math.cos(a), H - 0.25 + 0.25 * math.sin(a), 0))
+        pts.append((0.0, H, 0))
+        return pts
+
+    z = np.concatenate([np.linspace(-L / 2, -L / 2 + 0.4, 6), np.linspace(-L / 2 + 0.45, L / 2 - 0.45, 120),
+                        np.linspace(L / 2 - 0.4, L / 2, 6)])
+    secs = [section(zz) for zz in z]
+    nz, ns = len(secs), len(secs[0])
+    G = np.array([[(x, y, zz) for (x, y, _) in sec] for sec, zz in zip(secs, z)])
+    tz = np.gradient(G, axis=0)
+    ts = np.gradient(G, axis=1)
+    N = np.cross(tz, ts)
+    ctr = np.stack([np.zeros(nz), np.full(nz, H / 2), z], -1)[:, None, :]
+    N[np.sum(N * (G - ctr), -1) < 0] *= -1
+    N /= np.maximum(np.linalg.norm(N, axis=-1, keepdims=True), 1e-9)
+    for i in range(nz - 1):
+        # pilares entre as janelas (a cada ~1,5 m) e as pontas ficam pintados
+        zm = 0.5 * (z[i] + z[i + 1])
+        pilar = abs(zm) > L / 2 - 0.5 or (abs(((zm + L / 2) % 1.55) - 0.775) > 0.68)
+        for j in range(ns - 1):
+            gl = secs[i][j][2] and secs[i][j + 1][2] and not pilar
+            tgt = glass if gl else body
+            for sx in (1, -1):
+                q = [G[i, j], G[i + 1, j], G[i + 1, j + 1], G[i, j + 1]]
+                nq = [N[i, j], N[i + 1, j], N[i + 1, j + 1], N[i, j + 1]]
+                if sx < 0:
+                    q = [v * (-1, 1, 1) for v in q]
+                    nq = [v * (-1, 1, 1) for v in nq]
+                tgt.quad_n(q, nq)
+    for i in range(nz - 1):  # assoalho
+        z0, z1 = z[i], z[i + 1]
+        w0, w1 = G[i, 0, 0], G[i + 1, 0, 0]
+        dark.quad((-w0, bottom(z0), z0), (w0, bottom(z0), z0), (w1, bottom(z1), z1), (-w1, bottom(z1), z1), out=(0, -1, 0))
+    for i, sgn in ((0, -1), (nz - 1, 1)):  # frente e traseira: fecham a seção
+        c = (0.0, H / 2, z[i])
+        for j in range(ns - 1):
+            for sx in (1, -1):
+                body.tri(c, G[i, j] * (sx, 1, 1), G[i, j + 1] * (sx, 1, 1), out=(0, 0, sgn))
+    zf, zr = L / 2 + 0.006, -L / 2 - 0.006
+    we = hw * 0.88 - 0.05
+    glass.quad((-we, 0.95, zf), (we, 0.95, zf), (we * 0.98, 2.6, zf), (-we * 0.98, 2.6, zf), out=(0, 0, 1))  # para-brisa
+    dark.quad((-we, 2.62, zf), (we, 2.62, zf), (we, 3.0, zf), (-we, 3.0, zf), out=(0, 0, 1))  # caixa do letreiro
+    sign.quad((-we * 0.8, 2.67, zf + 0.004), (we * 0.8, 2.67, zf + 0.004), (we * 0.8, 2.95, zf + 0.004),
+              (-we * 0.8, 2.95, zf + 0.004), out=(0, 0, 1))
+    glass.quad((-we * 0.8, 1.9, zr), (we * 0.8, 1.9, zr), (we * 0.8, 2.6, zr), (-we * 0.8, 2.6, zr), out=(0, 0, -1))
+    sign.quad((-we * 0.5, 2.68, zr - 0.004), (we * 0.5, 2.68, zr - 0.004), (we * 0.5, 2.9, zr - 0.004),
+              (-we * 0.5, 2.9, zr - 0.004), out=(0, 0, -1))  # número da linha atrás
+    # portas de vidro (lado da calçada = -x, o carro anda para +z): dianteira e do meio
+    xd = -(hw + 0.008)
+    for z0, z1 in ((L / 2 - 1.55, L / 2 - 0.45), (-0.6, 0.6)):
+        glass.quad((xd, 0.42, z0), (xd, 0.42, z1), (xd, 2.55, z1), (xd, 2.55, z0), out=(-1, 0, 0))
+        chrome.quad((xd - 0.002, 0.42, (z0 + z1) / 2 - 0.02), (xd - 0.002, 0.42, (z0 + z1) / 2 + 0.02),
+                    (xd - 0.002, 2.55, (z0 + z1) / 2 + 0.02), (xd - 0.002, 2.55, (z0 + z1) / 2 - 0.02), out=(-1, 0, 0))
+    # faixa de cor na saia, nos dois lados (fora das portas e das rodas)
+    for sx in (1, -1):
+        x = sx * (hw + 0.004)
+        zs = np.linspace(-L / 2 + 0.4, L / 2 - 0.4, 60)
+        for za, zb in zip(zs[:-1], zs[1:]):
+            zm = 0.5 * (za + zb)
+            if sx < 0 and any(z0 - 0.02 < zm < z1 + 0.02 for z0, z1 in ((L / 2 - 1.55, L / 2 - 0.45), (-0.6, 0.6))):
+                continue
+            if any(abs(zm - zw) < r + 0.1 for zw in wheels):
+                continue
+            stripe.quad((x, 0.82, za), (x, 0.82, zb), (x, 1.12, zb), (x, 1.12, za), out=(sx, 0, 0))
+    for s in (-1, 1):  # faróis, lanternas, para-choques, retrovisores
+        head.box((s * hw * 0.68, 0.62, L / 2 - 0.02), (0.2, 0.06, 0.04))
+        tail.box((s * hw * 0.78, 0.9, -L / 2 + 0.02), (0.08, 0.28, 0.04))
+        body.box((s * (hw + 0.28), 2.35, L / 2 - 0.2), (0.04, 0.2, 0.08))
+        dark.box((s * (hw + 0.14), 2.6, L / 2 - 0.2), (0.14, 0.02, 0.02))
+    dark.box((0, 0.42, L / 2 - 0.02), (hw * 0.9, 0.12, 0.08))
+    dark.box((0, 0.42, -L / 2 + 0.02), (hw * 0.9, 0.12, 0.08))
+    plate.box((0, 0.42, L / 2 + 0.07), (0.2, 0.05, 0.02))
+    plate.box((0, 1.4, -L / 2 - 0.02), (0.2, 0.05, 0.02))
+    for zw in wheels:
+        for sx in (-1, 1):
+            dark.box((sx * (hw - 0.35), r + 0.15, zw), (0.33, 0.35, r + 0.07))
+            dark.cylinder_x(sx * (hw - 0.14), r, zw, r, 0.3)
+            chrome.cylinder_x(sx * (hw - 0.0), r, zw, r * 0.6, 0.02)
+    return dict(corpo=body, vidro=glass, escuro=dark, cromado=chrome, farol=head, lanterna=tail, luminoso=sign,
+                placa=plate, faixa=stripe)
+
+
+def write_gltf(path, parts, paint, verniz=True, letreiro=None):
     bin_ = bytearray()
     doc = {'asset': {'version': '2.0', 'generator': 'legacy tools/carros.py'}, 'buffers': [], 'bufferViews': [],
            'accessors': [], 'meshes': [], 'nodes': [], 'materials': [], 'scenes': [{'nodes': []}], 'scene': 0,
@@ -252,8 +366,16 @@ def write_gltf(path, parts, paint):
                      'emissiveFactor': [1.0, 0.04, 0.02], 'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 12.0}}},
         'luminoso': {'name': 'luminoso_taxi', 'pbrMetallicRoughness': {'baseColorFactor': [1, 0.95, 0.8, 1]},
                      'emissiveFactor': [1.0, 0.9, 0.6], 'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 8.0}}},
+        'faixa': {'name': 'faixa', 'pbrMetallicRoughness': {'baseColorFactor': [0.05, 0.22, 0.62, 1], 'metallicFactor': 0.2,
+                                                           'roughnessFactor': 0.35}},
         'placa': {'name': 'placa', 'pbrMetallicRoughness': {'baseColorFactor': [0.9, 0.85, 0.6, 1], 'roughnessFactor': 0.5}},
     }
+    if not verniz:
+        del mats['corpo']['extensions']
+        mats['corpo']['pbrMetallicRoughness'].update(metallicFactor=0.0, roughnessFactor=0.4)
+    if letreiro:
+        mats['luminoso'] = {'name': 'letreiro', 'pbrMetallicRoughness': {'baseColorFactor': list(letreiro) + [1]},
+                            'emissiveFactor': list(letreiro), 'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 10.0}}}
     prims = []
     for name, mesh in parts.items():
         if not mesh.idx:
@@ -285,6 +407,9 @@ def main():
     for name, m in MODELS.items():
         write_gltf(os.path.join(a.saida, f'{name}.gltf'), build_car(m), (0.5, 0.5, 0.52))
         made.append(name)
+    # ônibus: pintura branca sem verniz (o trânsito só sorteia cor para lataria com verniz) e letreiro âmbar
+    write_gltf(os.path.join(a.saida, 'onibus.gltf'), build_bus(), (0.86, 0.87, 0.88), verniz=False, letreiro=(1.0, 0.55, 0.08))
+    made.append('onibus')
     for name in ('seda', 'suv'):
         write_gltf(os.path.join(a.saida, f'taxi_{name}.gltf'), build_car(MODELS[name], taxi=True), yellow)
         made.append('taxi_' + name)

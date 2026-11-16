@@ -1279,6 +1279,10 @@ def cafe(out, texdir, seed, g=None, pbr=None):
               seg=18, sz=1.0)
         M['luz'].sphere((x, H - 1.06, z), 0.04, 8)
         lights.append((x, H - 1.2, z))
+    for (x, z) in ((-3.0, 9.6), (0.0, 9.6), (3.0, 9.6), (-3.0, 7.6), (3.0, 7.6)):  # spots embutidos (balcão)
+        M['escuro'].cylinder((x, z), 0.11, H - 0.02, H, seg=16)
+        M['luz'].cylinder((x, z), 0.08, H - 0.025, H - 0.02, seg=16)
+        lights.append((x, H - 0.25, z))
     for (x, z) in ((-4.5, 7.5), (4.5, 7.5)):  # vasos com planta
         torno(M['vaso'], x, z, [(0.0, 0.18), (0.4, 0.24), (0.45, 0.25)], seg=18, sz=1.0)
         M['planta'].sphere((x, 0.95, z), 0.45, 12, sy=1.3)
@@ -1302,7 +1306,7 @@ def cafe(out, texdir, seed, g=None, pbr=None):
         'vaso': g.material('cafe_vaso', color=(0.55, 0.3, 0.2), rough=0.6),
         'assento': g.material('cafe_assento', color=(0.3, 0.17, 0.1), rough=0.5),
     }
-    return _fechar(g, M, mats, 'cafe', embed, out, lights, (1.0, 0.78, 0.5), 60.0, 6.0)
+    return _fechar(g, M, mats, 'cafe', embed, out, lights, (1.0, 0.8, 0.55), 95.0, 7.0)
 
 
 def farmacia(out, texdir, seed, g=None, pbr=None):
