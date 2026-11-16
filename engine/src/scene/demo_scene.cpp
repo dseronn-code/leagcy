@@ -1182,7 +1182,7 @@ bool buildHairTest(Scene& s, Camera& camera) {
   hair.flags = kMaterialHair | kMaterialDoubleSided;
   // Fios na esfera de raio 1 escalada para a cabeça (o couro fica 3% para fora da pele).
   glm::mat4 t = glm::scale(glm::translate(glm::mat4(1.0f), head), glm::vec3(0.093f, 0.113f, 0.098f));
-  s.addObject(s.addMesh(makeHair(14000, 14, 1.0f, 2.6f, 0.0012f, 7)), t, s.addMaterial(hair));
+  s.addObject(s.addMesh(makeHair(40000, 16, 1.0f, 2.6f, 0.0009f, 7)), t, s.addMaterial(hair));
   // A cabeça vira para os lados e balança um pouco (o cabelo, simulado, atrasa e balança depois: hair_sim.comp).
   {
     std::vector<std::pair<uint32_t, glm::mat4>> parts;

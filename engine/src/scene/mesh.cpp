@@ -194,6 +194,9 @@ MeshData applyVertexGroups(const MeshData& pose, const std::vector<uint32_t>& gr
 }
 
 MeshData makeHair(uint32_t strands, uint32_t segments, float scalpRadius, float length, float halfWidth, uint32_t seed) {
+  // Penteado por guias (como os grooms de cinema e de jogos): ~1 guia para cada 40 fios define a forma de uma mecha
+  // (direção, ondulação, comprimento); cada fio nasce perto da raiz da sua guia, segue o caminho dela e se junta a
+  // ela perto da ponta (clumping), com um pouco de frizz próprio. Fios independentes viravam uma penugem rala.
   MeshData m;
   uint32_t st = seed * 747796405u + 2891336453u;
   auto rnd = [&]() {
@@ -201,40 +204,75 @@ MeshData makeHair(uint32_t strands, uint32_t segments, float scalpRadius, float 
     uint32_t w = ((st >> ((st >> 28u) + 4u)) ^ st) * 277803737u;
     return float((w >> 22u) ^ w) / 4294967296.0f;
   };
-  m.vertices.reserve(size_t(strands) * (segments + 1) * 2);
-  for (uint32_t s = 0; s < strands; ++s) {
-    // Raiz: calota de cima (y > −0,2), menos a testa (z > 0,55 e y < 0,5).
+  // Raiz no couro: calota de cima, sem a testa (linha do cabelo em arco) nem o rosto; costeletas e nuca ficam.
+  auto raiz = [&]() {
     glm::vec3 dir;
-    do {
+    for (;;) {
       const float z = 1.0f - 2.0f * rnd(), a = glm::two_pi<float>() * rnd(), r = std::sqrt(std::max(1.0f - z * z, 0.0f));
       dir = glm::vec3(r * std::cos(a), z, r * std::sin(a));
-    } while (dir.y < -0.2f || (dir.z > 0.55f && dir.y < 0.5f));
+      const float linhaTesta = 0.32f + 0.25f * dir.x * dir.x;  // a linha sobe nas têmporas
+      if (dir.y < -0.35f) continue;                              // abaixo da nuca
+      if (dir.z > 0.35f && dir.y < linhaTesta) continue;         // testa e rosto
+      if (std::abs(dir.x) > 0.75f && dir.z > 0.2f && dir.y < -0.05f) continue;  // bochecha (costeleta curta acima)
+      return dir;
+    }
+  };
+  const uint32_t guides = std::max(8u, strands / 40u), pts = segments + 1;
+  std::vector<glm::vec3> G(size_t(guides) * pts);
+  std::vector<glm::vec3> Groot(guides);
+  // Repartido de lado (x ≈ 0,25): as guias dos dois lados tombam para lados opostos a partir da risca.
+  const float risca = 0.25f;
+  for (uint32_t g = 0; g < guides; ++g) {
+    const glm::vec3 dir = raiz();
+    Groot[g] = dir;
     glm::vec3 p = dir * scalpRadius;
-    // Sai do couro quase rente a ele, penteado para trás e para baixo (a direção da gravidade/penteado projetada no
-    // plano tangente), com um pouco de volume para fora.
-    const glm::vec3 comb = glm::normalize(glm::vec3(0.0f, -0.6f, -1.0f));
+    const float lado = dir.x > risca ? 1.0f : -1.0f;
+    const glm::vec3 comb = glm::normalize(glm::vec3(0.55f * lado, -0.7f, -0.6f));  // penteado: para o lado e para trás
     glm::vec3 along = comb - dir * glm::dot(comb, dir);
     if (glm::dot(along, along) < 1e-6f) along = glm::vec3(0.0f, 0.0f, -1.0f);
-    glm::vec3 t = glm::normalize(glm::normalize(along) + dir * 0.25f);
-    const float len = length * (0.75f + 0.5f * rnd()), step = len / float(segments);
+    glm::vec3 t = glm::normalize(glm::normalize(along) + dir * 0.35f);              // volume na raiz
+    const float len = length * (0.8f + 0.4f * rnd()) * (dir.y < 0.0f ? 0.85f : 1.0f), step = len / float(segments);
     const glm::vec3 side = glm::normalize(glm::cross(t, dir) + glm::vec3(1e-4f, 0.0f, 0.0f));
-    const uint32_t base = uint32_t(m.vertices.size());
-    const float curl = 0.6f * (rnd() - 0.5f);
-    for (uint32_t k = 0; k <= segments; ++k) {
-      const float u = float(k) / float(segments), w = halfWidth * (1.0f - 0.7f * u);  // afina na ponta
-      // Lado da fita perpendicular ao fio neste ponto; normal = t × lado (o shader recupera o lado por normal × t).
-      const glm::vec3 sk = glm::normalize(side - t * glm::dot(side, t) + glm::vec3(1e-6f, 0.0f, 0.0f));
-      const glm::vec3 off = glm::normalize(glm::cross(t, sk));
-      for (int sd = 0; sd < 2; ++sd)
-        m.vertices.push_back({p + sk * (sd ? w : -w), off, {float(sd), u}, {t, w}});
-      // Próximo ponto: a gravidade dobra o fio (mais na ponta, que pesa menos para o fio segurar), ondulação, e o fio
-      // escorrega pela cabeça em vez de entrar nela.
-      t = glm::normalize(t + glm::vec3(0.0f, -0.45f, 0.0f) + side * curl * 0.1f);
+    const float onda = 0.06f + 0.1f * rnd(), fase = glm::two_pi<float>() * rnd(), freq = 2.0f + 1.5f * rnd();
+    for (uint32_t k = 0; k < pts; ++k) {
+      const float u = float(k) / float(segments);
+      G[size_t(g) * pts + k] = p + side * (onda * std::sin(freq * glm::pi<float>() * u + fase) * u * 0.5f);
+      t = glm::normalize(t + glm::vec3(0.0f, -0.4f, 0.0f) * (0.5f + u));
       glm::vec3 next = p + t * step;
-      const float r = glm::length(next), minR = scalpRadius * (1.02f + 0.04f * u);  // camadas: as pontas por fora
+      const float r = glm::length(next), minR = scalpRadius * (1.02f + 0.05f * u);  // camadas: pontas por fora
       if (r < minR) next *= minR / r;
       t = glm::normalize(next - p);
       p = next;
+    }
+  }
+  m.vertices.reserve(size_t(strands) * pts * 2);
+  for (uint32_t s = 0; s < strands; ++s) {
+    const uint32_t g = std::min(guides - 1, uint32_t(rnd() * float(guides)));
+    // Raiz do fio: perto da raiz da guia (no couro), deslocada no plano tangente
+    const glm::vec3 gd = Groot[g];
+    const glm::vec3 e1 = glm::normalize(glm::cross(gd, std::abs(gd.y) < 0.9f ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0)));
+    const glm::vec3 e2 = glm::cross(gd, e1);
+    const float ang = glm::two_pi<float>() * rnd(), rad = 0.07f * std::sqrt(rnd());
+    const glm::vec3 off0 = (e1 * std::cos(ang) + e2 * std::sin(ang)) * rad * scalpRadius;
+    const float clump = 0.55f + 0.35f * rnd(), frizz = 0.004f + 0.01f * rnd() * rnd();
+    const float fz1 = glm::two_pi<float>() * rnd(), fz2 = glm::two_pi<float>() * rnd();
+    std::vector<glm::vec3> P(pts);
+    for (uint32_t k = 0; k < pts; ++k) {
+      const float u = float(k) / float(segments);
+      glm::vec3 q = G[size_t(g) * pts + k] + off0 * (1.0f - clump * u * u);
+      q += scalpRadius * frizz * u * glm::vec3(std::sin(17.0f * u + fz1), std::sin(23.0f * u + fz2), std::cos(19.0f * u + fz1));
+      const float r = glm::length(q), minR = scalpRadius * (1.015f + 0.04f * u);
+      if (r < minR) q *= minR / r;
+      P[k] = q;
+    }
+    const uint32_t base = uint32_t(m.vertices.size());
+    for (uint32_t k = 0; k < pts; ++k) {
+      const float u = float(k) / float(segments), w = halfWidth * (1.0f - 0.75f * u);  // afina na ponta
+      const glm::vec3 t = glm::normalize(P[std::min(k + 1, pts - 1)] - P[k > 0 ? k - 1 : 0] + glm::vec3(1e-7f));
+      const glm::vec3 radial = glm::normalize(P[k] + glm::vec3(1e-7f));
+      const glm::vec3 sk = glm::normalize(glm::cross(t, radial) + glm::vec3(1e-6f, 0.0f, 0.0f));
+      const glm::vec3 nrm = glm::normalize(glm::cross(t, sk));
+      for (int sd = 0; sd < 2; ++sd) m.vertices.push_back({P[k] + sk * (sd ? w : -w), nrm, {float(sd), u}, {t, w}});
     }
     for (uint32_t k = 0; k < segments; ++k) {
       const uint32_t a = base + 2 * k;
@@ -242,7 +280,7 @@ MeshData makeHair(uint32_t strands, uint32_t segments, float scalpRadius, float 
     }
   }
   m.hairStrands = strands;
-  m.hairPoints = segments + 1;
+  m.hairPoints = pts;
   return m;
 }
 
