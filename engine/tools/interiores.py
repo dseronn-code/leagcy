@@ -230,6 +230,82 @@ def abox(M, mn, mx, uvs=1.0, skip=()):
             M.quad(a, b, c, d, uv=uv, face=f)
 
 
+def rbox(M, mn, mx, r=0.02, seg=3, bulge=0.0, uvs=1.0, skip=()):
+    """Caixa com quinas arredondadas (raio r, seg passos no arco) e faces estofadas (bulge: quanto o meio da face
+    "incha" para fora, em metros). Normais curvas de verdade (diferenças na própria superfície): a quina pega um
+    filete de luz e o estofado mostra o volume, em vez de uma caixa de quinas vivas."""
+    c = [(a + b) / 2 for a, b in zip(mn, mx)]
+    h = [max((b - a) / 2, 1e-4) for a, b in zip(mn, mx)]
+    r = max(1e-4, min(r, 0.95 * min(h)))
+
+    def grade(hh, extra):
+        canto = [hh - r + r * math.sin(math.pi / 2 * k / seg) for k in range(seg + 1)]
+        meio = list(np.linspace(-(hh - r), hh - r, extra + 2)) if hh - r > 1e-4 else []
+        return sorted(set([round(v, 6) for v in [-x for x in canto] + canto + meio]))
+
+    grades = [grade(hh, 4 if bulge > 0 else 0) for hh in h]
+
+    def ponto(q, eixo, sinal):
+        q = np.array(q, np.float64)
+        dentro = np.clip(q, [-(hh - r) for hh in h], [hh - r for hh in h])
+        d = q - dentro
+        n = np.linalg.norm(d)
+        p = dentro + (d / n * r if n > 1e-9 else d)
+        if bulge > 0:  # inchaço: máximo no meio da face, zero nas quinas
+            u, v = [k for k in range(3) if k != eixo]
+            f = max(0.0, 1 - (q[u] / h[u]) ** 2) * max(0.0, 1 - (q[v] / h[v]) ** 2)
+            p[eixo] += sinal * bulge * f
+        return p + np.array(c)
+
+    for eixo in range(3):
+        u, v = [k for k in range(3) if k != eixo]
+        for sinal in (-1, 1):
+            nome = ('+' if sinal > 0 else '-') + 'xyz'[eixo]
+            if nome in skip:
+                continue
+            gu, gv = grades[u], grades[v]
+            P = np.zeros((len(gu), len(gv), 3))
+            for i, uu in enumerate(gu):
+                for j, vv in enumerate(gv):
+                    q = [0.0, 0.0, 0.0]
+                    q[eixo], q[u], q[v] = sinal * h[eixo], uu, vv
+                    P[i, j] = ponto(q, eixo, sinal)
+            # normais pela própria superfície (diferença centrada), viradas para fora
+            N = np.zeros_like(P)
+            for i in range(len(gu)):
+                for j in range(len(gv)):
+                    du = P[min(i + 1, len(gu) - 1), j] - P[max(i - 1, 0), j]
+                    dv = P[i, min(j + 1, len(gv) - 1)] - P[i, max(j - 1, 0)]
+                    n = np.cross(du, dv)
+                    out = P[i, j] - np.array(c)
+                    if np.dot(n, out) < 0:
+                        n = -n
+                    N[i, j] = n / max(np.linalg.norm(n), 1e-9)
+            face = [0, 0, 0]
+            face[eixo] = sinal
+            for i in range(len(gu) - 1):
+                for j in range(len(gv) - 1):
+                    idx = ((i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1))
+                    uv = tuple((gu[a] * uvs, gv[b] * uvs) for a, b in idx)
+                    M.quad(*(P[a, b] for a, b in idx), uv=uv, face=tuple(N[i, j] + N[i + 1, j + 1]),
+                           nrms=tuple(N[a, b] for a, b in idx))
+
+
+def textura_couro(path, w=512):
+    """Normal map de vinil/couro: granulado fino irregular (o estofado deixa de parecer plástico liso)."""
+    rng = np.random.default_rng(11)
+    hgt = np.zeros((w, w))
+    for k, amp in ((8, 1.0), (16, 0.6), (64, 0.35), (128, 0.2)):
+        n = rng.random((k, k))
+        hgt += amp * np.asarray(Image.fromarray((n * 255).astype(np.uint8)).resize((w, w), Image.BICUBIC), np.float64) / 255
+    gy, gx = np.gradient(hgt)
+    nx, ny, nz = -gx * 6, -gy * 6, np.ones_like(hgt)
+    l = np.sqrt(nx * nx + ny * ny + nz * nz)
+    rgb = np.stack([nx / l, ny / l, nz / l], -1) * 0.5 + 0.5
+    Image.fromarray((rgb * 255).astype(np.uint8)).save(path)
+    return path
+
+
 def cell_uv(k, n=16, pad=0.004):
     u0, v0 = (k % n) / n + pad, (k // n) / n + pad
     u1, v1 = u0 + 1 / n - 2 * pad, v0 + 1 / n - 2 * pad
@@ -739,7 +815,7 @@ def lanchonete(out, texdir, seed, g=None, pbr=None):
         g = Gltf()
         pbr = Pbr(g, texdir, out)
     W, D, H = 10.0, 12.0, 3.4
-    M = {k: Mesh() for k in ('piso', 'parede', 'lambri', 'teto', 'cromo', 'estofado', 'mesa', 'balcao', 'cardapio',
+    M = {k: Mesh() for k in ('piso', 'parede', 'lambri', 'madeira', 'teto', 'cromo', 'estofado', 'mesa', 'balcao', 'cardapio',
                              'neon', 'luz', 'vidro', 'torta', 'xicara', 'escuro')}
     M['piso'].quad((-W / 2, 0, 0), (W / 2, 0, 0), (W / 2, 0, D), (-W / 2, 0, D),
                    uv=((-W / 1.2, 0), (W / 1.2, 0), (W / 1.2, D / 1.2), (-W / 1.2, D / 1.2)), face=(0, 1, 0))
@@ -753,13 +829,17 @@ def lanchonete(out, texdir, seed, g=None, pbr=None):
     lights = []
     # balcão comprido ao longo da parede da direita, com bancos
     bx = W / 2 - 2.2
-    abox(M['balcao'], (bx - 0.35, 0, 1.5), (bx + 0.35, 1.0, D - 1.5))
-    abox(M['cromo'], (bx - 0.42, 1.0, 1.4), (bx + 0.42, 1.06, D - 1.4))
-    abox(M['cromo'], (bx - 0.37, 0.05, 1.5), (bx - 0.35, 0.25, D - 1.5))  # rodapé cromado
-    for z in np.arange(2.0, D - 1.6, 0.9):
-        M['cromo'].cylinder((bx - 0.8, z), 0.05, 0.0, 0.7, seg=10)
-        M['cromo'].cylinder((bx - 0.8, z), 0.22, 0.0, 0.03, seg=14)
-        M['estofado'].cylinder((bx - 0.8, z), 0.21, 0.7, 0.8, seg=16)
+    rbox(M['balcao'], (bx - 0.33, 0.1, 1.5), (bx + 0.35, 0.98, D - 1.5), r=0.02)            # corpo
+    rbox(M['madeira'], (bx - 0.3, 0, 1.53), (bx + 0.33, 0.1, D - 1.53), r=0.01)              # rodapé recuado
+    rbox(M['cromo'], (bx - 0.45, 0.98, 1.4), (bx + 0.42, 1.04, D - 1.4), r=0.02)             # tampo com borda boleada
+    M['cromo'].tube([(bx - 0.36, 0.15, 1.5), (bx - 0.36, 0.15, D - 1.5)], 0.02, seg=10)    # apoio de pé
+    for z in np.arange(2.0, D - 1.6, 0.9):  # banquetas: pé cromado, aro, assento estofado abaulado
+        M['cromo'].frustum((bx - 0.8, z), 0.24, 0.2, 0.0, 0.025, seg=24)
+        M['cromo'].cylinder((bx - 0.8, z), 0.04, 0.025, 0.66, seg=16)
+        M['cromo'].frustum((bx - 0.8, z), 0.09, 0.2, 0.62, 0.68, seg=24)
+        M['cromo'].cylinder((bx - 0.8, z), 0.215, 0.68, 0.72, seg=28)
+        M['estofado'].cylinder((bx - 0.8, z), 0.205, 0.72, 0.75, seg=28, cap=False)
+        M['estofado'].sphere((bx - 0.8, 0.75, z), 0.205, 28, sy=0.22)
     # atrás do balcão: bancada, cafeteiras, expositor de tortas, prateleira de xícaras
     abox(M['cromo'], (W / 2 - 0.7, 0, 1.5), (W / 2, 0.95, D - 1.5))
     for z in (3.0, 3.6, 7.5):
@@ -775,17 +855,26 @@ def lanchonete(out, texdir, seed, g=None, pbr=None):
             M['xicara'].cylinder((W / 2 - 0.2, z), 0.045, yy, yy + 0.09, seg=8)
     abox(M['cromo'], (W / 2 - 0.3, 1.66, 1.8), (W / 2, 1.7, D - 1.8))
     abox(M['cromo'], (W / 2 - 0.3, 1.96, 1.8), (W / 2, 2.0, D - 1.8))
-    # sofás (booths) na parede da esquerda: dois bancos de encosto alto e mesa, luminária pendente
+    # sofás (booths) na parede da esquerda: assento estofado, encosto em gomos verticais (o clássico de lanchonete),
+    # filete cromado no alto do encosto, rodapé de madeira; mesa com borda cromada e pé de pedestal
     for z in np.arange(1.8, D - 1.2, 2.2):
         x0 = -W / 2
         for dz in (-0.75, 0.75):
-            abox(M['estofado'], (x0, 0, z + dz - 0.3), (x0 + 1.5, 0.45, z + dz + 0.3))
-            back = z + dz + (0.3 if dz > 0 else -0.3)
-            abox(M['estofado'], (x0, 0.45, min(back, back - 0.18 * (1 if dz > 0 else -1))),
-                 (x0 + 1.5, 1.15, max(back, back - 0.18 * (1 if dz > 0 else -1))))
-        abox(M['mesa'], (x0 + 0.1, 0.72, z - 0.4), (x0 + 1.3, 0.76, z + 0.4))
-        abox(M['cromo'], (x0 + 0.1, 0.7, z - 0.4), (x0 + 1.3, 0.72, z + 0.4))
-        M['cromo'].cylinder((x0 + 0.7, z), 0.04, 0.0, 0.72, seg=8)
+            sg = 1 if dz > 0 else -1
+            zf, zb = z + dz - 0.3 * sg, z + dz + 0.3 * sg          # frente (lado da mesa) e fundo do banco
+            lo, hi = min(zf, zb), max(zf, zb)
+            rbox(M['madeira'], (x0, 0, lo + 0.04 * (sg < 0)), (x0 + 1.5, 0.1, hi - 0.04 * (sg > 0)), r=0.01)  # rodapé
+            rbox(M['estofado'], (x0 + 0.02, 0.1, lo), (x0 + 1.48, 0.36, hi), r=0.025, bulge=0.008)        # saia
+            rbox(M['estofado'], (x0 + 0.02, 0.36, lo - 0.01), (x0 + 1.48, 0.5, hi + 0.01), r=0.06, bulge=0.025)  # assento
+            zb0, zb1 = (zb - 0.2, zb) if sg > 0 else (zb, zb + 0.2)
+            for k in range(4):  # gomos do encosto
+                xa = x0 + 0.03 + k * 0.36
+                rbox(M['estofado'], (xa, 0.5, zb0), (xa + 0.35, 1.12, zb1), r=0.07, bulge=0.03)
+            M['cromo'].tube([(x0, 1.13, zb0 + 0.1), (x0 + 1.5, 1.13, zb0 + 0.1)], 0.018, seg=8)
+        rbox(M['mesa'], (x0 + 0.1, 0.735, z - 0.4), (x0 + 1.3, 0.765, z + 0.4), r=0.012)
+        rbox(M['cromo'], (x0 + 0.095, 0.715, z - 0.405), (x0 + 1.305, 0.74, z + 0.405), r=0.01)
+        M['cromo'].cylinder((x0 + 0.7, z), 0.035, 0.03, 0.72, seg=16)
+        M['cromo'].frustum((x0 + 0.7, z), 0.24, 0.2, 0.0, 0.03, seg=20)
         abox(M['cromo'], (x0 + 0.3, 0.76, z - 0.06), (x0 + 0.42, 0.9, z + 0.06))  # porta-guardanapo
         M['escuro'].beam((x0 + 0.75, H, z), (x0 + 0.75, H - 0.9, z), 0.01, 0.01)
         M['cromo'].frustum((x0 + 0.75, z), 0.22, 0.03, H - 1.15, H - 0.9, seg=12)
@@ -806,7 +895,9 @@ def lanchonete(out, texdir, seed, g=None, pbr=None):
         'lambri': pbr('lanch_lambri', 'wood_table_001', tint=(0.55, 0.38, 0.28), rough=0.6),
         'teto': g.material('lanch_teto', color=(0.75, 0.73, 0.68), rough=0.6),
         'cromo': g.material('lanch_cromo', color=(0.85, 0.86, 0.88), rough=0.12, metal=1.0),
-        'estofado': g.material('lanch_estofado', color=(0.55, 0.04, 0.05), rough=0.35),
+        'estofado': g.material('lanch_estofado', color=(0.55, 0.04, 0.05), rough=0.3,
+                               normal_tex=os.path.relpath(textura_couro(tex('couro_normal.png')), out), normal_scale=0.6),
+        'madeira': pbr('lanch_madeira', 'dark_wood', tint=(0.45, 0.32, 0.26), rough=0.45),
         'mesa': g.material('lanch_mesa', color=(0.92, 0.9, 0.85), rough=0.2),
         'balcao': g.material('lanch_balcao', color=(0.6, 0.06, 0.07), rough=0.3),
         'cardapio': g.material('lanch_cardapio', tex=t_menu, emissive=(1, 1, 1), emissive_tex=t_menu, strength=4.0),
