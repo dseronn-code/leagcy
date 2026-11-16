@@ -8,6 +8,7 @@ ponto escolhido, renderizada sem janela no preset Cinema e salva em JPG. Uso (de
 (--pause-at) para a imagem acumular sem rastro.
 """
 import argparse
+import math
 import os
 import subprocess
 import sys
@@ -20,15 +21,34 @@ CIDADE = os.path.join('cenas', 'times_square', 'times_square.gltf')  # só a cid
 BISTRO = os.path.join('assets', 'Bistro', 'bistro.gltf')
 NOITE = ['--night', '--rain', '0.6', '--fog', '0.004']
 
+
+
+def loja(x, z, yaw_graus, modo):
+    """Câmera para uma loja da cidade (posição da porta e giro, do log de tools/times_square.py): 'porta' = da calçada
+    olhando a entrada; 'dentro' = logo depois da porta, olhando o fundo na diagonal."""
+    y = math.radians(yaw_graus)
+    d = (math.sin(y), math.cos(y))   # para dentro da loja
+    lado = (d[1], -d[0])
+    if modo == 'porta':
+        cam = (x - d[0] * 5.0 + lado[0] * 1.2, 1.65, z - d[1] * 5.0 + lado[1] * 1.2)
+        alvo = (x + d[0] * 2.0, 1.7, z + d[1] * 2.0)
+    else:
+        cam = (x + d[0] * 1.6 + lado[0] * 2.8, 1.6, z + d[1] * 1.6 + lado[1] * 2.8)
+        alvo = (x + d[0] * 8.0 - lado[0] * 2.0, 1.0, z + d[1] * 8.0 - lado[1] * 2.0)
+    return cam, alvo
+
+
 # nome: (cena e argumentos, posição, alvo, fov, recorte final LxA ou None)
 FOTOS = {
     'ts_hero': (['--scene', TS], (24.0, 9.0, 200.0), (18.0, 4.0, 150.0), 58, None),
     'ts_rua': (['--scene', TS], (19.2, 1.7, 183.0), (21.5, 6.0, 163.0), 62, None),
     'ts_praca': (['--scene', TS], (23.1, 1.7, 172.0), (18.1, 2.9, 152.6), 64, None),
-    'ts_mobiliario': (['--scene', CIDADE] + NOITE, (15.5, 1.65, 61.5), (24.0, 2.2, 58.0), 60, None),
-    'ts_lanchonete': (['--scene', CIDADE] + NOITE, (25.5, 1.6, 58.8), (31.0, 1.3, 60.5), 70, None),
-    'ts_loja': (['--scene', CIDADE] + NOITE, (39.2, 1.6, 147.9), (36.0, 1.3, 141.0), 70, None),
-    'ts_joalheria': (['--scene', CIDADE] + NOITE, (31.6, 1.6, 415.8), (24.0, 1.3, 414.0), 70, None),
+    # lojas da cidade atual (tools/times_square.py imprime "tipo [x, y, z] giro")
+    'ts_mobiliario': (['--scene', CIDADE] + NOITE, *loja(37.6, 70.4, 180, 'porta'), 64, None),
+    'ts_lanchonete': (['--scene', CIDADE] + NOITE, *loja(37.6, 70.4, 180, 'dentro'), 70, None),
+    'ts_loja': (['--scene', CIDADE] + NOITE, *loja(30.9, 126.5, 97, 'dentro'), 70, None),
+    'ts_joalheria': (['--scene', CIDADE] + NOITE, *loja(77.8, -9.6, 180, 'dentro'), 70, None),
+    'ts_conveniencia': (['--scene', CIDADE] + NOITE, *loja(-25.0, 70.4, 180, 'dentro'), 70, None),
     'eng_hero': (['--scene', BISTRO, '--night'], None, None, 0, None),
     'eng_luzes': (['--night'], None, None, 0, None),
     'eng_geometria': (['--scene', 'nanite', '--rochas', '16', '--rocha-segmentos', '768', '--sun-elevation', '14',
@@ -73,6 +93,10 @@ def main():
             args += ['--camera-path', cam, '--fps', '30']
         t0 = time.time()
         p = subprocess.run(args, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if (p.returncode or not os.path.exists(png)) and quality == 'cinema':  # não coube na memória: tenta no Alto
+            print(f'{nome}: o Cinema falhou (código {p.returncode}); de novo no Alto', flush=True)
+            args[args.index('cinema')] = 'alto'
+            p = subprocess.run(args, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if p.returncode or not os.path.exists(png):
             print(f'{nome}: falhou (código {p.returncode})\n{p.stdout[-1500:]}{p.stderr[-1500:]}', flush=True)
             continue
