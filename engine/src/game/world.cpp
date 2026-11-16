@@ -43,7 +43,7 @@ std::vector<std::vector<uint32_t>> bakeCrowdPeople(scene::Scene& scene, const st
                                                    const json& people, const std::string& animFile,
                                                    const std::vector<std::string>& clipNames,
                                                    const std::vector<std::pair<std::string, std::string>>& map,
-                                                   uint32_t poses) {
+                                                   uint32_t poses, std::vector<std::string>* clipOut = nullptr) {
   std::vector<std::vector<uint32_t>> clips;
   int src = -1;
   if (!scene::loadGltf(scene, path(animFile), glm::mat4(1.0f), &src) || src < 0) {
@@ -73,6 +73,7 @@ std::vector<std::vector<uint32_t>> bakeCrowdPeople(scene::Scene& scene, const st
     std::vector<uint32_t> parts;
     for (uint32_t k = 0; k < uint32_t(m.skinnedObjects.size()); ++k) parts.push_back(scene.bakeCrowdClip(model, poses, k));
     clips.push_back(parts);
+    if (clipOut) clipOut->push_back(clipName);
     m.root = glm::translate(glm::mat4(1.0f), {0.0f, -1000.0f, 0.0f});  // o original fica escondido
   }
   return clips;
@@ -773,8 +774,35 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       std::mt19937 rng(mj.value("semente", 1u));
       std::uniform_real_distribution<float> u(0.0f, 1.0f);
       const float y = mj.value("altura", 0.0f), yaw0 = glm::radians(mj.value("girar_graus", 0.0f));
+      std::vector<std::string> clipNamesOf;  // o clipe de cada pessoa (para saber quem pode levar guarda-chuva)
       const auto clips = bakeCrowdPeople(scene, path, mj.value("pessoas", json::array()), mj.value("animacoes", ""),
-                                         names(mj, "andar"), map, poses);
+                                         names(mj, "andar"), map, poses, &clipNamesOf);
+      // Guarda-chuvas (tools/guarda_chuva.py): só quem anda com a mão parada perto do corpo (no celular, braços
+      // cruzados) leva um, com o cabo na mão: "maos" dá, por clipe, onde fica a origem do guarda-chuva (a mão) no
+      // espaço da pessoa. Abre quando chove onde ela está (células de "tempestades" incluídas) e fecha (some) no seco.
+      //   "guarda_chuva": {"modelos": ["a.gltf", ...], "fracao": 0.7, "escala": 1.3,
+      //                    "maos": {"OnPhoneRight": [x, y, z], ...}}
+      std::vector<std::vector<std::pair<uint32_t, uint32_t>>> umbrellaModels;
+      std::unordered_map<std::string, glm::vec3> umbrellaHands;
+      float umbrellaFrac = 0.0f, umbrellaScale = 1.0f;
+      if (mj.contains("guarda_chuva") && mj["guarda_chuva"].is_object()) {
+        const json& gj = mj["guarda_chuva"];
+        umbrellaFrac = gj.value("fracao", 0.7f);
+        umbrellaScale = gj.value("escala", 1.0f);  // os modelos de pessoa podem ter escala própria
+        const json hands = gj.value("maos", json::object());
+        for (auto& [k, v] : hands.items()) umbrellaHands[k] = vec3Of(v, glm::vec3(0.0f));
+        const json models = gj.value("modelos", json::array());
+        for (const json& f : models) {
+          const uint32_t first = uint32_t(scene.objects.size());
+          if (!scene::loadGltf(scene, path(f.get<std::string>()), glm::mat4(1.0f))) continue;
+          std::vector<std::pair<uint32_t, uint32_t>> parts;
+          for (uint32_t o = first; o < scene.objects.size(); ++o) {
+            parts.push_back({scene.objects[o].mesh, scene.objects[o].material});
+            scene.setObjectHidden(o, true);
+          }
+          umbrellaModels.push_back(std::move(parts));
+        }
+      }
       struct Lane { glm::vec2 a, b; float width, length; };
       std::vector<Lane> lanes;
       float total = 0.0f;
@@ -820,6 +848,9 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           // golpe, freia, gira o corpo para fora e inclina para o lado do empurrão, voltando ao passo em ~1 s.
           float tropeco = 0.0f, giro = 0.0f;
           glm::vec2 empurrao{0.0f}, eixoQueda{0.0f};
+          std::vector<uint32_t> guarda;  // peças do guarda-chuva (vazio: não tem)
+          glm::vec3 mao{0.0f};
+          bool aberto = true;
         };
         // Obstáculos numa grade de 4 m (2.000 pessoas × 1.100 obstáculos por quadro seria lento).
         auto obsGrid = std::make_shared<std::unordered_map<int64_t, std::vector<glm::vec3>>>();
@@ -839,7 +870,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           const Lane L = lanes[li];
           const float dir = u(rng) < 0.5f ? 1.0f : -1.0f, side = (u(rng) - 0.5f) * L.width;
           const float speed = vmin + (vmax - vmin) * u(rng), s0 = u(rng) * L.length, scale = 0.94f + 0.12f * u(rng);
-          const std::vector<uint32_t>& person = clips[size_t(u(rng) * float(clips.size())) % clips.size()];
+          const size_t personIdx = size_t(u(rng) * float(clips.size())) % clips.size();
+          const std::vector<uint32_t>& person = clips[personIdx];
           const float phase = 4.0f * u(rng);
           auto objs = spawnCrowdPerson(scene, person, glm::mat4(1.0f), phase, rng);
           // O ciclo de passada das capturas (100STYLE) corresponde a ~1,35 m/s: quem anda mais rápido dá o passo mais
@@ -852,12 +884,31 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           ag.ritmoAmp = apressado ? 0.03f + 0.03f * u(rng) : 0.05f + 0.1f * u(rng);  // quem passeia varia mais
           ag.ritmoW = 0.15f + 0.35f * u(rng);
           ag.ritmoFase = 6.2831853f * u(rng);
+          if (!umbrellaModels.empty() && personIdx < clipNamesOf.size()) {
+            const auto hand = umbrellaHands.find(clipNamesOf[personIdx]);
+            if (hand != umbrellaHands.end() && u(rng) < umbrellaFrac) {
+              ag.mao = hand->second;
+              for (auto [mesh, mat] : umbrellaModels[size_t(u(rng) * float(umbrellaModels.size())) % umbrellaModels.size()])
+                ag.guarda.push_back(scene.addObject(mesh, glm::mat4(1.0f), mat));
+            }
+          }
           agents->push_back(std::move(ag));
         }
-        scene.addAnimator([this, agents, obsGrid, okey, y, yaw0](scene::Scene& sc, float t, float dt) {
+        scene.addAnimator([this, agents, obsGrid, okey, y, yaw0, umbrellaScale](scene::Scene& sc, float t, float dt) {
           std::vector<Agent>& A = *agents;
           const float step = std::min(dt, 0.1f);
           constexpr float kTropeco = 0.9f;
+          // Chuva onde a pessoa está (a mesma conta de stormRain em shaders/frame.glsl).
+          auto chuvaEm = [&sc, t](glm::vec2 p) {
+            if (sc.rain <= 0.0f) return 0.0f;
+            if (sc.storms.empty()) return sc.rain;
+            float r = 0.0f;
+            for (const auto& st : sc.storms) {
+              const float d = glm::length(p - (st.center + st.velocity * t));
+              r = std::max(r, st.intensity * (1.0f - glm::smoothstep(0.65f * st.radius, st.radius, d)));
+            }
+            return sc.rain * r;
+          };
           // Personagens da cena (o jogador e os de roteiro/IA): posição e velocidade no chão. A multidão abre espaço
           // para eles e reage quando é atropelada.
           std::vector<std::pair<glm::vec2, glm::vec2>> pers;
@@ -955,6 +1006,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             float alvoVel = a.speed * (1.0f + a.ritmoAmp * std::sin(a.ritmoW * t + a.ritmoFase));
             if (frenteVel < alvoVel) alvoVel = std::max(0.4f, frenteVel * 0.95f);
             if (a.tropeco > 0.0f) alvoVel = 0.25f;
+            // Na chuva, quem não tem guarda-chuva apressa o passo (até +25%).
+            else if (a.guarda.empty()) alvoVel *= 1.0f + 0.25f * std::min(1.0f, chuvaEm(a.pos));
             a.cur += (alvoVel - a.cur) * std::min(1.0f, 1.5f * step);
             for (uint32_t o : a.objs) sc.objects[o].animRate = glm::clamp(a.cur / 1.35f, 0.6f, 1.3f);
             const float half = a.L.width * 0.5f + 0.2f;
@@ -979,7 +1032,19 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               m = glm::rotate(m, lean, glm::vec3(a.eixoQueda.y, 0.0f, -a.eixoQueda.x));
             }
             m = glm::rotate(m, a.yaw + yaw0, glm::vec3(0, 1, 0));
-            for (uint32_t o : a.objs) sc.setTransform(o, glm::scale(m, glm::vec3(a.scale)));
+            m = glm::scale(m, glm::vec3(a.scale));
+            for (uint32_t o : a.objs) sc.setTransform(o, m);
+            if (!a.guarda.empty()) {
+              const bool abre = chuvaEm(a.pos) > 0.08f;
+              if (abre != a.aberto)
+                for (uint32_t o : a.guarda) sc.setObjectHidden(o, !abre);
+              a.aberto = abre;
+              if (abre) {  // inclinado um pouco para a frente (contra a chuva de quem anda)
+                const glm::mat4 g = glm::scale(glm::rotate(glm::translate(m, a.mao), 0.12f, glm::vec3(1, 0, 0)),
+                                              glm::vec3(umbrellaScale));
+                for (uint32_t o : a.guarda) sc.setTransform(o, g);
+              }
+            }
           }
         });
         LOG_INFO("Multidão: %d pessoas andando (%zu modelos, %u poses cada) em %zu faixas", count, clips.size(), poses,
@@ -1024,7 +1089,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
     //                "faixas": [{"de": [x, z], "ate": [x, z]}, ...], "altura": 0.0}
     if (doc.contains("transito") && doc["transito"].is_object()) {
       const json& tj = doc["transito"];
-      struct Template { std::vector<std::pair<uint32_t, uint32_t>> parts; bool taxi; float length; };
+      struct Template { std::vector<std::pair<uint32_t, uint32_t>> parts; bool taxi; float length; bool bus = false; };
       std::vector<Template> templates;
       const json carsJson = tj.value("carros", json::array());
       for (const json& cf : carsJson) {
@@ -1042,19 +1107,22 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         }
         if (file.find("van") != std::string::npos) t.length = 5.3f;
         if (file.find("hatch") != std::string::npos) t.length = 4.1f;
-        if (file.find("onibus") != std::string::npos) t.length = 12.2f;
+        if (file.find("onibus") != std::string::npos) {
+          t.length = 12.2f;
+          t.bus = true;
+        }
         templates.push_back(t);
       }
       // Semáforo: cada faixa pode ter "paradas" (distâncias, em m desde o início da faixa, das linhas de parada) e
       // uma "fase" (0 ou 1): a fase 0 tem verde na primeira metade do "ciclo" de "semaforo", a fase 1 na segunda.
-      struct Lane { glm::vec2 a, d; float length; std::vector<float> stops; int phase; };
+      struct Lane { glm::vec2 a, d; float length; std::vector<float> stops; int phase; std::vector<float> busStops; };
       std::vector<Lane> lanes;
       const json lanesJson = tj.value("faixas", json::array());
       for (const json& fj : lanesJson) {
         const glm::vec2 a(fj["de"][0].get<float>(), fj["de"][1].get<float>()), b(fj["ate"][0].get<float>(), fj["ate"][1].get<float>());
         const float len = glm::length(b - a);
         if (len <= 5.0f) continue;
-        Lane l{a, (b - a) / len, len, {}, fj.value("fase", 0)};
+        Lane l{a, (b - a) / len, len, {}, fj.value("fase", 0), {}};
         const json stops = fj.value("paradas", json::array());
         for (const json& st : stops) l.stops.push_back(st.get<float>());
         std::sort(l.stops.begin(), l.stops.end());
@@ -1064,18 +1132,62 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       if (!templates.empty() && !lanes.empty()) {
         std::mt19937 rng(tj.value("semente", 1u));
         std::uniform_real_distribution<float> u(0.0f, 1.0f);
+        // Pontos de ônibus ([x, z] na calçada, ou o nome de um .json com eles, ex.: tools/times_square.py grava
+        // pontos_onibus.json com os abrigos): cada ponto vai para a faixa mais perto (até 6 m), na distância ao longo
+        // dela; os ônibus andam nessas faixas e param ~12 s em cada ponto.
+        json busJson = tj.value("pontos_onibus", json::array());
+        if (busJson.is_string()) {
+          std::string bf = busJson.get<std::string>();
+          if (!std::ifstream(bf) && std::ifstream(sceneDir + bf)) bf = sceneDir + bf;
+          std::ifstream in(bf);
+          busJson = in ? json::parse(in, nullptr, false) : json::array();
+          if (!busJson.is_array()) busJson = json::array();
+        }
+        int busStopCount = 0;
+        for (const json& bp : busJson) {
+          if (!bp.is_array() || bp.size() < 2) continue;
+          const glm::vec2 p(bp[0].get<float>(), bp[1].get<float>());
+          int best = -1;
+          float bestD = 6.0f, bestS = 0.0f;
+          for (size_t li = 0; li < lanes.size(); ++li) {
+            const glm::vec2 r = p - lanes[li].a;
+            const float sAlong = glm::dot(r, lanes[li].d);
+            if (sAlong < 0.0f || sAlong > lanes[li].length) continue;
+            const float dist = std::abs(r.x * lanes[li].d.y - r.y * lanes[li].d.x);
+            if (dist < bestD) bestD = dist, best = int(li), bestS = sAlong;
+          }
+          if (best >= 0) {
+            lanes[size_t(best)].busStops.push_back(bestS);
+            ++busStopCount;
+          }
+        }
+        std::vector<uint32_t> busLanes;
+        for (uint32_t li = 0; li < lanes.size(); ++li)
+          if (!lanes[li].busStops.empty()) {
+            std::sort(lanes[li].busStops.begin(), lanes[li].busStops.end());
+            busLanes.push_back(li);
+          }
         const json vel = tj.value("velocidade", json::array({5.0, 11.0}));
         const float vmin = vel[0].get<float>(), vmax = vel[1].get<float>(), y = tj.value("altura", 0.0f);
         static const glm::vec3 paints[] = {{0.02f, 0.02f, 0.022f}, {0.85f, 0.85f, 0.86f}, {0.45f, 0.46f, 0.48f},
                                            {0.25f, 0.26f, 0.28f}, {0.05f, 0.08f, 0.2f},  {0.45f, 0.04f, 0.04f},
                                            {0.06f, 0.15f, 0.08f}, {0.6f, 0.58f, 0.52f}};
-        struct Car { uint32_t lane; float s, speed, vmax, len; std::vector<uint32_t> objs; };
+        struct Car {
+          uint32_t lane; float s, speed, vmax, len; std::vector<uint32_t> objs;
+          bool bus = false;
+          float dwell = 0.0f, served = -1.0f;  // ônibus: tempo parado no ponto e o último ponto atendido
+        };
         auto cars = std::make_shared<std::vector<Car>>();
         const int count = std::max(0, tj.value("quantidade", 60));
         for (int i = 0; i < count; ++i) {
           const Template& t = templates[size_t(u(rng) * float(templates.size())) % templates.size()];
           Car c{uint32_t(u(rng) * float(lanes.size())) % uint32_t(lanes.size()), 0.0f, 0.0f,
                 vmin + (vmax - vmin) * u(rng), t.length, {}};
+          if (t.bus && !busLanes.empty()) {  // ônibus andam nas faixas com ponto, um pouco mais devagar
+            c.lane = busLanes[size_t(u(rng) * float(busLanes.size())) % busLanes.size()];
+            c.bus = true;
+            c.vmax = std::min(c.vmax, vmin + 0.5f * (vmax - vmin));
+          }
           c.s = u(rng) * lanes[c.lane].length;
           c.speed = c.vmax;
           const glm::vec3 paint = paints[size_t(u(rng) * 8.0f) % 8];
@@ -1117,6 +1229,24 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
                   break;
                 }
               }
+              if (c.bus && !L.busStops.empty()) {  // ônibus: encosta no ponto, espera e sai
+                const float frente = c.s + c.len * 0.5f;
+                if (c.dwell > 0.0f) {
+                  want = 0.0f;
+                  c.dwell -= step;
+                } else {
+                  for (float st : L.busStops) {
+                    const float toStop = st + 3.0f - frente;  // a frente passa 3 m do abrigo: a porta fica nele
+                    if (toStop < -1.0f || (st == c.served && toStop < 1.5f)) continue;  // já atendido (até dar a volta)
+                    if (toStop < 4.0f + c.speed * c.speed / 3.0f) want = std::min(want, std::max(0.0f, toStop) / 1.2f);
+                    if (std::abs(toStop) < 1.0f && c.speed < 0.4f) {
+                      c.dwell = 12.0f;
+                      c.served = st;
+                    }
+                    break;
+                  }
+                }
+              }
               c.speed += glm::clamp(want - c.speed, -6.0f * step, 2.5f * step);  // freia forte, acelera devagar
             }
           }
@@ -1129,7 +1259,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             for (uint32_t o : c.objs) sc.setTransform(o, m);
           }
         });
-        LOG_INFO("Trânsito: %d carros (%zu modelos) em %zu faixas", count, templates.size(), lanes.size());
+        LOG_INFO("Trânsito: %d carros (%zu modelos) em %zu faixas, %d pontos de ônibus", count, templates.size(),
+                 lanes.size(), busStopCount);
       }
     }
     // Terreno de quilômetros: ladrilhos de "ladrilho" metros (o padrão é a célula do mundo aberto), cada um uma

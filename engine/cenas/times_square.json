@@ -861,6 +861,36 @@
    }
   ],
   "obstaculos": "times_square/obstaculos.json",
+  "guarda_chuva": {
+   "modelos": [
+    "times_square/guarda_chuva/preto.gltf",
+    "times_square/guarda_chuva/preto.gltf",
+    "times_square/guarda_chuva/azul.gltf",
+    "times_square/guarda_chuva/vermelho.gltf",
+    "times_square/guarda_chuva/verde.gltf",
+    "times_square/guarda_chuva/bege.gltf",
+    "times_square/guarda_chuva/xadrez.gltf"
+   ],
+   "fracao": 0.85,
+   "escala": 1.3,
+   "maos": {
+    "OnPhoneRight": [
+     -0.18,
+     2.35,
+     0.08
+    ],
+    "OnPhoneLeft": [
+     0.18,
+     2.35,
+     0.08
+    ],
+    "ArmsFolded": [
+     0.0,
+     2.0,
+     0.22
+    ]
+   }
+  },
   "clipes": [
    "Neutral",
    "Proud",
@@ -952,6 +982,8 @@
   ],
   "quantidade": 160,
   "semente": 3,
+  // abrigos da 7ª Avenida (tools/times_square.py): os ônibus encostam e esperam ~12 s
+  "pontos_onibus": "times_square/pontos_onibus.json",
   "velocidade": [
    4,
    11

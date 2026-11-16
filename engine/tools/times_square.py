@@ -1603,6 +1603,35 @@ def tree(trunk, leaves, x, z, y, rng):
                     (px - r, py + 0.1, pz + r), uv=((0, 1), (1, 1), (1, 0), (0, 0)), face=(0, 1, 0))
 
 
+def abrigo_onibus(M, x, z):
+    """Abrigo de ônibus (5,1 x 1,4 x 2,6 m), aberto para a rua (+x): colunas e teto de aço boleados, vidro no fundo e
+    nas laterais (meia lateral, para entrar), banco, painel de anúncio aceso dos dois lados numa ponta e o poste com a
+    placa azul do ponto junto ao meio-fio."""
+    from interiores import rbox, colar_y
+    A, V, L, B = Mesh(), Mesh(), Mesh(), Mesh()
+    for px in (-0.65, 0.65):
+        for pz in (-2.45, 2.45):
+            rbox(A, (px - 0.05, 0.0, pz - 0.05), (px + 0.05, 2.5, pz + 0.05), r=0.02)
+    rbox(A, (-0.85, 2.5, -2.6), (0.9, 2.62, 2.6), r=0.04)  # teto
+    rbox(A, (-0.7, 0.12, -2.45), (-0.62, 0.18, 2.45), r=0.01)  # trilho do vidro de baixo
+    V.quad((-0.64, 0.18, -2.4), (-0.64, 0.18, 2.4), (-0.64, 2.45, 2.4), (-0.64, 2.45, -2.4), face=(1, 0, 0))
+    for sz in (-1, 1):
+        V.quad((-0.6, 0.18, sz * 2.45), (0.15, 0.18, sz * 2.45), (0.15, 2.45, sz * 2.45), (-0.6, 2.45, sz * 2.45),
+               face=(0, 0, sz))
+        rbox(A, (0.12, 0.0, sz * 2.45 - 0.04), (0.2, 2.5, sz * 2.45 + 0.04), r=0.02)
+    rbox(A, (-0.6, 0.44, -1.6), (-0.2, 0.49, 1.0), r=0.02)  # banco
+    for bz in (-1.4, 0.8):
+        rbox(A, (-0.5, 0.0, bz - 0.04), (-0.3, 0.44, bz + 0.04), r=0.01)
+    rbox(A, (-0.62, 0.15, 1.45), (0.12, 2.3, 1.6), r=0.03)  # caixa do anúncio, perto de uma ponta
+    for sz, zz in ((-1, 1.44), (1, 1.61)):
+        L.quad((-0.55, 0.25, zz), (0.05, 0.25, zz), (0.05, 2.2, zz), (-0.55, 2.2, zz), face=(0, 0, sz))
+    A.cylinder((1.45, -3.2), 0.04, 0.0, 3.0, seg=12)  # poste do ponto, no meio-fio
+    rbox(B, (1.42, 2.3, -3.48), (1.48, 2.95, -2.92), r=0.02)  # placa azul
+    rbox(A, (1.38, 1.2, -3.32), (1.44, 1.75, -3.08), r=0.01)  # quadro de horários
+    for dst, src in (('aco', A), ('vidro', V), ('anuncio_abrigo', L), ('barreira', B)):
+        colar_y(M[dst], src, 0.0, (x, 0.0, z))
+
+
 def mobiliario(g, pbr, rng, plaza, sidewalk, near_plaza, obstacles, steam_points, tex, rel):
     """Mobiliário da Times Square de verdade (medidas da pesquisa, marcas fictícias): carrinhos de comida com guarda-sol,
     luz e fumaça; chaminés de vapor listradas laranja e branco (o vapor sai pela cena: vapor.json); quiosques de Wi-Fi
@@ -1675,20 +1704,26 @@ def mobiliario(g, pbr, rng, plaza, sidewalk, near_plaza, obstacles, steam_points
             for dz in (-1.0, 1.0):
                 M['barreira'].box((xc, 0.15, zz + dz), (0.35, 0.03, 0.03))
             obstacles.append((xc, zz, 1.0))
-    # abrigos de ônibus nas avenidas: estrutura, teto, vidro e painel de anúncio iluminado numa ponta
+    # Abrigos de ônibus: os sorteios antigos continuam consumindo o gerador (o resto da cidade não muda de lugar),
+    # mas os abrigos agora ficam nos pontos da 7ª Avenida, no meio das quadras, na calçada oeste (a faixa da direita
+    # de quem desce a avenida): o trânsito para os ônibus ali (pontos_onibus.json).
     for k in range(6):
-        ax = rng.choice(list(AVE_X.values()))
+        rng.choice(list(AVE_X.values()))
         z = rng.uniform(-200, 200)
-        if any(abs(z - street_z(n)) < 20 for n in range(40, 51)) or not near(ax, z):
+        if any(abs(z - street_z(n)) < 20 for n in range(40, 51)):
             continue
-        x = ax + rng.choice([-1, 1]) * 11.6
-        for dz in (-2.4, 2.4):
-            M['aco'].box((x, 1.3, z + dz), (0.05, 1.3, 0.05))
-        M['aco'].box((x, 2.62, z), (0.75, 0.04, 2.6))
-        M['vidro'].quad((x + 0.6, 0.2, z - 2.4), (x + 0.6, 0.2, z + 2.4), (x + 0.6, 2.4, z + 2.4), (x + 0.6, 2.4, z - 2.4),
-                        face=(1, 0, 0))
-        M['anuncio_abrigo'].box((x, 1.3, z + 2.45), (0.6, 1.0, 0.04))
-        obstacles.append((x, z, 2.4))
+        rng.choice([-1, 1])
+    pontos = []
+    for n in range(41, 49):
+        z = street_z(n) - STREET / 2
+        x = AVE_X['7th'] - 11.6
+        if not near(x, z, 160) or not all(sidewalk.contains(Point(x + dx, z + dz)) for dx in (-0.7, 0.7) for dz in (-2.6, 2.6)):
+            continue
+        abrigo_onibus(M, x, z)
+        pontos.append([round(x, 2), round(z, 2)])
+        for dz in (-1.7, 0.0, 1.7):
+            obstacles.append((x, z + dz, 1.0))
+    mobiliario.pontos_onibus = pontos
     # estações de bicicleta: base, 10 bicicletas azuis (rodas em tubo) e o totem
     for k in range(4):
         n = rng.randrange(41, 48)
@@ -2657,6 +2692,8 @@ def build(out, seed, texdir):
     mobiliario(g, pbr, rng, plaza, sidewalk, near_plaza, obstacles, steam_points, tex, rel)
     with open(os.path.join(out, 'vapor.json'), 'w') as f:  # de novo: carrinhos e chaminés soltam vapor
         json.dump(steam_points, f)
+    with open(os.path.join(out, 'pontos_onibus.json'), 'w') as f:  # onde os ônibus param (abrigos da 7ª Avenida)
+        json.dump(getattr(mobiliario, 'pontos_onibus', []), f)
     with open(os.path.join(out, 'obstaculos.json'), 'w') as f:  # de novo: árvores, lixo e caixas entraram
         json.dump([[round(x, 2), round(z, 2), r] for x, z, r in obstacles + fac.obstacles], f)
 
@@ -2714,7 +2751,7 @@ def main():
                         # 6 cm e os decalques (letreiros a 2 cm da placa, pintura a 1,2 cm do asfalto) colam na
                         # superfície de trás e piscam (z-fighting)
                         '-vpf'], check=True)
-        for extra in ('vapor.json', 'obstaculos.json'):
+        for extra in ('vapor.json', 'obstaculos.json', 'pontos_onibus.json'):
             shutil.copyfile(os.path.join(tmp, extra), os.path.join(a.saida, extra))
         # O gltfpack copia as texturas para o lado do .gltf (e aponta para lá): a pasta tex/ antiga sobra.
         shutil.rmtree(os.path.join(a.saida, 'tex'), ignore_errors=True)
