@@ -1,6 +1,9 @@
-# Rodada 47: as versões passam a sair no repositório público dseronn-code/legacy (só downloads e apresentação; o
-# código fica neste, que vai virar privado). Esta versão também sai aqui (transição): os launchers instalados se
-# atualizam para a versão que olha o repositório novo. A 1ª publicação lá sobe todos os arquivos dos jogos.
+# Rodada 48: (1) refaz a publicação no repositório público seronzera/legacy (a 47 parou no meio: a conta do GitHub foi
+# renomeada durante o envio). (2) Grava as tomadas do vídeo de reveal no preset Cinema, 1080p (tools/trailer.py); a
+# montagem final (textos, trilha, logo) é feita na nuvem com tools/reveal.py.
 [45] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher
 [100] python tools\gerar_instaladores.py --publicar
+[60] python tools\trailer.py --so rv_chuva,rv_rua,rv_luzes,sponza_luz
+[60] python tools\trailer.py --so bistro_noite,rv_rochas,pele
+[60] python tools\trailer.py --so pintura,oceano,nuvens,rv_aereo
