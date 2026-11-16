@@ -1025,7 +1025,7 @@ class Facades:
             u0, u1 = i * bw + 0.5, (i + span) * bw - 0.5
             if rng.random() < 0.8:
                 self.block('marquise', a, t, n, u0, u1, y0 + 3.75, y0 + 4.6, 0.12, 0.3)
-                self.wall_quad(f'placa{rng.randrange(16)}', a, t, n, u0 + 0.05, u1 - 0.05, y0 + 3.8, y0 + 4.55, 0.305,
+                self.wall_quad(f'placa{rng.randrange(16)}', a, t, n, u0 + 0.05, u1 - 0.05, y0 + 3.8, y0 + 4.55, 0.32,
                                unit=True)
             if st['toldo'] and rng.random() < 0.75:
                 self.awning(a, t, n, i * bw + 0.3, (i + span) * bw - 0.3, y0 + 3.7, st['toldo_cor'])
@@ -2660,7 +2660,11 @@ def main():
         build(tmp, a.semente, a.texturas)
         os.makedirs(a.saida, exist_ok=True)
         subprocess.run([a.gltfpack, '-i', os.path.join(tmp, 'times_square.gltf'), '-o',
-                        os.path.join(a.saida, 'times_square.gltf'), '-cc', '-kn', '-km', '-ke'], check=True)
+                        os.path.join(a.saida, 'times_square.gltf'), '-cc', '-kn', '-km', '-ke',
+                        # posições em ponto flutuante: quantizadas, cada malha (do tamanho da cidade) cai numa grade de
+                        # 6 cm e os decalques (letreiros a 2 cm da placa, pintura a 1,2 cm do asfalto) colam na
+                        # superfície de trás e piscam (z-fighting)
+                        '-vpf'], check=True)
         for extra in ('vapor.json', 'obstaculos.json'):
             shutil.copyfile(os.path.join(tmp, extra), os.path.join(a.saida, extra))
         # O gltfpack copia as texturas para o lado do .gltf (e aponta para lá): a pasta tex/ antiga sobra.
