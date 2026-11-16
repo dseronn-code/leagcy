@@ -23,7 +23,6 @@
   ],
   "fov": 60
  },
- "menu": false,
  "entidades": [
   {
    "nome": "cidade",
