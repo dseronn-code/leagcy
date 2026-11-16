@@ -196,6 +196,19 @@ struct Vehicle {
   uint32_t id = ~0u;  // na Physics
   uint32_t wheelObjects[4] = {~0u, ~0u, ~0u, ~0u};
   std::string wheelMaterial;
+  // Carro tirado do trânsito: as peças do modelo glTF (chão em y = 0, frente para +z) seguem o chassi; sem caixa nem
+  // cilindros. `parked`: o jogador saiu, freio de mão puxado.
+  std::vector<uint32_t> visual;
+  bool parked = false;
+};
+
+// Um carro que o trânsito entrega para o jogador dirigir (World::grabTraffic).
+struct TrafficGrab {
+  std::vector<uint32_t> objects;  // os objetos do carro na cena (passam a seguir o chassi; objeto novo no meio do
+                                 // jogo não entra no renderizador)
+  glm::vec2 position{0.0f};
+  float yaw = 0.0f, length = 4.8f, speed = 0.0f;
+  bool bus = false;
 };
 
 // Entrada do jogador neste quadro: movimento relativo à câmera (x = direita, y = frente, -1..1) e a direção da câmera.
@@ -316,6 +329,11 @@ class World {
   // deste quadro (vetores de movimento certos no TAA e no motion blur).
   std::function<void(float)> networkStep;
   bool playerControl = true;         // controle_jogador(falso): o jogador para de responder (cutscene)
+  // Entrar e sair de carros (tecla F / botão Y): o veículo mais perto (até 3,5 m), da cena ou do trânsito; o
+  // personagem fica guardado enquanto dirige. `grabTraffic` é montado pelo "transito" da cena.
+  std::function<bool(glm::vec2, float, TrafficGrab*)> grabTraffic;  // nullptr: só confere se há carro perto
+  entt::entity driving = entt::null;
+  void updateCarEntry(scene::Scene& scene);
   float realTime = 0.0f;             // s desde o início, mesmo pausado (tempo_real())
   std::string qualityRequest;        // qualidade("medio"): o main recria o renderizador com o preset
   // Câmera de cinema pelo script (camera(x, y, z, ax, ay, az) / camera_jogo()): com `active`, o main põe a câmera em

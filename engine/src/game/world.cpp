@@ -911,14 +911,31 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           };
           // Personagens da cena (o jogador e os de roteiro/IA): posição e velocidade no chão. A multidão abre espaço
           // para eles e reage quando é atropelada.
-          std::vector<std::pair<glm::vec2, glm::vec2>> pers;
-          if (physics)
+          struct Corpo { glm::vec2 p, v; float r; };  // posição, velocidade e raio a mais (carro: 0,9 m)
+          std::vector<Corpo> pers;
+          if (physics) {
             for (auto ent : registry.view<Character>()) {
               const Character& c = registry.get<Character>(ent);
               if (c.id == ~0u || c.ragdoll.active || c.remoteSlot >= 0) continue;
               const glm::vec3 p = physics->characterFeet(c.id), v = physics->characterVelocity(c.id);
-              if (std::abs(p.y - y) < 2.5f) pers.push_back({{p.x, p.z}, {v.x, v.z}});
+              if (std::abs(p.y - y) < 2.5f) pers.push_back({{p.x, p.z}, {v.x, v.z}, 0.0f});
             }
+            // O carro que o jogador dirige: pontos ao longo do comprimento (quem está na frente é empurrado)
+            if (driving != entt::null && registry.valid(driving) && registry.all_of<Vehicle, Transform>(driving)) {
+              const Vehicle& v = registry.get<Vehicle>(driving);
+              const Transform& tr = registry.get<Transform>(driving);
+              if (v.id != ~0u) {
+                const glm::vec3 f3 = tr.rotation * glm::vec3(0, 0, 1);
+                const glm::vec2 f2 = glm::length(glm::vec2(f3.x, f3.z)) > 1e-3f ? glm::normalize(glm::vec2(f3.x, f3.z)) : glm::vec2(0, 1);
+                const glm::vec3 lv = physics->linearVelocity(physics->vehicleBody(v.id));
+                const int n = std::max(2, int(v.desc.length / 1.6f));
+                for (int k = 0; k < n; ++k) {
+                  const float a = (float(k) / float(n - 1) - 0.5f) * (v.desc.length - 1.0f);
+                  pers.push_back({glm::vec2(tr.position.x, tr.position.z) + f2 * a, {lv.x, lv.z}, 0.5f * v.desc.width - 0.3f});
+                }
+              }
+            }
+          }
           // 1) Posição ao longo da faixa e desvio dos obstáculos olhando até 4 m à frente: a pessoa escolhe o lado
           //    e muda o caminho aos poucos (~0,9 m/s de lado), em vez de ser jogada para a borda ao encostar.
           for (Agent& a : A) {
@@ -988,9 +1005,10 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             // vitrines das lojas.
             // Personagens: espaço pessoal maior (1,6 m) que entre desconhecidos da multidão; quem está parado bem na
             // frente faz a pessoa frear e contornar. Encostar correndo derruba o passo dela (esbarrão).
-            for (const auto& [pp, pv] : pers) {
+            for (const Corpo& cp : pers) {
+              const glm::vec2 pp = cp.p, pv = cp.v;
               const glm::vec2 r = pp - a.pos;
-              const float dist = glm::length(r), along = glm::dot(r, f), across = glm::dot(r, n);
+              const float dist = std::max(0.0f, glm::length(r) - cp.r), along = glm::dot(r, f), across = glm::dot(r, n);
               if (dist < 1.6f && along > -0.3f) push += (across >= 0.0f ? -1.0f : 1.0f) * (1.6f - dist) * 0.6f;
               if (dist < 1.5f && along > 0.2f && std::abs(across) < 0.5f) frenteVel = std::min(frenteVel, 0.5f);
               const float vel = glm::length(pv);
@@ -1227,6 +1245,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           uint32_t lane; float s, speed, vmax, len; std::vector<uint32_t> objs;
           bool bus = false;
           float dwell = 0.0f, served = -1.0f;  // ônibus: tempo parado no ponto e o último ponto atendido
+          bool taken = false;                  // o jogador pegou este carro (vira veículo com física)
         };
         auto cars = std::make_shared<std::vector<Car>>();
         const int count = std::max(0, tj.value("quantidade", 60));
@@ -1255,13 +1274,46 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           cars->push_back(std::move(c));
         }
         const size_t laneCount = lanes.size();
-        scene.addAnimator([cars, lanes, laneCount, y, cycle](scene::Scene& sc, float time, float dt) {
+        // O jogador pega o carro do trânsito mais perto: o carro sai do trânsito (escondido) e as peças dele viram o
+        // visual de um veículo com física (updateCarEntry).
+        grabTraffic = [cars, lanes](glm::vec2 p, float radius, TrafficGrab* out) {
+          int best = -1;
+          float bestD = radius;
+          for (size_t i = 0; i < cars->size(); ++i) {
+            const Car& c = (*cars)[i];
+            if (c.taken) continue;
+            const glm::vec2 cp = lanes[c.lane].a + lanes[c.lane].d * c.s;
+            const glm::vec2 r = p - cp;
+            // distância até o retângulo do carro (comprimento ao longo da faixa, ~1 m de meia largura)
+            const float along = std::max(0.0f, std::abs(glm::dot(r, lanes[c.lane].d)) - 0.5f * c.len);
+            const float across = std::max(0.0f, std::abs(r.x * lanes[c.lane].d.y - r.y * lanes[c.lane].d.x) - 1.0f);
+            const float d = std::sqrt(along * along + across * across);
+            if (d < bestD) bestD = d, best = int(i);
+          }
+          if (best < 0) return false;
+          if (!out) return true;
+          TrafficGrab& g = *out;
+          Car& c = (*cars)[size_t(best)];
+          c.taken = true;
+          g.objects = c.objs;
+          g.position = lanes[c.lane].a + lanes[c.lane].d * c.s;
+          g.yaw = std::atan2(lanes[c.lane].d.x, lanes[c.lane].d.y);
+          g.length = c.len;
+          g.speed = c.speed;
+          g.bus = c.bus;
+          return true;
+        };
+        scene.addAnimator([this, cars, lanes, laneCount, y, cycle](scene::Scene& sc, float time, float dt) {
           std::vector<Car>& C = *cars;
           const float step = std::min(dt, 0.1f);
           const bool firstHalf = std::fmod(time, cycle) < cycle * 0.5f;
+          // O carro que o jogador dirige é um obstáculo na faixa em que ele estiver (o trânsito freia atrás dele).
+          glm::vec3 pv(0.0f), pf(0.0f);
+          const bool hasPv = playerVehicle(pv, pf);
           // Por faixa, em ordem de posição: cada carro freia se o da frente estiver perto (2 s de distância + 3 m).
           std::vector<std::vector<uint32_t>> byLane(laneCount);
-          for (uint32_t i = 0; i < C.size(); ++i) byLane[C[i].lane].push_back(i);
+          for (uint32_t i = 0; i < C.size(); ++i)
+            if (!C[i].taken) byLane[C[i].lane].push_back(i);
           for (auto& list : byLane) {
             std::sort(list.begin(), list.end(), [&](uint32_t a, uint32_t b) { return C[a].s < C[b].s; });
             for (size_t k = 0; k < list.size(); ++k) {
@@ -1270,8 +1322,13 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               float gap = ahead.s - c.s;
               if (gap <= 0.0f) gap += lanes[c.lane].length;  // o da frente já deu a volta
               if (list.size() == 1) gap = 1e9f;
-              float want = gap < 3.0f + c.len + c.speed * 2.0f ? std::max(0.0f, (gap - c.len - 2.5f) / 2.0f) : c.vmax;
               const Lane& L = lanes[c.lane];
+              if (hasPv) {
+                const glm::vec2 r = glm::vec2(pv.x, pv.z) - L.a;
+                const float sp = glm::dot(r, L.d) - c.s, lat = std::abs(r.x * L.d.y - r.y * L.d.x);
+                if (lat < 2.0f && sp > 0.0f && sp < gap) gap = sp;
+              }
+              float want = gap < 3.0f + c.len + c.speed * 2.0f ? std::max(0.0f, (gap - c.len - 2.5f) / 2.0f) : c.vmax;
               if (!L.stops.empty() && (firstHalf == (L.phase != 0))) {  // vermelho: para antes da próxima linha
                 for (float st : L.stops) {
                   const float toStop = st - (c.s + c.len * 0.5f);
@@ -1302,6 +1359,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
             }
           }
           for (Car& c : C) {
+            if (c.taken) continue;
             const Lane& L = lanes[c.lane];
             c.s = std::fmod(c.s + c.speed * step, L.length);
             const glm::vec2 p = L.a + L.d * c.s;
@@ -1619,6 +1677,7 @@ void World::update(scene::Scene& scene, float dt) {
   if (!netClient) updateOpenWorld(scene);
   if (scripting) scripting->update(scene, dt);
   if (paused) return;  // um script pausou agora: a pausa já vale neste quadro (nada se move)
+  if (!netClient && playerControl) updateCarEntry(scene);
   if (netClient) {  // cliente de rede: as poses vêm do anfitrião (game/network); aqui só a animação dos "visual"
     // Previsão: o boneco deste jogador anda já com a entrada local (o anfitrião confirma e o network corrige).
     if (predictLocal && localSlot >= 0) {
@@ -1655,6 +1714,10 @@ void World::update(scene::Scene& scene, float dt) {
   for (auto ent : registry.view<Character>()) {
     Character& c = registry.get<Character>(ent);
     if (c.id == ~0u) continue;
+    if (c.player && driving != entt::null && c.remoteSlot < 0) {  // dirigindo: o personagem fica guardado
+      physics->setCharacterFeet(c.id, glm::vec3(0.0f, -2500.0f, 0.0f));
+      continue;
+    }
     if (c.ragdoll.active) {  // a cápsula fica guardada fora do mapa enquanto o corpo é da física
       physics->setCharacterFeet(c.id, glm::vec3(0.0f, -3000.0f - 10.0f * float(entt::to_integral(ent) & 1023u), 0.0f));
       continue;
@@ -1800,6 +1863,9 @@ void World::update(scene::Scene& scene, float dt) {
         brake = 1.0f;
         throttle = 0.0f;
       }
+    } else if (v.parked) {
+      hand = 1.0f;
+      brake = 1.0f;
     } else if (!v.script.empty()) {
       size_t k = 0;
       while (k + 1 < v.script.size() && v.script[k + 1].time <= time) ++k;
@@ -1822,6 +1888,17 @@ void World::update(scene::Scene& scene, float dt) {
     for (int w = 0; w < 4; ++w)
       scene.setTransform(v.wheelObjects[w], physics->wheelMatrix(v.id, w) *
                                                 glm::scale(glm::mat4(1.0f), glm::vec3(v.desc.wheelRadius, 0.5f * v.desc.wheelWidth, v.desc.wheelRadius)));
+  }
+  for (auto ent : registry.view<Vehicle, Transform>()) {  // carros do trânsito: o modelo segue o chassi pelas rodas
+    const Vehicle& v = registry.get<Vehicle>(ent);
+    if (v.id == ~0u || v.visual.empty()) continue;
+    Transform& t = registry.get<Transform>(ent);
+    physics->pose(physics->vehicleBody(v.id), t.position, t.rotation);
+    glm::vec3 axle(0.0f);  // meio das 4 rodas: o chão do modelo fica um raio de roda abaixo
+    for (int w = 0; w < 4; ++w) axle += glm::vec3(physics->wheelMatrix(v.id, w)[3]) * 0.25f;
+    const glm::vec3 up = t.rotation * glm::vec3(0, 1, 0);
+    const glm::mat4 m = glm::translate(glm::mat4(1.0f), axle - up * v.desc.wheelRadius) * glm::mat4_cast(t.rotation);
+    for (uint32_t o : v.visual) scene.setTransform(o, m);
   }
   for (auto ent : registry.view<SoundSource, Transform>()) {  // sons seguem as entidades
     const SoundSource& snd = registry.get<SoundSource>(ent);
@@ -2243,6 +2320,94 @@ bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera&
 }
 
 World* currentWorld() { return gCurrent; }
+
+// F (ou o botão Y do controle): entra no veículo mais perto (até 3,5 m) ou sai do que está dirigindo. Um carro do
+// trânsito vira um veículo com física do tamanho dele (ônibus pesado e com rodas grandes), parado onde estava.
+void World::updateCarEntry(scene::Scene& /*scene*/) {
+  if (!physics) return;
+  entt::entity me = entt::null;
+  for (auto ent : registry.view<Character>()) {
+    const Character& c = registry.get<Character>(ent);
+    if (c.player && c.remoteSlot < 0 && c.id != ~0u) me = ent;
+  }
+  if (me == entt::null) return;  // cena sem personagem (ex.: só o carro): nada a fazer
+  if (!scripting) hud.clear();
+  const bool press = gameInput.hit("f") || gameInput.hit("pad_y");
+  auto hint = [&](const std::string& text) {
+    HudItem h;
+    h.kind = HudItem::Kind::Text;
+    h.pos = {0.5f, 0.88f};
+    h.align = 1;
+    h.textSize = 0.032f;
+    h.text = text;
+    h.back = {0.0f, 0.0f, 0.0f, 0.45f};
+    hud.push_back(h);
+  };
+  if (driving != entt::null) {
+    if (!registry.valid(driving)) {
+      driving = entt::null;
+      return;
+    }
+    hint(translate("F  sair do carro"));
+    if (!press) return;
+    Vehicle& v = registry.get<Vehicle>(driving);
+    const Transform& t = registry.get<Transform>(driving);
+    v.player = false;
+    v.parked = true;
+    // Sai pela porta do motorista (lado esquerdo de quem olha para a frente: +x do carro), no chão.
+    const glm::vec3 side = t.rotation * glm::vec3(1.0f, 0.0f, 0.0f);
+    glm::vec3 feet = t.position + side * (0.5f * v.desc.width + 0.6f);
+    feet.y = t.position.y - 0.5f * v.desc.height - v.desc.wheelRadius + 0.1f;
+    physics->setCharacterFeet(registry.get<Character>(me).id, feet);
+    driving = entt::null;
+    LOG_INFO("Jogador saiu do carro em (%.1f, %.1f)", feet.x, feet.z);
+    return;
+  }
+  const glm::vec3 feet = physics->characterFeet(registry.get<Character>(me).id);
+  // 1) veículo da cena mais perto
+  entt::entity near = entt::null;
+  float bestD = 3.5f;
+  for (auto ent : registry.view<Vehicle, Transform>()) {
+    const Vehicle& v = registry.get<Vehicle>(ent);
+    if (v.id == ~0u || !v.script.empty()) continue;
+    const float d = glm::length(glm::vec2(registry.get<Transform>(ent).position.x - feet.x,
+                                          registry.get<Transform>(ent).position.z - feet.z)) - 0.5f * v.desc.length;
+    if (d < bestD) bestD = d, near = ent;
+  }
+  // 2) senão, um carro do trânsito
+  if (near == entt::null && !(grabTraffic && grabTraffic(glm::vec2(feet.x, feet.z), 3.0f, nullptr))) return;
+  hint(translate("F  entrar no carro"));
+  if (!press) return;
+  if (near == entt::null) {
+    TrafficGrab g;
+    if (!grabTraffic(glm::vec2(feet.x, feet.z), 3.0f, &g)) return;
+    VehicleDesc d;
+    d.length = g.length;
+    d.width = g.bus ? 2.55f : 1.85f;
+    d.height = g.bus ? 1.6f : 0.75f;
+    d.mass = g.bus ? 11000.0f : 1450.0f;
+    d.engineTorque = g.bus ? 4200.0f : 520.0f;
+    d.wheelRadius = g.bus ? 0.5f : 0.34f;
+    d.wheelWidth = g.bus ? 0.3f : 0.24f;
+    d.maxSteerDeg = g.bus ? 40.0f : 35.0f;
+    d.rearDrive = g.bus;
+    const glm::quat rot = glm::angleAxis(g.yaw, glm::vec3(0, 1, 0));
+    const glm::vec3 pos(g.position.x, feet.y + d.wheelRadius + 0.5f * d.height + 0.25f, g.position.y);
+    near = registry.create();
+    registry.emplace<Transform>(near, Transform{pos, rot});
+    Vehicle v;
+    v.desc = d;
+    v.id = physics->addVehicle(d, pos, rot);
+    v.visual = g.objects;
+    registry.emplace<Vehicle>(near, std::move(v));
+  }
+  Vehicle& v = registry.get<Vehicle>(near);
+  v.player = true;
+  v.parked = false;
+  driving = near;
+  const glm::vec3 cp = registry.get<Transform>(near).position;
+  LOG_INFO("Jogador entrou no carro em (%.1f, %.1f)", cp.x, cp.z);
+}
 
 bool World::playerVehicle(glm::vec3& position, glm::vec3& forward) const {
   for (auto ent : registry.view<Vehicle, Transform>()) {
@@ -2727,6 +2892,10 @@ void World::setEntityPose(scene::Scene& scene, entt::entity e, glm::vec3 positio
 }
 
 bool World::playerFeet(glm::vec3& feet) const {
+  if (driving != entt::null && registry.valid(driving) && registry.all_of<Transform>(driving)) {
+    feet = registry.get<Transform>(driving).position;  // dirigindo: o "jogador" é o carro
+    return true;
+  }
   if (netClient) {  // a câmera do cliente segue a vaga dele (pose replicada)
     const entt::entity e = slotEntity(localSlot);
     if (e == entt::null) return false;

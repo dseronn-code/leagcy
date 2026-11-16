@@ -1,0 +1,66 @@
+{
+ "sol": {
+  "elevacao": 40,
+  "azimute": 200,
+  "iluminancia": 60000
+ },
+ "menu": false,
+ "entidades": [
+  {
+   "nome": "chao",
+   "forma": "caixa",
+   "meia_extensao": [
+    80,
+    0.25,
+    150
+   ],
+   "posicao": [
+    0,
+    -0.25,
+    0
+   ],
+   "fisica": {
+    "tipo": "estatico",
+    "atrito": 1.0
+   }
+  },
+  {
+   "nome": "jogador",
+   "posicao": [
+    3.0,
+    0,
+    0
+   ],
+   "personagem": {
+    "altura": 1.8,
+    "raio": 0.3,
+    "velocidade": 1.5,
+    "velocidade_correndo": 5,
+    "controle": "jogador"
+   }
+  }
+ ],
+ "transito": {
+  "carros": [
+   "times_square/carros/seda.gltf"
+  ],
+  "quantidade": 30,
+  "semente": 2,
+  "velocidade": [
+   0.01,
+   0.02
+  ],
+  "faixas": [
+   {
+    "de": [
+     0,
+     -100
+    ],
+    "ate": [
+     0,
+     100
+    ]
+   }
+  ]
+ }
+}
