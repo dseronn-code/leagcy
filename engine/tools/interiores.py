@@ -291,6 +291,97 @@ def rbox(M, mn, mx, r=0.02, seg=3, bulge=0.0, uvs=1.0, skip=()):
                            nrms=tuple(N[a, b] for a, b in idx))
 
 
+def superficie(M, P, uvs=1.0, fora=None):
+    """Grade de pontos P[i][j] (n × m × 3) vira malha lisa: normais pela própria superfície; fora = um ponto "de
+    dentro" (as normais apontam para longe dele) ou None (segue a ordem da grade)."""
+    P = np.asarray(P, np.float64)
+    n, m = P.shape[:2]
+    N = np.zeros_like(P)
+    for i in range(n):
+        for j in range(m):
+            du = P[min(i + 1, n - 1), j] - P[max(i - 1, 0), j]
+            dv = P[i, min(j + 1, m - 1)] - P[i, max(j - 1, 0)]
+            v = np.cross(du, dv)
+            if fora is not None and np.dot(v, P[i, j] - np.asarray(fora)) < 0:
+                v = -v
+            N[i, j] = v / max(np.linalg.norm(v), 1e-9)
+    for i in range(n - 1):
+        for j in range(m - 1):
+            idx = ((i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1))
+            M.quad(*(P[a, b] for a, b in idx), uv=tuple((a / (n - 1) * uvs, b / (m - 1) * uvs) for a, b in idx),
+                   face=tuple(N[i, j] + N[i + 1, j + 1]), nrms=tuple(N[a, b] for a, b in idx))
+
+
+def torno(M, cx, cz, perfil, seg=24, sz=0.7, yaw=0.0):
+    """Sólido de revolução de seção elíptica (largura 1, profundidade sz): perfil = [(y, raio), ...] de baixo para
+    cima. Tronco de manequim, garrafa, vaso."""
+    c, s = math.cos(yaw), math.sin(yaw)
+    P = []
+    for y, r in perfil:
+        anel = []
+        for k in range(seg + 1):
+            t = 2 * math.pi * k / seg
+            lx, lz = r * math.cos(t), r * sz * math.sin(t)
+            anel.append((cx + lx * c - lz * s, y, cz + lx * s + lz * c))
+        P.append(anel)
+    superficie(M, P, fora=None)
+    # garante a normal para fora: a ordem anel × volta dá a orientação; conferida pelo centro
+    return P
+
+
+def peca_pendurada(R, Mmet, x, ytop, z, tipo, rng, ao_longo='z'):
+    """Roupa num cabide (vista de lado na arara): gancho e cabide, ombros caídos, mangas, corpo em painel acolchoado
+    com pregas verticais que aumentam para a barra. tipo: camisa, casaco, vestido ou calca."""
+    comp = {'camisa': 0.72, 'casaco': 0.98, 'vestido': 1.1, 'calca': 0.55}[tipo]
+    larg = {'camisa': 0.46, 'casaco': 0.5, 'vestido': 0.4, 'calca': 0.36}[tipo]
+    esp = {'camisa': 0.025, 'casaco': 0.05, 'vestido': 0.022, 'calca': 0.03}[tipo]
+    fase = rng.uniform(0, 6.28)
+    # eixo da largura da peça (perpendicular à arara) e eixo da espessura (ao longo da arara)
+    def L(u, y, e):  # u: largura (m), e: espessura (m)
+        return (x + u, y, z + e) if ao_longo == 'z' else (x + e, y, z + u)
+    # cabide: gancho e triângulo
+    Mmet.tube([L(0, ytop + 0.07, 0), L(0.02, ytop + 0.1, 0), L(0, ytop + 0.12, 0), L(-0.02, ytop + 0.1, 0)], 0.004, seg=5)
+    Mmet.tube([L(0, ytop + 0.07, 0), L(0, ytop + 0.03, 0)], 0.004, seg=5)
+    Mmet.tube([L(-larg * 0.48, ytop - 0.06, 0), L(0, ytop + 0.03, 0), L(larg * 0.48, ytop - 0.06, 0),
+               L(-larg * 0.48, ytop - 0.06, 0)], 0.006, seg=5)
+    nu, nv = 9, 10
+    for lado in (-1, 1):  # frente e verso da peça
+        P = []
+        for i in range(nu):
+            u = -1 + 2 * i / (nu - 1)
+            col = []
+            for j in range(nv):
+                v = j / (nv - 1)
+                ombro = 0.07 * abs(u) * (1 - v) if tipo != 'calca' else 0.0
+                w = larg / 2 * (1 + (0.25 * v * v if tipo == 'vestido' else 0.04 * v))
+                if tipo == 'calca':  # duas pernas: estreita no meio, abaixo do gancho
+                    w = larg / 2
+                y = ytop - 0.05 - ombro - v * comp
+                prega = 0.012 * v * math.sin(5.5 * u * math.pi + fase) * (1.6 if tipo == 'vestido' else 1.0)
+                e = lado * (esp * math.sqrt(max(0.0, 1 - u * u)) + 0.004) + prega
+                col.append(L(u * w, y, e))
+            P.append(col)
+        superficie(R, P, fora=L(0, ytop - comp / 2, 0))
+    if tipo in ('camisa', 'casaco'):  # mangas penduradas junto ao corpo
+        for su in (-1, 1):
+            r = 0.045 if tipo == 'camisa' else 0.06
+            a = L(su * larg / 2 * 0.95, ytop - 0.1, 0)
+            b = L(su * larg / 2 * 1.02, ytop - 0.1 - comp * (0.55 if tipo == 'camisa' else 0.8), 0.01 * su)
+            R.tube([a, b], r, seg=8)
+
+
+def pilha_dobrada(R, Rescolhe, x, y, z, rng, n=None):
+    """Pilha de peças dobradas: camadas boleadas e levemente desalinhadas, de alturas diferentes."""
+    n = n or rng.randrange(4, 9)
+    for k in range(n):
+        h = rng.uniform(0.028, 0.042)
+        dx, dz = rng.uniform(-0.012, 0.012), rng.uniform(-0.012, 0.012)
+        rbox(Rescolhe(), (x - 0.15 + dx, y, z - 0.12 + dz), (x + 0.15 + dx, y + h, z + 0.12 + dz), r=0.014, seg=2,
+             bulge=0.006)
+        y += h
+    return y
+
+
 def textura_couro(path, w=512):
     """Normal map de vinil/couro: granulado fino irregular (o estofado deixa de parecer plástico liso)."""
     rng = np.random.default_rng(11)
@@ -942,44 +1033,51 @@ def roupas(out, texdir, seed, g=None, pbr=None):
         M['parede'].quad(a, b, (b[0], H, b[2]), (a[0], H, a[2]), face=f)
     M['teto'].quad((-W / 2, H, 0), (W / 2, H, 0), (W / 2, H, D), (-W / 2, H, D), face=(0, -1, 0))
     lights = []
-    # araras de parede (esquerda e direita): barra cromada e roupas penduradas uma ao lado da outra
+    # araras de parede (esquerda e direita): barra cromada com suportes e peças em cabides, de lado, agrupadas por cor
     for sx in (-1, 1):
         xw = sx * (W / 2 - 0.35)
-        for yb, comp in ((1.75, 1.0), (0.95, 0.65)) if sx < 0 else ((1.6, 1.15),):
-            M['metal'].tube([(xw, yb, 1.2), (xw, yb, D - 1.2)], 0.015, seg=6)
-            z = 1.3
-            while z < D - 1.3:
+        for yb, tipos in (((1.8, ('camisa', 'casaco')), (1.0, ('calca',))) if sx < 0 else ((1.75, ('vestido', 'casaco')),)):
+            M['metal'].tube([(xw, yb, 1.2), (xw, yb, D - 1.2)], 0.014, seg=10)
+            for zs in (1.2, D / 2, D - 1.2):  # suportes na parede
+                M['metal'].tube([(xw, yb, zs), (sx * W / 2, yb, zs)], 0.012, seg=8)
+            z = 1.35
+            while z < D - 1.4:
                 cor = rng.randrange(len(CORES))
+                tipo = rng.choice(tipos)
                 for _ in range(rng.randrange(3, 7)):
-                    if z > D - 1.3:
+                    if z > D - 1.4:
                         break
-                    largura = 0.5 if comp < 1.1 else 0.55
-                    abox(R[cor], (xw - largura / 2, yb - comp, z), (xw + largura / 2, yb - 0.04, z + 0.035))
-                    z += 0.06
-                z += 0.12
-    # mesas no meio com pilhas de roupa dobrada
+                    peca_pendurada(R[cor], M['metal'], xw, yb, z, tipo, rng, ao_longo='z')
+                    z += 0.075 if tipo != 'casaco' else 0.1
+                z += 0.14
+    # mesas no meio (tampo boleado, pés torneados) com pilhas de roupa dobrada
     for (x, z) in ((-1.2, 4.0), (1.2, 4.0), (-1.2, 7.5), (1.2, 7.5)):
-        abox(M['mesa'], (x - 0.7, 0.75, z - 0.45), (x + 0.7, 0.8, z + 0.45))
+        rbox(M['mesa'], (x - 0.7, 0.75, z - 0.45), (x + 0.7, 0.8, z + 0.45), r=0.012)
+        rbox(M['mesa'], (x - 0.64, 0.68, z - 0.39), (x + 0.64, 0.75, z + 0.39), r=0.008)  # saia do tampo
         for dx, dz in ((-0.4, -0.2), (0.0, -0.2), (0.4, -0.2), (-0.4, 0.2), (0.0, 0.2), (0.4, 0.2)):
             cor = rng.randrange(len(CORES))
-            hh = rng.uniform(0.08, 0.22)
-            abox(R[cor], (x + dx - 0.15, 0.8, z + dz - 0.12), (x + dx + 0.15, 0.8 + hh, z + dz + 0.12))
+            pilha_dobrada(None, lambda c=cor: R[c] if rng.random() < 0.8 else R[rng.randrange(len(CORES))],
+                          x + dx, 0.8, z + dz, rng)
         for dx in (-0.6, 0.6):
-            for dz in (-0.38, 0.38):
-                M['metal'].beam((x + dx, 0.0, z + dz), (x + dx, 0.75, z + dz), 0.04, 0.04)
-    # manequins (corpo estilizado branco brilhante, com a roupa no tronco)
+            for dz in (-0.36, 0.36):
+                M['mesa'].frustum((x + dx, z + dz), 0.022, 0.032, 0.0, 0.68, seg=12)
+    # manequins: tronco torneado (ombros, cintura, quadril), pescoço e cabeça ovais, base redonda; a roupa é uma
+    # casca um pouco maior por cima do tronco
+    corpo = [(0.92, 0.15), (1.0, 0.16), (1.1, 0.135), (1.2, 0.14), (1.32, 0.165), (1.42, 0.18), (1.48, 0.16),
+             (1.52, 0.09), (1.55, 0.05)]
     for (x, z) in ((-2.6, 1.6), (2.6, 1.6), (0.0, 9.8), (-0.8, 9.8)):
-        M['manequim'].cylinder((x, z), 0.18, 0.0, 0.02, seg=14)
-        M['manequim'].cylinder((x, z), 0.02, 0.02, 0.95, seg=8)
+        M['manequim'].frustum((x, z), 0.2, 0.18, 0.0, 0.02, seg=24)
+        M['manequim'].cylinder((x, z), 0.012, 0.02, 0.92, seg=10)
+        torno(M['manequim'], x, z, corpo + [(1.62, 0.045)], seg=24, sz=0.62)
         cor = rng.randrange(len(CORES))
-        R[cor].frustum((x, z), 0.17, 0.2, 0.9, 1.45, seg=14)
-        R[cor].sphere((x, 1.45, z), 0.2, 12, sy=0.5)
-        M['manequim'].cylinder((x, z), 0.05, 1.5, 1.6, seg=10)
-        M['manequim'].sphere((x, 1.72, z), 0.11, 12, sy=1.25)
+        torno(R[cor], x, z, [(y, r + 0.012) for y, r in corpo[:7]] + [(1.5, 0.1)], seg=24, sz=0.66)
+        torno(M['manequim'], x, z, [(1.62, 0.045), (1.66, 0.07), (1.74, 0.095), (1.82, 0.09), (1.88, 0.06),
+                                    (1.91, 0.0)], seg=20, sz=0.85)
     # espelho no fundo, balcão com caixa perto da entrada, spots no teto
     M['espelho'].quad((-1.0, 0.2, D - 0.02), (1.0, 0.2, D - 0.02), (1.0, 2.2, D - 0.02), (-1.0, 2.2, D - 0.02), face=(0, 0, -1))
-    abox(M['balcao'], (2.4, 0, 2.5), (4.2, 1.0, 3.2))
-    abox(M['metal'], (3.2, 1.0, 2.75), (3.6, 1.12, 3.05))
+    rbox(M['balcao'], (2.4, 0.08, 2.5), (4.2, 1.0, 3.2), r=0.03)
+    rbox(M['mesa'], (2.35, 1.0, 2.45), (4.25, 1.04, 3.25), r=0.015)
+    rbox(M['metal'], (3.2, 1.04, 2.75), (3.6, 1.16, 3.05), r=0.015)
     for x in (-2.0, 0.0, 2.0):
         M['metal'].tube([(x, H - 0.1, 1.0), (x, H - 0.1, D - 1.0)], 0.02, seg=6)
         for z in np.arange(1.8, D - 1.0, 1.6):
