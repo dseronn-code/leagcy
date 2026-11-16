@@ -493,7 +493,7 @@ if (window.legacy && window.legacy.aoAtualizarLauncher) {
 }
 $('#btn-atualizar-launcher').addEventListener('click', async () => {
   if ($('#btn-atualizar-launcher').dataset.reiniciar) return window.legacy.reiniciarLauncher();
-  const url = (catalogo && catalogo.launcher) || 'https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe';
+  const url = (catalogo && catalogo.launcher) || 'https://github.com/dseronn-code/legacy/releases/latest/download/Legacy-Setup.exe';
   await window.legacy.abrirExterno(url);
   aviso('O download do instalador novo começou no navegador. Feche o launcher e rode o instalador.');
 });

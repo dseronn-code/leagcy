@@ -18,7 +18,7 @@ const http = require('http');
 const https = require('https');
 const zlib = require('zlib');
 
-const RELEASES = process.env.LEGACY_RELEASES || 'https://github.com/dseronn-code/leagcy/releases';
+const RELEASES = process.env.LEGACY_RELEASES || 'https://github.com/dseronn-code/legacy/releases';
 const LOCAL = 'manifesto-local.json';
 const TEMP = '.atualizando';
 

@@ -8,7 +8,7 @@
       "tipo": "jogo",
       "precisa_conta": false,
       "versao": "0.1.0",
-      "download": "https://github.com/dseronn-code/leagcy/releases/latest/download/TimesSquare-Setup.exe"
+      "download": "https://github.com/dseronn-code/legacy/releases/latest/download/TimesSquare-Setup.exe"
     },
     {
       "id": "legacy-engine",
@@ -17,8 +17,8 @@
       "tipo": "ferramenta",
       "precisa_conta": true,
       "versao": "0.1.0",
-      "download": "https://github.com/dseronn-code/leagcy/releases/latest/download/LegacyEngine-Setup.exe"
+      "download": "https://github.com/dseronn-code/legacy/releases/latest/download/LegacyEngine-Setup.exe"
     }
   ],
-  "launcher": "https://github.com/dseronn-code/leagcy/releases/latest/download/Legacy-Setup.exe"
+  "launcher": "https://github.com/dseronn-code/legacy/releases/latest/download/Legacy-Setup.exe"
 }

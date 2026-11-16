@@ -31,7 +31,11 @@ DIST = os.path.join(RAIZ, 'dist')
 SAIDA = os.path.join(DIST, 'instaladores')
 LOCAL = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
 NODE_URL = 'https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip'
-REPO = 'dseronn-code/leagcy'
+# As versões saem no repositório público (só downloads e a apresentação; o código fica no privado). TRANSICAO: repositórios
+# antigos que recebem também o launcher, o latest.yml e os manifestos, para os launchers já instalados (que olham o
+# repositório antigo) se atualizarem para a versão que olha o novo. Esvaziar depois que o antigo virar privado.
+REPO = 'dseronn-code/legacy'
+TRANSICAO = ['dseronn-code/leagcy']
 
 
 def rodar(cmd, **kw):
@@ -269,22 +273,34 @@ def publicar():
         with open(caminho, 'w', encoding='utf-8') as f:
             json.dump(man, f)
         envios += subir + [(caminho, f'manifesto-{produto}.json')]
+    nomes_transicao = {'Legacy-Setup.exe', 'TimesSquare-Setup.exe', 'LegacyEngine-Setup.exe', 'latest.yml',
+                       'Legacy-Setup.exe.blockmap', 'manifesto-times-square.json', 'manifesto-legacy-engine.json'}
+    for repo in [REPO] + TRANSICAO:
+        lista = envios if repo == REPO else [(a, n) for a, n in envios if n in nomes_transicao]
+        try:
+            criar_release(repo, token, tag, v, lista)
+        except Exception as e:  # noqa: BLE001 - o repositório antigo pode já estar privado ou sem acesso
+            if repo == REPO:
+                raise
+            print(f'AVISO: versão de transição em {repo} não publicada: {e}', flush=True)
+
+
+def criar_release(repo, token, tag, v, envios):
     # Rascunho primeiro: só vira a "mais nova" depois de todos os arquivos subirem (o launcher nunca vê um
     # manifesto apontando para um arquivo que ainda não existe).
-    rel = api('POST', f'https://api.github.com/repos/{REPO}/releases', token, json.dumps({
-        'tag_name': tag, 'name': f'Legacy {v}', 'draft': True,
-        'target_commitish': subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=RAIZ, capture_output=True, text=True).stdout.strip(),
-        'body': 'Legacy Launcher, Times Square e Legacy Engine para Windows (gerados no PC com a RTX). '
-                'O launcher atualiza sozinho e baixa só os arquivos que mudaram.'}).encode())
+    rel = api('POST', f'https://api.github.com/repos/{repo}/releases', token, json.dumps({
+        'tag_name': tag, 'name': f'Legacy {v}', 'draft': True, 'target_commitish': 'main',
+        'body': 'Legacy Launcher, Times Square e Legacy Engine para Windows. Baixe o **Legacy-Setup.exe**: '
+                'o launcher instala os jogos e se atualiza sozinho.'}).encode())
     for k, (a, nome) in enumerate(envios):
         if os.path.getsize(a) > 5e6 or k % 50 == 0:
-            print(f'enviando {nome} ({k + 1}/{len(envios)}, {os.path.getsize(a) / 1e6:.1f} MB)', flush=True)
+            print(f'{repo}: enviando {nome} ({k + 1}/{len(envios)}, {os.path.getsize(a) / 1e6:.1f} MB)', flush=True)
         up = rel['upload_url'].split('{')[0] + '?name=' + urllib.parse.quote(nome)
         with open(a, 'rb') as f:
             api('POST', up, token, f.read(), 'application/octet-stream')
-    api('PATCH', f'https://api.github.com/repos/{REPO}/releases/{rel["id"]}', token,
+    api('PATCH', f'https://api.github.com/repos/{repo}/releases/{rel["id"]}', token,
         json.dumps({'draft': False, 'make_latest': 'true'}).encode())
-    print('Release publicada:', f'{RELEASES}/tag/{tag}', flush=True)
+    print('Release publicada:', f'https://github.com/{repo}/releases/tag/{tag}', flush=True)
 
 
 def main():

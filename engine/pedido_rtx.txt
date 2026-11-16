@@ -1,6 +1,6 @@
-# Rodada 46: conteúdo "cozinhado" (como o cook da Unreal). Ao gerar os instaladores, cada cena abre uma vez sem
-# janela e o cache da carga (texturas BC7, tangentes, geometria virtualizada) vai junto no download: o jogador não
-# calcula mais nada na 1ª abertura. O relatório traz o tempo de cada fase da carga na RTX. Título da janela pela cena.
+# Rodada 47: as versões passam a sair no repositório público dseronn-code/legacy (só downloads e apresentação; o
+# código fica neste, que vai virar privado). Esta versão também sai aqui (transição): os launchers instalados se
+# atualizam para a versão que olha o repositório novo. A 1ª publicação lá sobe todos os arquivos dos jogos.
 [45] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher
-[45] python tools\gerar_instaladores.py --publicar
+[100] python tools\gerar_instaladores.py --publicar
