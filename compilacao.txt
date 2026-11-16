@@ -1,0 +1,72 @@
+Versão do MSBuild 18.11.1-1.26513.3+940033be3 para .NET Framework
+
+  Checking File Globs
+  Performing build step for 'ShaderMake'
+  Vers├úo do MSBuild 18.11.1-1.26513.3+940033be3 para .NET Framework
+  
+    ShaderMake.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\shadermake-build\build\Release\ShaderMake.exe
+  No install step for 'ShaderMake'
+  Completed 'ShaderMake'
+  1>
+  1>
+  Detour.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\recastnavigation-build\Detour\Release\Detour.lib
+  DetourTileCache.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\recastnavigation-build\DetourTileCache\Release\DetourTileCache.lib
+  Recast.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\recastnavigation-build\Recast\Release\Recast.lib
+  DebugUtils.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\recastnavigation-build\DebugUtils\Release\DebugUtils.lib
+  DetourCrowd.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\recastnavigation-build\DetourCrowd\Release\DetourCrowd.lib
+  Jolt.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\jolt-build\Release\Jolt.lib
+  ShaderMakeBlob.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\shadermake-build\Release\ShaderMakeBlob.lib
+  Verificando fontes para dependências de módulo...
+  NRD.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\nrd_sdk-build\Release\NRD.lib
+  Verificando fontes para dependências de módulo...
+  NRI_Shared.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\nri-build\Release\NRI_Shared.lib
+  Verificando fontes para dependências de módulo...
+  NRI_VK.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\nri-build\Release\NRI_VK.lib
+  Verificando fontes para dependências de módulo...
+  NRI_Validation.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\nri-build\Release\NRI_Validation.lib
+  Verificando fontes para dependências de módulo...
+  NRI.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\nri-build\Release\NRI.lib
+  Verificando fontes para dependências de módulo...
+  bc7enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\Release\bc7enc.lib
+  enet.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\enet-build\Release\enet.lib
+  glfw.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\glfw-build\src\Release\glfw3.lib
+  glm.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\glm-build\glm\Release\glm.lib
+  1>
+  draco_animation.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_animation.dir\Release\draco_animation.lib
+  draco_animation_dec.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_animation_dec.dir\Release\draco_animation_dec.lib
+  draco_animation_enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_animation_enc.dir\Release\draco_animation_enc.lib
+  draco_attributes.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_attributes.dir\Release\draco_attributes.lib
+  draco_compression_attributes_dec.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_attributes_dec.dir\Release\draco_compression_attributes_dec.lib
+  draco_compression_attributes_enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_attributes_enc.dir\Release\draco_compression_attributes_enc.lib
+  draco_compression_attributes_pred_schemes_enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_attributes_pred_schemes_enc.dir\Release\draco_compression_attributes_pred_schemes_enc.lib
+  draco_compression_bit_coders.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_bit_coders.dir\Release\draco_compression_bit_coders.lib
+  draco_compression_decode.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_decode.dir\Release\draco_compression_decode.lib
+  draco_compression_encode.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_encode.dir\Release\draco_compression_encode.lib
+  draco_compression_entropy.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_entropy.dir\Release\draco_compression_entropy.lib
+  draco_compression_mesh_dec.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_mesh_dec.dir\Release\draco_compression_mesh_dec.lib
+  draco_compression_mesh_enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_mesh_enc.dir\Release\draco_compression_mesh_enc.lib
+  draco_compression_options.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_options.dir\Release\draco_compression_options.lib
+  draco_compression_point_cloud_dec.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_point_cloud_dec.dir\Release\draco_compression_point_cloud_dec.lib
+  draco_compression_point_cloud_enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_compression_point_cloud_enc.dir\Release\draco_compression_point_cloud_enc.lib
+  draco_core.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_core.dir\Release\draco_core.lib
+  draco_io.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_io.dir\Release\draco_io.lib
+  draco_mesh.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_mesh.dir\Release\draco_mesh.lib
+  draco_metadata.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_metadata.dir\Release\draco_metadata.lib
+  draco_metadata_dec.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_metadata_dec.dir\Release\draco_metadata_dec.lib
+  draco_metadata_enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_metadata_enc.dir\Release\draco_metadata_enc.lib
+  draco_point_cloud.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_point_cloud.dir\Release\draco_point_cloud.lib
+  draco_points_dec.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_points_dec.dir\Release\draco_points_dec.lib
+  draco_points_enc.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\draco_points_enc.dir\Release\draco_points_enc.lib
+  draco.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\draco-build\Release\draco.lib
+  Verificando fontes para dependências de módulo...
+  legacy_basisu.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\Release\legacy_basisu.lib
+  Verificando fontes para dependências de módulo...
+  legacy_imgui.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\Release\legacy_imgui.lib
+  legacy_lua.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\Release\legacy_lua.lib
+  meshoptimizer.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\_deps\meshoptimizer-build\Release\meshoptimizer.lib
+  mikktspace.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\Release\mikktspace.lib
+  Verificando fontes para dependências de módulo...
+  gltf_loader.cpp
+  Compilando...
+  gltf_loader.cpp
+  legacy.vcxproj -> C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\leagcy\engine\build\Release\legacy.exe

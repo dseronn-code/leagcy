@@ -1,0 +1,9 @@
+# Rodada 52: fotos novas da Times Square (sem os pedestres bugados e com as lojas de verdade) para o site, o launcher
+# e o repositório público; a multidão na altura dos olhos (para conferir); e a versão nova publicada (cidade com todas
+# as texturas, interiores sem estourar a memória de vídeo).
+[90] python tools\fotos.py --so ts_hero,ts_rua,ts_praca,ts_mobiliario,ts_lanchonete,ts_loja,ts_joalheria
+[60] python tools\trailer.py --so times_square_multidao
+[30] python tools\comprimir_tomadas.py
+[45] python tools\gerar_instaladores.py --jogos
+[10] python tools\gerar_instaladores.py --launcher
+[100] python tools\gerar_instaladores.py --publicar
