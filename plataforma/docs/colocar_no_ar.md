@@ -33,7 +33,7 @@ plano grátis do Render pode bloquear o envio por SMTP; se os e-mails não chega
 
 ## 3. Render (servidor)
 1. Entre em render.com → **Get Started** → **GitHub**.
-2. **New** → **Blueprint** → escolha o repositório `dseronn-code/leagcy` → ele lê o `render.yaml` sozinho.
+2. **New** → **Blueprint** → escolha o repositório `seronzera/leagcy` → ele lê o `render.yaml` sozinho.
 3. Ele pede 2 valores: `DATABASE_URL` (a connection string do Neon) e `RESEND_API_KEY` (a chave do Resend).
    Cole e clique em **Apply**. (O segredo dos códigos, `LEGACY_PEPPER`, ele cria sozinho.)
 4. Quando ficar **Live**, abra `https://legacy-conta.onrender.com/saude` (o endereço aparece no topo): tem que

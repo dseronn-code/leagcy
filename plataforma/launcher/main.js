@@ -69,7 +69,7 @@ function getJson(url) {
   });
 }
 ipcMain.handle('versao:ultima', async () => {
-  try { return (await getJson('https://api.github.com/repos/dseronn-code/legacy/releases/latest')).tag_name || null; }
+  try { return (await getJson('https://api.github.com/repos/seronzera/legacy/releases/latest')).tag_name || null; }
   catch { return null; }
 });
 ipcMain.handle('abrir:externo', (_e, url) => {

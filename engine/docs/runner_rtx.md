@@ -29,7 +29,7 @@ guardado em `%LOCALAPPDATA%\legacy_agente_rtx.txt`.
 
 Com o agente ligado, abra no navegador do celular (logado no GitHub):
 
-https://github.com/dseronn-code/leagcy/edit/ccr-5423dd89-y3br6e/engine/comando_pc.txt
+https://github.com/seronzera/leagcy/edit/ccr-5423dd89-y3br6e/engine/comando_pc.txt
 
 Troque a última linha por **`desligar`** (ou `reiniciar`, ou `cancelar`) e toque em **Commit changes**. Em até 30
 segundos, o Windows mostra o aviso e desliga em 60 segundos, com um desligamento normal. Cada vez que você salva, o

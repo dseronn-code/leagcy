@@ -34,8 +34,8 @@ NODE_URL = 'https://nodejs.org/dist/v22.11.0/node-v22.11.0-win-x64.zip'
 # As versões saem no repositório público (só downloads e a apresentação; o código fica no privado). TRANSICAO: repositórios
 # antigos que recebem também o launcher, o latest.yml e os manifestos, para os launchers já instalados (que olham o
 # repositório antigo) se atualizarem para a versão que olha o novo. Esvaziar depois que o antigo virar privado.
-REPO = 'dseronn-code/legacy'
-TRANSICAO = ['dseronn-code/leagcy']
+REPO = 'seronzera/legacy'
+TRANSICAO = ['seronzera/leagcy']
 
 
 def rodar(cmd, **kw):

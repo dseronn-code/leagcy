@@ -34,7 +34,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "dseronn-code",
+        "owner": "seronzera",
         "repo": "legacy"
       }
     ]
