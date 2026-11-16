@@ -1,7 +1,6 @@
 # Depois da limpeza do histórico (16/11/2026): atualiza esta pasta para o histórico novo e move as tags das
 # versões para os commits novos (o GitHub as guarda; esta sessão na nuvem não pode enviar tags).
 # Uso (na pasta engine, uma vez só): powershell -ExecutionPolicy Bypass -File tools\trocar_historico.ps1
-$ErrorActionPreference = "Stop"
 git fetch origin
 git checkout -q ccr-5423dd89-y3br6e
 git reset --hard origin/ccr-5423dd89-y3br6e
