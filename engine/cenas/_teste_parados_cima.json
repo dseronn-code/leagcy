@@ -1,0 +1,211 @@
+{
+ "sol": {
+  "elevacao": 35,
+  "azimute": 140,
+  "iluminancia": 60000
+ },
+ "camera": {
+  "posicao": [
+   0.5,
+   14,
+   0
+  ],
+  "alvo": [
+   0,
+   0,
+   0
+  ],
+  "fov": 55
+ },
+ "menu": false,
+ "materiais": {
+  "chao": {
+   "cor": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "rugosidade": 0.8
+  }
+ },
+ "entidades": [
+  {
+   "nome": "chao",
+   "forma": "caixa",
+   "meia_extensao": [
+    30,
+    0.25,
+    30
+   ],
+   "posicao": [
+    0,
+    -0.25,
+    0
+   ],
+   "material": "chao",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  }
+ ],
+ "multidao": {
+  "pessoas": [
+   "times_square/pessoas/p101.gltf",
+   "times_square/pessoas/p102.gltf",
+   "times_square/pessoas/p103.gltf",
+   "times_square/pessoas/p104.gltf",
+   "times_square/pessoas/p105.gltf"
+  ],
+  "animacoes": "times_square/personagens/estilos.gltf",
+  "mapa": {
+   "Hips": "pelvis",
+   "Chest": "spine_01",
+   "Chest2": "spine_02",
+   "Chest3": "spine_03",
+   "Neck": "neck_01",
+   "Head": "head",
+   "RightCollar": "clavicle_r",
+   "RightShoulder": "upperarm_r",
+   "RightElbow": "lowerarm_r",
+   "RightWrist": "hand_r",
+   "LeftCollar": "clavicle_l",
+   "LeftShoulder": "upperarm_l",
+   "LeftElbow": "lowerarm_l",
+   "LeftWrist": "hand_l",
+   "RightHip": "thigh_r",
+   "RightKnee": "calf_r",
+   "RightAnkle": "foot_r",
+   "RightToe": "ball_r",
+   "LeftHip": "thigh_l",
+   "LeftKnee": "calf_l",
+   "LeftAnkle": "foot_l",
+   "LeftToe": "ball_l"
+  },
+  "poses": 16,
+  "quantidade": 0,
+  "altura": 0.0,
+  "semente": 3,
+  "velocidade": [
+   1.0,
+   1.6
+  ],
+  "clipes": [
+   "OnPhoneRight",
+   "OnPhoneLeft",
+   "ArmsFolded",
+   "Neutral",
+   "OnPhoneRight"
+  ],
+  "faixas": [
+   {
+    "de": [
+     -2,
+     -25
+    ],
+    "ate": [
+     -2,
+     25
+    ],
+    "largura": 3
+   },
+   {
+    "de": [
+     2,
+     -25
+    ],
+    "ate": [
+     2,
+     25
+    ],
+    "largura": 3
+   }
+  ],
+  "obstaculos": [
+   [
+    -2,
+    0,
+    0.8
+   ],
+   [
+    2,
+    4,
+    0.6
+   ],
+   [
+    -1.5,
+    -6,
+    0.5
+   ]
+  ],
+  "guarda_chuva": {
+   "modelos": [
+    "times_square/guarda_chuva/preto.gltf",
+    "times_square/guarda_chuva/preto.gltf",
+    "times_square/guarda_chuva/azul.gltf",
+    "times_square/guarda_chuva/vermelho.gltf",
+    "times_square/guarda_chuva/verde.gltf",
+    "times_square/guarda_chuva/bege.gltf",
+    "times_square/guarda_chuva/xadrez.gltf"
+   ],
+   "fracao": 0.85,
+   "escala": 1.3,
+   "maos": {
+    "OnPhoneRight": [
+     -0.18,
+     2.35,
+     0.08
+    ],
+    "OnPhoneLeft": [
+     0.18,
+     2.35,
+     0.08
+    ],
+    "ArmsFolded": [
+     0.0,
+     2.0,
+     0.22
+    ]
+   }
+  },
+  "parados": {
+   "pessoas": [
+    "times_square/pessoas/p129.gltf",
+    "times_square/pessoas/p130.gltf",
+    "times_square/pessoas/p131.gltf",
+    "times_square/pessoas/p132.gltf",
+    "times_square/pessoas/p133.gltf",
+    "times_square/pessoas/p134.gltf",
+    "times_square/pessoas/p135.gltf",
+    "times_square/pessoas/p136.gltf",
+    "times_square/pessoas/p137.gltf",
+    "times_square/pessoas/p138.gltf",
+    "times_square/pessoas/p139.gltf",
+    "times_square/pessoas/p140.gltf"
+   ],
+   "animacoes": "times_square/personagens/parados.gltf",
+   "clipes": [
+    "parado_Neutral",
+    "parado_OnPhoneRight",
+    "parado_LookUp",
+    "parado_ArmsFolded",
+    "parado_HandsInPockets",
+    "parado_OnPhoneLeft"
+   ],
+   "quantidade": 30,
+   "areas": [
+    [
+     -4,
+     -6,
+     4,
+     6
+    ]
+   ],
+   "olhar_para": [
+    0,
+    30
+   ],
+   "grupos": 0.5
+  }
+ },
+ "chuva": 0.6
+}

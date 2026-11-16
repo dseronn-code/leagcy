@@ -1050,33 +1050,84 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
         LOG_INFO("Multidão: %d pessoas andando (%zu modelos, %u poses cada) em %zu faixas", count, clips.size(), poses,
                  lanes.size());
       }
-      // Gente parada: posições sorteadas nas áreas (longe dos obstáculos), olhando para um ponto com variação.
+      // Gente parada: posições sorteadas nas áreas (longe dos obstáculos e uns dos outros), olhando para um ponto com
+      // variação. Parte em rodinhas de 2 a 4 conversando (de frente para o centro do grupo, com os clipes sem
+      // celular). Na chuva, os de celular ou braços cruzados seguram o guarda-chuva (as mesmas "maos", sem "parado_").
       if (mj.contains("parados") && mj["parados"].is_object()) {
         const json& pj = mj["parados"];
+        std::vector<std::string> idleClips;
         const auto idle = bakeCrowdPeople(scene, path, pj.value("pessoas", json::array()), pj.value("animacoes", ""),
-                                          names(pj, "parado"), map, poses);
+                                          names(pj, "parado"), map, poses, &idleClips);
         std::vector<glm::vec4> areas;
         const json areasJson = pj.value("areas", json::array());
         for (const json& a : areasJson)
           areas.push_back({a[0].get<float>(), a[1].get<float>(), a[2].get<float>(), a[3].get<float>()});
         const json look = pj.value("olhar_para", json());
+        const float groupFrac = pj.value("grupos", 0.0f);
+        const bool raining = doc.value("chuva", 0.0f) > 0.05f && !doc.contains("tempestades");
+        std::vector<size_t> chatty;  // clipes bons para conversar (sem celular, sem olhar para cima)
+        for (size_t k = 0; k < idleClips.size(); ++k)
+          if (idleClips[k].find("Phone") == std::string::npos && idleClips[k].find("LookUp") == std::string::npos)
+            chatty.push_back(k);
+        std::unordered_map<std::string, glm::vec3> idleHands;
+        if (mj.contains("guarda_chuva") && mj["guarda_chuva"].is_object()) {
+          const json hands = mj["guarda_chuva"].value("maos_parados", json::object());
+          for (auto& [k, v] : hands.items()) idleHands[k] = vec3Of(v, glm::vec3(0.0f));
+        }
+        std::vector<glm::vec2> taken;
+        auto livre = [&](glm::vec2 p, float r) {
+          for (const glm::vec3& o : obstacles)
+            if (glm::length(p - glm::vec2(o.x, o.y)) < o.z) return false;
+          for (const glm::vec2& q : taken)
+            if (glm::length(p - q) < r) return false;
+          return true;
+        };
+        auto place = [&](glm::vec2 p, float yaw, size_t who) {
+          glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
+          m = glm::rotate(m, yaw + yaw0, glm::vec3(0, 1, 0));
+          m = glm::scale(m, glm::vec3(0.94f + 0.12f * u(rng)));
+          spawnCrowdPerson(scene, idle[who], m, 8.0f * u(rng), rng);
+          taken.push_back(p);
+          if (raining && !umbrellaModels.empty() && who < idleClips.size()) {
+            const auto hand = idleHands.find(idleClips[who]);
+            if (hand != idleHands.end() && u(rng) < umbrellaFrac) {
+              const glm::mat4 g = glm::scale(glm::rotate(glm::translate(m, hand->second), 0.05f, glm::vec3(1, 0, 0)),
+                                             glm::vec3(umbrellaScale));
+              for (auto [mesh, mat] : umbrellaModels[size_t(u(rng) * float(umbrellaModels.size())) % umbrellaModels.size()])
+                scene.addObject(mesh, g, mat);
+            }
+          }
+        };
         int made = 0;
         const int want = std::max(0, pj.value("quantidade", 100));
-        for (int i = 0; i < want * 4 && made < want && !idle.empty() && !areas.empty(); ++i) {
+        for (int i = 0; i < want * 6 && made < want && !idle.empty() && !areas.empty(); ++i) {
           const glm::vec4 a = areas[size_t(u(rng) * float(areas.size())) % areas.size()];
           const glm::vec2 p(a.x + (a.z - a.x) * u(rng), a.y + (a.w - a.y) * u(rng));
-          bool blocked = false;
-          for (const glm::vec3& o : obstacles) blocked |= glm::length(p - glm::vec2(o.x, o.y)) < o.z;
-          if (blocked) continue;
+          if (!chatty.empty() && u(rng) < groupFrac) {  // rodinha: 2 a 4 pessoas num círculo de ~0,6 m
+            const int n = 2 + int(u(rng) * 2.99f);
+            const float R = 0.45f + 0.1f * float(n), rot = glm::two_pi<float>() * u(rng);
+            bool ok = livre(p, R + 0.7f);
+            for (int k = 0; k < n && ok; ++k) {
+              const float ang = rot + glm::two_pi<float>() * float(k) / float(n);
+              ok = livre(p + R * glm::vec2(std::sin(ang), std::cos(ang)), 0.6f);
+            }
+            if (!ok) continue;
+            for (int k = 0; k < n && made < want; ++k) {
+              const float ang = rot + glm::two_pi<float>() * float(k) / float(n) + (u(rng) - 0.5f) * 0.3f;
+              const glm::vec2 q = p + R * glm::vec2(std::sin(ang), std::cos(ang));
+              const glm::vec2 to = p - q;  // de frente para o meio da roda
+              place(q, std::atan2(to.x, to.y) + (u(rng) - 0.5f) * 0.4f, chatty[size_t(u(rng) * float(chatty.size())) % chatty.size()]);
+              ++made;
+            }
+            continue;
+          }
+          if (!livre(p, 0.7f)) continue;
           float yaw = glm::two_pi<float>() * u(rng);
           if (look.is_array() && u(rng) < 0.7f) {  // a maioria olha para os telões, com ±40° de variação
             const glm::vec2 to = glm::vec2(look[0].get<float>(), look[1].get<float>()) - p;
             yaw = std::atan2(to.x, to.y) + (u(rng) - 0.5f) * 1.4f;
           }
-          glm::mat4 m = glm::translate(glm::mat4(1.0f), {p.x, y, p.y});
-          m = glm::rotate(m, yaw + yaw0, glm::vec3(0, 1, 0));
-          m = glm::scale(m, glm::vec3(0.94f + 0.12f * u(rng)));
-          spawnCrowdPerson(scene, idle[size_t(u(rng) * float(idle.size())) % idle.size()], m, 8.0f * u(rng), rng);
+          place(p, yaw, size_t(u(rng) * float(idle.size())) % idle.size());
           ++made;
         }
         LOG_INFO("Multidão: %d pessoas paradas (%zu modelos)", made, idle.size());
