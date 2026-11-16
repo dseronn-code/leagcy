@@ -674,6 +674,7 @@ class Facades:
         self.is_street = None  # (ponto médio, normal) -> a fachada dá para a rua? (senão é empena de divisa)
         self.lojas = []  # (tipo, posição da porta, giro): interiores 3D a encaixar atrás das vitrines
         self.lojas_restantes = 0
+        self.lojas_plantas = []  # plantas das lojas já postas (uma loja não pode cair dentro de outra)
         self.loja_ok = False  # o prédio atual pode ter loja com interior 3D (perto da praça)
         self._poly = None
         self.n_murais = 0
@@ -985,7 +986,11 @@ class Facades:
                 i0 = rng.randrange(0, nb - m + 1)
                 uc = (i0 + m / 2) * bw
                 cantos = [self.P(a, t, n, uc + su * Wi / 2, 0, -(Di + 0.6)) for su in (-1, 1)]
-                if all(self._poly.contains(Point(c[0], c[2])) for c in cantos):
+                pe = [self.P(a, t, n, uc + su * Wi / 2, 0, -dd) for su, dd in ((-1, 0.3), (1, 0.3), (1, Di + 0.6), (-1, Di + 0.6))]
+                planta = Polygon([(q[0], q[2]) for q in pe])
+                livre = not any(planta.intersects(o) for o in self.lojas_plantas)  # duas lojas no mesmo espaço: não
+                if livre and all(self._poly.contains(Point(c[0], c[2])) for c in cantos):
+                    self.lojas_plantas.append(planta.buffer(0.3))
                     loja = set(range(i0, i0 + m))
                     porta = i0 + m // 2  # o vão do meio é a porta: sem vidro e sem embasamento (dá para entrar)
                     x, _, z = self.P(a, t, n, uc, 0, -0.34)

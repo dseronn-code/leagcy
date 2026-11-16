@@ -191,13 +191,25 @@ def textura_quadro(path, seed, w=256, h=352):
     rng = random.Random(seed)
     img = Image.new('RGB', (w, h), (15, 15, 18))
     d = ImageDraw.Draw(img)
-    if seed % 2 == 0:  # retrato de dama: vestido claro, rosto, cabelo escuro, fundo esfumado
-        bg = Image.new('RGB', (w, h), (40, 34, 30)).filter(ImageFilter.GaussianBlur(4))
-        img.paste(bg)
-        d.ellipse((w * 0.38, h * 0.18, w * 0.62, h * 0.38), fill=(235, 210, 190))
-        d.ellipse((w * 0.34, h * 0.1, w * 0.66, h * 0.3), fill=(60, 40, 25))
-        d.polygon([(w * 0.2, h), (w * 0.3, h * 0.45), (w * 0.7, h * 0.45), (w * 0.8, h)], fill=(225, 225, 230))
-        img = img.filter(ImageFilter.GaussianBlur(1.5))
+    if seed % 2 == 0:  # paisagem a óleo: céu em degradê, sol baixo, serras em camadas, lago e pinceladas
+        rng2 = np.random.default_rng(seed)
+        y = np.linspace(0, 1, h)[:, None]
+        topo, horiz = np.array(rng.choice([(40, 60, 110), (70, 50, 90), (30, 70, 120)])), np.array((235, 170, 110))
+        ceu = topo * (1 - y) + horiz * y
+        arr = np.repeat(ceu[:, None, :], w, axis=1)
+        sx, sy = rng.uniform(0.3, 0.7) * w, 0.5 * h
+        yy, xx = np.mgrid[0:h, 0:w]
+        brilho = np.exp(-((xx - sx) ** 2 + (yy - sy) ** 2) / (2 * (w * 0.08) ** 2))[..., None]
+        arr = arr * (1 - brilho) + np.array((255, 225, 170)) * brilho
+        for k, (base, cor) in enumerate(((0.5, (90, 70, 95)), (0.58, (60, 55, 70)), (0.68, (35, 40, 40)))):
+            perfil = base * h + np.cumsum(rng2.normal(0, 2.2, w)) * (1 - 0.3 * k)
+            perfil -= perfil.mean() - base * h
+            mask = yy > perfil[None, :]
+            arr[mask] = np.array(cor) * (0.85 + 0.15 * rng2.random())
+        lago = yy > 0.8 * h
+        arr[lago] = arr[lago] * 0.5 + np.array((120, 110, 120)) * 0.3
+        arr += rng2.normal(0, 7, arr.shape)  # textura de pincelada
+        img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.8))
     else:  # anúncio: pedra preciosa no centro + nome fictício
         gem = rng.choice([(220, 30, 50), (40, 160, 230), (60, 200, 120), (250, 250, 255)])
         cx, cy = w / 2, h * 0.5
@@ -380,6 +392,20 @@ def pilha_dobrada(R, Rescolhe, x, y, z, rng, n=None):
              bulge=0.006)
         y += h
     return y
+
+
+def colar(dst, src, giro_x=0.0, pivo=(0, 0, 0)):
+    """Copia a malha src para dst girada giro_x graus em torno do eixo x que passa por pivo (encosto inclinado)."""
+    c, sn = math.cos(math.radians(giro_x)), math.sin(math.radians(giro_x))
+    px, py, pz = pivo
+    base = dst.nv
+    for i in range(src.nv):
+        x, y, z = src.p[3 * i:3 * i + 3]
+        nx, ny, nz = src.n[3 * i:3 * i + 3]
+        y, z = y - py, z - pz
+        dst.vert((x, py + y * c - z * sn, pz + y * sn + z * c), (nx, ny * c - nz * sn, ny * sn + nz * c),
+                 src.uv[2 * i:2 * i + 2])
+    dst.idx.extend(i + base for i in src.idx)
 
 
 def textura_couro(path, w=512):
@@ -708,9 +734,12 @@ def joalheria(out, texdir, seed, g=None, pbr=None):
 
     def vitrine(x0, x1, z0, z1):
         """Balcão-vitrine: caixa de madeira escura, faixa de luz, tampo e laterais de vidro, bandejas com joias."""
-        abox(M['madeira'], (x0, 0, z0), (x1, 0.85, z1), uvs=0.7)
-        abox(M['escuro'], (x0 - 0.02, 0.85, z0 - 0.02), (x1 + 0.02, 0.9, z1 + 0.02))
-        abox(M['bandeja'], (x0 + 0.05, 0.9, z0 + 0.05), (x1 - 0.05, 0.93, z1 - 0.05))
+        rbox(M['escuro'], (x0 + 0.06, 0, z0 + 0.06), (x1 - 0.06, 0.1, z1 - 0.06), r=0.01)        # rodapé recuado
+        rbox(M['madeira'], (x0, 0.1, z0), (x1, 0.84, z1), r=0.025, uvs=0.7)                     # corpo boleado
+        for yy in (0.16, 0.78):                                                                   # frisos de latão
+            rbox(M['ouro'], (x0 - 0.004, yy, z0 - 0.004), (x1 + 0.004, yy + 0.012, z1 + 0.004), r=0.004, seg=2)
+        rbox(M['escuro'], (x0 - 0.025, 0.84, z0 - 0.025), (x1 + 0.025, 0.9, z1 + 0.025), r=0.018)  # tampo boleado
+        rbox(M['bandeja'], (x0 + 0.05, 0.9, z0 + 0.05), (x1 - 0.05, 0.93, z1 - 0.05), r=0.01, bulge=0.004)  # veludo
         # vidro: tampo e 4 lados
         y0, y1 = 0.9, 1.22
         V = M['vidro']
@@ -720,6 +749,9 @@ def joalheria(out, texdir, seed, g=None, pbr=None):
         V.quad((x0, y0, z1), (x0, y0, z0), (x0, y1, z0), (x0, y1, z1), face=(-1, 0, 0))
         V.quad((x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0), face=(1, 0, 0))
         abox(M['luz_vitrine'], (x0 + 0.05, 1.2, (z0 + z1) / 2 - 0.015), (x1 - 0.05, 1.215, (z0 + z1) / 2 + 0.015))
+        for (xa, za), (xb, zb) in ((((x0, z0), (x1, z0))), (((x1, z0), (x1, z1))), (((x1, z1), (x0, z1))), (((x0, z1), (x0, z0)))):
+            M['prata'].tube([(xa, y1, za), (xb, y1, zb)], 0.006, seg=6)                           # aresta do vidro
+            M['prata'].tube([(xa, y1, za), (xa, y0, za)], 0.006, seg=6)
         lights.append(((x0 + x1) / 2, 1.15, (z0 + z1) / 2))
         # joias: degraus de expositor com anéis (toros), bustos com colar, suportes de relógio
         x = x0 + 0.2
@@ -809,12 +841,20 @@ def joalheria(out, texdir, seed, g=None, pbr=None):
     abox(M['moldura_branca'], (-0.85, 0, D - 0.03), (0.85, 2.75, D - 0.005))  # batente
     abox(M['madeira'], (-0.7, 0, D - 0.07), (0.7, 2.6, D - 0.03))  # porta do fundo, na frente do batente
     abox(M['ouro'], (0.5, 1.0, D - 0.1), (0.55, 1.15, D - 0.07))  # maçaneta
-    for (x, z) in ((-3.5, 9.0), (-2.6, 9.0), (3.5, 9.0)):  # cadeiras estofadas
-        abox(M['veludo'], (x - 0.25, 0.45, z - 0.25), (x + 0.25, 0.55, z + 0.25))
-        abox(M['veludo'], (x - 0.25, 0.55, z + 0.18), (x + 0.25, 1.1, z + 0.25))
-        for dx in (-0.22, 0.22):
-            for dz in (-0.22, 0.22):
-                M['madeira'].beam((x + dx, 0, z + dz), (x + dx, 0.45, z + dz), 0.035, 0.035)
+    for (x, z) in ((-3.5, 9.0), (-2.6, 9.0), (3.5, 9.0)):  # cadeiras estofadas (estilo Luís XVI)
+        rbox(M['madeira'], (x - 0.24, 0.4, z - 0.24), (x + 0.24, 0.46, z + 0.24), r=0.015)          # cinta do assento
+        rbox(M['veludo'], (x - 0.23, 0.46, z - 0.23), (x + 0.23, 0.53, z + 0.22), r=0.04, bulge=0.018)  # assento
+        for dx in (-0.2, 0.2):
+            for dz in (-0.2, 0.2):
+                M['madeira'].frustum((x + dx, z + dz), 0.014, 0.024, 0.0, 0.4, seg=10)              # pés torneados
+        enc = Mesh()
+        for dx in (-0.21, 0.21):                                                                     # montantes
+            enc.tube([(x + dx, 0.46, z + 0.22), (x + dx * 1.04, 0.8, z + 0.22), (x + dx * 0.8, 1.0, z + 0.22)], 0.018, seg=8)
+        enc.tube([(x - 0.17, 1.0, z + 0.22), (x, 1.06, z + 0.22), (x + 0.17, 1.0, z + 0.22)], 0.018, seg=8)
+        colar(M['madeira'], enc, -8, (x, 0.46, z + 0.22))
+        enc = Mesh()
+        rbox(enc, (x - 0.18, 0.56, z + 0.2), (x + 0.18, 0.98, z + 0.24), r=0.02, bulge=0.02)          # encosto
+        colar(M['veludo'], enc, -8, (x, 0.46, z + 0.22))
     for (x, z) in ((-5.4, 1.0), (5.4, 1.0), (-1.5, D - 0.5), (1.5, D - 0.5)):  # vasos com folhagem
         M['escuro'].frustum((x, z), 0.25, 0.35, 0.0, 1.0, seg=14)
         for _ in range(18):
