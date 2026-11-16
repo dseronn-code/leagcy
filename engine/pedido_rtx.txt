@@ -1,3 +1,8 @@
-# Rodada 49: as tomadas do reveal (rodada 48) não subiram (rv_luzes tinha 120 MB, acima do limite do GitHub).
-# Recupera a cópia do último envio e recomprime cada tomada para menos de 60 MB. Nada é renderizado de novo.
+# Rodada 50: Times Square sem piscar (cidade com posições exatas: letreiros e faixas de pedestre não brigam mais com a
+# superfície de trás) + Esc abre o menu de pausa. Grava de novo as tomadas da Times Square do reveal (para conferir o
+# piscar e remontar o vídeo), comprime para o envio e publica a versão nova.
+[60] python tools\trailer.py --so rv_chuva,rv_rua,rv_luzes,rv_aereo
 [30] python tools\comprimir_tomadas.py
+[45] python tools\gerar_instaladores.py --jogos
+[10] python tools\gerar_instaladores.py --launcher
+[100] python tools\gerar_instaladores.py --publicar
