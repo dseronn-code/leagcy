@@ -522,20 +522,20 @@ def conveniencia(out, texdir, seed, g=None, pbr=None):
     nd = 9
     dw = (W - 1.0) / nd
     zf = D - 0.9
-    abox(M['escuro'], (-W / 2 + 0.5, 0, zf), (W / 2 - 0.5, 0.25, D))
-    abox(M['escuro'], (-W / 2 + 0.5, 2.35, zf), (W / 2 - 0.5, H, D))
-    abox(M['cartazes'], (-W / 2 + 0.5, 2.4, zf - 0.02), (W / 2 - 0.5, 2.7, zf), skip=('+z', '-x', '+x', '+y', '-y'))
+    rbox(M['escuro'], (-W / 2 + 0.5, 0, zf), (W / 2 - 0.5, 0.25, D))
+    rbox(M['escuro'], (-W / 2 + 0.5, 2.35, zf), (W / 2 - 0.5, H, D))
+    rbox(M['cartazes'], (-W / 2 + 0.5, 2.4, zf - 0.02), (W / 2 - 0.5, 2.7, zf), skip=('+z', '-x', '+x', '+y', '-y'))
     for i in range(nd + 1):
         x = -W / 2 + 0.5 + i * dw
-        abox(M['metal'], (x - 0.03, 0.25, zf - 0.05), (x + 0.03, 2.35, zf))
-        abox(M['luz_fria'], (x - 0.012, 0.3, zf + 0.02), (x + 0.012, 2.3, zf + 0.06))
+        rbox(M['metal'], (x - 0.03, 0.25, zf - 0.05), (x + 0.03, 2.35, zf))
+        rbox(M['luz_fria'], (x - 0.012, 0.3, zf + 0.02), (x + 0.012, 2.3, zf + 0.06))
     M['vidro'].quad((-W / 2 + 0.5, 0.25, zf - 0.03), (W / 2 - 0.5, 0.25, zf - 0.03), (W / 2 - 0.5, 2.35, zf - 0.03),
                     (-W / 2 + 0.5, 2.35, zf - 0.03), face=(0, 0, -1))
     for i in range(nd):
         x0 = -W / 2 + 0.5 + i * dw
-        abox(M['metal'], (x0 + 0.4, 1.0, zf - 0.07), (x0 + 0.43, 1.6, zf - 0.04))  # puxador
+        rbox(M['metal'], (x0 + 0.4, 1.0, zf - 0.07), (x0 + 0.43, 1.6, zf - 0.04))  # puxador
         for sy in (0.3, 0.75, 1.2, 1.65, 2.05):
-            abox(M['prateleira'], (x0 + 0.04, sy - 0.02, zf + 0.05), (x0 + dw - 0.04, sy, D - 0.1))
+            rbox(M['prateleira'], (x0 + 0.04, sy - 0.02, zf + 0.05), (x0 + dw - 0.04, sy, D - 0.1))
             k = rng.randrange(256)
             garrafa = rng.random() < 0.6
             r = 0.035 if garrafa else 0.033
@@ -545,19 +545,19 @@ def conveniencia(out, texdir, seed, g=None, pbr=None):
                     produto_cilindro(M['produtos'], xx, sy, zz, r, h, k, garrafa)
     # ---- prateleira de parede (lado esquerdo) e duas gôndolas duplas no meio
     def gondola(x0, x1, zc, depth, height, faces, levels):
-        abox(M['prateleira'], (x0, 0, zc - depth / 2), (x1, 0.12, zc + depth / 2))
+        rbox(M['prateleira'], (x0, 0, zc - depth / 2), (x1, 0.12, zc + depth / 2))
         if faces == 2:
-            abox(M['prateleira'], (x0, 0.12, zc - 0.02), (x1, height, zc + 0.02))  # costas perfuradas
+            rbox(M['prateleira'], (x0, 0.12, zc - 0.02), (x1, height, zc + 0.02))  # costas perfuradas
         for xx in np.arange(x0, x1 + 0.01, 1.0):
-            abox(M['metal'], (xx - 0.02, 0, zc - 0.03), (xx + 0.02, height, zc + 0.03))
+            rbox(M['metal'], (xx - 0.02, 0, zc - 0.03), (xx + 0.02, height, zc + 0.03))
         sides = (-1, 1) if faces == 2 else (-1,)
         for sd in sides:
             zs0 = zc + sd * 0.03
             zs1 = zc + sd * depth / 2
             for lv in range(levels):
                 sy = 0.15 + lv * (height - 0.25) / levels
-                abox(M['prateleira'], (x0, sy - 0.025, min(zs0, zs1)), (x1, sy, max(zs0, zs1)))
-                abox(M['cartazes'], (x0, sy - 0.06, zs1 - 0.005 * sd), (x1, sy - 0.025, zs1),
+                rbox(M['prateleira'], (x0, sy - 0.025, min(zs0, zs1)), (x1, sy, max(zs0, zs1)))
+                rbox(M['cartazes'], (x0, sy - 0.06, zs1 - 0.005 * sd), (x1, sy - 0.025, zs1),
                      skip=('+x', '-x', '+y', '-y', '+z' if sd < 0 else '-z'))  # etiqueta de preço
                 x = x0 + 0.04
                 while x < x1 - 0.1:  # frentes de produto: 3 a 7 iguais lado a lado
@@ -599,10 +599,10 @@ def conveniencia(out, texdir, seed, g=None, pbr=None):
         M[k].idx.extend(i + base for i in src.idx)
     # ---- balcão do caixa (direita, perto da porta), em L, com vitrine de doces na frente
     bx0, bx1, bz0, bz1 = 1.6, 4.6, 1.6, 2.4
-    abox(M['balcao'], (bx0, 0, bz0), (bx1, 0.95, bz1), uvs=0.8)
-    abox(M['balcao'], (bx1 - 0.8, 0, bz1), (bx1, 0.95, 4.2), uvs=0.8)
-    abox(M['escuro'], (bx0 - 0.02, 0.95, bz0 - 0.02), (bx1 + 0.02, 0.99, bz1 + 0.02))
-    abox(M['escuro'], (bx1 - 0.82, 0.95, bz1), (bx1 + 0.02, 0.99, 4.22))
+    rbox(M['balcao'], (bx0, 0, bz0), (bx1, 0.95, bz1), uvs=0.8)
+    rbox(M['balcao'], (bx1 - 0.8, 0, bz1), (bx1, 0.95, 4.2), uvs=0.8)
+    rbox(M['escuro'], (bx0 - 0.02, 0.95, bz0 - 0.02), (bx1 + 0.02, 0.99, bz1 + 0.02))
+    rbox(M['escuro'], (bx1 - 0.82, 0.95, bz1), (bx1 + 0.02, 0.99, 4.22))
     for lv in (0.2, 0.5):  # vitrine de doces na frente do balcão (prateleirinhas inclinadas com chocolates)
         x = bx0 + 0.1
         while x < bx1 - 0.15:
@@ -611,19 +611,29 @@ def conveniencia(out, texdir, seed, g=None, pbr=None):
                 produto_caixa(M['produtos'], x + 0.045, lv, bz0 - 0.06, 0.09, 0.03, 0.12, k, face=(0, 0, -1))
                 x += 0.095
             x += 0.02
-        abox(M['prateleira'], (bx0 + 0.05, lv - 0.02, bz0 - 0.14), (bx1 - 0.05, lv, bz0))
+        rbox(M['prateleira'], (bx0 + 0.05, lv - 0.02, bz0 - 0.14), (bx1 - 0.05, lv, bz0))
     # caixa registradora, monitor, maquininha, expositor de loteria
     cx = bx0 + 0.9
-    abox(M['plastico'], (cx - 0.22, 0.99, 1.85), (cx + 0.22, 1.12, 2.25))
-    abox(M['plastico'], (cx - 0.2, 1.12, 2.05), (cx + 0.2, 1.2, 2.25))
-    abox(M['escuro'], (cx - 0.18, 1.2, 2.15), (cx + 0.18, 1.45, 2.19))  # tela
-    abox(M['plastico'], (cx - 0.04, 1.12, 2.17), (cx + 0.04, 1.2, 2.2))
-    abox(M['escuro'], (cx + 0.4, 0.99, 1.75), (cx + 0.5, 1.03, 1.95))  # maquininha de cartão
-    abox(M['cartazes'], (bx0 + 0.15, 0.99, 1.7), (bx0 + 0.45, 1.35, 1.72))  # expositor de loteria
-    abox(M['cartazes'], (bx1 - 0.6, 0.99, 1.75), (bx1 - 0.2, 1.25, 1.95))  # display de chiclete
+    # caixa registradora (PDV): gaveta, teclado inclinado, monitor fino no pedestal, visor do cliente
+    rbox(M['plastico'], (cx - 0.21, 0.99, 1.86), (cx + 0.21, 1.1, 2.26), r=0.012)                     # gaveta
+    rbox(M['escuro'], (cx - 0.2, 1.03, 1.855), (cx + 0.2, 1.06, 1.86), r=0.003, seg=1)                 # fresta
+    tec = Mesh()
+    rbox(tec, (cx - 0.17, 1.1, 1.9), (cx + 0.17, 1.125, 2.08), r=0.008)
+    colar(M['plastico'], tec, 10, (cx, 1.1, 2.0))
+    M['plastico'].cylinder((cx, 2.2), 0.018, 1.1, 1.3, seg=12)                                         # pedestal
+    tela = Mesh()
+    rbox(tela, (cx - 0.19, 1.28, 2.17), (cx + 0.19, 1.52, 2.2), r=0.01)
+    colar(M['escuro'], tela, -12, (cx, 1.3, 2.2))
+    rbox(M['escuro'], (cx + 0.4, 0.99, 1.75), (cx + 0.5, 1.03, 1.95))  # maquininha de cartão
+    # expositor de loteria: a frente (para o cliente, -z) com o cartaz na orientação certa; corpo e verso lisos
+    rbox(M['escuro'], (bx0 + 0.15, 0.99, 1.702), (bx0 + 0.45, 1.35, 1.72), r=0.004)
+    u0, v0, u1, v1 = 0.0, 0.0, 0.25, 1.0  # 1º cartaz do atlas (4 lado a lado)
+    M['cartazes'].quad((bx0 + 0.45, 1.0, 1.7), (bx0 + 0.15, 1.0, 1.7), (bx0 + 0.15, 1.34, 1.7), (bx0 + 0.45, 1.34, 1.7),
+                       uv=((u0, v1), (u1, v1), (u1, v0), (u0, v0)), face=(0, 0, -1))
+    rbox(M['cartazes'], (bx1 - 0.6, 0.99, 1.75), (bx1 - 0.2, 1.25, 1.95))  # display de chiclete
     # parede atrás do caixa: painel de cigarros (maços) e bebidas, com letreiros iluminados por cima
     zw = 4.6
-    abox(M['escuro'], (bx0, 0.0, zw), (bx1 + 0.3, 2.6, zw + 0.35))
+    rbox(M['escuro'], (bx0, 0.0, zw), (bx1 + 0.3, 2.6, zw + 0.35))
     for row in range(8):
         y = 1.0 + row * 0.16
         x = bx0 + 0.1
@@ -635,12 +645,12 @@ def conveniencia(out, texdir, seed, g=None, pbr=None):
             x += 0.015
     for i in range(3):  # letreiros iluminados de marcas sobre o painel
         x = bx0 + 0.2 + i * 1.05
-        abox(M['cartazes'], (x, 2.35, zw - 0.12), (x + 0.95, 2.6, zw - 0.04))
-        abox(M['luz'], (x + 0.02, 2.33, zw - 0.1), (x + 0.93, 2.35, zw - 0.06))
+        rbox(M['cartazes'], (x, 2.35, zw - 0.12), (x + 0.95, 2.6, zw - 0.04))
+        rbox(M['luz'], (x + 0.02, 2.33, zw - 0.1), (x + 0.93, 2.35, zw - 0.06))
     # revisteiro perto da vitrine e caixotes de fruta
     for i in range(4):
         y = 0.4 + i * 0.3
-        abox(M['prateleira'], (-4.6, y - 0.02, 0.6), (-2.6, y, 0.9))
+        rbox(M['prateleira'], (-4.6, y - 0.02, 0.6), (-2.6, y, 0.9))
         x = -4.55
         while x < -2.7:
             u0, v0, u1, v1 = ((rng.randrange(64) % 8) / 8, (rng.randrange(64) // 8) / 8, 0, 0)
@@ -651,12 +661,12 @@ def conveniencia(out, texdir, seed, g=None, pbr=None):
     for i, col in enumerate([(0.9, 0.45, 0.05), (0.85, 0.8, 0.1), (0.6, 0.05, 0.05), (0.3, 0.6, 0.1)]):
         x = -4.4 + (i % 2) * 0.7
         z = 2.0 + (i // 2) * 0.6
-        abox(M['balcao'], (x - 0.3, 0.55 + 0.25 * (i // 2), z - 0.25), (x + 0.3, 0.65 + 0.25 * (i // 2), z + 0.25))
+        rbox(M['balcao'], (x - 0.3, 0.55 + 0.25 * (i // 2), z - 0.25), (x + 0.3, 0.65 + 0.25 * (i // 2), z + 0.25))
         for _ in range(14):
             M['fruta'].sphere((x + rng.uniform(-0.24, 0.24), 0.7 + 0.25 * (i // 2), z + rng.uniform(-0.2, 0.2)),
                               rng.uniform(0.04, 0.06), 8)
     # tapetes da entrada, cartazes nas paredes, relógio, câmera de segurança, ventilador
-    abox(M['tapete'], (-1.4, 0.0, 0.3), (1.0, 0.012, 1.6))
+    rbox(M['tapete'], (-1.4, 0.0, 0.3), (1.0, 0.012, 1.6))
     for i in range(5):
         z = 2.0 + i * 1.8
         u0, v0 = (i % 4) / 4, (i // 4) / 4
@@ -687,7 +697,7 @@ def conveniencia(out, texdir, seed, g=None, pbr=None):
         'escuro': g.material('escuro', color=(0.05, 0.05, 0.055), rough=0.5),
         'tapete': g.material('tapete', color=(0.08, 0.09, 0.1), rough=0.95),
         'fruta': g.material('fruta', color=(0.85, 0.4, 0.05), rough=0.45),
-        'plastico': g.material('plastico', color=(0.85, 0.85, 0.82), rough=0.35),
+        'plastico': g.material('plastico', color=(0.16, 0.16, 0.17), rough=0.35),
     }
     ids = [g.add_mesh('conveniencia_' + k, mesh, mats[k], scene_node=not embed) for k, mesh in M.items()]
     luzes = [((x, y, z), (1.0, 0.97, 0.92), 140.0, 10.0) for (x, y, z) in lights]
