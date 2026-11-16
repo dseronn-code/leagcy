@@ -816,6 +816,10 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           // Temperamento: o ritmo varia devagar em volta da velocidade própria (amplitude e período por pessoa); quem
           // não consegue passar por alguém logo à frente diminui o passo atrás dele.
           float s = 0.0f, cur = 0.0f, ritmoAmp = 0.05f, ritmoW = 0.3f, ritmoFase = 0.0f;
+          // Reação a um esbarrão (personagem a mais de 1,2 m/s encostando): a pessoa é empurrada na direção do
+          // golpe, freia, gira o corpo para fora e inclina para o lado do empurrão, voltando ao passo em ~1 s.
+          float tropeco = 0.0f, giro = 0.0f;
+          glm::vec2 empurrao{0.0f}, eixoQueda{0.0f};
         };
         // Obstáculos numa grade de 4 m (2.000 pessoas × 1.100 obstáculos por quadro seria lento).
         auto obsGrid = std::make_shared<std::unordered_map<int64_t, std::vector<glm::vec3>>>();
@@ -850,14 +854,32 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           ag.ritmoFase = 6.2831853f * u(rng);
           agents->push_back(std::move(ag));
         }
-        scene.addAnimator([agents, obsGrid, okey, y, yaw0](scene::Scene& sc, float t, float dt) {
+        scene.addAnimator([this, agents, obsGrid, okey, y, yaw0](scene::Scene& sc, float t, float dt) {
           std::vector<Agent>& A = *agents;
           const float step = std::min(dt, 0.1f);
+          constexpr float kTropeco = 0.9f;
+          // Personagens da cena (o jogador e os de roteiro/IA): posição e velocidade no chão. A multidão abre espaço
+          // para eles e reage quando é atropelada.
+          std::vector<std::pair<glm::vec2, glm::vec2>> pers;
+          if (physics)
+            for (auto ent : registry.view<Character>()) {
+              const Character& c = registry.get<Character>(ent);
+              if (c.id == ~0u || c.ragdoll.active || c.remoteSlot >= 0) continue;
+              const glm::vec3 p = physics->characterFeet(c.id), v = physics->characterVelocity(c.id);
+              if (std::abs(p.y - y) < 2.5f) pers.push_back({{p.x, p.z}, {v.x, v.z}});
+            }
           // 1) Posição ao longo da faixa e desvio dos obstáculos olhando até 4 m à frente: a pessoa escolhe o lado
           //    e muda o caminho aos poucos (~0,9 m/s de lado), em vez de ser jogada para a borda ao encostar.
           for (Agent& a : A) {
             const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, n(-d.y, d.x), f = d * a.dir;
-            a.s = std::fmod(a.s + a.cur * step, a.L.length);
+            if (a.tropeco > 0.0f) {  // o empurrão desloca a pessoa (ao longo e de lado) e some em ~0,3 s
+              a.s += glm::dot(a.empurrao, f) * step;
+              a.side = glm::clamp(a.side + glm::dot(a.empurrao, n) * step, -0.5f * a.L.width - 0.2f,
+                                  0.5f * a.L.width + 0.2f);
+              a.empurrao *= std::exp(-6.0f * step);
+              a.tropeco = std::max(0.0f, a.tropeco - step);
+            }
+            a.s = std::fmod(a.s + a.cur * step + a.L.length, a.L.length);
             const float s = a.s;
             const glm::vec2 c = a.dir > 0.0f ? a.L.a + d * s : a.L.b - d * s;  // ponto no eixo da faixa
             float alvo = a.side;
@@ -913,8 +935,26 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               }
             // Desvio só dentro da faixa (+20 cm): com +60 cm, quem desviava encostava na fachada e aparecia "dentro" das
             // vitrines das lojas.
+            // Personagens: espaço pessoal maior (1,6 m) que entre desconhecidos da multidão; quem está parado bem na
+            // frente faz a pessoa frear e contornar. Encostar correndo derruba o passo dela (esbarrão).
+            for (const auto& [pp, pv] : pers) {
+              const glm::vec2 r = pp - a.pos;
+              const float dist = glm::length(r), along = glm::dot(r, f), across = glm::dot(r, n);
+              if (dist < 1.6f && along > -0.3f) push += (across >= 0.0f ? -1.0f : 1.0f) * (1.6f - dist) * 0.6f;
+              if (dist < 1.5f && along > 0.2f && std::abs(across) < 0.5f) frenteVel = std::min(frenteVel, 0.5f);
+              const float vel = glm::length(pv);
+              if (dist < 0.6f && vel > 1.2f && a.tropeco <= 0.0f) {
+                const glm::vec2 golpe = pv / vel, fora = dist > 1e-3f ? -r / dist : golpe;
+                a.empurrao = glm::normalize(golpe + fora) * std::min(vel, 5.0f) * 0.7f;
+                a.eixoQueda = glm::normalize(a.empurrao);
+                a.giro = (glm::dot(golpe, n) * a.dir >= 0.0f ? 1.0f : -1.0f) * 0.7f;
+                a.tropeco = kTropeco;
+                a.cur *= 0.3f;
+              }
+            }
             float alvoVel = a.speed * (1.0f + a.ritmoAmp * std::sin(a.ritmoW * t + a.ritmoFase));
             if (frenteVel < alvoVel) alvoVel = std::max(0.4f, frenteVel * 0.95f);
+            if (a.tropeco > 0.0f) alvoVel = 0.25f;
             a.cur += (alvoVel - a.cur) * std::min(1.0f, 1.5f * step);
             for (uint32_t o : a.objs) sc.objects[o].animRate = glm::clamp(a.cur / 1.35f, 0.6f, 1.3f);
             const float half = a.L.width * 0.5f + 0.2f;
@@ -925,12 +965,19 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           for (Agent& a : A) {
             const glm::vec2 d = (a.L.b - a.L.a) / a.L.length, f = d * a.dir;
             const glm::vec2 v = a.pos - a.prevPos;
-            const float alvoYaw = (a.started && glm::length(v) > 0.3f * step) ? std::atan2(v.x, v.y) : std::atan2(f.x, f.y);
+            float alvoYaw = (a.started && glm::length(v) > 0.3f * step && a.tropeco <= 0.0f) ? std::atan2(v.x, v.y)
+                                                                                               : std::atan2(f.x, f.y);
+            const float k = a.tropeco / kTropeco;  // 1 no esbarrão, 0 recuperado
+            alvoYaw += a.giro * k;
             if (!a.started) a.yaw = alvoYaw;
             float dy = std::remainder(alvoYaw - a.yaw, 6.2831853f);
             a.yaw += dy * std::min(1.0f, 7.0f * step);
             a.started = true;
             glm::mat4 m = glm::translate(glm::mat4(1.0f), {a.pos.x, y, a.pos.y});
+            if (k > 0.0f) {  // inclina pelos pés para o lado do empurrão e volta (sobe rápido, desce devagar)
+              const float lean = 0.16f * std::sin(3.14159265f * std::pow(1.0f - k, 0.6f));
+              m = glm::rotate(m, lean, glm::vec3(a.eixoQueda.y, 0.0f, -a.eixoQueda.x));
+            }
             m = glm::rotate(m, a.yaw + yaw0, glm::vec3(0, 1, 0));
             for (uint32_t o : a.objs) sc.setTransform(o, glm::scale(m, glm::vec3(a.scale)));
           }

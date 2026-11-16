@@ -980,7 +980,7 @@ class Facades:
         # Loja de verdade (interior 3D) atrás de alguns vãos: só perto da praça, com fachada larga e prédio fundo.
         loja, porta = set(), -1
         if self.loja_ok and self.lojas_restantes > 0 and self._poly is not None and rng.random() < 0.9:
-            tipo, Wi, Di = rng.choices([('conveniencia', 10.0, 12.0), ('joalheria', 12.0, 14.0), ('lanchonete', 10.0, 12.0), ('roupas', 10.0, 12.0)], [2, 1, 2, 2])[0]
+            tipo, Wi, Di = rng.choices([('conveniencia', 10.0, 12.0), ('joalheria', 12.0, 14.0), ('lanchonete', 10.0, 12.0), ('roupas', 10.0, 12.0), ('cafe', 10.0, 12.0), ('farmacia', 10.0, 12.0)], [2, 1, 2, 2, 2, 1])[0]
             m = int(Wi // bw)
             if m >= 2 and nb >= m:
                 i0 = rng.randrange(0, nb - m + 1)

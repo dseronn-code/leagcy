@@ -2,7 +2,7 @@
 # lojas refeitas com forma de verdade), a multidão em vídeo (poses interpoladas, passada pela velocidade, desvio
 # antecipado) e a versão nova publicada (cidade com interiores e mobiliário refeitos, pedestres novos, reveal no launcher).
 [90] python tools\fotos.py --so ts_hero,ts_rua,ts_praca --quadros 96
-[90] python tools\fotos.py --so ts_mobiliario,ts_lanchonete,ts_loja,ts_joalheria,ts_conveniencia
+[120] python tools\fotos.py --so ts_mobiliario,ts_lanchonete,ts_loja,ts_joalheria,ts_conveniencia,ts_cafe,ts_farmacia
 [60] python tools\trailer.py --so times_square_multidao --quality alto
 [30] python tools\comprimir_tomadas.py
 [45] python tools\gerar_instaladores.py --jogos

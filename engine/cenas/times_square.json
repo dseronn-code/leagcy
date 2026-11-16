@@ -35,9 +35,9 @@
   {
    "nome": "vapor00",
    "posicao": [
-    13.65,
+    -11.99,
     0.02,
-    9.45
+    -40.17
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -49,9 +49,9 @@
   {
    "nome": "vapor01",
    "posicao": [
-    -11.52,
+    66.71,
     0.02,
-    12.27
+    -1.72
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -63,9 +63,9 @@
   {
    "nome": "vapor02",
    "posicao": [
-    12.47,
+    -13.59,
     0.02,
-    17.68
+    -92.38
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -77,9 +77,9 @@
   {
    "nome": "vapor03",
    "posicao": [
-    -11.6,
+    -10.97,
     0.02,
-    28.49
+    -97.92
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -90,146 +90,6 @@
   },
   {
    "nome": "vapor04",
-   "posicao": [
-    55.27,
-    0.02,
-    -1.93
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor05",
-   "posicao": [
-    16.53,
-    0.02,
-    55.54
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor06",
-   "posicao": [
-    -14.68,
-    0.02,
-    -56.99
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor07",
-   "posicao": [
-    -16.59,
-    0.02,
-    -92.62
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor08",
-   "posicao": [
-    53.72,
-    0.02,
-    81.64
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor09",
-   "posicao": [
-    22.37,
-    0.02,
-    97.0
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor10",
-   "posicao": [
-    68.81,
-    0.02,
-    -81.68
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor11",
-   "posicao": [
-    17.03,
-    0.02,
-    106.73
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor12",
-   "posicao": [
-    124.53,
-    0.02,
-    -0.75
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor13",
-   "posicao": [
-    25.48,
-    0.02,
-    122.43
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor14",
    "posicao": [
     130.0,
     0.02,
@@ -243,11 +103,151 @@
    }
   },
   {
+   "nome": "vapor05",
+   "posicao": [
+    20.54,
+    0.02,
+    142.13
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor06",
+   "posicao": [
+    -19.64,
+    0.02,
+    -142.68
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor07",
+   "posicao": [
+    130.0,
+    0.02,
+    80.0
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor08",
+   "posicao": [
+    130.0,
+    0.02,
+    -80.0
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor09",
+   "posicao": [
+    -170.0,
+    0.02,
+    0.0
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor10",
+   "posicao": [
+    32.84,
+    0.02,
+    182.61
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor11",
+   "posicao": [
+    -170.0,
+    0.02,
+    80.0
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor12",
+   "posicao": [
+    -170.0,
+    0.02,
+    -80.0
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor13",
+   "posicao": [
+    110.34,
+    0.02,
+    -159.02
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
+   "nome": "vapor14",
+   "posicao": [
+    119.86,
+    0.02,
+    161.15
+   ],
+   "particulas": {
+    "tipo": "fumaca",
+    "raio": 0.45,
+    "escala": 0.9,
+    "quantidade": 220
+   }
+  },
+  {
    "nome": "vapor15",
    "posicao": [
-    11.6,
+    200.85,
     0.02,
-    134.26
+    -1.37
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -259,9 +259,9 @@
   {
    "nome": "vapor16",
    "posicao": [
-    -120.67,
+    -125.84,
     0.02,
-    -82.35
+    -159.96
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -273,9 +273,9 @@
   {
    "nome": "vapor17",
    "posicao": [
-    -129.62,
+    130.0,
     0.02,
-    -78.13
+    160.0
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -289,7 +289,7 @@
    "posicao": [
     130.0,
     0.02,
-    80.0
+    -160.0
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -301,9 +301,9 @@
   {
    "nome": "vapor19",
    "posicao": [
-    130.0,
+    -36.46,
     0.02,
-    -80.0
+    -207.27
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -315,9 +315,9 @@
   {
    "nome": "vapor20",
    "posicao": [
-    12.91,
+    35.47,
     0.02,
-    -169.02
+    215.53
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -329,9 +329,9 @@
   {
    "nome": "vapor21",
    "posicao": [
-    13.03,
+    206.16,
     0.02,
-    169.15
+    -79.22
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -343,9 +343,9 @@
   {
    "nome": "vapor22",
    "posicao": [
-    -170.0,
+    -20.89,
     0.02,
-    0.0
+    227.83
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -359,7 +359,7 @@
    "posicao": [
     -170.0,
     0.02,
-    80.0
+    160.0
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -373,7 +373,7 @@
    "posicao": [
     -170.0,
     0.02,
-    -80.0
+    -160.0
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -385,9 +385,9 @@
   {
    "nome": "vapor25",
    "posicao": [
-    -113.02,
+    -78.42,
     0.02,
-    -158.15
+    227.14
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -399,9 +399,9 @@
   {
    "nome": "vapor26",
    "posicao": [
-    -118.48,
+    -54.27,
     0.02,
-    -160.28
+    239.86
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -413,9 +413,9 @@
   {
    "nome": "vapor27",
    "posicao": [
-    -118.02,
+    58.25,
     0.02,
-    -160.83
+    239.69
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -427,9 +427,9 @@
   {
    "nome": "vapor28",
    "posicao": [
-    130.0,
+    -118.71,
     0.02,
-    160.0
+    227.48
    ],
    "particulas": {
     "tipo": "fumaca",
@@ -441,79 +441,9 @@
   {
    "nome": "vapor29",
    "posicao": [
-    130.0,
+    -19.55,
     0.02,
-    -160.0
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor30",
-   "posicao": [
-    -170.0,
-    0.02,
-    160.0
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor31",
-   "posicao": [
-    -170.0,
-    0.02,
-    -160.0
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor32",
-   "posicao": [
-    89.49,
-    0.02,
-    227.26
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor33",
-   "posicao": [
-    67.25,
-    0.02,
-    239.32
-   ],
-   "particulas": {
-    "tipo": "fumaca",
-    "raio": 0.45,
-    "escala": 0.9,
-    "quantidade": 220
-   }
-  },
-  {
-   "nome": "vapor34",
-   "posicao": [
-    -42.83,
-    0.02,
-    -254.57
+    -257.87
    ],
    "particulas": {
     "tipo": "fumaca",

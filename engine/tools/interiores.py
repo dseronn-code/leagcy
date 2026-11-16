@@ -1172,6 +1172,207 @@ def roupas(out, texdir, seed, g=None, pbr=None):
     return path
 
 
+def _casca(M, W, D, H, piso_uvs=1.2):
+    """Piso, três paredes (a frente é a vitrine da cidade) e forro."""
+    M['piso'].quad((-W / 2, 0, 0), (W / 2, 0, 0), (W / 2, 0, D), (-W / 2, 0, D),
+                   uv=((-W / piso_uvs, 0), (W / piso_uvs, 0), (W / piso_uvs, D / piso_uvs), (-W / piso_uvs, D / piso_uvs)),
+                   face=(0, 1, 0))
+    for (a, b, f) in (((-W / 2, 0, D), (W / 2, 0, D), (0, 0, -1)), ((-W / 2, 0, 0), (-W / 2, 0, D), (1, 0, 0)),
+                      ((W / 2, 0, D), (W / 2, 0, 0), (-1, 0, 0))):
+        L = math.dist(a, b)
+        M['parede'].quad(a, b, (b[0], H, b[2]), (a[0], H, a[2]), uv=((0, 0), (L / 2, 0), (L / 2, H / 2), (0, H / 2)), face=f)
+    M['teto'].quad((-W / 2, H, 0), (W / 2, H, 0), (W / 2, H, D), (-W / 2, H, D), face=(0, -1, 0))
+
+
+def _fechar(g, M, mats, nome, embed, out, lights, cor, inten, raio):
+    ids = [g.add_mesh(f'{nome}_' + k, mesh, mats[k], scene_node=not embed) for k, mesh in M.items() if mesh.nv]
+    luzes = [((x, y, z), cor, inten, raio) for (x, y, z) in lights]
+    if embed:
+        return [i for i in ids if i is not None], luzes, 0
+    for pos, col, it, rr in luzes:
+        g.light(pos, col, it, rr)
+    path = os.path.join(out, f'{nome}.gltf')
+    g.write(path)
+    print(path, sum(m.nv for m in M.values()), 'vértices')
+    return path
+
+
+def cafe(out, texdir, seed, g=None, pbr=None):
+    """Cafeteria (10 × 12 × 3,4 m): piso de madeira, balcão de madeira boleado com máquina de espresso, moedor e
+    vitrine de doces, quadro-negro de cardápio, mesinhas redondas de pedestal com cadeiras de bistrô, bancada de
+    janela com banquetas, prateleira de xícaras e sacos de café, pendentes de vidro âmbar, plantas."""
+    rng = random.Random(seed)
+    os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
+    tex = lambda n: os.path.join(out, 'tex', 'int_' + n)
+    embed = g is not None
+    if not embed:
+        g = Gltf()
+        pbr = Pbr(g, texdir, out)
+    W, D, H = 10.0, 12.0, 3.4
+    M = {k: Mesh() for k in ('piso', 'parede', 'teto', 'madeira', 'tampo', 'inox', 'escuro', 'quadro', 'vidro', 'ambar',
+                             'luz', 'xicara', 'saco', 'doce', 'planta', 'vaso', 'assento')}
+    _casca(M, W, D, H)
+    lights = []
+    # balcão no fundo, de lado a lado, com a máquina de espresso, moedor e a vitrine de doces
+    zb = D - 2.6
+    rbox(M['madeira'], (-3.5, 0.08, zb - 0.35), (2.5, 1.0, zb + 0.35), r=0.03)
+    rbox(M['escuro'], (-3.45, 0, zb - 0.3), (2.45, 0.08, zb + 0.3), r=0.01)
+    rbox(M['tampo'], (-3.6, 1.0, zb - 0.42), (2.6, 1.05, zb + 0.42), r=0.02)
+    for x in (-2.6, -1.7):  # máquina de espresso de dois grupos: corpo inox boleado, bandeja, bicos, xícaras em cima
+        rbox(M['inox'], (x - 0.38, 1.05, zb - 0.05), (x + 0.38, 1.5, zb + 0.32), r=0.04)
+        rbox(M['escuro'], (x - 0.3, 1.06, zb - 0.22), (x + 0.3, 1.09, zb - 0.02), r=0.006, seg=2)
+        for dx in (-0.16, 0.16):
+            M['inox'].cylinder((x + dx, zb - 0.07), 0.04, 1.2, 1.3, seg=12)
+            M['escuro'].tube([(x + dx, 1.25, zb - 0.07), (x + dx, 1.25, zb - 0.25)], 0.012, seg=6)
+        for k in range(5):
+            torno(M['xicara'], x - 0.3 + k * 0.15, zb + 0.15, [(1.5, 0.028), (1.53, 0.03), (1.565, 0.036), (1.565, 0.0)],
+                  seg=14, sz=1.0)
+    M['inox'].frustum((-0.9, zb + 0.1), 0.08, 0.07, 1.05, 1.3, seg=14)          # moedor
+    M['ambar'].frustum((-0.9, zb + 0.1), 0.06, 0.09, 1.3, 1.5, seg=14)
+    rbox(M['madeira'], (-0.2, 1.05, zb - 0.38), (1.9, 1.12, zb + 0.38), r=0.015)   # vitrine de doces
+    V = M['vidro']
+    rbox(V, (-0.18, 1.12, zb - 0.36), (1.88, 1.48, zb + 0.36), r=0.01, seg=1)
+    for k in range(10):
+        x = -0.05 + k * 0.19
+        for zz in (zb - 0.18, zb + 0.15):
+            if rng.random() < 0.85:
+                torno(M['doce'], x, zz, [(1.13, 0.06), (1.16, 0.065), (1.19, 0.05), (1.205, 0.0)], seg=12, sz=1.0)
+    # quadro-negro do cardápio e prateleiras com xícaras e sacos de café atrás do balcão
+    rbox(M['madeira'], (-3.2, 1.75, D - 0.08), (0.2, 2.95, D - 0.02), r=0.02)
+    M['quadro'].quad((0.12, 1.83, D - 0.085), (-3.12, 1.83, D - 0.085), (-3.12, 2.87, D - 0.085), (0.12, 2.87, D - 0.085),
+                     uv=((0, 1), (1, 1), (1, 0), (0, 0)), face=(0, 0, -1))
+    for yy in (1.55, 1.95, 2.35):
+        rbox(M['madeira'], (0.8, yy, D - 0.32), (4.6, yy + 0.04, D - 0.02), r=0.01, seg=2)
+        x = 0.95
+        while x < 4.45:
+            if yy < 2.0:
+                torno(M['xicara'], x, D - 0.17, [(yy + 0.04, 0.035), (yy + 0.08, 0.04), (yy + 0.12, 0.045), (yy + 0.12, 0.0)],
+                      seg=12, sz=1.0)
+                x += 0.14
+            else:  # saco de café em pé (fundo largo, boca dobrada)
+                rbox(M['saco'], (x - 0.07, yy + 0.04, D - 0.24), (x + 0.07, yy + 0.3, D - 0.12), r=0.025, bulge=0.012)
+                x += 0.2
+    # mesinhas redondas de pedestal com cadeiras de bistrô (assento redondo, encosto em arco)
+    for (x, z) in ((-2.6, 2.6), (0.0, 2.6), (2.6, 2.6), (-2.6, 5.4), (0.0, 5.4), (2.6, 5.4)):
+        M['tampo'].cylinder((x, z), 0.36, 0.72, 0.75, seg=28)
+        M['escuro'].cylinder((x, z), 0.035, 0.03, 0.72, seg=12)
+        M['escuro'].frustum((x, z), 0.24, 0.2, 0.0, 0.03, seg=20)
+        for a in (0.0, math.pi):
+            cx, cz = x + 0.62 * math.cos(a), z + 0.62 * math.sin(a)
+            M['assento'].cylinder((cx, cz), 0.19, 0.44, 0.47, seg=20)
+            for k in range(4):
+                b = a + math.pi / 4 + k * math.pi / 2
+                M['escuro'].tube([(cx + 0.15 * math.cos(b), 0.44, cz + 0.15 * math.sin(b)),
+                                  (cx + 0.19 * math.cos(b), 0.0, cz + 0.19 * math.sin(b))], 0.012, seg=6)
+            fora = (math.cos(a), math.sin(a))
+            arco = [(cx + fora[0] * 0.17 + 0.17 * math.cos(t) * -fora[1], 0.47 + 0.36 * math.sin(t) ** 0.6,
+                     cz + fora[1] * 0.17 + 0.17 * math.cos(t) * fora[0]) for t in np.linspace(0.0, math.pi, 12)]
+            M['escuro'].tube(arco, 0.012, seg=6)
+    # bancada de janela com banquetas e pendentes de vidro âmbar sobre as mesas
+    rbox(M['tampo'], (-4.6, 1.05, 0.45), (4.6, 1.1, 0.85), r=0.015)
+    for x in np.arange(-4.0, 4.2, 1.0):
+        M['escuro'].cylinder((x, 1.05), 0.025, 0.0, 0.72, seg=10)
+        M['assento'].cylinder((x, 1.05), 0.17, 0.72, 0.76, seg=18)
+    for (x, z) in ((-2.6, 2.6), (0.0, 2.6), (2.6, 2.6), (-2.6, 5.4), (0.0, 5.4), (2.6, 5.4)):
+        M['escuro'].tube([(x, H, z), (x, H - 0.9, z)], 0.004, seg=4)
+        torno(M['ambar'], x, z, [(H - 1.15, 0.0), (H - 1.14, 0.1), (H - 1.05, 0.12), (H - 0.95, 0.07), (H - 0.9, 0.02)],
+              seg=18, sz=1.0)
+        M['luz'].sphere((x, H - 1.06, z), 0.04, 8)
+        lights.append((x, H - 1.2, z))
+    for (x, z) in ((-4.5, 7.5), (4.5, 7.5)):  # vasos com planta
+        torno(M['vaso'], x, z, [(0.0, 0.18), (0.4, 0.24), (0.45, 0.25)], seg=18, sz=1.0)
+        M['planta'].sphere((x, 0.95, z), 0.45, 12, sy=1.3)
+    t_quadro = os.path.relpath(textura_cardapio(tex('cafe_menu.png'), seed + 3), out)
+    mats = {
+        'piso': pbr('cafe_piso', 'laminate_floor_02', tint=(0.7, 0.55, 0.4), rough=0.45),
+        'parede': g.material('cafe_parede', color=(0.72, 0.62, 0.52), rough=0.8),
+        'teto': g.material('cafe_teto', color=(0.18, 0.15, 0.13), rough=0.8),
+        'madeira': pbr('cafe_madeira', 'dark_wood', tint=(0.5, 0.36, 0.26), rough=0.45),
+        'tampo': pbr('cafe_tampo', 'wood_table_001', tint=(0.85, 0.7, 0.55), rough=0.35),
+        'inox': g.material('cafe_inox', color=(0.85, 0.85, 0.86), rough=0.18, metal=1.0),
+        'escuro': g.material('cafe_ferro', color=(0.06, 0.06, 0.06), rough=0.4, metal=0.6),
+        'quadro': g.material('cafe_quadro', tex=t_quadro, emissive=(0.35, 0.35, 0.35), emissive_tex=t_quadro, strength=1.0),
+        'vidro': vidro(g, 'cafe_vidro'),
+        'ambar': g.material('cafe_ambar', color=(0.9, 0.55, 0.2), rough=0.1),
+        'luz': g.material('cafe_luz', color=(1, 1, 1), emissive=(1.0, 0.75, 0.45), strength=30.0),
+        'xicara': g.material('cafe_xicara', color=(0.92, 0.9, 0.86), rough=0.2),
+        'saco': g.material('cafe_saco', color=(0.45, 0.32, 0.2), rough=0.85),
+        'doce': g.material('cafe_doce', color=(0.75, 0.48, 0.25), rough=0.6),
+        'planta': g.material('cafe_planta', color=(0.12, 0.3, 0.1), rough=0.7),
+        'vaso': g.material('cafe_vaso', color=(0.55, 0.3, 0.2), rough=0.6),
+        'assento': g.material('cafe_assento', color=(0.3, 0.17, 0.1), rough=0.5),
+    }
+    return _fechar(g, M, mats, 'cafe', embed, out, lights, (1.0, 0.78, 0.5), 60.0, 6.0)
+
+
+def farmacia(out, texdir, seed, g=None, pbr=None):
+    """Farmácia (10 × 12 × 3,4 m): piso claro, gôndolas brancas boleadas com caixas e frascos, prateleiras de parede
+    com placas de seção acesas, balcão do farmacêutico com cruz verde, luminárias de tubo."""
+    rng = random.Random(seed)
+    os.makedirs(os.path.join(out, 'tex'), exist_ok=True)
+    tex = lambda n: os.path.join(out, 'tex', 'int_' + n)
+    embed = g is not None
+    if not embed:
+        g = Gltf()
+        pbr = Pbr(g, texdir, out)
+    W, D, H = 10.0, 12.0, 3.4
+    M = {k: Mesh() for k in ('piso', 'parede', 'teto', 'gondola', 'produtos', 'frasco', 'placa', 'cruz', 'balcao', 'metal',
+                             'luz')}
+    _casca(M, W, D, H, piso_uvs=1.0)
+    lights = []
+    t_prod = os.path.relpath(atlas_produtos(tex('farm_produtos.jpg'), seed + 5), out)
+
+    def prateleiras(x0, x1, z0, z1, frente_z, sd, niveis, altura):
+        rbox(M['gondola'], (x0, 0, z0), (x1, 0.12, z1), r=0.02)
+        for k in range(niveis):
+            y = 0.25 + k * (altura - 0.3) / max(1, niveis - 1)
+            rbox(M['gondola'], (x0, y - 0.025, z0), (x1, y, z1), r=0.008, seg=2)
+            x = x0 + 0.06
+            while x < x1 - 0.08:
+                kk = rng.randrange(16)
+                if rng.random() < 0.35:  # frasco: corpo torneado e tampa
+                    torno(M['frasco'], x + 0.04, frente_z - sd * 0.08, [(y, 0.03), (y + 0.11, 0.032), (y + 0.13, 0.016),
+                                                                         (y + 0.16, 0.016), (y + 0.16, 0.0)], seg=10, sz=1.0)
+                    x += 0.09
+                else:
+                    w = rng.uniform(0.07, 0.14)
+                    produto_caixa(M['produtos'], x + w / 2, y, frente_z - sd * 0.07, w * 0.92, rng.uniform(0.1, 0.2),
+                                  0.08, kk, face=(0, 0, -sd))
+                    x += w
+    for zc in (3.5, 6.0, 8.5):  # gôndolas duplas
+        rbox(M['gondola'], (-3.0, 0.12, zc - 0.03), (2.0, 1.6, zc + 0.03), r=0.01)
+        prateleiras(-3.0, 2.0, zc - 0.35, zc - 0.03, zc - 0.35, 1, 4, 1.55)
+        prateleiras(-3.0, 2.0, zc + 0.03, zc + 0.35, zc + 0.35, -1, 4, 1.55)
+        rbox(M['placa'], (-1.3, 2.25, zc - 0.03), (0.3, 2.55, zc + 0.03), r=0.01)  # placa de seção acesa
+        M['metal'].tube([(-1.0, 2.55, zc), (-1.0, H, zc)], 0.006, seg=4)
+        M['metal'].tube([(0.0, 2.55, zc), (0.0, H, zc)], 0.006, seg=4)
+    for zc in (1.2,):  # prateleira de parede perto da vitrine (de frente para o fundo)
+        prateleiras(-4.6, -1.0, zc - 0.35, zc, zc, -1, 5, 1.9)
+    # balcão do farmacêutico no fundo, com a cruz verde acesa
+    rbox(M['balcao'], (-2.5, 0.05, D - 2.2), (3.5, 1.05, D - 1.6), r=0.03)
+    rbox(M['metal'], (-2.55, 1.05, D - 2.25), (3.55, 1.09, D - 1.55), r=0.015)
+    for (x0, x1, y0, y1) in ((0.2, 0.8, 2.2, 3.0), (0.0, 1.0, 2.4, 2.8)):
+        rbox(M['cruz'], (x0, y0, D - 0.06), (x1, y1, D - 0.02), r=0.02)
+    for x in (-2.5, 0.0, 2.5):
+        for z in (2.5, 5.0, 7.5, 10.0):
+            luminaria_tubo(M['metal'], M['luz'], x, H - 0.1, z, comp=1.2, larg=0.25)
+            lights.append((x, H - 0.3, z))
+    mats = {
+        'piso': g.material('farm_piso', color=(0.86, 0.86, 0.84), rough=0.25),
+        'parede': g.material('farm_parede', color=(0.93, 0.95, 0.95), rough=0.6),
+        'teto': g.material('farm_teto', color=(0.9, 0.9, 0.9), rough=0.8),
+        'gondola': g.material('farm_gondola', color=(0.95, 0.95, 0.95), rough=0.3),
+        'produtos': g.material('farm_produtos', tex=t_prod, rough=0.4),
+        'frasco': g.material('farm_frasco', color=(0.95, 0.9, 0.8), rough=0.15),
+        'placa': g.material('farm_placa', color=(0.1, 0.45, 0.3), emissive=(0.1, 0.6, 0.35), strength=4.0),
+        'cruz': g.material('farm_cruz', color=(0.1, 0.8, 0.3), emissive=(0.15, 1.0, 0.35), strength=12.0),
+        'balcao': g.material('farm_balcao', color=(0.92, 0.92, 0.92), rough=0.3),
+        'metal': g.material('farm_metal', color=(0.75, 0.75, 0.77), rough=0.2, metal=1.0),
+        'luz': g.material('farm_luz', color=(1, 1, 1), emissive=(0.95, 0.98, 1.0), strength=22.0),
+    }
+    return _fechar(g, M, mats, 'farmacia', embed, out, lights, (0.95, 0.97, 1.0), 55.0, 6.5)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--saida', default=os.path.join('cenas', 'interiores'))
@@ -1192,6 +1393,10 @@ def main():
         joalheria(a.saida, a.texturas, a.semente)
     if a.tipo in ('lanchonete', 'todos'):
         lanchonete(a.saida, a.texturas, a.semente)
+    if a.tipo in ('cafe', 'todos'):
+        cafe(a.saida, a.texturas, a.semente)
+    if a.tipo in ('farmacia', 'todos'):
+        farmacia(a.saida, a.texturas, a.semente)
     if a.tipo in ('roupas', 'todos'):
         roupas(a.saida, a.texturas, a.semente)
 

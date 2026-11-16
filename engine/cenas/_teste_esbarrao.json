@@ -1,0 +1,202 @@
+{
+ "sol": {
+  "elevacao": 30,
+  "azimute": 200,
+  "iluminancia": 60000
+ },
+ "camera": {
+  "posicao": [
+   9,
+   9,
+   4
+  ],
+  "alvo": [
+   0,
+   0,
+   2
+  ],
+  "fov": 60
+ },
+ "menu": false,
+ "materiais": {
+  "chao": {
+   "cor": [
+    0.4,
+    0.4,
+    0.4
+   ],
+   "rugosidade": 0.8
+  }
+ },
+ "entidades": [
+  {
+   "nome": "chao",
+   "forma": "caixa",
+   "meia_extensao": [
+    30,
+    0.25,
+    30
+   ],
+   "posicao": [
+    0,
+    -0.25,
+    0
+   ],
+   "material": "chao",
+   "fisica": {
+    "tipo": "estatico"
+   }
+  },
+  {
+   "nome": "corredor",
+   "forma": "capsula",
+   "posicao": [
+    2.3,
+    0,
+    -18
+   ],
+   "material": "chao",
+   "personagem": {
+    "altura": 1.8,
+    "raio": 0.3,
+    "velocidade": 1.5,
+    "velocidade_correndo": 4.5,
+    "controle": "roteiro",
+    "roteiro": [
+     {
+      "t": 0,
+      "andar": [
+       0,
+       0,
+       1
+      ],
+      "correr": true
+     },
+     {
+      "t": 9,
+      "andar": [
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "nome": "parado",
+   "forma": "capsula",
+   "posicao": [
+    -2,
+    0,
+    8
+   ],
+   "material": "chao",
+   "personagem": {
+    "altura": 1.8,
+    "raio": 0.3,
+    "velocidade": 1.5,
+    "controle": "roteiro",
+    "roteiro": [
+     {
+      "t": 0,
+      "andar": [
+       0,
+       0,
+       0
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "multidao": {
+  "pessoas": [
+   "times_square/pessoas/p101.gltf",
+   "times_square/pessoas/p102.gltf",
+   "times_square/pessoas/p103.gltf",
+   "times_square/pessoas/p104.gltf",
+   "times_square/pessoas/p105.gltf"
+  ],
+  "animacoes": "times_square/personagens/estilos.gltf",
+  "mapa": {
+   "Hips": "pelvis",
+   "Chest": "spine_01",
+   "Chest2": "spine_02",
+   "Chest3": "spine_03",
+   "Neck": "neck_01",
+   "Head": "head",
+   "RightCollar": "clavicle_r",
+   "RightShoulder": "upperarm_r",
+   "RightElbow": "lowerarm_r",
+   "RightWrist": "hand_r",
+   "LeftCollar": "clavicle_l",
+   "LeftShoulder": "upperarm_l",
+   "LeftElbow": "lowerarm_l",
+   "LeftWrist": "hand_l",
+   "RightHip": "thigh_r",
+   "RightKnee": "calf_r",
+   "RightAnkle": "foot_r",
+   "RightToe": "ball_r",
+   "LeftHip": "thigh_l",
+   "LeftKnee": "calf_l",
+   "LeftAnkle": "foot_l",
+   "LeftToe": "ball_l"
+  },
+  "poses": 16,
+  "quantidade": 60,
+  "altura": 0.0,
+  "semente": 3,
+  "velocidade": [
+   1.0,
+   1.6
+  ],
+  "clipes": [
+   "Neutral",
+   "Proud",
+   "HandsInPockets",
+   "OnPhoneRight"
+  ],
+  "faixas": [
+   {
+    "de": [
+     -2,
+     -25
+    ],
+    "ate": [
+     -2,
+     25
+    ],
+    "largura": 3
+   },
+   {
+    "de": [
+     2,
+     -25
+    ],
+    "ate": [
+     2,
+     25
+    ],
+    "largura": 3
+   }
+  ],
+  "obstaculos": [
+   [
+    -2,
+    0,
+    0.8
+   ],
+   [
+    2,
+    4,
+    0.6
+   ],
+   [
+    -1.5,
+    -6,
+    0.5
+   ]
+  ]
+ }
+}
