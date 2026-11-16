@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Fotos de divulgação (site, launcher, repositório público): cada foto é uma cena do motor com a câmera parada num
+ponto escolhido, renderizada sem janela no preset Cinema e salva em JPG. Uso (de engine/):
+
+    python tools/fotos.py [--so ts_rua,eng_luzes] [--previa] [--saida resultados_pc/fotos]
+
+--previa: 960x540 no preset Alto (conferir enquadramento rápido). As animações (multidão, telões) param no quadro 8
+(--pause-at) para a imagem acumular sem rastro.
+"""
+import argparse
+import os
+import subprocess
+import sys
+import time
+
+from PIL import Image
+
+TS = os.path.join('cenas', 'times_square.json')               # com multidão, trânsito e vapor
+CIDADE = os.path.join('cenas', 'times_square', 'times_square.gltf')  # só a cidade (interiores)
+BISTRO = os.path.join('assets', 'Bistro', 'bistro.gltf')
+NOITE = ['--night', '--rain', '0.6', '--fog', '0.004']
+
+# nome: (cena e argumentos, posição, alvo, fov, recorte final LxA ou None)
+FOTOS = {
+    'ts_hero': (['--scene', TS], (24.0, 9.0, 200.0), (18.0, 4.0, 150.0), 58, None),
+    'ts_rua': (['--scene', TS], (19.2, 1.7, 183.0), (21.5, 6.0, 163.0), 62, None),
+    'ts_praca': (['--scene', TS], (23.1, 1.7, 172.0), (18.1, 2.9, 152.6), 64, None),
+    'ts_mobiliario': (['--scene', CIDADE] + NOITE, (15.5, 1.65, 61.5), (24.0, 2.2, 58.0), 60, None),
+    'ts_lanchonete': (['--scene', CIDADE] + NOITE, (25.5, 1.6, 58.8), (31.0, 1.3, 60.5), 70, None),
+    'ts_loja': (['--scene', CIDADE] + NOITE, (39.2, 1.6, 147.9), (36.0, 1.3, 141.0), 70, None),
+    'ts_joalheria': (['--scene', CIDADE] + NOITE, (31.6, 1.6, 415.8), (24.0, 1.3, 414.0), 70, None),
+    'eng_hero': (['--scene', BISTRO, '--night'], None, None, 0, None),
+    'eng_luzes': (['--night'], None, None, 0, None),
+    'eng_geometria': (['--scene', 'nanite', '--rochas', '16', '--rocha-segmentos', '768', '--sun-elevation', '14',
+                       '--sun-azimuth', '200'], (-8.0, 38.0, 34.0), (3.0, 0.0, -80.0), 60, None),
+    'eng_cabelo': (['--scene', 'hair'], None, None, 0, (1080, 1080)),
+    'vale': (['--scene', os.path.join('cenas', 'vale', 'vale.json')], None, None, 0, None),
+}
+
+
+def achar_binario():
+    for b in (os.path.join('build', 'Release', 'legacy.exe'), os.path.join('build', 'legacy.exe'),
+              os.path.join('build', 'legacy')):
+        if os.path.exists(b):
+            return b
+    sys.exit('Não achei o executável: compile antes.')
+
+
+def main():
+    for s in (sys.stdout, sys.stderr):
+        s.reconfigure(encoding='utf-8', errors='replace')
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--so')
+    ap.add_argument('--previa', action='store_true')
+    ap.add_argument('--saida', default=os.path.join('resultados_pc', 'fotos'))
+    ap.add_argument('--quadros', type=int, default=64)
+    a = ap.parse_args()
+    b = achar_binario()
+    os.makedirs(a.saida, exist_ok=True)
+    w, h = (960, 540) if a.previa else (1920, 1080)
+    quality = 'alto' if a.previa else 'cinema'
+    for nome in (a.so.split(',') if a.so else FOTOS):
+        cena, pos, alvo, fov, recorte = FOTOS[nome]
+        png = os.path.join(a.saida, nome + '.png')
+        args = [b, '--headless', '--width', str(w), '--height', str(h), '--quality', quality, '--frames',
+                str(a.quadros), '--pause-at', '8', '--out', png] + cena
+        if pos:
+            cam = os.path.join(a.saida, nome + '.cam.txt')
+            with open(cam, 'w') as f:  # câmera parada: o mesmo ponto no começo e no fim
+                for t in (0, 100):
+                    f.write(f'{t} {pos[0]} {pos[1]} {pos[2]} {alvo[0]} {alvo[1]} {alvo[2]} {fov}\n')
+            args += ['--camera-path', cam, '--fps', '30']
+        t0 = time.time()
+        p = subprocess.run(args, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if p.returncode or not os.path.exists(png):
+            print(f'{nome}: falhou (código {p.returncode})\n{p.stdout[-1500:]}{p.stderr[-1500:]}', flush=True)
+            continue
+        im = Image.open(png).convert('RGB')
+        if recorte:
+            rw, rh = recorte
+            x0, y0 = (im.width - rw) // 2, (im.height - rh) // 2
+            im = im.crop((x0, y0, x0 + rw, y0 + rh))
+        jpg = os.path.join(a.saida, nome + '.jpg')
+        im.save(jpg, quality=90, optimize=True, progressive=True)
+        os.remove(png)
+        print(f'{nome}: {time.time() - t0:.0f} s -> {jpg} ({os.path.getsize(jpg) / 1024:.0f} KB)', flush=True)
+
+
+if __name__ == '__main__':
+    main()
