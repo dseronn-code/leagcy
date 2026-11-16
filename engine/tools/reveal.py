@@ -28,15 +28,13 @@ FONTES = '/usr/share/fonts/opentype/inter'
 # tomada, início dentro dela (s), duração (s), texto pequeno (laranja), texto grande, nota pequena
 ROTEIRO = [
     ('rv_chuva', 0.0, 7.0, '', '', ''),
-    ('rv_rua', 0.5, 7.0, 'TIMES SQUARE', 'Cada telão é uma luz.', ''),
-    ('rv_luzes', 0.5, 3.0, 'VISTA DE DEPURAÇÃO', 'Mil luzes. Todas com sombra.', 'cor = luz escolhida em cada pixel'),
-    ('sponza_luz', 0.5, 7.0, 'LUZ GLOBAL', 'Sem bake. Tudo muda no mesmo quadro.', ''),
-    ('bistro_noite', 0.5, 7.0, 'PROVA FÍSICA', '6% do path tracing. A 60 q/s.', 'Bistro, 1080p, preset Médio, RTX 3070 Ti'),
+    ('rv_rua', 0.3, 7.5, 'TIMES SQUARE', 'Cada telão é uma luz.', ''),
+    ('rv_luzes', 0.5, 2.6, 'VISTA DE DEPURAÇÃO', 'Mil luzes. Todas com sombra.', 'cor = luz escolhida em cada pixel'),
+    ('sponza_luz', 0.3, 7.5, 'LUZ GLOBAL', 'Sem bake. Tudo muda no mesmo quadro.', ''),
+    ('bistro_noite', 0.3, 7.5, 'PROVA FÍSICA', '6% do path tracing. A 60 q/s.', 'Bistro, 1080p, preset Médio, RTX 3070 Ti'),
     ('rv_rochas', 0.0, 10.0, 'GEOMETRIA DENSA', '151 milhões de triângulos. 4,1 ms.', 'G-buffer, RTX 3070 Ti'),
-    ('pele', 0.0, 6.0, 'PELE', 'A luz atravessa. Como na pele de verdade.', ''),
-    ('pintura', 0.0, 7.0, 'MATERIAIS', 'Verniz e flocos metálicos, raio por raio.', ''),
-    ('oceano', 0.5, 7.0, 'MUNDO', 'Oceano, nuvens e céu físicos.', ''),
-    ('nuvens', 0.5, 6.0, '', '', ''),
+    ('pintura', 1.5, 5.5, 'MATERIAIS', 'Verniz e flocos metálicos, raio por raio.', ''),
+    ('oceano', 1.0, 7.0, 'MUNDO', 'Oceano e céu físicos.', ''),
     ('rv_aereo', 0.0, 9.0, '', '', ''),
 ]
 FINAL = 8.0  # cartão do logo
@@ -173,7 +171,7 @@ def trilha(total, cortes, arq):
                 pad[a:b] += env * (np.sin(2 * np.pi * (f0 + det) * tt) + 0.3 * np.sin(4 * np.pi * (f0 + det) * tt))
     pad = filtro(pad, hi=1800)
     mix += 0.035 * pad * envelope(t, [(0, 0), (c['sponza_luz'], 0.0), (c['sponza_luz'] + 2, 0.6), (t_rochas, 0.8),
-                                      (c['pele'], 0.4), (t_aereo, 1.2), (t_final + 3, 1.0), (total, 0)])
+                                      (c['pintura'], 0.4), (t_aereo, 1.2), (t_final + 3, 1.0), (total, 0)])
     # pulso: bumbo a 100 bpm do meio em diante, dobra no voo final; caixa com reverb nos tempos 2 e 4
     bpm = 100.0
     bumbo = np.zeros(n)
@@ -188,7 +186,7 @@ def trilha(total, cortes, arq):
         tb = c['bistro_noite'] + k * batida
         if tb >= t_final:
             break
-        dentro_pele = c['pele'] <= tb < c['oceano']
+        dentro_pele = c['pintura'] <= tb < c['oceano']
         if not dentro_pele:
             i = int(tb * SR)
             bumbo[i:i + kick_n] += kick[:max(0, min(kick_n, n - i))]
@@ -204,7 +202,7 @@ def trilha(total, cortes, arq):
     it = np.arange(imp_n) / SR
     boom = np.sin(2 * np.pi * (28 + 70 * np.exp(-it * 5)) * it) * np.exp(-it * 1.3)
     boom += 0.35 * filtro(rng.standard_normal(imp_n), hi=3000) * np.exp(-it * 9)
-    for tb, g in ((c['rv_rua'], 0.6), (t_rochas, 0.9), (c['pele'], 0.5), (t_aereo, 1.0), (t_final, 1.3)):
+    for tb, g in ((c['rv_rua'], 0.6), (t_rochas, 0.9), (c['pintura'], 0.5), (t_aereo, 1.0), (t_final, 1.3)):
         i = int(tb * SR)
         mix[i:i + imp_n] += 0.55 * g * boom[:max(0, min(imp_n, n - i))]
     for alvo, comp in ((t_rochas, 4.0), (t_aereo, 5.0), (t_final, 3.0)):
