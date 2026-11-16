@@ -1323,6 +1323,8 @@ class Gltf:
             m['occlusionTexture'] = {'index': self.texture(orm_tex)}
         if emissive is not None:
             m['emissiveFactor'] = list(emissive)
+            if getattr(self, 'sem_luz', False):  # brilha, mas não vira luz de malha (o lugar já tem luzes pontuais)
+                m['extras'] = {'legacy_sem_luz': 1}
             if emissive_tex:
                 m['emissiveTexture'] = {'index': self.texture(emissive_tex)}
             if strength != 1.0:
@@ -2333,6 +2335,9 @@ def build(out, seed, texdir):
     if fac.lojas:
         import interiores
         feitos = {}
+        # 68 lojas: se cada painel de luz, letreiro e cardápio virasse luz de malha seriam +230 mil luzes (a RTX de 8
+        # GB ficou sem memória). As luzes pontuais de cada loja já iluminam o interior.
+        g.sem_luz = True
         for tipo, pos, yaw in fac.lojas:
             if tipo not in feitos:
                 feitos[tipo] = getattr(interiores, tipo)(out, texdir, 7 + len(feitos), g=g, pbr=pbr)
@@ -2341,6 +2346,7 @@ def build(out, seed, texdir):
             c, sn = math.cos(yaw), math.sin(yaw)
             for (lx, ly, lz), col, inten, rr in luzes:  # gira (x, z) por yaw em torno de y e soma a posição
                 g.light((pos[0] + lx * c + lz * sn, pos[1] + ly, pos[2] - lx * sn + lz * c), col, inten, rr)
+        g.sem_luz = False
         print(f'{len(fac.lojas)} lojas com interior 3D:', {k: sum(1 for l in fac.lojas if l[0] == k) for k in feitos})
         for tipo, pos, yaw in fac.lojas:
             print('  ', tipo, [round(v, 1) for v in pos], round(math.degrees(yaw)))
