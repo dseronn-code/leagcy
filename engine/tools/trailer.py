@@ -42,6 +42,8 @@ TOMADAS = {
                      '--fog', '0.004'], 'rv_chuva.txt', 0.0),
     'rv_rua': (8, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain', '0.8',
                    '--fog', '0.004'], 'times_square.txt', 0.0),
+    'rv_loja': (9, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain', '0.6',
+                    '--fog', '0.004'], 'rv_loja.txt', 0.0),
     'rv_luzes': (4, ['--scene', os.path.join('cenas', 'times_square', 'times_square.gltf'), '--night', '--rain', '0.8',
                      '--debug-view', 'luzes'], 'times_square.txt', 0.0),
     'rv_rochas': (10, ['--scene', 'nanite', '--rochas', '16', '--rocha-segmentos', '768', '--sun-elevation', '14',

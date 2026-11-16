@@ -775,7 +775,14 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
       }
       // Obstáculos ([x, z, raio], ex.: bancas, bancos, entradas do metrô): a pessoa contorna pela lateral.
       std::vector<glm::vec3> obstacles;
-      const json obsJson = mj.value("obstaculos", json::array());
+      // Lista na cena ou o nome de um .json com ela (a da cidade: tools/times_square.py grava obstaculos.json com tudo
+      // o que fica na calçada — árvores, lixeiras, carrinhos, bancas — e a multidão contorna cada um).
+      json obsJson = mj.value("obstaculos", json::array());
+      if (obsJson.is_string()) {
+        std::ifstream of(path(obsJson.get<std::string>()));
+        obsJson = of ? json::parse(of, nullptr, false) : json::array();
+        if (!obsJson.is_array()) obsJson = json::array();
+      }
       for (const json& o : obsJson)
         if (o.is_array() && o.size() >= 3) obstacles.push_back({o[0].get<float>(), o[1].get<float>(), o[2].get<float>()});
       if (!clips.empty() && !lanes.empty()) {

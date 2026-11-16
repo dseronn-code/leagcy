@@ -125,6 +125,20 @@ class Pacote:
         for chave in ('carregamento', 'icone'):  # tela de carregamento e ícone da janela (src/core/carregamento.cpp)
             if isinstance(doc.get(chave), str):
                 self.exigir(doc[chave], f'{rel} ({chave})', pasta, os.path.join(MOTOR, 'cenas'))
+        # Qualquer outro arquivo citado pela cena, em qualquer lugar (multidão, trânsito, vapor, interiores...): antes só
+        # as entidades entravam, e a multidão da Times Square ficava de fora do jogo instalado (sem pedestres).
+        def varrer(v, onde):
+            if isinstance(v, dict):
+                for k, x in v.items():
+                    if k != 'entidades':
+                        varrer(x, f'{onde}.{k}')
+            elif isinstance(v, list):
+                for x in v:
+                    varrer(x, onde)
+            elif isinstance(v, str) and v.lower().endswith(EXTENSOES):
+                if self.relativo(v, pasta, os.path.join(MOTOR, 'cenas')):
+                    self.exigir(v, f'{rel} ({onde})', pasta, os.path.join(MOTOR, 'cenas'))
+        varrer(doc, 'cena')
         for e in doc.get('entidades', []):
             quem = f'{rel} ({e.get("nome", "sem nome")})'
             if 'modelo' in e:

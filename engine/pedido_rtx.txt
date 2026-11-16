@@ -1,7 +1,8 @@
-# Rodada 50: Times Square sem piscar (cidade com posições exatas: letreiros e faixas de pedestre não brigam mais com a
-# superfície de trás) + Esc abre o menu de pausa. Grava de novo as tomadas da Times Square do reveal (para conferir o
-# piscar e remontar o vídeo), comprime para o envio e publica a versão nova.
-[60] python tools\trailer.py --so rv_chuva,rv_rua,rv_luzes,rv_aereo
+# Rodada 51: pedestres de volta no jogo instalado (o empacotador deixava a multidão de fora e faltavam as texturas de
+# cabelo/olhos/sobrancelha), a multidão contorna os 1.110 obstáculos da cidade, 68 lojas com interior 3D e porta de
+# entrar (vidro de verdade). Grava a entrada numa loja e a multidão na altura dos olhos, e publica a versão nova
+# (com o vídeo de reveal no launcher).
+[60] python tools\trailer.py --so rv_loja,times_square_multidao
 [30] python tools\comprimir_tomadas.py
 [45] python tools\gerar_instaladores.py --jogos
 [10] python tools\gerar_instaladores.py --launcher

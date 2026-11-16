@@ -977,8 +977,8 @@ class Facades:
         rng = self.rng
         lit_store = st['loja_luz']
         # Loja de verdade (interior 3D) atrás de alguns vãos: só perto da praça, com fachada larga e prédio fundo.
-        loja = set()
-        if self.loja_ok and self.lojas_restantes > 0 and self._poly is not None and rng.random() < 0.45:
+        loja, porta = set(), -1
+        if self.loja_ok and self.lojas_restantes > 0 and self._poly is not None and rng.random() < 0.9:
             tipo, Wi, Di = rng.choices([('conveniencia', 10.0, 12.0), ('joalheria', 12.0, 14.0), ('lanchonete', 10.0, 12.0), ('roupas', 10.0, 12.0)], [2, 1, 2, 2])[0]
             m = int(Wi // bw)
             if m >= 2 and nb >= m:
@@ -987,12 +987,20 @@ class Facades:
                 cantos = [self.P(a, t, n, uc + su * Wi / 2, 0, -(Di + 0.6)) for su in (-1, 1)]
                 if all(self._poly.contains(Point(c[0], c[2])) for c in cantos):
                     loja = set(range(i0, i0 + m))
+                    porta = i0 + m // 2  # o vão do meio é a porta: sem vidro e sem embasamento (dá para entrar)
                     x, _, z = self.P(a, t, n, uc, 0, -0.34)
                     self.lojas.append((tipo, (x, y0, z), math.atan2(-n[0], -n[1])))
                     self.lojas_restantes -= 1
         for i in range(nb):
             u0, u1 = i * bw + 0.35, (i + 1) * bw - 0.35
             yt = y0 + 3.6
+            if i == porta:  # entrada da loja: vão aberto até o chão, com batentes e a verga
+                self.recess(a, t, n, u0, u1, y0, yt, 0.3, 'caixilho')
+                self.block('caixilho', a, t, n, u0, u1, yt - 0.08, yt, -0.3, -0.22)
+                self.block(trim, a, t, n, i * bw, u0, y0, y0 + ground, 0.0, 0.12)
+                self.block(trim, a, t, n, u1, (i + 1) * bw, y0, y0 + ground, 0.0, 0.12)
+                self.wall_quad(wall, a, t, n, u0, u1, yt, y0 + ground)
+                continue
             if i in loja:  # vitrine de vidro de verdade: o interior 3D aparece atrás
                 self.wall_quad('vidro_loja', a, t, n, u0, u1, y0 + 0.45, yt, -0.3)
                 self.recess(a, t, n, u0, u1, y0 + 0.45, yt, 0.3, 'caixilho')
@@ -2126,7 +2134,7 @@ def build(out, seed, texdir):
                                               emissive=(0.25, 0.25, 0.25), emissive_tex=rel(e), strength=0.3)
     roof = pbr('telhado', 'brushed_concrete', tint=(0.35, 0.34, 0.33))
     fac = Facades(rng)
-    fac.lojas_restantes = 18
+    fac.lojas_restantes = 70  # quase toda loja perto da praça tem interior 3D e porta de entrar
     from shapely.prepared import prep
     blocks_p = prep(blocks)
     fac.is_street = lambda mid, nrm: not blocks_p.contains(Point(mid[0] + nrm[0] * 2.5, mid[1] + nrm[1] * 2.5))
@@ -2164,7 +2172,7 @@ def build(out, seed, texdir):
                          'cunhais': rng.random() < 0.4,
                          'caixilho': rng.choice(['caixilho', 'caixilho', 'caixilho_branco', 'caixilho_verde'])}
                 fac.lod = 0 if d < 140 else 1
-                fac.loja_ok = d < 90 and rng.random() < 0.5
+                fac.loja_ok = d < 120 and rng.random() < 0.85
                 fac.bevel = 0.025 if fac.lod == 0 else 0.0
                 top = fac.masonry(body, 0.15, podium, wall, st=style)
                 fac.bevel = 0.0
