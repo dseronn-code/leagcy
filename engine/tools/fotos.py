@@ -58,9 +58,10 @@ def main():
     b = achar_binario()
     os.makedirs(a.saida, exist_ok=True)
     w, h = (960, 540) if a.previa else (1920, 1080)
-    quality = 'alto' if a.previa else 'cinema'
     for nome in (a.so.split(',') if a.so else FOTOS):
         cena, pos, alvo, fov, recorte = FOTOS[nome]
+        # A Times Square inteira com multidão não cabe no preset Cinema numa placa de 8 GB: no Alto, com mais quadros.
+        quality = 'alto' if a.previa or cena[1] == TS else 'cinema'
         png = os.path.join(a.saida, nome + '.png')
         args = [b, '--headless', '--width', str(w), '--height', str(h), '--quality', quality, '--frames',
                 str(a.quadros), '--pause-at', '8', '--out', png] + cena
