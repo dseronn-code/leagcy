@@ -1,9 +1,3 @@
-# Rodada 48: (1) refaz a publicação no repositório público seronzera/legacy (a 47 parou no meio: a conta do GitHub foi
-# renomeada durante o envio). (2) Grava as tomadas do vídeo de reveal no preset Cinema, 1080p (tools/trailer.py); a
-# montagem final (textos, trilha, logo) é feita na nuvem com tools/reveal.py.
-[45] python tools\gerar_instaladores.py --jogos
-[10] python tools\gerar_instaladores.py --launcher
-[100] python tools\gerar_instaladores.py --publicar
-[60] python tools\trailer.py --so rv_chuva,rv_rua,rv_luzes,sponza_luz
-[60] python tools\trailer.py --so bistro_noite,rv_rochas,pele
-[60] python tools\trailer.py --so pintura,oceano,nuvens,rv_aereo
+# Rodada 49: as tomadas do reveal (rodada 48) não subiram (rv_luzes tinha 120 MB, acima do limite do GitHub).
+# Recupera a cópia do último envio e recomprime cada tomada para menos de 60 MB. Nada é renderizado de novo.
+[30] python tools\comprimir_tomadas.py
