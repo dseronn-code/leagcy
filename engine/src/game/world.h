@@ -200,6 +200,11 @@ struct Vehicle {
   // cilindros. `parked`: o jogador saiu, freio de mão puxado.
   std::vector<uint32_t> visual;
   bool parked = false;
+  // Viatura perseguindo o jogador (World::updatePolice): dirige sozinha até `aiTarget`; giroflex piscando.
+  bool police = false, chasing = false;
+  glm::vec3 aiTarget{0.0f};
+  float stuck = 0.0f, reverse = 0.0f;
+  uint32_t sirenRed = ~0u, sirenBlue = ~0u;
 };
 
 // Um carro que o trânsito entrega para o jogador dirigir (World::grabTraffic).
@@ -208,7 +213,8 @@ struct TrafficGrab {
                                  // jogo não entra no renderizador)
   glm::vec2 position{0.0f};
   float yaw = 0.0f, length = 4.8f, speed = 0.0f;
-  bool bus = false;
+  bool bus = false, police = false;
+  uint32_t sirenRed = ~0u, sirenBlue = ~0u;
 };
 
 // Entrada do jogador neste quadro: movimento relativo à câmera (x = direita, y = frente, -1..1) e a direção da câmera.
@@ -334,6 +340,23 @@ class World {
   std::function<bool(glm::vec2, float, TrafficGrab*)> grabTraffic;  // nullptr: só confere se há carro perto
   entt::entity driving = entt::null;
   void updateCarEntry(scene::Scene& scene);
+  // Polícia (nível de procurado e o que ela sabe, como o Heat): crimes vistos sobem as estrelas; viaturas a até 45 m
+  // veem o jogador (aparência a pé, o carro dirigindo); longe e fora da vista por um tempo, as estrelas caem (mais
+  // rápido se ele trocou o carro que a polícia conhece). Com estrela, as viaturas do trânsito mais perto ligam o
+  // giroflex e perseguem; colada no jogador a pé por 2,5 s, é preso.
+  struct Heat {
+    float level = 0.0f;                   // 0..6 (estrelas)
+    glm::vec2 lastSeen{0.0f};
+    float unseen = 0.0f, escape = 0.0f, arrest = 0.0f, messageTime = 0.0f, cooldown = 0.0f;
+    entt::entity knownCar = entt::null;   // o carro em que a polícia viu o jogador
+    bool knowsLook = false;               // viram o jogador a pé
+    std::string message;
+  } heat;
+  void reportCrime(glm::vec2 where, float weight);
+  void updatePolice(scene::Scene& scene, float dt);
+  std::function<int(glm::vec2, int, std::vector<TrafficGrab>&)> grabPolice;  // até n viaturas do trânsito, as mais perto
+  std::function<void(std::vector<glm::vec2>&)> policeInTraffic;             // onde estão as viaturas do trânsito
+  std::function<void(bool)> sirensInTraffic;                                // giroflex das viaturas do trânsito
   float realTime = 0.0f;             // s desde o início, mesmo pausado (tempo_real())
   std::string qualityRequest;        // qualidade("medio"): o main recria o renderizador com o preset
   // Câmera de cinema pelo script (camera(x, y, z, ax, ay, az) / camera_jogo()): com `active`, o main põe a câmera em

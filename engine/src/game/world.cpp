@@ -1019,6 +1019,7 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
                 a.giro = (glm::dot(golpe, n) * a.dir >= 0.0f ? 1.0f : -1.0f) * 0.7f;
                 a.tropeco = kTropeco;
                 a.cur *= 0.3f;
+                if (cp.r > 0.0f && vel > 3.0f) reportCrime(a.pos, 1.0f);  // atropelou alguém
               }
             }
             float alvoVel = a.speed * (1.0f + a.ritmoAmp * std::sin(a.ritmoW * t + a.ritmoFase));
@@ -1158,7 +1159,9 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
     //                "faixas": [{"de": [x, z], "ate": [x, z]}, ...], "altura": 0.0}
     if (doc.contains("transito") && doc["transito"].is_object()) {
       const json& tj = doc["transito"];
-      struct Template { std::vector<std::pair<uint32_t, uint32_t>> parts; bool taxi; float length; bool bus = false; };
+      struct Template {
+        std::vector<std::pair<uint32_t, uint32_t>> parts; bool taxi; float length; bool bus = false, police = false;
+      };
       std::vector<Template> templates;
       const json carsJson = tj.value("carros", json::array());
       for (const json& cf : carsJson) {
@@ -1170,6 +1173,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           continue;
         }
         Template t{{}, file.find("taxi") != std::string::npos, 4.8f};
+        t.police = file.find("policia") != std::string::npos;
+        t.taxi |= t.police;  // viatura: pintura própria (não sorteia cor)
         for (uint32_t o = first; o < scene.objects.size(); ++o) {
           t.parts.push_back({scene.objects[o].mesh, scene.objects[o].material});
           scene.setObjectHidden(o, true);  // o original fica escondido
@@ -1246,6 +1251,8 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           bool bus = false;
           float dwell = 0.0f, served = -1.0f;  // ônibus: tempo parado no ponto e o último ponto atendido
           bool taken = false;                  // o jogador pegou este carro (vira veículo com física)
+          bool police = false;
+          uint32_t sirenRed = ~0u, sirenBlue = ~0u;  // as duas metades do giroflex (os dois últimos objetos)
         };
         auto cars = std::make_shared<std::vector<Car>>();
         const int count = std::max(0, tj.value("quantidade", 60));
@@ -1270,6 +1277,13 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               useMat = scene.addMaterial(m);
             }
             c.objs.push_back(scene.addObject(mesh, glm::mat4(1.0f), useMat));
+          }
+          if (t.police && c.objs.size() >= 2) {
+            c.police = true;
+            c.sirenRed = c.objs[c.objs.size() - 2];
+            c.sirenBlue = c.objs.back();
+            scene.setObjectHidden(c.sirenRed, true);  // giroflex apagado até alguém ser procurado
+            scene.setObjectHidden(c.sirenBlue, true);
           }
           cars->push_back(std::move(c));
         }
@@ -1303,7 +1317,42 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
           g.bus = c.bus;
           return true;
         };
-        scene.addAnimator([this, cars, lanes, laneCount, y, cycle](scene::Scene& sc, float time, float dt) {
+        // Polícia: onde estão as viaturas, entregar as mais perto para perseguir, e o giroflex de todas.
+        auto sirens = std::make_shared<bool>(false);
+        policeInTraffic = [cars, lanes](std::vector<glm::vec2>& out) {
+          for (const Car& c : *cars)
+            if (c.police && !c.taken) out.push_back(lanes[c.lane].a + lanes[c.lane].d * c.s);
+        };
+        sirensInTraffic = [sirens](bool on) { *sirens = on; };
+        grabPolice = [cars, lanes](glm::vec2 p, int n, std::vector<TrafficGrab>& out) {
+          int got = 0;
+          while (got < n) {
+            int best = -1;
+            float bestD = 400.0f;
+            for (size_t i = 0; i < cars->size(); ++i) {
+              const Car& c = (*cars)[i];
+              if (!c.police || c.taken) continue;
+              const float d = glm::length(lanes[c.lane].a + lanes[c.lane].d * c.s - p);
+              if (d < bestD && d > 25.0f) bestD = d, best = int(i);  // não nasce em cima do jogador
+            }
+            if (best < 0) break;
+            Car& c = (*cars)[size_t(best)];
+            c.taken = true;
+            TrafficGrab g;
+            g.objects = c.objs;
+            g.position = lanes[c.lane].a + lanes[c.lane].d * c.s;
+            g.yaw = std::atan2(lanes[c.lane].d.x, lanes[c.lane].d.y);
+            g.length = c.len;
+            g.speed = c.speed;
+            g.police = true;
+            g.sirenRed = c.sirenRed;
+            g.sirenBlue = c.sirenBlue;
+            out.push_back(std::move(g));
+            ++got;
+          }
+          return got;
+        };
+        scene.addAnimator([this, cars, lanes, laneCount, y, cycle, sirens](scene::Scene& sc, float time, float dt) {
           std::vector<Car>& C = *cars;
           const float step = std::min(dt, 0.1f);
           const bool firstHalf = std::fmod(time, cycle) < cycle * 0.5f;
@@ -1358,8 +1407,13 @@ bool World::load(const std::string& path, scene::Scene& scene, scene::Camera& ca
               c.speed += glm::clamp(want - c.speed, -6.0f * step, 2.5f * step);  // freia forte, acelera devagar
             }
           }
+          const bool flashRed = std::fmod(time, 0.5f) < 0.25f;
           for (Car& c : C) {
             if (c.taken) continue;
+            if (c.police) {  // giroflex: vermelho e azul alternando 2x por segundo enquanto há procurado
+              sc.setObjectHidden(c.sirenRed, !(*sirens && flashRed));
+              sc.setObjectHidden(c.sirenBlue, !(*sirens && !flashRed));
+            }
             const Lane& L = lanes[c.lane];
             c.s = std::fmod(c.s + c.speed * step, L.length);
             const glm::vec2 p = L.a + L.d * c.s;
@@ -1677,7 +1731,9 @@ void World::update(scene::Scene& scene, float dt) {
   if (!netClient) updateOpenWorld(scene);
   if (scripting) scripting->update(scene, dt);
   if (paused) return;  // um script pausou agora: a pausa já vale neste quadro (nada se move)
+  if (!scripting) hud.clear();  // sem scripts ninguém limpa a interface: as dicas e a polícia são refeitas aqui
   if (!netClient && playerControl) updateCarEntry(scene);
+  if (!netClient) updatePolice(scene, dt);
   if (netClient) {  // cliente de rede: as poses vêm do anfitrião (game/network); aqui só a animação dos "visual"
     // Previsão: o boneco deste jogador anda já com a entrada local (o anfitrião confirma e o network corrige).
     if (predictLocal && localSlot >= 0) {
@@ -1862,6 +1918,26 @@ void World::update(scene::Scene& scene, float dt) {
       if (throttle != 0.0f && speed * throttle < -1.0f) {  // pedal contra o movimento: freia
         brake = 1.0f;
         throttle = 0.0f;
+      }
+    } else if (v.chasing) {  // viatura: vai até o alvo (o jogador ou onde ele foi visto por último)
+      const Transform& t = registry.get<Transform>(ent);
+      const glm::vec3 to = glm::inverse(t.rotation) * (v.aiTarget - t.position);
+      const float dist = glm::length(glm::vec2(to.x, to.z)), ang = std::atan2(to.x, to.z);
+      const float speed = physics->vehicleForwardSpeed(v.id);
+      if (v.reverse > 0.0f) {  // atolada (parede, outro carro): dá ré virando para o outro lado
+        v.reverse -= dt;
+        throttle = -0.7f;
+        steer = ang > 0.0f ? 1.0f : -1.0f;
+      } else {
+        steer = glm::clamp(-ang / 0.5f, -1.0f, 1.0f);
+        throttle = dist > 12.0f ? 1.0f : dist > 5.0f ? 0.45f : 0.0f;
+        if (std::abs(ang) > 1.2f) throttle = std::min(throttle, 0.6f);  // curva fechada: mais devagar
+        if (dist < 6.0f && speed > 2.0f) brake = 1.0f;
+        v.stuck = (throttle > 0.3f && std::abs(speed) < 0.6f) ? v.stuck + dt : 0.0f;
+        if (v.stuck > 1.5f) {
+          v.stuck = 0.0f;
+          v.reverse = 1.4f;
+        }
       }
     } else if (v.parked) {
       hand = 1.0f;
@@ -2321,6 +2397,157 @@ bool loadWorldScene(const std::string& path, scene::Scene& scene, scene::Camera&
 
 World* currentWorld() { return gCurrent; }
 
+void World::reportCrime(glm::vec2 where, float weight) {
+  if (heat.cooldown > 0.0f) return;  // o mesmo atropelamento não conta várias vezes
+  heat.cooldown = 1.0f;
+  heat.level = std::min(6.0f, std::floor(heat.level) + weight);
+  heat.lastSeen = where;
+  heat.unseen = heat.escape = 0.0f;
+  if (driving != entt::null) heat.knownCar = driving;
+  else heat.knowsLook = true;
+  LOG_INFO("Polícia: crime em (%.0f, %.0f), %d estrela(s)", where.x, where.y, int(heat.level));
+}
+
+void World::updatePolice(scene::Scene& scene, float dt) {
+  if (!physics) return;
+  heat.cooldown = std::max(0.0f, heat.cooldown - dt);
+  heat.messageTime = std::max(0.0f, heat.messageTime - dt);
+  glm::vec3 me3(0.0f);
+  const bool hasMe = playerFeet(me3);
+  const glm::vec2 me(me3.x, me3.z);
+  std::vector<entt::entity> chasers;
+  for (auto ent : registry.view<Vehicle, Transform>())
+    if (registry.get<Vehicle>(ent).chasing) chasers.push_back(ent);
+  auto endChase = [&](const char* msg) {
+    for (entt::entity e : chasers) {
+      Vehicle& v = registry.get<Vehicle>(e);
+      v.chasing = false;
+      v.parked = true;
+      if (v.sirenRed != ~0u) scene.setObjectHidden(v.sirenRed, true);
+      if (v.sirenBlue != ~0u) scene.setObjectHidden(v.sirenBlue, true);
+    }
+    heat = Heat{};
+    heat.message = translate(msg);
+    heat.messageTime = 3.5f;
+    LOG_INFO("Polícia: %s", msg);
+  };
+  if (sirensInTraffic) sirensInTraffic(heat.level > 0.0f);
+  if (heat.level > 0.0f && hasMe) {
+    // 1) alguma viatura vê o jogador? (do trânsito ou perseguindo, até 45 m)
+    std::vector<glm::vec2> eyes;
+    if (policeInTraffic) policeInTraffic(eyes);
+    for (entt::entity e : chasers) eyes.push_back(glm::vec2(registry.get<Transform>(e).position.x, registry.get<Transform>(e).position.z));
+    bool seen = false;
+    for (const glm::vec2& p : eyes) seen |= glm::length(p - me) < 45.0f;
+    if (seen) {
+      heat.unseen = heat.escape = 0.0f;
+      heat.lastSeen = me;
+      if (driving != entt::null) heat.knownCar = driving;
+      else heat.knowsLook = true;
+    } else {
+      heat.unseen += dt;
+      // Fugindo: longe de onde foi visto e fora da vista. Trocar o carro que a polícia conhece despista em dobro.
+      const int stars = int(std::ceil(heat.level));
+      const bool swapped = heat.knownCar != entt::null && driving != heat.knownCar;
+      if (glm::length(me - heat.lastSeen) > 30.0f + 15.0f * float(stars) || heat.unseen > 20.0f)
+        heat.escape += dt * (swapped ? 2.0f : 1.0f);
+      if (heat.escape > 6.0f + 3.0f * float(stars)) {
+        heat.escape = 0.0f;
+        heat.level = std::max(0.0f, std::ceil(heat.level) - 1.0f);
+        if (swapped) heat.knownCar = entt::null;  // perderam o carro de vista: não sabem mais qual é
+        if (heat.level <= 0.0f) {
+          endChase("Você despistou a polícia");
+          return;
+        }
+      }
+    }
+    // 2) viaturas perseguindo: uma por estrela (até 4); as do trânsito mais perto ligam o giroflex e vêm
+    const int want = std::min(4, int(std::ceil(heat.level)));
+    if (int(chasers.size()) < want && grabPolice) {
+      std::vector<TrafficGrab> got;
+      grabPolice(me, want - int(chasers.size()), got);
+      for (TrafficGrab& g : got) {
+        VehicleDesc d;
+        d.length = g.length;
+        d.width = 1.85f;
+        d.height = 0.75f;
+        d.mass = 1700.0f;
+        d.engineTorque = 650.0f;
+        d.wheelRadius = 0.34f;
+        d.wheelWidth = 0.24f;
+        d.rearDrive = true;
+        const glm::quat rot = glm::angleAxis(g.yaw, glm::vec3(0, 1, 0));
+        const glm::vec3 pos(g.position.x, me3.y + d.wheelRadius + 0.5f * d.height + 0.25f, g.position.y);
+        const entt::entity e = registry.create();
+        registry.emplace<Transform>(e, Transform{pos, rot});
+        Vehicle v;
+        v.desc = d;
+        v.id = physics->addVehicle(d, pos, rot);
+        v.visual = g.objects;
+        v.police = v.chasing = true;
+        v.sirenRed = g.sirenRed;
+        v.sirenBlue = g.sirenBlue;
+        registry.emplace<Vehicle>(e, std::move(v));
+        chasers.push_back(e);
+      }
+    }
+    // 3) alvo das viaturas e o giroflex delas
+    const bool flashRed = std::fmod(time, 0.5f) < 0.25f;
+    const glm::vec3 target = heat.unseen < 1.0f ? me3 : glm::vec3(heat.lastSeen.x, me3.y, heat.lastSeen.y);
+    float closest = 1e9f;
+    for (entt::entity e : chasers) {
+      Vehicle& v = registry.get<Vehicle>(e);
+      v.aiTarget = target;
+      if (v.sirenRed != ~0u) scene.setObjectHidden(v.sirenRed, !flashRed);
+      if (v.sirenBlue != ~0u) scene.setObjectHidden(v.sirenBlue, flashRed);
+      const glm::vec3 p = registry.get<Transform>(e).position;
+      closest = std::min(closest, glm::length(glm::vec2(p.x, p.z) - me));
+    }
+    // 4) preso: a pé, com uma viatura colada por 2,5 s
+    heat.arrest = (driving == entt::null && closest < 4.5f) ? heat.arrest + dt : 0.0f;
+    if (heat.arrest > 2.5f) {
+      endChase("Você foi preso");
+      return;
+    }
+  }
+  // HUD: estrelas no canto de cima à direita, o que a polícia sabe e as mensagens
+  if (heat.level > 0.0f) {
+    const int stars = int(std::ceil(heat.level));
+    for (int k = 0; k < 6; ++k) {
+      HudItem h;
+      h.kind = HudItem::Kind::Rect;
+      h.pos = {0.955f - 0.028f * float(5 - k), 0.04f};
+      h.size = {0.022f, 0.035f};
+      const bool on = k < stars;
+      const bool blink = heat.unseen > 1.0f && std::fmod(time, 1.0f) < 0.5f;  // fora da vista: piscando
+      h.color = on ? (blink ? glm::vec4(1, 1, 1, 0.35f) : glm::vec4(1.0f, 0.82f, 0.2f, 0.95f)) : glm::vec4(1, 1, 1, 0.15f);
+      h.back = glm::vec4(0.0f);
+      hud.push_back(h);
+    }
+    std::string sabe;
+    if (heat.knowsLook) sabe += translate("sua aparência");
+    if (heat.knownCar != entt::null) sabe += (sabe.empty() ? "" : ", ") + translate("o carro");
+    HudItem t;
+    t.kind = HudItem::Kind::Text;
+    t.pos = {0.98f, 0.085f};
+    t.align = 2;
+    t.textSize = 0.024f;
+    t.text = heat.unseen > 1.0f ? translate("Procurando você") : translate("Polícia sabe") + ": " + sabe;
+    t.back = {0.0f, 0.0f, 0.0f, 0.35f};
+    hud.push_back(t);
+  }
+  if (heat.messageTime > 0.0f) {
+    HudItem m;
+    m.kind = HudItem::Kind::Text;
+    m.pos = {0.5f, 0.3f};
+    m.align = 1;
+    m.textSize = 0.05f;
+    m.text = heat.message;
+    m.back = {0.0f, 0.0f, 0.0f, 0.4f};
+    hud.push_back(m);
+  }
+}
+
 // F (ou o botão Y do controle): entra no veículo mais perto (até 3,5 m) ou sai do que está dirigindo. Um carro do
 // trânsito vira um veículo com física do tamanho dele (ônibus pesado e com rodas grandes), parado onde estava.
 void World::updateCarEntry(scene::Scene& /*scene*/) {
@@ -2331,7 +2558,6 @@ void World::updateCarEntry(scene::Scene& /*scene*/) {
     if (c.player && c.remoteSlot < 0 && c.id != ~0u) me = ent;
   }
   if (me == entt::null) return;  // cena sem personagem (ex.: só o carro): nada a fazer
-  if (!scripting) hud.clear();
   const bool press = gameInput.hit("f") || gameInput.hit("pad_y");
   auto hint = [&](const std::string& text) {
     HudItem h;
@@ -2400,6 +2626,7 @@ void World::updateCarEntry(scene::Scene& /*scene*/) {
     v.id = physics->addVehicle(d, pos, rot);
     v.visual = g.objects;
     registry.emplace<Vehicle>(near, std::move(v));
+    reportCrime(glm::vec2(feet.x, feet.z), 1.0f);  // tirou um carro do trânsito: roubo (sempre tem quem veja)
   }
   Vehicle& v = registry.get<Vehicle>(near);
   v.player = true;

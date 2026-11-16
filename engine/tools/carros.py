@@ -101,7 +101,7 @@ def profile(m, nseg=48):
     return z, y
 
 
-def build_car(m, taxi=False):
+def build_car(m, taxi=False, policia=False):
     """Lataria lisa: seções transversais arredondadas (barriga na lateral, ombro e teto abaulados, quinas da planta
     arredondadas) ao longo do comprimento, normais suaves calculadas na grade, caixas de roda recortadas. Vidros
     laterais acima da cintura e para-brisa/vigia onde o teto inclina."""
@@ -213,8 +213,25 @@ def build_car(m, taxi=False):
     if taxi:  # luminoso no teto
         ytop_max = max(ytop)
         sign.box((0, ytop_max + 0.12, -0.2), (0.32, 0.1, 0.12))
-    return dict(corpo=body, vidro=glass, escuro=dark, cromado=chrome, farol=head, lanterna=tail, luminoso=sign,
-                placa=plate)
+    partes = dict(corpo=body, vidro=glass, escuro=dark, cromado=chrome, farol=head, lanterna=tail, luminoso=sign,
+                  placa=plate)
+    if policia:  # barra de giroflex no teto (metade vermelha, metade azul: o jogo acende uma de cada vez) e faixa
+        ytop_max = max(ytop)
+        zc = z[int(np.argmax(ytop))] * 0.5
+        base, verm, azul, faixa = Mesh(), Mesh(), Mesh(), Mesh()
+        base.box((0, ytop_max + 0.04, zc), (0.62, 0.04, 0.16))
+        for s_, M in ((1, verm), (-1, azul)):
+            for k in range(3):
+                M.box((s_ * (0.12 + 0.17 * k), ytop_max + 0.13, zc), (0.075, 0.055, 0.12))
+        for sx in (1, -1):  # faixa azul na lateral, na altura das portas
+            x = sx * (hw * 1.025 + 0.004)
+            for i in range(len(z) - 1):
+                if abs(z[i]) > L / 2 - 0.9:
+                    continue
+                faixa.quad((x, belt - 0.32, z[i]), (x, belt - 0.32, z[i + 1]), (x, belt - 0.2, z[i + 1]),
+                           (x, belt - 0.2, z[i]), out=(sx, 0, 0))
+        partes.update(base_giro=base, faixa=faixa, giro_vermelho=verm, giro_azul=azul)  # os dois por último
+    return partes
 
 
 def build_bus():
@@ -366,6 +383,12 @@ def write_gltf(path, parts, paint, verniz=True, letreiro=None):
                      'emissiveFactor': [1.0, 0.04, 0.02], 'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 12.0}}},
         'luminoso': {'name': 'luminoso_taxi', 'pbrMetallicRoughness': {'baseColorFactor': [1, 0.95, 0.8, 1]},
                      'emissiveFactor': [1.0, 0.9, 0.6], 'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 8.0}}},
+        'base_giro': {'name': 'base_giroflex', 'pbrMetallicRoughness': {'baseColorFactor': [0.05, 0.05, 0.06, 1],
+                                                                       'roughnessFactor': 0.4}},
+        'giro_vermelho': {'name': 'giroflex_vermelho', 'pbrMetallicRoughness': {'baseColorFactor': [1, 0.05, 0.05, 1]},
+                          'emissiveFactor': [1.0, 0.03, 0.03], 'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 25.0}}},
+        'giro_azul': {'name': 'giroflex_azul', 'pbrMetallicRoughness': {'baseColorFactor': [0.05, 0.15, 1, 1]},
+                      'emissiveFactor': [0.05, 0.2, 1.0], 'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 25.0}}},
         'faixa': {'name': 'faixa', 'pbrMetallicRoughness': {'baseColorFactor': [0.05, 0.22, 0.62, 1], 'metallicFactor': 0.2,
                                                            'roughnessFactor': 0.35}},
         'placa': {'name': 'placa', 'pbrMetallicRoughness': {'baseColorFactor': [0.9, 0.85, 0.6, 1], 'roughnessFactor': 0.5}},
@@ -410,6 +433,9 @@ def main():
     # ônibus: pintura branca sem verniz (o trânsito só sorteia cor para lataria com verniz) e letreiro âmbar
     write_gltf(os.path.join(a.saida, 'onibus.gltf'), build_bus(), (0.86, 0.87, 0.88), verniz=False, letreiro=(1.0, 0.55, 0.08))
     made.append('onibus')
+    # viatura: sedã branco com faixa azul e giroflex (as duas metades são os dois últimos objetos do glTF)
+    write_gltf(os.path.join(a.saida, 'policia.gltf'), build_car(MODELS['seda'], policia=True), (0.92, 0.93, 0.95))
+    made.append('policia')
     for name in ('seda', 'suv'):
         write_gltf(os.path.join(a.saida, f'taxi_{name}.gltf'), build_car(MODELS[name], taxi=True), yellow)
         made.append('taxi_' + name)
