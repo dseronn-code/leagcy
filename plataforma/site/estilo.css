@@ -185,3 +185,6 @@ details a { color: var(--destaque); }
 .reveal video { width: 100%; aspect-ratio: 16 / 9; display: block; border-radius: 16px; background: #000;
   border: 1px solid var(--linha); box-shadow: 0 30px 80px rgba(0, 0, 0, .55); }
 .reveal .nota { text-align: center; color: var(--texto2, #8b90a0); font-size: 13px; margin-top: 10px; }
+
+/* Título principal para buscadores e leitores de tela (a abertura já mostra os três nomes em painéis) */
+.so-leitor { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
